@@ -299,7 +299,7 @@ export function census({ root = ROOT, extraFiles = [], doorFile = DOOR_FILE } = 
     }
   }
   // Derive the private session implementation reachable from the real door.
-  // No file-wide exemption: a storeDraftGraph RPC remains outside the door.
+  // No file-wide exemption: a direct draft-graph RPC remains outside the door.
   const sessionReachable = new Set();
   for (const call of calls) if (call.file === doorFile && named(call.owner) === DOOR) {
     if (writers.has(call.sym)) sessionReachable.add(call.sym);

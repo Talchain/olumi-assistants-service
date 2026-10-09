@@ -104,13 +104,6 @@ export interface SaveVersionWrite {
   readonly event_id?: string;
 }
 
-export interface RestoreVersionWrite {
-  readonly scenario_id: string;
-  readonly version_id: string;
-  readonly label?: string;
-  readonly expected_graph_identity_hash?: string;
-}
-
 export interface AtomicRestoreVersionWrite {
   readonly scenario_id: string;
   readonly version_id: string;
@@ -157,7 +150,6 @@ export interface ModelVersionStorePort {
   getVersionForCommittedTurn?(
     scenarioId: string, sourceTurnId: string, mutationId: string,
   ): Promise<ModelVersionRecord | null>;
-  restoreVersion(write: RestoreVersionWrite): Promise<VersionWriteOutcome>;
   restoreVersionAtomic?(
     write: AtomicRestoreVersionWrite,
   ): Promise<AtomicRestoreVersionOutcome>;
@@ -229,20 +221,6 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
       throw mapRpcError('create_model_version', error, write.expected_graph_identity_hash ?? null);
     }
     return parseWriteOutcome('create_model_version', data);
-  }
-
-  async restoreVersion(write: RestoreVersionWrite): Promise<VersionWriteOutcome> {
-    const { data, error } = await this.client.rpc('restore_model_version', {
-      p_scenario_id: write.scenario_id,
-      p_version_id: write.version_id,
-      p_label: write.label ?? null,
-      p_event_id: null,
-      p_expected_graph_identity_hash: write.expected_graph_identity_hash ?? null,
-    });
-    if (error) {
-      throw mapRpcError('restore_model_version', error, write.expected_graph_identity_hash ?? null);
-    }
-    return parseWriteOutcome('restore_model_version', data);
   }
 
   async restoreVersionAtomic(

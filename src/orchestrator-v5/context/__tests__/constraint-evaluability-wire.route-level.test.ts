@@ -55,10 +55,6 @@ import { formatConstraintAdded } from '../../tools/handlers/d1-shared/format-con
 import { RECENT_CHANGES_SUMMARY_MAX_CHARS } from '../recent-changes.js';
 import { observeSerialisedPack } from './observe-serialised-pack.js';
 
-const { storeDraftGraphMock } = vi.hoisted(() => ({
-  storeDraftGraphMock: vi.fn(async () => undefined),
-}));
-
 const SCENARIO_ID = randomUUID();
 
 /** Identities. Every assertion binds to THESE. */
@@ -185,7 +181,6 @@ vi.mock('../../session/index.js', () => ({
     readNewestAnalysisFactFor: async () => null,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: storeDraftGraphMock,
     loadGraph: async () => (SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH),
     loadGraphAndBriefText: async () => ({
       graph: SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH,
@@ -312,7 +307,6 @@ function entryLabelled(
 
 beforeEach(() => {
   SUPPRESS_PERSISTED_GRAPH = false;
-  storeDraftGraphMock.mockClear();
 });
 
 afterEach(() => {

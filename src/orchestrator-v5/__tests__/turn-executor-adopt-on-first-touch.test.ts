@@ -89,7 +89,6 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => {
       if (failLoadGraph) {
         throw new Error('loadGraph failed (injected): strict reread degraded');

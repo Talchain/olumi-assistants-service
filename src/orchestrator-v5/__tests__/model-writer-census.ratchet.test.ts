@@ -9,10 +9,9 @@ const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const SCRIPT = join(ROOT, 'scripts/census/model-writer-census.mjs');
 
 // RATCHET: the outside-door count may ONLY DECREASE. Never raise it to admit a writer.
-// Measured at CEE staging b33222d4047f82a995254ac81cf57ee6794d1479: 13 outside the door.
 // A PR that moves a writer through the door must lower BASELINE in the same PR (stale-baseline row).
 // Door callers are reported, not capped: routing a writer through the door raises that count.
-const BASELINE = 13;
+const BASELINE = 10;
 
 interface Site { file: string; line: number; kind: string; callee: string; reason?: string }
 interface Census {

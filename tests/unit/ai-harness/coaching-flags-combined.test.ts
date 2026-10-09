@@ -74,7 +74,6 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
       Array.isArray(rowIds) && rowIds.includes(PRIOR_RA_TURN.id) ? mockState.priorFacts : [],
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async (scenarioId: string) => (scenarioId === SCENARIO_ID ? mockState.persistedGraph : null),
     loadGraphAndBriefText: async (scenarioId: string) =>
       scenarioId === SCENARIO_ID
