@@ -88,7 +88,13 @@ describe('m1 after the identity card\'s Yes: target failures belong to their aff
   });
 
   it('the served graph withholds the affected price option; the clean baseline keeps its zero', async () => {
-    const result = await runOn(M1.graph);
+    const g = structuredClone(M1.graph);
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of g.nodes.filter((n: Json) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
+    const result = await runOn(g);
     expect(chances(result)).toEqual({ current_price: 0 });
     const w = warningsOf(result).filter((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
     // Both reasons remain on the affected price option; neither may spread to the clean baseline.
@@ -101,7 +107,12 @@ describe('m1 after the identity card\'s Yes: target failures belong to their aff
   });
 
   it('CONTROL: the user sized the route (price → churn → subscribers at 12 months) → the chance is shown', async () => {
-    const g = clone(M1.graph);
+    const g = structuredClone(M1.graph);
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of g.nodes.filter((n: Json) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
     for (const e of g.edges as Json[]) {
       if ((e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months') && (e.defaulted === true || String(e.provenance?.magnitude ?? '').startsWith('olumi_'))) {
         e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' };

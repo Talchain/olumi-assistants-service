@@ -127,9 +127,9 @@ describe('agent route: real structural challenge press reachability', () => {
     return { fact, payload };
   }
 
-  async function licensedRun(selectedLink = LINK) {
+  async function licensedRun(selectedLink = LINK, model = MODEL_A) {
     link = selectedLink;
-    graph = renameIds(MODEL_A, link);
+    graph = renameIds(model, link);
     // The user has stated these sizes before Run A; the current real admission/licence logic stays in force.
     for (const edge of graph.edges as Rec[]) edge.provenance = { ...edge.provenance, source: 'user_specified', magnitude: 'user_stated' };
     transport.store = createNoopSessionStore({ loadGraphResult: graph });
@@ -324,6 +324,13 @@ describe('agent route: real structural challenge press reachability', () => {
   });
 
   it('not-a-press keeps ordinary model handling', async () => {
+    const localModel = structuredClone(MODEL_A);
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of localModel.nodes.filter((n: Rec) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
+    await licensedRun(LINK, localModel);
     const response = await post('not-a-press');
     const body = response.json();
     expect(response.statusCode).toBe(200); expect(body.assistant_text).toBe('normal');
@@ -421,6 +428,13 @@ describe('agent route: real structural challenge press reachability', () => {
     });
 
     it('F2-C2: a chipless ordinary-chip retry keeps exactly its stored words', async () => {
+      const localModel = structuredClone(MODEL_A);
+      // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+      for (const goal of localModel.nodes.filter((n: Rec) => n.kind === 'goal')) {
+        delete goal.goal_horizon_months;
+        delete goal.goal_deadline_as_stated;
+      }
+      await licensedRun(LINK, localModel);
       const live = await post('not-a-press');
       expect(live.statusCode).toBe(200);
       expect(live.json().assistant_text).toBe('normal');

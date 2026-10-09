@@ -21,7 +21,7 @@ import { HORIZON_MARKER, REPLY_FACE_WORD_BUDGET } from '../reply/compose-reply.j
 import { untestedHorizonLine } from '../decision-input-ask.js';
 
 type Json = Record<string, any>;
-const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
+const READ_FIXTURE = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
 const SCREEN = (JSON.parse(readFileSync(new URL('./fixtures/waveB-screen-chance-lines-20261007.json', import.meta.url), 'utf8')) as { line: string; source: string }[])
   .filter((s) => s.source.includes('/t1b-b5-1/')).map((s) => s.line);
 const LEAD = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
@@ -52,6 +52,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 
 describe('S4d: the Explain turn on a current Run says the screen’s chance lines', () => {
   let app: FastifyInstance;
+  let READ: Json = READ_FIXTURE;
   let narrator = '';
   let state: Json = READ.analysis_state;
   beforeAll(async () => {
@@ -75,7 +76,7 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); narrator = ''; state = READ.analysis_state; });
+  beforeEach(() => { rows.clear(); narrator = ''; READ = READ_FIXTURE; state = READ.analysis_state; });
 
   const runThenExplainPayload = async (): Promise<Record<string, unknown>> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -103,6 +104,12 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
   });
 
   it('RED at base: the narrator writes the screen’s lines, the leader gate deletes them, and the Explain reply still leads with each exact finding, moving its optional frame to detail on mandatory overflow', async () => {
+    READ = structuredClone(READ_FIXTURE);
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of READ.graph.nodes.filter((n: Json) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
     const nearTie = 'No single option can be put forward: the comparison is a near tie.';
     narrator = `${nearTie}\n\n${LEAD}\n\n${SCREEN.join(' ')}`;
     const b = await press(await runThenExplainPayload());

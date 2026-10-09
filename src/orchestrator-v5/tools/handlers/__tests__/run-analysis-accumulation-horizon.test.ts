@@ -7,7 +7,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { GraphStateIngressSchema } from '../../../boundary/request-extensions.js';
 import { definitionalLinkInUse, identityRunUseOfResult } from '../../../compose/definitional-links.js';
 import { GOAL_HORIZON_NOT_TESTED, withUntestedHorizonWarning } from '../../../agent-lane/decision-input-ask.js';
-import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../../../../orchestrator/context/option-result-source.js';
 import { GOAL_CHANCE_LICENSED } from '../../../goal-target/goal-chance-licence.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
@@ -59,14 +59,14 @@ async function run(graph: Rec, body: Rec = minimalFixture): Promise<{ wire: Rec;
 const driftWarnings = (result: Rec): Rec[] => (result.enrichment.inference_warnings ?? []).filter((w: Rec) => w.code === 'ACCUMULATION_HORIZON_DRIFT');
 
 describe('Run accumulation horizon drift — the wire copy uses the current deadline', () => {
-  it('a withdrawn accumulation marks the horizon untested even with a duration limit', () => {
+  it('a withdrawn accumulation with held H owes no retired warning, even with a duration limit', () => {
     const graph = { nodes: [{ id: 'mrr', kind: 'goal', goal_horizon_months: 6 }],
       goal_constraints: [{ unit: 'months' }] };
+    // Q-c (DL 87114): the withdrawn carrier (true) leaves no §(ad) detail on this surface, so A7 is owed even with a duration limit.
+    const expected = { inference_warnings: [{ code: 'GOAL_HORIZON_NOT_TESTED', severity: 'info',
+      message: "This model doesn't yet say whether any option gets there within 6 months.", node_ids: ['mrr'] }] };
     expect(withUntestedHorizonWarning({}, graph)).toEqual({});
-    expect(withUntestedHorizonWarning({}, graph, true)).toEqual({ inference_warnings: [{
-      code: GOAL_HORIZON_NOT_TESTED, severity: 'info', node_ids: ['mrr'],
-      message: "This model doesn't yet say whether any option gets there within 6 months.",
-    }] });
+    expect(withUntestedHorizonWarning({}, graph, true)).toEqual(expected);
   });
 
   it('RED ROW subscribers_at_12: deadline changed to 6 drops only the wire carrier and records its exact warning', async () => {
@@ -101,11 +101,16 @@ describe('Run accumulation horizon drift — the wire copy uses the current dead
     const body = { ...clone(minimalFixture), option_comparison: [
       { option_id: 'raise_price_to_59', probability_of_goal: 0.7, win_probability: 0.7 },
       { option_id: 'raise_price_to_54', probability_of_goal: 0.4, win_probability: 0.3 },
-    ], identity_evaluations: [{ node_id: 'mrr', operation: 'product', factor_ids: PRODUCT.factor_ids, evaluated: true, level_source: 'stated_level' }] };
+    ], identity_evaluations: [
+      { node_id: 'mrr', operation: 'product', factor_ids: PRODUCT.factor_ids, evaluated: true, level_source: 'stated_level' },
+      { node_id: CARRIER_ID, operation: 'accumulation', factor_ids: CARRIER.factor_ids, horizon_months: 12, evaluated: true },
+    ] };
     const licences: Rec[] = [];
     for (const deadline of [6, 12]) {
       const graph = accumulationGraph(deadline);
       node(graph, CARRIER_ID).nonlinear_identity.stated_in_brief = true;
+      // This control's exact carrier now has an explicit Run attestation on the user's three levels.
+      for (const id of CARRIER.factor_ids) node(graph, id).observed_state.source = 'user_override';
       Object.assign(node(graph, 'mrr'), { goal_threshold: 0.8, goal_threshold_raw: 85000,
         goal_threshold_cap: 106250, goal_threshold_unit: 'GBP/month', goal_threshold_frame: 'level', goal_direction: '>=' });
       const ratePath = graph.edges.find((e: Rec) => e.from === 'pro_plan_price' && e.to === 'monthly_churn');
@@ -115,7 +120,10 @@ describe('Run accumulation horizon drift — the wire copy uses the current dead
       const licence = result.enrichment.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_LICENSED);
       if (deadline === 6) {
         expect(licence).toBeUndefined();
-        expect(result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({ code: GOAL_HORIZON_NOT_TESTED }));
+        expect(result.enrichment.inference_warnings).not.toContainEqual(expect.objectContaining({ code: GOAL_HORIZON_NOT_TESTED }));
+        expect(result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({
+          code: GOAL_FIGURES_HORIZON_NOT_TESTED, detail: { reason: 'HORIZON_NOT_TESTED' },
+        }));
         expect(result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({
           code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, node_ids: [CARRIER_ID],
         }));

@@ -1,3 +1,4 @@
+import { withReadTimeHorizonGate } from '../goal-target/goal-horizon-verdict.js';
 /**
  * V5 Task 1.4 — analysis state fallback for follow-up turns.
  *
@@ -567,6 +568,7 @@ export function resolveLeadingWinProbability(
 export function buildAnalysisFromPriorFacts(
   priorFacts: readonly HandlerFact[],
   optionLabelSource?: readonly OptionLabelSource[],
+  currentGraph?: unknown,
 ): AnalysisResponseSummaryWithSignals | null {
   // V5 state-trust: route both the projection and the freshness verdict
   // through the SAME selector. Pre-state-trust this used `priorFacts.find`
@@ -580,7 +582,7 @@ export function buildAnalysisFromPriorFacts(
   const fact = selected.fact;
   if (fact.fact_type !== 'run_analysis') return null; // narrow for the type checker
 
-  const result = fact.result;
+  const result = withReadTimeHorizonGate(fact.result, currentGraph, fact.result.enrichment);
   const labelMap = buildLabelMap(optionLabelSource);
   const labelFor = (optionId: string): string =>
     labelMap.get(optionId) ?? optionId;

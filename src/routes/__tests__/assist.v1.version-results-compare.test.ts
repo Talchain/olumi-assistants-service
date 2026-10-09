@@ -368,3 +368,30 @@ describe('version result comparison uses the real route, service, binder and del
     expect(mocks.getVersion).not.toHaveBeenCalled(); expect(mocks.facts).not.toHaveBeenCalled();
   });
 });
+
+// DL 87114: Compare reads each stored endpoint on its own server-loaded version graph.
+it('version Compare withholds H=12 stored chances on the held endpoint and preserves the no-H contrast', async () => {
+  const prior = clone(PRIOR), current = clone(CURRENT);
+  for (const run of [prior, current]) {
+    const enrichment = result(run).enrichment as Record<string, unknown>;
+    enrichment.inference_warnings = [{ code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
+      option_ids: ['opt-a', 'opt-b'], pct_by_option: { 'opt-a': 63, 'opt-b': 43 } }];
+  }
+  const bytes = JSON.stringify([prior, current]);
+  mocks.facts.mockResolvedValue({ factSet: factSet([current, prior]), hotWindow: { status: 'ok', facts: [] } });
+  const before = (await compare()).json().result_comparison;
+  expect(before.run_delta.goal_chances.every((row: { prior: { kind: string }; current: { kind: string } }) =>
+    row.prior.kind === 'point' && row.current.kind === 'point')).toBe(true);
+  const heldGraph = clone(GraphStateIngressSchema.parse(TO.graph));
+  Object.assign(heldGraph.nodes.find(n => n.kind === 'goal')!, { goal_horizon_months: 12 });
+  const heldTo = versionRecord(heldGraph, { id: TO.id });
+  mocks.getVersion.mockImplementation(async (_scenario: string, id: string) => id === FROM.id ? FROM : id === TO.id ? heldTo : null);
+  const response = await compare(); expect(response.statusCode, response.body).toBe(200);
+  const after = ModelVersionDiffV2Schema.parse(response.json()).result_comparison;
+  expect(after).toMatchObject({ status: 'available', kind: 'paired_runs' });
+  if (after.status !== 'available' || after.kind !== 'paired_runs') throw new Error('Expected paired Runs');
+  expect(after.run_delta.goal_chances).toHaveLength(2);
+  expect(after.run_delta.goal_chances?.every(row => row.prior.kind === 'point' && row.current.kind === 'withheld')).toBe(true);
+  expect(after.run_delta.win_probabilities.length).toBe(before.run_delta.win_probabilities.length);
+  expect(JSON.stringify([prior, current])).toBe(bytes);
+});
