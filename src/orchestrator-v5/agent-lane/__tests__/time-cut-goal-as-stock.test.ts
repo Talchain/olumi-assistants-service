@@ -73,7 +73,8 @@ const carrierOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.nonlinear_identity
 const zeroOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.id === carrierOf(g).nonlinear_identity.factor_ids[1]);
 
 function candidate(reading: 'net' | 'gross' | undefined, explicit = true): CandidateModel {
-  return {
+  // A recorded-provider-shaped candidate (value_kind, unit-bearing effects): typed loosely, exactly as the drafter's JSON.
+  const recorded: Rec = {
     goal: { metric: 'MRR', operator: '>=', target_stated: true, value: 150000, unit: 'GBP/month', horizon_months: 9,
       provenance: 'explicit', baseline_known: true, baseline_value: 120000, baseline_provenance: 'explicit', scope: null },
     constraints: [], options: [
@@ -94,6 +95,7 @@ function candidate(reading: 'net' | 'gross' | undefined, explicit = true): Candi
     ], identities: [{ outcome: 'MRR', operation: 'accumulation', factors: ['MRR today', 'Monthly change'],
       provenance: explicit ? 'explicit' : 'inferred', ...(reading !== undefined ? { reading } : {}) }],
   };
+  return recorded as CandidateModel;
 }
 
 async function build(reading: 'net' | 'gross' | undefined, explicit = true, change = 2000): Promise<{ graph: Rec; result: Rec }> {
@@ -387,7 +389,7 @@ describe('slices B + C through the existing card, Run and canonical read', () =>
     expect(untestedHorizonLineForCells(graph, cells)).toBeNull();
     memory.run = JSON.parse(JSON.stringify(fact));
     const cold = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: graph as never, requestId: 'req-time-reload' });
-    expect(cold.analysis_state.run_state.kind).toBe('complete_current');
+    expect(cold.analysis_state?.run_state.kind).toBe('complete_current');
     expect(goalChanceFactsForAgent(cold.analysis_result, graph, true).goal_horizon_line).toBe(WHY);
     expect(JSON.stringify(cold.analysis_result).split(WHY)).toHaveLength(2);
   });
