@@ -1,6 +1,6 @@
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
-import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
+import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
  *
@@ -2199,9 +2199,12 @@ export async function buildModelFromBrief(
     const scopeAsked = scopeLoss !== undefined && !plainTotal
       ? { question: scopeLoss.reason, assumption: typeof scopeLoss.after === 'string' ? scopeLoss.after : undefined }
       : null;
+    const identityScopeMaterial = goalIdentityScopeIsMaterial(readsAsTotal, candidate, admitted);
+    let retainedScopeQuestion: string | null = null;
     if (readsAsTotal && candidate.goal.scope) {
       // The drafter's own restatement of the part-or-whole question (Codex buddy r1 P2: it carried the C46 "… for the Pro plan
-      // only. Which did you mean?" through `unknowns`): the goal now reads as the total, so it is not asked beside the reading.
+      // only. Which did you mean?" through `unknowns`): keep it when the goal identity makes scope material;
+      // otherwise the goal now reads as the total, so it is not asked beside the reading.
       // A restatement names the goal AND both readings AND asks which: an evidence question about the two populations ("can
       // the Pro plan only estimate apply to all plans together?") names no goal and stays (Codex buddy r2 P2).
       const [modelled, alternative, metric] = [candidate.goal.scope.modelled, candidate.goal.scope.alternative, candidate.goal.metric]
@@ -2209,17 +2212,32 @@ export async function buildModelFromBrief(
       for (let i = openQuestions.length - 1; i >= 0; i--) {
         const q = openQuestions[i]!.toLowerCase();
         if (modelled !== '' && alternative !== '' && metric !== '' && q.includes(modelled) && q.includes(alternative) && q.includes(metric)
-          && /\b(or|whether|which)\b/.test(q)) openQuestions.splice(i, 1);
+          && /\b(or|whether|which)\b/.test(q)) {
+          if (identityScopeMaterial && retainedScopeQuestion === null) retainedScopeQuestion = openQuestions[i]!;
+          else openQuestions.splice(i, 1);
+        }
       }
     }
-    const untypedScopeWords = scopeAsked !== null ? scopeAsked.question
-      : readsAsTotal && scopeGoal !== undefined
+    // DL #2914 r3 CHANGES_REQUIRED: material scope with no drafter restatement falls back to a question
+    // naming the modelled part and asking which scope the target uses; it never says "total".
+    // Not when the drafter already asks it in other words (its question names the declared modelled scope and the goal,
+    // as a question): that only gates the fallback, it never removes a question (R2 B1-A asks "…cover the Pro plan only or all plans?").
+    const scopeAlreadyAsked = candidate.goal.scope !== undefined && candidate.goal.scope !== null
+      && openQuestions.some((q) => {
+        const t = q.toLowerCase(); const [m, g] = [candidate.goal.scope!.modelled, candidate.goal.metric].map((x) => x.trim().toLowerCase());
+        return m !== '' && g !== '' && t.includes(m) && t.includes(g) && /\b(or|whether|which)\b/.test(t);
+      });
+    const materialFallback = identityScopeMaterial && retainedScopeQuestion === null && !scopeAlreadyAsked && candidate.goal.scope
+      && candidate.goal.scope.modelled.trim() !== '' && candidate.goal.scope.alternative.trim() !== ''
+      ? materialScopeQuestion(candidate.goal.metric, candidate.goal.scope.modelled.trim(), candidate.goal.scope.alternative.trim()) : null;
+    const untypedScopeWords = retainedScopeQuestion ?? materialFallback ?? (scopeAsked !== null ? scopeAsked.question
+      : readsAsTotal && !identityScopeMaterial && scopeGoal !== undefined
         ? (() => {
           const components = untypedScopeComponents({ nodes: admitted.nodes, edges: admitted.edges }, scopeGoal.id);
           return components.length > 0 ? untypedScopeDisclosure(candidate.goal.metric, components) : null;
         })()
-        : null;
-    if (untypedScopeWords !== null) openQuestions.unshift(untypedScopeWords);
+        : null);
+    if (untypedScopeWords !== null && !openQuestions.includes(untypedScopeWords)) openQuestions.unshift(untypedScopeWords);
 
     // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
     // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
