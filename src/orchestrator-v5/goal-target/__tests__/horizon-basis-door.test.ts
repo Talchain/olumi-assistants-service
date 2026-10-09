@@ -962,6 +962,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     const restore = vi.fn(async (write: Rec) => {
       expect(write.current_graph).toEqual(w.read());
       expect(write.version_id).toBe(versionId);
+      expect(write.expected_revision).toBe(31);
       expect(goalOf(write.graph, goalId)).not.toHaveProperty('horizon_basis');
       w.restoreGraph(write.graph);
       return { status: 'ok', value: { ...target, mutation_id: mutationId,
@@ -975,6 +976,8 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
       getVersion: vi.fn(async () => ({ status: 'ok', value: target })),
       getCurrentVersion: vi.fn(async () => ({ status: 'ok', value: null })), restoreVersionAtomic: restore,
     } as never);
+    // #2920 (revision CAS): the real restore reads the current graph + revision from the scenario snapshot.
+    w.store.readExistingScenario = vi.fn(async () => ({ graph: w.read(), briefText: null, revision: 31, owner: null } as never));
     const app = Fastify();
     try {
       await versionsRoute(app);
