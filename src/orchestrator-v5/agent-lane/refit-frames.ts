@@ -23,6 +23,8 @@
  * Tightening the source (AIQ's F_S floor, 5894561359) is not built in v1: on `c96` it makes two new cuts (AIQ).
  * PURE: the input graph is never mutated.
  */
+import { clearPlaceholderMarker } from '../../cee/magnitude/link-sizing.js';
+
 type Rec = Record<string, any>;
 
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -344,8 +346,7 @@ export function refitFramesForOlumiEstimates(graph: Rec): {
     edge.provenance.magnitude = 'olumi_estimate';
     if (candidate.natural_effect !== undefined) edge.provenance.natural_effect = structuredClone(candidate.natural_effect);
     else delete edge.provenance.natural_effect;
-    delete edge.provenance.mean_projected;
-    delete edge.defaulted;
+    clearPlaceholderMarker(edge);
     delete edge.provenance.olumi_fit_candidate;
     const moved = new Set<string>();
     let reason: FrameRefusal['reason'] | undefined;

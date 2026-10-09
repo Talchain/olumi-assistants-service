@@ -23,6 +23,7 @@ import { clampForPersist, frameOf, refitFramesForStatedEffects, withStatedStreng
 import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { statementWords, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import { SET_ASIDE_ESTIMATE_LABEL } from './admit-candidate.js';
+import { markPlaceholder } from '../../cee/magnitude/link-sizing.js';
 
 type Rec = Record<string, any>;
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -65,7 +66,8 @@ function refitAndSetAside<G>(g: Rec): { graph: G; setAside: SetAsideEstimate[] }
   const refitted = refitFramesForStatedEffects(g, { goalOwnRows: true }).graph;
   const setAside: SetAsideEstimate[] = [];
   for (const e of (refitted.edges ?? []) as Rec[]) {
-    if (e.provenance?.magnitude !== 'olumi_estimate' || !num(e.strength?.mean) || Math.abs(e.strength.mean) <= 1 + 1e-9) continue;
+    if (e.provenance?.magnitude !== 'olumi_estimate' || e.provenance?.definitional === true
+      || !num(e.strength?.mean) || Math.abs(e.strength.mean) <= 1 + 1e-9) continue;
     const natural = e.provenance.natural_effect;
     const source = refitted.nodes.find((n: Rec) => n.id === e.from);
     const target = refitted.nodes.find((n: Rec) => n.id === e.to);
@@ -76,9 +78,7 @@ function refitAndSetAside<G>(g: Rec): { graph: G; setAside: SetAsideEstimate[] }
         naturalUnitFrame(source, natural.per_source_change_unit), naturalUnitFrame(target, natural.amount_unit)) : 'as given' });
     e.strength = { mean: e.effect_direction === 'negative' ? -STRENGTH_DEFAULT_SIGNATURE.mean : STRENGTH_DEFAULT_SIGNATURE.mean,
       std: STRENGTH_DEFAULT_SIGNATURE.std };
-    e.provenance.magnitude = 'olumi_placeholder';
-    e.provenance.mean_projected = true;
-    e.defaulted = true;
+    markPlaceholder(e);
     delete e.provenance.natural_effect;
     delete e.provenance.basis;
     delete e.provenance.clamped_from;

@@ -382,6 +382,11 @@ function goalEditGraph(fitted: boolean, negative: boolean, retire: boolean): Rec
   start.edges.push({ from: 'u', to: 'y', strength: { mean: 0.6, std: 0.3 }, exists_probability: 0.8, effect_direction: 'positive',
     provenance: { source: 'brief_extraction', magnitude: 'user_stated', natural_effect: {
       amount: 3, amount_unit: '£', per_source_change: 1, per_source_change_unit: 'items', strength_mean: 0.6, strength_mean_frame: 'edge_strength' } } });
+  // A £1-per-£1 definition is a sized link even when admission classes its magnitude as an Olumi estimate.
+  start.nodes.push({ id: 'd', label: 'D', kind: 'factor', scale_frame: 300, unit: '£' });
+  start.edges.push({ from: 'd', to: 'y', strength: { mean: 0.6, std: 0.3 }, exists_probability: 0.8, effect_direction: 'positive',
+    provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', definitional: true, natural_effect: {
+      amount: 1, amount_unit: '£', per_source_change: 1, per_source_change_unit: '£', strength_mean: 0.6, strength_mean_frame: 'edge_strength' } } });
   return start;
 }
 
@@ -401,6 +406,13 @@ function assertGoalEditSetAside(start: Rec, after: Rec, disclosure: string, nega
   expect(user.provenance.clamped_from).toBe(3);
   expect(user.provenance.natural_effect).toEqual({ ...edge(start, 'u→y').provenance.natural_effect, strength_mean: 3 });
   expect(user.provenance.magnitude).toBe('user_stated');
+  const definition = edge(after, 'd→y');
+  expect(definition.provenance.magnitude).toBe('olumi_estimate');
+  expect(definition.provenance.definitional).toBe(true);
+  expect(definition.strength).toEqual({ mean: 1, std: 0.5 });
+  expect(definition.provenance.clamped_from).toBe(3);
+  expect(definition.provenance.natural_effect).toEqual({ ...edge(start, 'd→y').provenance.natural_effect, strength_mean: 3 });
+  expect(definition.provenance.clamped_from * frames.frameOf(node(after, 'y'))! / frames.frameOf(node(after, 'd'))!).toBe(1);
   expect(frames.frameOf(node(after, 'y'))).toBe(100);
   noCandidates(after);
 }
@@ -445,6 +457,127 @@ it.each([true, false])('row (l): goal edit → estimate set aside, not clamped; 
   expect(out.ok, JSON.stringify(out)).toBe(true);
   expect(registrations).toHaveLength(1);
   assertGoalEditSetAside(start, stored, out.not_represented, true);
+});
+
+it.each([800, 80])('frame-write class: add_constraint changes a target-only goal cap (target £%s), preserving or disclosing sizes', async target => {
+  const start = goalEditGraph(false, false, false);
+  const goal = node(start, 'y');
+  delete goal.observed_state;
+  Object.assign(goal, { goal_threshold_raw: 400, goal_threshold_cap: 500, goal_threshold: 0.8,
+    ...(target === 800 ? { goal_threshold_unit: '£' } : {}), goal_threshold_frame: 'level' });
+  const out = await createAddConstraintHandler()({
+    context: { session_id: 'scn-edit', stage: 'frame', request_id: 'req-edit', prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+    payload: { kind: 'message', scenario_id: 'scn-edit', turn_id: 'turn-edit', stage: 'frame', message: `Make the target at least £${target}` },
+    requestId: 'req-edit', signal: new AbortController().signal, orientationText: '',
+    proposal: { handler_id: 'add_constraint', entity: { id: 'y', kind: 'goal', resolution_status: 'resolved', resolution_method: 'id_match' },
+      parameters: [{ name: 'constraint_type', value: 'at_least', source: 'user_explicit' },
+        { name: 'value', value: target, source: 'user_explicit' }, { name: 'unit', value: '£', source: 'user_explicit' }], cited_context_fields: [] },
+    graphForTurn: start,
+  } as unknown as HandlerInvocation);
+  const after = out.mutated_graph as Rec;
+  if (target === 80) {
+    assertGoalEditSetAside(start, after, out.assistant_text, false);
+    return;
+  }
+  expect(frames.frameOf(node(after, 'y'))).toBe(1000);
+  for (const id of ['x→y', 'u→y', 'd→y']) {
+    expect(Math.abs(naturalSize(start, edge(start, id)) - naturalSize(after, edge(after, id))), id).toBeLessThanOrEqual(1e-9);
+    expect(edge(after, id).provenance.magnitude).toBe(edge(start, id).provenance.magnitude);
+  }
+  expect(out.assistant_text).not.toContain(SET_ASIDE_ESTIMATE_LABEL);
+});
+
+it('frame-write class: an unpaired ceiling clears the old goal cap, carries the fallback frame and discloses the set-aside', async () => {
+  const start = goalEditGraph(false, false, false);
+  const goal = node(start, 'y');
+  Object.assign(goal, { goal_threshold_raw: 400, goal_threshold_cap: 500, goal_threshold: 0.8,
+    goal_threshold_unit: '£', goal_threshold_frame: 'level', goal_direction: '>=' });
+  delete goal.observed_state.cap;
+  goal.observed_state.value = goal.observed_state.baseline = 0.4; // fallback raw/value frame = 100, below the old goal cap.
+  expect(frames.frameOf(goal)).toBe(500);
+  const out = await createAddConstraintHandler()({
+    context: { session_id: 'scn-edit', stage: 'frame', request_id: 'req-edit', prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+    payload: { kind: 'message', scenario_id: 'scn-edit', turn_id: 'turn-edit', stage: 'frame', message: 'Make the target at most £80' },
+    requestId: 'req-edit', signal: new AbortController().signal, orientationText: '', holdsGoalDirection: true,
+    proposal: { handler_id: 'add_constraint', entity: { id: 'y', kind: 'goal', resolution_status: 'resolved', resolution_method: 'id_match' },
+      parameters: [{ name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
+        { name: 'value', value: 80, source: 'user_explicit' }, { name: 'unit', value: '£', source: 'user_explicit' }], cited_context_fields: [] },
+    graphForTurn: start,
+  } as unknown as HandlerInvocation);
+  const after = out.mutated_graph as Rec;
+  expect(node(after, 'y')).not.toHaveProperty('goal_threshold_cap');
+  assertGoalEditSetAside(start, after, out.assistant_text, false);
+});
+
+async function correctChangeGoalLevel(value: number) {
+  const start: Rec = {
+    nodes: [
+      { id: 'x', label: 'X', kind: 'factor', scale_frame: 100, unit: 'items' },
+      { id: 'u', label: 'U', kind: 'factor', scale_frame: 100, unit: 'items' },
+      { id: 'y', label: 'Y', kind: 'goal', goal_threshold_raw: -0.2, goal_threshold: -0.2,
+        goal_threshold_frame: 'change_rel', goal_threshold_unit: '£/month', goal_direction: '<=',
+        goal_threshold_cap: 56250, goal_threshold_cap_provenance: 'target_derived_headroom',
+        observed_state: { value: 0.8, baseline: 0.8, raw_value: 45000, cap: 56250, unit: '£/month', source: 'brief_extraction' } },
+      { id: 'hold', label: 'Hold', kind: 'option', interventions: { y: 0 } },
+    ],
+    edges: ['x', 'u'].map(from => ({ from, to: 'y', strength: { mean: 0.6, std: 0.3 }, exists_probability: 0.8,
+      effect_direction: 'positive', provenance: { source: from === 'x' ? 'cee_hypothesis' : 'brief_extraction',
+        magnitude: from === 'x' ? 'olumi_estimate' : 'user_stated', natural_effect: {
+          amount: 337.5, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: 'items',
+          strength_mean: 0.6, strength_mean_frame: 'edge_strength' } } })),
+  };
+  const snapshot = JSON.stringify(start);
+  let stored = structuredClone(start);
+  const registrations: Rec[] = [];
+  const dispatch: InternalDispatch = async (path, body) => {
+    if (path.endsWith('/graph/register')) {
+      stored = structuredClone((body as { graph: Rec }).graph); registrations.push(stored);
+      return { status: 200, json: { model_version: { version_number: 2 } } };
+    }
+    return { status: 200, json: { graph: structuredClone(stored), graph_hash: registrations.length ? 'h1' : 'h0' } };
+  };
+  const caps = createAgentCapabilities(dispatch, new ProposalStore());
+  const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400cc', authenticated_user_id: null,
+    request_id: 'req-correction', user_text: `Actually our Y is £${value} a month, not £45k.` };
+  const proposed = await dispatchTool('propose_goal_current_level', JSON.stringify({ goal_label: 'Y', value, unit: '£/month', user_stated: true }), ctx, caps) as Rec;
+  expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+  expect(registrations).toHaveLength(0);
+  const out = await dispatchTool('authorise_change', JSON.stringify({ proposal_id: proposed.proposal_id }), ctx, caps) as Rec;
+  expect(out.ok, JSON.stringify(out)).toBe(true);
+  expect(registrations).toHaveLength(1);
+  expect(JSON.stringify(start)).toBe(snapshot);
+  expect(frames.frameOf(node(stored, 'y'))).toBe(value * 1.25);
+  expect(node(stored, 'y').goal_threshold_raw).toBe(-0.2);
+  return { start, stored, out };
+}
+
+it('row (m): upward current-level correction £45k→£50k preserves the estimate and user_stated natural sizes', async () => {
+  const { start, stored, out } = await correctChangeGoalLevel(50000);
+  for (const id of ['x→y', 'u→y']) {
+    const before = edge(start, id); const after = edge(stored, id);
+    expect(Math.abs(naturalSize(start, before) - naturalSize(stored, after)), id).toBeLessThanOrEqual(1e-9);
+    expect(after.provenance.magnitude).toBe(before.provenance.magnitude);
+    expect(after.provenance.natural_effect).toEqual({ ...before.provenance.natural_effect, strength_mean: 0.54 });
+    expect(after.strength).toEqual({ mean: 0.54, std: 0.27 });
+    expect(after.provenance).not.toHaveProperty('clamped_from');
+  }
+  expect(out.not_represented ?? '').not.toContain(SET_ASIDE_ESTIMATE_LABEL);
+});
+
+it('row (n): downward current-level correction £45k→£10k sets aside the oversized estimate and discloses it; user_stated clamps', async () => {
+  const { start, stored, out } = await correctChangeGoalLevel(10000);
+  const estimate = edge(stored, 'x→y');
+  const placeholder = admitCandidateLinks([{ from: 'x', to: 'y', direction: 'positive', provenance: 'ai_proposed', existence_probability: 0.8 }]).edges[0]!;
+  expect(estimate).toEqual(placeholder);
+  expect(estimate.provenance).not.toHaveProperty('clamped_from');
+  expect(out.not_represented).toContain(SET_ASIDE_ESTIMATE_LABEL);
+  expect(out.not_represented).toContain('337.5');
+  const user = edge(stored, 'u→y');
+  expect(user.provenance.magnitude).toBe('user_stated');
+  expect(user.strength).toEqual({ mean: 1, std: 0.5 });
+  expect(user.provenance.clamped_from).toBeCloseTo(2.7, 12);
+  expect(user.provenance.natural_effect.amount).toBe(337.5);
+  expect(Math.abs(user.provenance.clamped_from * 12500 / 100 - naturalSize(start, edge(start, 'u→y')))).toBeLessThanOrEqual(1e-9);
 });
 
 it('served census: 116 corpus + 8 R2; fewer not_representable set-asides and goal-path placeholders', async () => {

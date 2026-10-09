@@ -42,6 +42,7 @@
  * what we produce, which is the point.
  */
 
+import { markPlaceholder } from '../../cee/magnitude/link-sizing.js';
 import {
   DEFAULT_EXISTS_PROBABILITY,
   STRENGTH_DEFAULT_SIGNATURE,
@@ -418,9 +419,10 @@ export function admitCandidateLinks(
       provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance),
         ...(fitCandidate !== undefined ? { olumi_fit_candidate: fitCandidate } : {}),
         // An authored spread keeps frame-defaulted-links' existing eligibility.
-        ...(!authored ? { mean_projected: true as const, ...(!stdAuthored ? { magnitude: 'olumi_placeholder' as const } : {}) } : { magnitude: 'olumi_estimate' as const }),
+        ...(authored ? { magnitude: 'olumi_estimate' as const } : {}),
       },
     };
+    if (!authored) markPlaceholder(edge, { tagMagnitude: !stdAuthored });
 
     const key = `${link.from}::${link.to}`;
     projected_fields[key] = projected;

@@ -1400,10 +1400,10 @@ export async function applyGoalCurrentLevel(
   const ceilingPaired = holdsPairableCeiling(retiredOrSame, op.path)
     && pairGoalCeiling(retiredOrSame, op.path) === 'paired';
   const retired = retiredOrSame !== unretired;
-  // ⭐ …and the renormalised frame carries the links sized on the old one (Codex buddy r1 F3 on #2618): every user-sized or
-  // definitional link into the goal is re-derived onto the new frame from its unchanged natural size, as the target
-  // writer does when it moves the level frame (`add-constraint.ts`, D1 B). A retirement above has already re-derived.
-  const rederived = ceilingPaired && !retired && frameBefore !== undefined
+  // Every actual frame change carries its sized links, including a change-goal level correction's new headroom cap.
+  // Ceiling pairing is only one way to move it. A normalising retirement above has already carried the links.
+  const frameAfter = frameOf(retiredOrSame.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined);
+  const rederived = !retired && frameBefore !== undefined && frameAfter !== frameBefore
     ? rederiveGoalInLinksWithSetAside(retiredOrSame, op.path, frameBefore) : { graph: retiredOrSame, setAside: [] };
   const graph = rederived.graph;
   const setAside = [...retirement.setAside, ...rederived.setAside];
