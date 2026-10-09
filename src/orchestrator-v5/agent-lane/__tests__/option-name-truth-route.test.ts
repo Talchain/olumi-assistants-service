@@ -92,8 +92,8 @@ describe('Agent Run result names a changed option level without renaming the gra
       } }));
       expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
       expect(modelRequests.length).toBeGreaterThan(before);
-      expect(latestRunContext()?.canonical_state).toMatchObject({
-        option_display_names: ['Spend £110,000 (set to £120,000)'],
+      expect((latestRunContext()?.canonical_state as { entities: { id: string; display_label?: string }[] }).entities.find(n => n.id === 'opt_hybrid')).toMatchObject({
+        id: 'opt_hybrid', display_label: 'Spend £110,000 (set to £120,000)',
       });
       expect((r.json() as { assistant_text: string }).assistant_text).toContain(modelText);
       expect((readBody.analysis_result as typeof repaired.result).enrichment.option_comparison[0]!.option_label).toBe('Spend £110,000');
