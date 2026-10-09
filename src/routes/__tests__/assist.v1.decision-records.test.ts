@@ -1119,3 +1119,80 @@ async function startJwksFixture(keys: import('jose').JWK[]): Promise<JwksFixture
   fixtureKeys.keys = keys;
   return { base: 'https://owniso.invalid', issuer: 'https://owniso.invalid/auth/v1', close: async () => {} } as JwksFixture;
 }
+
+const { anchorFact, anchorFixture, anchorRow } = await import('../../orchestrator-v5/decision-records/__tests__/analysis-anchor-fixture.js');
+const { SupabaseDecisionRecordStore } = await import('../../orchestrator-v5/decision-records/store-adapter.js');
+const { selectRunAnalysisFact } = await import('../../orchestrator-v5/context/freshness.js');
+
+describe('S1 user-commit route — persisted anchor equals the selected successful Run', () => {
+  it('persists the ONE selected Run through the real adapter and RPC arguments', async () => {
+    const early = '2026-10-09T10:00:00.000Z';
+    const late = '2026-10-09T12:00:00.000Z';
+    const selectedFact = anchorFact('selected', late);
+    const facts = [anchorFact('refused', '2026-10-09T13:00:00.000Z', 'refused'),
+      anchorFact('inserted-last-success', early), selectedFact];
+    const selected = selectRunAnalysisFact(facts)!;
+    const fixture = anchorFixture(facts.map((fact, i) => anchorRow(fact, i + 1,
+      `2026-10-09T14:0${3 - i}:00.000Z`)));
+    const rpc = vi.fn(async (_name: string, args: Record<string, unknown>) => ({
+      data: { record: { record_id: args.p_record_id, decision: args.p_decision },
+        deduped: false, event_id: args.p_event_id }, error: null,
+    }));
+    fixture.client.rpc = rpc as unknown as typeof fixture.client.rpc;
+    const adapter = new SupabaseDecisionRecordStore(fixture.client, fixture.sessionStore);
+    const { store } = makeStore();
+    store.readNewestAnalysisAnchor = adapter.readNewestAnalysisAnchor.bind(adapter);
+    store.createRecord = adapter.createRecord.bind(adapter);
+    const app = await buildApp(store);
+    try {
+      const res = await app.inject({ method: 'POST', url: '/assist/v1/decision-records/commit',
+        headers: { authorization: `Bearer ${token}` }, payload: COMMIT_BODY });
+      expect(res.statusCode).toBe(201);
+      expect(rpc).toHaveBeenCalledTimes(1);
+      const args = rpc.mock.calls[0]![1];
+      expect(args.p_decision).toMatchObject({ graph_hash: `${AAG_V1_GRAPH_HASH_PREFIX}${selected.graph_hash_at_run}` });
+      expect((args.p_decision as Record<string, unknown>).graph_hash).toBe(`${AAG_V1_GRAPH_HASH_PREFIX}hash-selected`);
+      expect(fixture.queries).not.toContain('analysis_runs');
+    } finally { await app.close(); }
+  });
+  it.each(['older', 'newest'] as const)('malformed %s row does not 503 a commit with a valid success', async malformedPosition => {
+    const early = '2026-10-09T10:00:00.000Z';
+    const late = '2026-10-09T12:00:00.000Z';
+    const validAt = malformedPosition === 'older' ? late : early;
+    const fixture = anchorFixture([
+      anchorRow({ fact_type: 'run_analysis', result: [] }, 2, malformedPosition === 'older' ? early : late),
+      anchorRow(anchorFact('valid-anchor', validAt), 1, validAt),
+    ]);
+    const adapter = new SupabaseDecisionRecordStore(fixture.client, fixture.sessionStore);
+    const { store, createRecord } = makeStore();
+    store.readNewestAnalysisAnchor = adapter.readNewestAnalysisAnchor.bind(adapter);
+    const app = await buildApp(store);
+    try {
+      const res = await app.inject({ method: 'POST', url: '/assist/v1/decision-records/commit',
+        headers: { authorization: `Bearer ${token}` }, payload: COMMIT_BODY });
+      expect(res.statusCode).toBe(201);
+      expect(createRecord).toHaveBeenCalledTimes(1);
+      expect(createRecord.mock.calls[0]?.[0].decision.graph_hash)
+        .toBe(`${AAG_V1_GRAPH_HASH_PREFIX}hash-valid-anchor`);
+    } finally { await app.close(); }
+  });
+  it.each(['capped', 'malformed', 'failed'] as const)('%s history is explicit unavailable and writes nothing', async mode => {
+    const late = '2026-10-09T12:00:00.000Z';
+    const rows = mode === 'capped'
+      ? Array.from({ length: 21 }, (_, i) => anchorRow(anchorFact(`degraded-${i}`, late, 'degraded'), i + 1, late))
+      : mode === 'malformed' ? [anchorRow({ fact_type: 'run_analysis', result: [] }, 1, late)]
+        : [anchorRow(anchorFact('valid', late), 1, late)];
+    const fixture = anchorFixture(rows, mode === 'capped' ? 22 : rows.length, mode === 'failed');
+    const adapter = new SupabaseDecisionRecordStore(fixture.client, fixture.sessionStore);
+    const { store, createRecord } = makeStore();
+    store.readNewestAnalysisAnchor = adapter.readNewestAnalysisAnchor.bind(adapter);
+    const app = await buildApp(store);
+    try {
+      const res = await app.inject({ method: 'POST', url: '/assist/v1/decision-records/commit',
+        headers: { authorization: `Bearer ${token}` }, payload: COMMIT_BODY });
+      expect(res.statusCode).toBe(503);
+      expect(res.json().code).toBe('analysis_anchor_unavailable');
+      expect(createRecord).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+});

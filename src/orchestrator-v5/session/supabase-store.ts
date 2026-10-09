@@ -55,6 +55,8 @@ import {
   type PendingActionReadOptions,
   type SessionAppendOutcome,
   type SessionStore,
+  type ScenarioRunAnalysisFactReadOptions,
+  type ScenarioRunAnalysisFactPage,
   type SessionTurnWrite,
 } from './store.js';
 import { parseAnswerOffers } from '../agent-lane/answer-offers-envelope.js';
@@ -2363,11 +2365,8 @@ export class SupabaseSessionStore implements SessionStore {
   async readScenarioRunAnalysisFactsFor(
     scenarioId: string,
     limit: number,
-  ): Promise<{
-    readonly facts: readonly IdentifiedHandlerFact[];
-    readonly total_count: number;
-    readonly legacy_edit_facts?: LegacyAnalysisEditFacts;
-  }> {
+    options?: ScenarioRunAnalysisFactReadOptions,
+  ): Promise<ScenarioRunAnalysisFactPage> {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new SessionReadError(
         'Scenario analysis-fact lookahead limit is invalid',
@@ -2411,6 +2410,26 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
 
+    if (options?.malformedRows === 'isolate-for-anchor') {
+      const facts: IdentifiedHandlerFact[] = [];
+      const ids: (string | null)[] = [];
+      for (const row of data) {
+        try {
+          // Reuse the strict decoder per row. Only its row-corruption refusal is isolated;
+          // a query/count failure above still fails the entire read.
+          if (row === null || typeof row !== 'object') {
+            throw new SessionReadError('Scenario analysis-fact row metadata is invalid', { code: 'analysis_fact_corrupt' });
+          }
+          facts.push(...parseScenarioRunAnalysisRows([row], scenarioId));
+        } catch (error) {
+          if (!(error instanceof SessionReadError) || error.code !== 'analysis_fact_corrupt') throw error;
+          const rawId = row !== null && typeof row === 'object' && 'id' in row ? row.id : null;
+          ids.push(typeof rawId === 'string' ? rawId : null);
+        }
+      }
+      return Object.freeze({ facts: Object.freeze(facts), total_count: count as number,
+        isolated_malformed_rows: Object.freeze({ read_count: data.length, ids: Object.freeze(ids) }) });
+    }
     const facts = parseScenarioRunAnalysisRows(data, scenarioId);
     const selected = selectRunAnalysisFact(facts.map(entry => entry.fact));
     let legacyEdits: LegacyAnalysisEditFacts | undefined;
