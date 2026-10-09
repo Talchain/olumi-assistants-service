@@ -135,6 +135,7 @@ import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
 import { parseGuidedSizingPress, guidedSizingWireAction, guidedSizingOnWire, type GuidedSizing } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
+import { ModelWriteOwnershipRefused } from '../orchestrator-v5/ownership/door-ownership.js';
 import { handleReplacementTurn } from '../orchestrator-v5/replacement/turn-entry.js';
 import { shapeRunResult } from '../orchestrator-v5/replacement/to-run-result.js';
 // ⚠ The ADAPTER and the MINTER, not the writer beneath them. The
@@ -2905,6 +2906,7 @@ export type V5RouteReply = {
   200: FinalisedV5Response;
   400: BoundaryError;
   401: BoundaryError;
+  403: { error: ModelWriteOwnershipRefused['code']; message: string };
   // F4 — a graph CAS write conflict (GRAPH_DIVERGED) returns 409, not the
   // uniform 500, so the UI can branch to refresh-and-reconfirm rather than a
   // generic infra-failure retry.
@@ -8758,23 +8760,34 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
     }
 
-    // TurnExecutor returns a well-formed OlumiResponse envelope on every
-    // path (success, typed error block, or commit failure). The HTTP
-    // status on the wire is decided here by the route, NOT by the
-    // TurnExecutor — see the status/body matrix in the file header. The
-    // executor never throws past this boundary.
-    const run = await runTurnExecutor(ingress, requestId, {
-      graphState: extensions.graphState,
-      analysisState: extensions.analysisState,
-      selectedElements: extensions.selectedElements,
-      ...(chipClickResumeIntent
-        ? { chipClickResumeIntent }
-        : {}),
-      // F2 CHANGE A — forced explanation intent for a typed analytical pill.
-      ...(chipClickForcedIntent
-        ? { chipClickForcedIntent }
-        : {}),
-    });
+    // The route decides the HTTP status for executor results and preserved
+    // ownership refusals; see the status/body matrix in the file header.
+    let run: Awaited<ReturnType<typeof runTurnExecutor>>;
+    try {
+      run = await runTurnExecutor(ingress, requestId, {
+        graphState: extensions.graphState,
+        analysisState: extensions.analysisState,
+        selectedElements: extensions.selectedElements,
+        ...(chipClickResumeIntent
+          ? { chipClickResumeIntent }
+          : {}),
+        // F2 CHANGE A — forced explanation intent for a typed analytical pill.
+        ...(chipClickForcedIntent
+          ? { chipClickForcedIntent }
+          : {}),
+      });
+    } catch (error) {
+      if (error instanceof ModelWriteOwnershipRefused) {
+        await markDraftGraphWriteFailed(ingress.scenario_id, ingress.turn_id, error.code, requestId, 'turn_dead_only');
+        return reply.code(403).send({
+          error: error.code,
+          message: error.reason === 'not_owner'
+            ? "Nothing was saved. You don't have access to change this model."
+            : "Nothing was saved. I couldn't check access to this model. Try again.",
+        });
+      }
+      throw error;
+    }
 
     // Group 3 Task B — fail-closed invariant: `commit_performed: false` must
     // NEVER appear inside an HTTP 200. When the TurnExecutor did not persist
