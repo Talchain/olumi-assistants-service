@@ -487,7 +487,6 @@ describe('edit_graph recent_changes acceptance E2E (DL-7)', () => {
       async ensureScenarioExists(_s: string, userId: string) {
         return { user_id: userId };
       },
-      async storeDraftGraph() { /* noop */ },
       async loadGraph() { return null; },
       async loadGraphAndBriefText() { return { graph: null, briefText: null }; },
       async readMostRecentPendingActions() { return []; },

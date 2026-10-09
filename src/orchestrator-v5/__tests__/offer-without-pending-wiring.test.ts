@@ -90,7 +90,6 @@ vi.mock('../session/index.js', () => ({
     readMostRecentPendingActions: async () => mockedPriorPendings,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => persistedGraph,
     loadGraphAndBriefText: async () => ({ graph: persistedGraph, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),

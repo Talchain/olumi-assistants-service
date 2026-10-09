@@ -142,7 +142,6 @@ vi.mock("../../orchestrator-v5/session/index.js", () => ({
 const listVersions = vi.fn();
 const getVersion = vi.fn();
 const saveVersion = vi.fn();
-const restoreVersion = vi.fn();
 const restoreVersionAtomic = vi.fn();
 const getCurrentVersionPointer = vi.fn();
 // The HEAD record reader — the restore path's return-leg input. Distinct from
@@ -161,7 +160,6 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
       listVersions,
       getVersion,
       saveVersion,
-      restoreVersion,
       restoreVersionAtomic,
       getCurrentVersionPointer,
       getCurrentVersion,
@@ -341,17 +339,6 @@ beforeEach(() => {
       graph_identity_hash: HASH_SNAPSHOT,
       deduped: false,
       event_id: "evt-snap",
-    },
-  });
-  restoreVersion.mockResolvedValue({
-    status: "ok",
-    value: {
-      version_id: RESTORED_VERSION,
-      version_number: 4,
-      graph_identity_hash: HASH_A,
-      deduped: false,
-      event_id: "evt-restore",
-      restored_from_version_id: VERSION_A,
     },
   });
   restoreVersionAtomic.mockResolvedValue(atomicRestoreOk());
@@ -863,7 +850,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
 
     expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
     expect(saveVersion).not.toHaveBeenCalled();
-    expect(restoreVersion).not.toHaveBeenCalled();
     expect(appendSpy).not.toHaveBeenCalled();
     const write = restoreVersionAtomic.mock.calls[0][0];
     expect(write.scenario_id).toBe(SCENARIO);

@@ -144,7 +144,6 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
     hasPriorTurns: async () => storeHolder.turns.length > 0,
     loadGraph: async () => storeHolder.graph,
     loadGraphAndBriefText: async () => ({ graph: storeHolder.graph, briefText: null }),
-    storeDraftGraph: async () => undefined,
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),

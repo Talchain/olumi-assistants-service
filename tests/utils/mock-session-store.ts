@@ -143,7 +143,6 @@ export function createMockSessionStore(
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     // T1(d)'s optional snapshot reads still participate in the exhaustive

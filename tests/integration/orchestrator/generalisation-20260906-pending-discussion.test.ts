@@ -29,7 +29,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
     invalidateScoped: async (_id: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' }, entries_invalidated: [] }),
-    ensureScenarioExists: async () => ({ user_id: null }), storeDraftGraph: async () => undefined,
+    ensureScenarioExists: async () => ({ user_id: null }),
     loadGraph: async () => structuredClone(savedGraph),
     loadGraphAndBriefText: async () => ({ graph: structuredClone(savedGraph), briefText: null }),
     readMostRecentPendingActions: async () => pendings,

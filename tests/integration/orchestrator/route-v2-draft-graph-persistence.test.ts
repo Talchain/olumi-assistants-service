@@ -40,7 +40,6 @@ const mockStore = {
   invalidateScoped: vi.fn().mockResolvedValue({ scope: { kind: 'structural' }, entries_invalidated: [] }),
   invalidateAll: vi.fn().mockResolvedValue({ scope: { kind: 'structural' }, entries_invalidated: [] }),
   ensureScenarioExists: vi.fn().mockResolvedValue({ user_id: 'user-1' }),
-  storeDraftGraph: vi.fn().mockResolvedValue(undefined),
 };
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({

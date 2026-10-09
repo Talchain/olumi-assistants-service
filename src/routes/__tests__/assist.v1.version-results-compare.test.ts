@@ -38,7 +38,7 @@ vi.mock('../../orchestrator-v5/model-management/index.js', async (original) => {
   const actual = await original<typeof import('../../orchestrator-v5/model-management/index.js')>();
   return { ...actual, getModelManagementService: () => new actual.ModelManagementService({ isEnabled: () => true,
     store: { getVersion: mocks.getVersion, saveVersion: vi.fn(), listVersions: vi.fn(),
-      restoreVersion: vi.fn(), getCurrentVersionId: vi.fn() } }) };
+      getCurrentVersionId: vi.fn() } }) };
 });
 import versionsRoute from '../assist.v1.scenario-versions.js';
 

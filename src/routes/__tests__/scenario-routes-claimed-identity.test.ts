@@ -75,7 +75,6 @@ const listVersions = vi.fn();
 const getCurrentVersionPointer = vi.fn();
 const saveVersion = vi.fn();
 const getVersion = vi.fn();
-const restoreVersion = vi.fn();
 const compareVersions = vi.fn();
 vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal) => {
   const actual =
@@ -87,7 +86,6 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
       getCurrentVersionPointer,
       saveVersion,
       getVersion,
-      restoreVersion,
       compareVersions,
     }),
   };
@@ -153,13 +151,6 @@ beforeEach(() => {
     value: { id: VERSION_ID, version_number: 1, graph_identity_hash: "a".repeat(64) },
   });
   getVersion.mockResolvedValue({ status: "ok", value: { id: VERSION_ID, graph: GRAPH } });
-  restoreVersion.mockResolvedValue({ status: "ok", value: { id: VERSION_ID } });
-  // Compare is bound to "was the service reached", exactly like its three
-  // siblings, so this default need only be a shape the handler can act on.
-  compareVersions.mockResolvedValue({
-    status: "error",
-    error: { code: "version_not_found" },
-  });
 });
 
 describe("an OWNED scenario is not readable on a caller's say-so", () => {
@@ -537,7 +528,6 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
       await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID, mutation_id: MUTATION_ID, expected_graph_identity_hash: null });
 
       expect(getVersion).not.toHaveBeenCalled();
-      expect(restoreVersion).not.toHaveBeenCalled();
       await app.close();
     });
 
@@ -558,7 +548,6 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
       await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID, mutation_id: MUTATION_ID, expected_graph_identity_hash: null });
 
       expect(getVersion).not.toHaveBeenCalled();
-      expect(restoreVersion).not.toHaveBeenCalled();
       await app.close();
     });
   });

@@ -90,7 +90,6 @@ function makeStore(initial: unknown) {
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     readMostRecentPendingActions: async () => [],
-    storeDraftGraph: async () => undefined,
     ensureScenarioExists: async () => ({ user_id: null }),
     countTurns: async () => 0,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
