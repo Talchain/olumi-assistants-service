@@ -1,0 +1,143 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { expect, it } from 'vitest';
+import { userStatedOptionLevel } from '../user-stated-option-level.js';
+import { prepareProvisionalCandidate } from '../runtime/build-model.js';
+import { buildModelFromBrief } from '../runtime/build-model.js';
+import { countsInWords } from '../stated-by-user.js';
+import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
+import { slugId, type CandidateModel } from '../admit-model.js';
+
+type Rec = Record<string, unknown>;
+type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
+interface Row { id: string; brief: string; drafter_texts: string[] }
+function valid(i: Iv, brief: string): boolean {
+  const e = i.stated_evidence;
+  if (!e || !e.quote || !e.option_quote) return false;
+  if (![e.start, e.end, e.amount_start, e.option_start, e.option_end].every(Number.isInteger)) return false;
+  if (e.start < 0 || e.end > brief.length || brief.slice(e.start, e.end) !== e.quote
+    || e.option_start < e.start || e.option_end > e.end || brief.slice(e.option_start, e.option_end) !== e.option_quote) return false;
+  return [...findStatedAmounts(brief), ...countsInWords(brief)].some(a => a.index === e.amount_start
+    && a.magnitude === i.value && a.index >= e.option_start && a.index + a.matchedText.length <= e.option_end);
+}
+async function replay(row: Row) {
+  let registered: Rec | null = null; let index = 0;
+  const dispatch = async (p: string, body: unknown) => {
+    if (p.endsWith('/graph/register')) { registered = body as Rec; return { status: 200, json: { model_version: { version_number: 1 } } }; }
+    if (p.endsWith('/versions')) return { status: 200, json: { versions: [] } };
+    if (p.endsWith('/graph')) return { status: 200, json: { graph: (registered?.graph as Rec | undefined) ?? { nodes: [], edges: [] }, graph_hash: 'x' } };
+    return { status: 404, json: {} };
+  };
+  const result = await buildModelFromBrief('00000000-0000-4000-8000-000000000077', row.brief, dispatch as never,
+    (async () => ({ text: row.drafter_texts[Math.min(index++, row.drafter_texts.length - 1)]!, status: 'completed' })) as never);
+  return { graph: ((registered as Rec | null)?.graph as Rec | undefined) ?? null, result };
+}
+function losses(row: Row, graph: Rec | null, result: unknown): string[] {
+  const draft = JSON.parse(row.drafter_texts[0]!) as CandidateModel;
+  const nodes = (graph?.nodes ?? []) as Rec[];
+  const demoted = (result as { provenance_demoted?: {option: string; factor: string}[] }).provenance_demoted ?? [];
+  return draft.options.flatMap(o => (o.interventions ?? []).flatMap(i => {
+    if (i.provenance !== 'explicit' || !valid(i, row.brief)) return [];
+    const option = nodes.find(n => n.id === slugId(o.label));
+    const factor = nodes.find(n => n.id === slugId(i.factor_label));
+    const served = (option?.interventions as Record<string, Rec> | undefined)?.[String(factor?.id)];
+    return !served || served.source !== 'brief_extraction' || demoted.some(d => d.option === o.label && d.factor === i.factor_label)
+      ? [`${slugId(o.label)}.${slugId(i.factor_label)}`] : [];
+  }));
+}
+const r2 = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/s7-user-stated-r2.json'), 'utf8')) as Row[];
+it('compound-A first differing intervention and identity-bound row', async () => {
+  const row = r2[0]!; const served = await replay(row);
+  const raw = (JSON.parse(row.drafter_texts[0]!) as CandidateModel).options[0]!.interventions![0]!;
+  const node = (served.graph?.nodes as Rec[]).find(n => n.id === 'all_reliability');
+  const intervention = (node?.interventions as Rec)?.engineers_on_reliability_work;
+  fs.writeFileSync('/private/tmp/s7-first-diff.json', JSON.stringify({ raw, admitted: intervention, result: served.result }, null, 2));
+  expect(intervention).toMatchObject({ source: 'cee_hypothesis', raw_value: 6 });
+  expect((served.result as {provenance_demoted?: unknown[]}).provenance_demoted).toHaveLength(4);
+  expect(losses(row, served.graph, served.result)).toEqual([]);
+});
+it('served property census', async () => {
+  const corpus = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, 'fixtures/s7-construction-census/corpus.json.gz'))).toString()) as Row[];
+  expect(corpus).toHaveLength(116); expect(r2).toHaveLength(8);
+  const counts: Record<string, number> = {};
+  for (const row of [...r2, ...corpus]) { const s = await replay(row); counts[row.id] = losses(row, s.graph, s.result).length; }
+  fs.writeFileSync('/private/tmp/s7-user-stated-counts.json', JSON.stringify(counts, null, 2));
+  console.log('USER-STATED LOSS', JSON.stringify(counts));
+  const failing = Object.entries(counts).filter(([,n]) => n > 0).map(([id]) => id);
+  const baseline = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../../scripts/ci/user-stated-survives-baseline.json'), 'utf8')) as Baseline;
+  expect(baseline.failing_ids).toHaveLength(baseline.failing_count);
+  expect(ratchet(failing, baseline)).toEqual([]);
+  expect(countRegressions(counts, baseline.loss_counts ?? {})).toEqual([]);
+}, 120_000);
+
+interface Baseline { failing_count: number; failing_ids: string[]; loss_counts?: Record<string, number> }
+function countRegressions(counts: Record<string, number>, baseline: Record<string, number>): string[] {
+  return Object.entries(counts).filter(([id, n]) => n > (baseline[id] ?? 0)).map(([id, n]) => `${id}: losses ${n} > baseline ${baseline[id] ?? 0}`);
+}
+function ratchet(ids: string[], baseline: Baseline): string[] {
+  const failures = ids.filter(id => !baseline.failing_ids.includes(id)).map(id => `newly failing: ${id}`);
+  if (ids.length > baseline.failing_count) failures.push(`failing ${ids.length} > baseline ${baseline.failing_count}`);
+  const stale = baseline.failing_ids.filter(id => !ids.includes(id));
+  if (stale.length) failures.push(`stale baseline: remove ids ${stale.join(', ')}`);
+  return failures;
+}
+it('ratchet: zero, planted, stale, removed and re-fail controls', () => {
+  const empty: Baseline = { failing_count: 0, failing_ids: [] };
+  expect(ratchet([], empty)).toEqual([]);
+  expect(ratchet(['planted'], empty)).toEqual(['newly failing: planted', 'failing 1 > baseline 0']);
+  expect(ratchet([], { failing_count: 1, failing_ids: ['planted'] })).toEqual(['stale baseline: remove ids planted']);
+  expect(ratchet([], empty)).toEqual([]);
+  expect(ratchet(['planted'], empty)).toEqual(['newly failing: planted', 'failing 1 > baseline 0']);
+  expect(countRegressions({ existing: 2 }, { existing: 1 })).toEqual(['existing: losses 2 > baseline 1']);
+});
+function plantedRow(label: string): Row {
+  const draft = JSON.parse(r2[0]!.drafter_texts[0]!) as CandidateModel;
+  const brief = 'Set reliability allocation to 6 engineers.';
+  const option = draft.options[0]!;
+  const i = option.interventions![0]!;
+  const evidence = { quote: brief, start: 0, end: brief.length, option_quote: brief,
+    option_start: 0, option_end: brief.length, amount_start: brief.indexOf('6') };
+  return { id: label, brief, drafter_texts: [JSON.stringify({ ...draft, options: [{ ...option, label,
+    interventions: [{ ...i, stated_evidence: evidence }] }] })] };
+}
+it('planted loss is detected in the served object, including shared goal/limit words', async () => {
+  for (const label of ['Reliability allocation', 'Annual support contract total allocated engineers reliability allocation']) {
+    const row = plantedRow(label); const s = await replay(row);
+    expect(losses(row, s.graph, s.result)).toEqual([]);
+    const graph = structuredClone(s.graph)!;
+    const option = (graph.nodes as Rec[]).find(n => n.id === slugId(label))!;
+    const iv = option.interventions as Record<string, Rec>;
+    iv.engineers_on_reliability_work = { ...iv.engineers_on_reliability_work, source: 'cee_hypothesis' };
+    expect(losses(row, graph, s.result)).toEqual([`${slugId(label)}.engineers_on_reliability_work`]);
+    delete iv.engineers_on_reliability_work;
+    expect(losses(row, graph, s.result)).toEqual([`${slugId(label)}.engineers_on_reliability_work`]);
+  }
+});
+it('contrast: addition without total evidence, absent quote, amount outside own option span stay demoted by exact id', async () => {
+  for (const kind of ['addition', 'absent-quote', 'outside-option']) {
+    const row = plantedRow(`Contrast ${kind}`);
+    const draft = JSON.parse(row.drafter_texts[0]!) as CandidateModel;
+    const iv = draft.options[0]!.interventions![0]!;
+    if (kind === 'addition') { row.brief = 'Add +2 engineers to reliability.'; iv.value = 2; iv.stated_evidence = null; }
+    if (kind === 'absent-quote') iv.stated_evidence = { ...iv.stated_evidence!, quote: 'Set prototype allocation to 6 engineers.' };
+    if (kind === 'outside-option') iv.stated_evidence = { ...iv.stated_evidence!, option_quote: 'Set reliability allocation', option_end: 26 };
+    expect(userStatedOptionLevel(iv, row.brief)).toBe(false);
+    expect(prepareProvisionalCandidate(draft, row.brief).provenance_demoted).toEqual([
+      { option: draft.options[0]!.label, factor: iv.factor_label, value: iv.value },
+    ]);
+    row.drafter_texts = [JSON.stringify(draft)]; const s = await replay(row);
+    const option = (s.graph?.nodes as Rec[]).find(n => n.id === slugId(draft.options[0]!.label));
+    expect((option?.interventions as Record<string, Rec>).engineers_on_reliability_work).toMatchObject({ source: 'cee_hypothesis', raw_value: iv.value });
+  }
+});
+it('shared number readers verify both digits and number words, and malformed offsets fail closed', () => {
+  for (const word of ['6', 'six']) {
+    const row = plantedRow('Allocation'); const draft = JSON.parse(row.drafter_texts[0]!) as CandidateModel;
+    const i = draft.options[0]!.interventions![0]!; const brief = row.brief.replace('6', word);
+    i.stated_evidence = { ...i.stated_evidence!, quote: brief, end: brief.length, option_quote: brief, option_end: brief.length };
+    expect(valid(i, brief)).toBe(true); expect(userStatedOptionLevel(i, brief)).toBe(true);
+    i.stated_evidence = { ...i.stated_evidence, amount_start: i.stated_evidence.amount_start - 1 };
+    expect(userStatedOptionLevel(i, brief)).toBe(false);
+  }
+});

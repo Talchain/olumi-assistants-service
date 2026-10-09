@@ -1,3 +1,4 @@
+import { userStatedOptionLevel } from '../user-stated-option-level.js';
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -658,7 +659,8 @@ export function retrySchemaPinningGoal(
  *   A LOOP is not found here: it is admission's verdict (`loopIssues`, below).
  *
  * ⛔ An EXPLICIT `value_kind:"absolute"` level on a factor whose baseline is NOT
- * known is demoted to `ai_proposed`: with no known starting point it may be an
+ * known is demoted to `ai_proposed` unless its exact quote, amount and option spans
+ * verify the user-stated level: with no known starting point an unverified figure may be an
  * addition mislabelled as a total, derived from Olumi's estimate, and stamping it
  * as the user's would exempt a modelling guess from the money invariant's audit.
  * ⚠ BUT A USER'S OWN NUMBER MUST NEVER SILENTLY READ AS OLUMI'S (review 5822711266,
@@ -792,6 +794,7 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (kind === 'absolute') {
         const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
         if (intervention.provenance === 'explicit' && unknownBaseline
+          && !userStatedOptionLevel(intervention, brief)
           && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed' });

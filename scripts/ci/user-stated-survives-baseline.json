@@ -1,0 +1,11 @@
+{
+  "failing_count": 2,
+  "failing_ids": [
+    "arm-mechanism-2842/B3-d3.json",
+    "p44-lab-two-risks-20261008/heldout3-d1.json"
+  ],
+  "loss_counts": {
+    "arm-mechanism-2842/B3-d3.json": 2,
+    "p44-lab-two-risks-20261008/heldout3-d1.json": 1
+  }
+}
