@@ -182,6 +182,7 @@ export function parseStringifiedAuxFields(obj: Record<string, unknown>): void {
  * quietly becoming model-writable.
  */
 export const CEE_MINTED_GOAL_FIELDS = [
+  'horizon_basis',
   'goal_threshold',
   'goal_threshold_raw',
   'goal_threshold_unit',

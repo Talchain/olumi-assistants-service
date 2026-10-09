@@ -3,6 +3,7 @@
  * Only valid initial imports may create a scenario; deleted-scenario fencing remains.
  * Payload, CAS, stored-fact carry and write-error contracts remain in this handler. */
 
+import { stripHorizonBasis } from '../orchestrator-v5/goal-target/horizon-basis.js';
 import { assertShareByDatePreserved, ShareByDateOwnershipError } from '../orchestrator-v5/goal-target/share-by-date-carrier.js';
 import { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -764,6 +765,7 @@ export default async function route(app: FastifyInstance) {
           withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
           baseGraphForInvariants,
         ), baseGraphForInvariants), baseGraphForInvariants);
+        stripHorizonBasis(graphToRegister, baseGraphForInvariants);
         // The canvas omits edge provenance; verify the postimage after restoring unchanged held facts.
         assertShareByDatePreserved(baseGraphForInvariants, graphToRegister);
       } catch (err) {

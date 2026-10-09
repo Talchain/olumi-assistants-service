@@ -47,6 +47,7 @@
  * response envelope).
  */
 
+import { stripHorizonBasis } from '../goal-target/horizon-basis.js';
 import { z } from 'zod';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 // The PUBLISHED selected-element ref, imported rather than restated: this
@@ -425,6 +426,7 @@ export function parseRequestExtensions(
       };
     }
     graphState = bounds.graph;
+    stripHorizonBasis(graphState);
   }
 
   let analysisState: AnalysisStateIngress | null = null;

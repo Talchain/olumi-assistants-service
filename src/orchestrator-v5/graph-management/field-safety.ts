@@ -206,6 +206,7 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'goal_level_reading',
   'goal_scope',
   'goal_horizon_months',
+  'horizon_basis',
   // The deadline in the brief's own words (PJ-E-A2 part 2): the same G1 class, written only by construction.
   'goal_deadline_as_stated',
   // ⛔ An option's LIFECYCLE AUTHORITY (F1 T6; CODEX overflow #2467 5935234950 P1-1). `proposed_by` is written only by
