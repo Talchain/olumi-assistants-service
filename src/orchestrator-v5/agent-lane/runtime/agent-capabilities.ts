@@ -3562,6 +3562,14 @@ export function createAgentCapabilities(
     }
   };
 
+  // Optional additions never invalidate independently admissible required content.
+  // Retry only after a preflight refusal, with that field absent; all ordinary guards run again.
+  const discloseOptional = (result: ToolResult, field: string, reason: string): ToolResult => ({
+    ...result,
+    optional_fields_not_recorded: [...(Array.isArray(result.optional_fields_not_recorded) ? result.optional_fields_not_recorded : []), { field, reason }],
+    detail: [result.detail, `${field} was not recorded: ${reason}.`].filter(v => typeof v === 'string' && v !== '').join(' '),
+  });
+
   const caps: AgentCapabilities = {
     async getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id, options?.section);
@@ -5248,7 +5256,13 @@ export function createAgentCapabilities(
       }
       for (const level of levels) {
         const declaration = parseUnmodelledMechanisms(level?.unmodelled_mechanisms, level != null && Object.hasOwn(level, 'unmodelled_mechanisms'));
-        if (declaration.kind === 'invalid') return { ok: false, mutated: false, refusal: declaration.reason, detail: 'Nothing was proposed: every gap declaration must be valid.' };
+        if (declaration.kind === 'invalid') {
+          const option_levels = levels.map(l => {
+            if (parseUnmodelledMechanisms(l?.unmodelled_mechanisms, l != null && Object.hasOwn(l, 'unmodelled_mechanisms')).kind !== 'invalid') return l;
+            const { unmodelled_mechanisms: _gap, ...level } = l; return level;
+          });
+          return discloseOptional(await caps.proposeStartingPoint(ctx, { ...args, option_levels }), 'option_levels[].unmodelled_mechanisms', declaration.reason);
+        }
       }
       // ⛔ A keep is its own approval (`keep_with_other_changes`, CODEX CEE BUDDY 5925846990): never folded into a starting
       // point's one Yes, whose card would call Olumi's kept figure a starting assumption.
@@ -5270,7 +5284,10 @@ export function createAgentCapabilities(
             ? [{ op: 'set_option_intervention', path: `${option.node.id}::${factor.node.id}`, value: { unmodelled_mechanisms: parsed.mechanisms } }] : [];
         });
         const parsed = parseOptionGapsOfLevelOps(declarations);
-        if (parsed.kind === 'invalid') return { ok: false, mutated: false, refusal: parsed.reason, detail: 'Nothing was proposed: repeated option gap declarations must agree.' };
+        if (parsed.kind === 'invalid') {
+          const option_levels = levels.map(l => { const { unmodelled_mechanisms: _gap, ...level } = l; return level; });
+          return discloseOptional(await caps.proposeStartingPoint(ctx, { ...args, option_levels }), 'option_levels[].unmodelled_mechanisms', 'the optional gap declarations disagreed');
+        }
       }
       const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
       // What THIS starting point would make each factor's starting value — read off the stored
@@ -5351,6 +5368,12 @@ export function createAgentCapabilities(
         base_revision: compound.base_graph_identity_hash,
         assumptions: a?.assumptions ?? [],
         option_levels: b?.interventions ?? [],
+        // Joined proposals keep the child level handler's optional-field disclosures in the model's result.
+        ...(b !== null && (Array.isArray(b.ranges_not_recorded) || Array.isArray(b.optional_fields_not_recorded)) ? {
+          ...(Array.isArray(b.ranges_not_recorded) ? { ranges_not_recorded: b.ranges_not_recorded } : {}),
+          ...(Array.isArray(b.optional_fields_not_recorded) ? { optional_fields_not_recorded: b.optional_fields_not_recorded } : {}),
+          detail: b.detail,
+        } : {}),
         // Levels the proposer LEFT OUT because the option is not wired to that
         // factor — the Agent must say so and offer a level it CAN record.
         ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked, not_linked_note: b.not_linked_note } : {}),
@@ -5378,7 +5401,13 @@ export function createAgentCapabilities(
       }
       const declarations = input.map(i => parseUnmodelledMechanisms(i?.unmodelled_mechanisms, i != null && Object.hasOwn(i, 'unmodelled_mechanisms')));
       const invalid = declarations.find(d => d.kind === 'invalid');
-      if (invalid?.kind === 'invalid') return { ok: false, mutated: false, refusal: invalid.reason, detail: 'Nothing was proposed: every gap declaration must be valid.' };
+      if (invalid?.kind === 'invalid') {
+        const interventions = input.map((l, index) => {
+          if (declarations[index]?.kind !== 'invalid') return l;
+          const { unmodelled_mechanisms: _gap, ...level } = l; return level;
+        });
+        return discloseOptional(await caps.proposeOptionInterventions(ctx, { ...args, interventions }, internal), 'interventions[].unmodelled_mechanisms', invalid.reason);
+      }
       const declaredOps: ProposalOperation[] = [];
       // Resolved within the kind first (a label on a node of another kind never shadows the
       // right one), then by `resolveNamed`: an id is identity, a label beats a description,
@@ -5403,6 +5432,7 @@ export function createAgentCapabilities(
       const notAccepted: { option: string; factor: string; value: unknown; reason: string }[] = [];
       /** Levels the Agent marked `user_stated` that the user never wrote: recorded as Olumi's, never as theirs. */
       const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
+      const rangesNotRecorded: { option: string; factor: string; reason: string }[] = [];
       const seen = new Set<string>();
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
@@ -5474,7 +5504,10 @@ export function createAgentCapabilities(
         const needsLink = !linkedFactorsOf(g as never, option.id).some((f) => f.id === factor.id);
         const gapOperands = declaration.kind === 'valid' ? optionGapOperands(g.raw, option.id) : undefined;
         if (declaration.kind === 'valid') {
-          if (gapOperands == null) return { ok: false, mutated: false, refusal: 'gap_operands_unavailable' };
+          if (gapOperands == null) {
+            const interventions = input.map(l => { const { unmodelled_mechanisms: _gap, ...level } = l; return level; });
+            return discloseOptional(await caps.proposeOptionInterventions(ctx, { ...args, interventions }, internal), 'interventions[].unmodelled_mechanisms', 'the model cannot resolve the optional gap operands');
+          }
           declaredOps.push({ op: 'set_option_intervention', path: `${option.id}::${factor.id}`, value: { unmodelled_mechanisms: declaration.mechanisms } });
         }
         // ⛔ A held status quo takes no level the AGENT supplies (`heldStatusQuoPairs`):
@@ -5493,35 +5526,14 @@ export function createAgentCapabilities(
         // ground it: a model-supplied unit ("% monthly churn rate") would name away the entity the guard reads
         // (Canonical #2025 B1). Grounding reads only the factor's DECLARED unit; the rate after the figure is skipped anyway.
         const statedUnit = typeof i?.unit === 'string' && i.unit.trim() !== '' ? i.unit.trim() : undefined;
-        // A typed range and its level are shown together for explicit approval. Equivalent wording must not
-        // change that reading; the existing literal-figure guard remains for ordinary, non-range levels.
-        const rangeRequested = i?.likely_low !== undefined || i?.likely_high !== undefined
-          || i?.range_meaning !== undefined || i?.range_user_stated === true;
-        const userWrote = claimedByUser && (rangeRequested
-          || figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
-        if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
-        if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
-          notAccepted.push({
-            option: option.label, factor: factor.label, value: i?.value,
-            reason: claimedByUser
-              ? `${option.label} is held at its starting values, and ${String(i?.value)} is not a figure the user wrote, so no level is recorded for ${factor.label}. Leave it out; never send a figure as the user's unless they wrote it.`
-              : `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
-          });
-          continue;
-        }
         const raw = Number(i?.value);
-        if (!Number.isFinite(raw)) {
-          unresolved.push(`${option.label} -> ${factor.label} (no value)`);
-          notAccepted.push({ option: option.label, factor: factor.label, value: i?.value, reason: 'No numeric value was given.' });
-          continue;
-        }
         /**
          * TEMPORAL (B6's ask, #2384; R3 #75 5914230653): the user's LIKELY RANGE for this level, decided from the TYPED
          * arguments only (Codex CR 5963331228 P1: no parsing of the user's words). Both ends; the reading the Agent took
          * (`range_meaning`: only `likely_range` is recorded, so a 95% interval, a min–max or a bound is never stored as
          * one); that the USER gave it (`range_user_stated`); beside a level they gave; the level inside it. The user then
          * approves the range AND its reading, shown on the approval ("read as the middle half of what's likely"): that
-         * approval is the provenance check. Anything else is refused with the reason, so the Agent asks.
+         * approval is the provenance check. An invalid optional range is left out and disclosed; its level is kept.
          */
         const hasLow = i?.likely_low !== undefined;
         const hasHigh = i?.likely_high !== undefined;
@@ -5534,15 +5546,34 @@ export function createAgentCapabilities(
             : i?.range_user_stated !== true ? 'a range is recorded only when the user gave it (range_user_stated), never one Olumi proposed'
             : i?.range_meaning !== 'likely_range'
               ? `Olumi records only a LIKELY range (the middle half of what\u2019s likely); a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement and is not stored as one`
-            : !userWrote ? 'a likely range is recorded only beside a level the user gave (user_stated)'
+            : !claimedByUser ? 'a likely range is recorded only beside a level the user gave (user_stated)'
             : raw < low || raw > high ? `${raw} lies outside the likely range ${low}–${high} it was given with`
             : null;
           if (why !== null) {
-            notAccepted.push({ option: option.label, factor: factor.label, value: i?.value,
-              reason: `No likely range was recorded: ${why}. Ask the user for each option’s likely range in their own words, then propose it again.` });
-            continue;
+            rangesNotRecorded.push({ option: option.label, factor: factor.label,
+              reason: `No likely range was recorded: ${why}.` });
+          } else {
+            likelyRange = { low, high };
           }
-          likelyRange = { low, high };
+        }
+
+        // A rejected range has no bearing on the ordinary level or its authorship.
+        const userWrote = claimedByUser && (likelyRange !== undefined
+          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
+        if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
+        if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
+          notAccepted.push({
+            option: option.label, factor: factor.label, value: i?.value,
+            reason: claimedByUser
+              ? `${option.label} is held at its starting values, and ${String(i?.value)} is not a figure the user wrote, so no level is recorded for ${factor.label}. Leave it out; never send a figure as the user's unless they wrote it.`
+              : `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
+          });
+          continue;
+        }
+        if (!Number.isFinite(raw)) {
+          unresolved.push(`${option.label} -> ${factor.label} (no value)`);
+          notAccepted.push({ option: option.label, factor: factor.label, value: i?.value, reason: 'No numeric value was given.' });
+          continue;
         }
 
         const os = (factor.observed_state ?? {}) as { cap?: unknown; unit?: unknown };
@@ -5629,11 +5660,14 @@ export function createAgentCapabilities(
           const unit = typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? '');
           if (prior.raw !== raw || prior.normalised !== normalised || prior.cap !== (cap ?? derivedFrame)
             || prior.unit !== unit || prior.userStated !== userWrote || prior.needsLink !== needsLink
-            || !isDeepStrictEqual(prior.likelyRange, likelyRange)
-            || (declaration.kind === 'valid' && prior.mechanisms !== undefined
-              && !isDeepStrictEqual(prior.mechanisms, declaration.mechanisms))) {
+            || !isDeepStrictEqual(prior.likelyRange, likelyRange)) {
             return { ok: false, mutated: false, refusal: 'conflicting_option_gap_declarations',
               detail: 'Nothing was proposed: repeated option levels and their gap statements must agree.' };
+          }
+          if (declaration.kind === 'valid' && prior.mechanisms !== undefined && !isDeepStrictEqual(prior.mechanisms, declaration.mechanisms)) {
+            const interventions = input.map(l => { const { unmodelled_mechanisms: _gap, ...level } = l; return level; });
+            return discloseOptional(await caps.proposeOptionInterventions(ctx, { ...args, interventions }, internal),
+              'interventions[].unmodelled_mechanisms', 'the optional gap declarations disagreed');
           }
           if (declaration.kind === 'valid' && gapOperands != null) {
             prior.mechanisms = declaration.mechanisms; prior.gapOperands = gapOperands;
@@ -5652,7 +5686,10 @@ export function createAgentCapabilities(
       }
 
       const declaredGaps = parseOptionGapsOfLevelOps(declaredOps);
-      if (declaredGaps.kind === 'invalid') return { ok: false, mutated: false, refusal: declaredGaps.reason, detail: 'Nothing was proposed: repeated option gap declarations must agree.' };
+      if (declaredGaps.kind === 'invalid') {
+        const interventions = input.map(l => { const { unmodelled_mechanisms: _gap, ...level } = l; return level; });
+        return discloseOptional(await caps.proposeOptionInterventions(ctx, { ...args, interventions }, internal), 'interventions[].unmodelled_mechanisms', 'the optional gap declarations disagreed');
+      }
 
       // Validate the whole resolved cohort before dropping unchanged, undeclared levels.
       const changed = set.filter(level => {
@@ -5678,7 +5715,9 @@ export function createAgentCapabilities(
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
           ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
-          detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
+          ...(rangesNotRecorded.length > 0 ? { ranges_not_recorded: rangesNotRecorded } : {}),
+          detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.'
+            + rangesNotRecorded.map(r => ` ${r.option} / ${r.factor}: ${r.reason}`).join(''),
         };
       }
 
@@ -5744,6 +5783,10 @@ export function createAgentCapabilities(
         ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
         ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
+        ...(rangesNotRecorded.length > 0 ? {
+          ranges_not_recorded: rangesNotRecorded,
+          detail: rangesNotRecorded.map(r => `${r.option} / ${r.factor}: ${r.reason}`).join(' '),
+        } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
           'authorise_change with this proposal_id once they agree.',

@@ -179,6 +179,9 @@ export const PREWARM_DEADLINE_MS = 15_000;
 /** The prefix of the call id a host-made first call carries in the conversation (never a model's id; unique per turn). */
 export const HOST_FIRST_CALL_ID = 'host_first_call';
 
+/** One harness instruction; actual tool/reason/detail are supplied by the refusal result. */
+export const REPEATED_REFUSAL_NARRATION = '{tool} was refused twice for the same reason ({refusal}: {detail}); do not call it again this turn; tell the user in plain words what is missing.';
+
 /**
  * Where a turn's wall time actually went.
  *
@@ -395,6 +398,8 @@ export async function runAgentTurn(
   const mode: AgentLaneMode = input.mode ?? 'full';
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
   const withheld = new Set(input.withheldTools ?? []);
+  const refusalCounts = new Map<string, number>();
+  const repeatLimitations = new Map<string, string>();
   /**
    * ⭐ THE STATE THE SERVER ALREADY HOLDS IS GIVEN, NOT FETCHED (slice C1; P3A replay of Paul's transcript, 27 Sep).
    * Every ordinary turn spent a whole model call (~3 s) asking for `get_canonical_state`, and every answer then sat
@@ -517,6 +522,9 @@ export async function runAgentTurn(
     // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
     // and a context packet can never widen the surface.
     const narrateHop = narrateNext;
+    const limitationItems = [...repeatLimitations.values()].map(text => ({
+      role: 'developer', content: [{ type: 'input_text', text }],
+    }));
     const offered = (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
       .filter((t) => !withheld.has(t.name));
     const hostCall = hop === 0 && input.hostFirstCall !== undefined && offered.some((t) => t.name === input.hostFirstCall!.name)
@@ -525,11 +533,11 @@ export async function runAgentTurn(
       ? input.firstCallTool : undefined;
     const request: ModelCallRequest = {
       instructions: input.instructions,
-      input: narrateNext ? [...items, NARRATE_ITEM] : items,
+      input: [...items, ...limitationItems, ...(narrateNext ? [NARRATE_ITEM] : [])],
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
-      ...(narrateNext ? { reasoning_role: 'narrate' as const } : {}),
+      ...(narrateHop ? { reasoning_role: 'narrate' as const } : {}),
     };
     if (hostCall !== undefined) {
       void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
@@ -619,7 +627,9 @@ export async function runAgentTurn(
       const toolStartedAt = now();
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
-      const result: ToolResult = withheld.has(String(call.name))
+      const result: ToolResult = repeatLimitations.has(String(call.name))
+        ? { ok: false, mutated: false, refusal: 'repeated_refusal_withheld', detail: repeatLimitations.get(String(call.name)) }
+        : withheld.has(String(call.name))
         ? {
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
             detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',
@@ -646,6 +656,20 @@ export async function runAgentTurn(
                   + 'a change the user has already seen stays theirs to approve or decline.',
               }
             : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
+      if (result.ok === false && typeof result.refusal === 'string' && !withheld.has(String(call.name))) {
+        const key = `${String(call.name)}:${result.refusal}`;
+        const count = (refusalCounts.get(key) ?? 0) + 1;
+        refusalCounts.set(key, count);
+        // One corrected retry remains possible. Only the second identical refusal withholds the tool.
+        if (count === 2) {
+          withheld.add(String(call.name));
+          const detail = typeof result.detail === 'string' && result.detail.trim() !== ''
+            ? result.detail.replace(/\s+/g, ' ').slice(0, 600) : result.refusal;
+          const text = REPEATED_REFUSAL_NARRATION.replace('{tool}', () => String(call.name))
+            .replace('{refusal}', () => result.refusal as string).replace('{detail}', () => detail);
+          repeatLimitations.set(String(call.name), text);
+        }
+      }
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
       //
       // `build_model_from_brief` is dispatched as a tool and makes its own
