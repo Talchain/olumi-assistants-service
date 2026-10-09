@@ -216,7 +216,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       if (typeof graphHash === 'string' && applyIdentityConfirmEdit({ persistedGraph: raw, ...card,
         expected_graph_hash: graphHash, reading_token: identityConfirmReadingToken(card) }).kind === 'mutated') {
         const label = (id: string) => { const n = nodes.find(n => n?.id === id); return typeof n?.label === 'string' ? n.label : id; };
-        identityReading = { goalLabel: label(card.outcome_id), a: label(card.factor_ids[0]), b: label(card.factor_ids[1]) };
+        if (card.operation === 'product') identityReading = { goalLabel: label(card.outcome_id), a: label(card.factor_ids[0]), b: label(card.factor_ids[1]) };
       }
     }
     const signals = assembleGuidanceSignals({
