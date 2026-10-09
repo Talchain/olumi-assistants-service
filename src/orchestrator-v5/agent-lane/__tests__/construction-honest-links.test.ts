@@ -84,8 +84,8 @@ describe('the construction contract states the link requirement', () => {
   });
 
   it('aims for Release Control’s envelope, with the gate’s own ceilings', () => {
-    expect(BUILD_INSTRUCTIONS).toContain('normally 3 to 5 options');
-    expect(BUILD_INSTRUCTIONS).toContain('roughly 4 to 8 factors');
+    expect(BUILD_INSTRUCTIONS).toContain('EVERY option the user stated, never dropped or merged — when');
+    expect(BUILD_INSTRUCTIONS).toContain('the factors that actually move the goal —');
     expect(BUILD_INSTRUCTIONS).toContain(`${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links`);
   });
 });

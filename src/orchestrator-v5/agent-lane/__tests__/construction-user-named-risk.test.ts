@@ -12,7 +12,7 @@ import { COMPACT_MARKER, servedControlInstructions } from './compact-benchmark-c
 
 const K3 = 'EVERY RISK THE USER NAMES IS DRAWN AS A RISK NODE: each downside the user states in their own words (for example that they will run out of money, lose a key customer, or miss a deadline) is its own risk, linked to what it threatens, even when you also draw a risk of your own. ';
 
-const K3_PRECEDENCE = 'A RISK THE USER NAMED OUTRANKS THE ENVELOPE: when the risks the user named do not all fit beside your own, leave out your own risks and outcomes first; never leave out or merge a risk the user named, even when that takes the model past 6 outcomes and risks. ';
+const K3_PRECEDENCE = 'A RISK THE USER NAMED OUTRANKS THE ENVELOPE: when the risks the user named do not all fit beside your own, leave out your own risks and outcomes first; never leave out or merge a risk the user named; leave out your own additions first, and the user-material exception to the size limit applies. ';
 
 describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as a risk node', () => {
   it('RED: the construction instructions carry the rule, verbatim, once', () => {
@@ -24,17 +24,17 @@ describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as
     const text = String(BUILD_INSTRUCTIONS);
     const keep = text.indexOf('DRAW EVERY RISK THAT COULD REVERSE THE ANSWER');
     const k3 = text.indexOf(K3);
-    const widen = text.indexOf('Leave out only what the brief neither states nor implies');
+    const widen = text.indexOf('Keep everything the user stated. Add only supported mechanisms, alternatives and risks that materially affect the reasoning');
     expect(keep).toBeGreaterThan(-1);
     expect(widen).toBeGreaterThan(-1);
     expect(keep < k3 && k3 < widen).toBe(true);
   });
 
-  it('RED: user-named risks outrank the 4-to-6 envelope, stated once, directly after K3 and before the omission limit', () => {
+  it('RED: user-named risks outrank the envelope, stated once, directly after K3 and before the omission limit', () => {
     const text = String(BUILD_INSTRUCTIONS);
     expect(text.split(K3_PRECEDENCE).length - 1).toBe(1);
     expect(text.indexOf(K3_PRECEDENCE)).toBe(text.indexOf(K3) + K3.length);
-    expect(text.indexOf(K3_PRECEDENCE) < text.indexOf('Leave out only what the brief neither states nor implies')).toBe(true);
+    expect(text.indexOf(K3_PRECEDENCE) < text.indexOf('Keep everything the user stated. Add only supported mechanisms, alternatives and risks that materially affect the reasoning')).toBe(true);
   });
 
   it('RED: the node/link budget yields to the user\'s own material, stated once, in the same sentence block as the budget', () => {
@@ -57,7 +57,7 @@ describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as
     expect(control).not.toContain('cannot fit this budget');
   });
 
-  it('CONTROL: the envelope still excludes speculative options and risks or outcomes that could not change the answer', () => {
-    expect(String(BUILD_INSTRUCTIONS)).toContain('no speculative options, and no risk or outcome that could not change the answer');
+  it('CONTROL: the envelope preserves user material and limits additions to supported mechanisms, alternatives and risks', () => {
+    expect(String(BUILD_INSTRUCTIONS)).toContain('Keep everything the user stated. Add only supported mechanisms, alternatives and risks that materially affect the reasoning; no speculative options. ');
   });
 });
