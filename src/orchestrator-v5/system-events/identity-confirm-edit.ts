@@ -22,6 +22,7 @@
  * `identity_confirm`, which commits `mutatedGraph` + `handlerFacts` on the one CAS-guarded append. Pure: the stored graph
  * is never mutated.
  */
+import { goalStockAccumulationOf } from '../goal-target/goal-horizon-detail.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -176,6 +177,11 @@ function partLevelsWereAsked(graph: unknown, ids: readonly string[], levels: rea
  */
 export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: readonly string[]): { readonly id: string; readonly label: string; readonly kind: string }[] {
   if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes)) return [];
+  const stock = goalStockAccumulationOf(persistedGraph);
+  if (stock !== null && factorIds.length === 1 && factorIds[0] === stock.carrier.id) {
+    return identityPartsWithoutLevel(persistedGraph, [String(stock.stock.id), String(stock.inflow.id),
+      ...(stock.netZero === null ? [String(stock.rate.id)] : [])]);
+  }
   const out: { id: string; label: string; kind: string }[] = [];
   for (const id of new Set(factorIds)) {
     const part = persistedGraph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
@@ -261,6 +267,10 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   const outcome = graph.nodes.find((n): n is Rec => isRec(n) && n.id === outcome_id);
   if (outcome === undefined) return refuse('outcome_not_found');
   const distinct = [...new Set(factor_ids)];
+  const stock = goalStockAccumulationOf(params.persistedGraph);
+  const stockCard = stock !== null && stock.goal.id === outcome_id && distinct.length === 1
+    && distinct[0] === stock.carrier.id ? proposeProductIdentity(params.persistedGraph) : null;
+  if (stockCard !== null && (stockCard.words !== words || part_levels !== undefined)) return refuse('reading_not_confirmed');
   if (identityConflictsWithScope({ ...outcome, nonlinear_identity: { operation: 'product', factor_ids: distinct } })) {
     return refuse('goal_scope_conflict', 'This product covers a component of the total goal. Correct its scope before confirming an identity.');
   }
@@ -272,13 +282,15 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
     const held = outcome.nonlinear_identity;
     const sameProduct = isRec(held) && held.operation === 'product' && Array.isArray(held.factor_ids)
       && held.factor_ids.length === distinct.length && distinct.every((id) => (held.factor_ids as unknown[]).includes(id));
-    if (!sameProduct) return refuse('carrier_conflict');
-    if (held.stated_in_brief === true) return refuse('already_carried');
+    if (!isRec(held) || !Array.isArray(held.factor_ids)) return refuse('carrier_conflict');
+    if (!sameProduct && stockCard === null) return refuse('carrier_conflict');
+    if (held.stated_in_brief === true && stockCard === null) return refuse('already_carried');
     factorOrder = [...(held.factor_ids as string[])];
   }
 
   // ── THE CONSTRUCTION RULE, on the stored graph ─────────────────────────────────────────────────────────────────────
-  const admitted = admitStoredProductDeclaration(params.persistedGraph, { outcome_id, factor_ids: distinct });
+  const admitted = stockCard !== null ? { ok: true as const }
+    : admitStoredProductDeclaration(params.persistedGraph, { outcome_id, factor_ids: distinct });
   if (!admitted.ok) return admitted.reason === 'invalid_graph' ? refuse('invalid_graph') : refuse(admitted.reason, admitted.detail);
   if (part_levels !== undefined) {
     if (!partLevelsWereAsked(params.persistedGraph, factorOrder, part_levels)) return refuse('part_level_not_asked');
@@ -298,7 +310,11 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
     return refuse('operand_level_missing', identityPartLevelAsk(labelOf(outcome_id), factorOrder.map(labelOf), unlevelled));
   }
 
-  const carrier = { operation: 'product' as const, factor_ids: factorOrder, stated_in_brief: true };
+  const carrier = { operation: stockCard !== null ? 'sum' as const : 'product' as const, factor_ids: factorOrder, stated_in_brief: true };
+  if (stockCard !== null && stock?.netZero !== null && stock?.netZero !== undefined) {
+    const zero = graph.nodes.find((n): n is Rec => isRec(n) && n.id === stock.netZero!.id)!;
+    zero.observed_state = { ...(zero.observed_state as Rec), source: 'user_confirmed' };
+  }
   outcome.nonlinear_identity = carrier;
   for (const id of factorOrder) {
     const part = graph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
@@ -346,6 +362,13 @@ export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: u
   if (!isRec(before) || !isRec(after) || !Array.isArray(before.nodes) || !Array.isArray(after.nodes)) return false;
   if (after.nodes.length !== before.nodes.length) return false;
   const restored = structuredClone(after) as Rec & { nodes: unknown[] };
+  const stock = goalStockAccumulationOf(before);
+  if (stock !== null && stock.goal.id === outcomeId && stock.netZero !== null) {
+    const zero = restored.nodes.find((n): n is Rec => isRec(n) && n.id === stock.netZero!.id);
+    const prior = stock.netZero.observed_state as Rec;
+    if (zero === undefined || !isDeepStrictEqual(zero.observed_state, { ...prior, source: 'user_confirmed' })) return false;
+    zero.observed_state = structuredClone(prior);
+  }
   const at = restored.nodes.findIndex((n) => isRec(n) && n.id === outcomeId);
   const was = (before.nodes as unknown[]).find((n) => isRec(n) && n.id === outcomeId);
   if (at < 0 || !isRec(was)) return false;

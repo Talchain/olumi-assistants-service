@@ -235,7 +235,7 @@ export function approvalChipsFor(
   if (tool === 'propose_identity') {
     const words = identityWordsFor(labelSourceFor?.(proposalId));
     return words === undefined ? []
-      : [{ id: approvalChipIdFor(proposalId), label: words.startsWith('Olumi reads ‘') ? "Yes, that's how" : approve.label,
+      : [{ id: approvalChipIdFor(proposalId), label: words.startsWith('Olumi reads ‘') && (stored === undefined || identityReadingOf(stored)?.operation !== 'sum') ? "Yes, that's how" : approve.label,
         message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
   }
   // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
