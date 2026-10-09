@@ -37,7 +37,7 @@ import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
 import { readUnitParts, sameUnit } from './same-unit.js';
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.js';
-import { chanceGoalSentence, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
+import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
 import { sayDate } from '../goal-target/deadline-date.js';
 
 type Rec = Record<string, unknown>;
@@ -668,7 +668,7 @@ export function noDeadEndAsks(
   // ("today's level of … in % likelihood of on-time launch") and no link into it is asked to be sized: Olumi computes that
   // chance. The one sentence says so; nothing is asked first (the host's one question is the deadline).
   if (goal !== undefined && goalKindOf(goal) === 'chance_of_event') {
-    const deadline = goalDeadlineOf(goal);
+    const deadline = goalDeadlineFromRecord(graph, goal.id);
     return { message: chanceGoalSentence(deadline === undefined ? undefined : sayDate(deadline)), gaugeLinks: new Set() };
   }
   // The host owns the date -> team-time question; a forecast has no level today.
