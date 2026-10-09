@@ -508,23 +508,34 @@ function orderRunAnalysisFacts(
     candidates.push(view);
   }
 
-  // Stable sort by computed_at desc, putting facts without computed_at
-  // last. JavaScript Array.sort is stable in V8, so insertion order is
-  // preserved among facts that compare equal (same timestamp or both
-  // null) — and build-turn-context delivers newest-first, so the
-  // first equal-keyed fact is the freshest by insertion.
-  candidates.sort((a, b) => {
+  return orderRunAnalysisFactsByTime(candidates);
+}
+
+/**
+ * Canonical Run ordering for fact views AND typed records. Loaded fact views
+ * already arrive newest-insertion-first; typed rows supply that same persisted
+ * fact created_at/id tie-break explicitly, never their derivation timestamp.
+ * Revision is provenance, not a second definition of newest.
+ */
+export function orderRunAnalysisFactsByTime<T extends { readonly computed_at: string | null }>(
+  rows: readonly T[],
+  insertion?: (row: T) => { readonly created_at: string; readonly id: string },
+): T[] {
+  return [...rows].sort((a, b) => {
     if (a.computed_at !== null && b.computed_at !== null) {
-      // Lexicographic ISO compare is correct for desc sort.
       if (a.computed_at < b.computed_at) return 1;
       if (a.computed_at > b.computed_at) return -1;
-      return 0;
+    } else {
+      if (a.computed_at !== null) return -1;
+      if (b.computed_at !== null) return 1;
     }
-    if (a.computed_at !== null) return -1; // a is fresher than untimestamped b
-    if (b.computed_at !== null) return 1;
-    return 0;
+    if (insertion !== undefined) {
+      const av = insertion(a); const bv = insertion(b);
+      if (av.created_at !== bv.created_at) return av.created_at < bv.created_at ? 1 : -1;
+      if (av.id !== bv.id) return av.id < bv.id ? 1 : -1;
+    }
+    return 0; // stable input order, exactly as selectRunAnalysisFact
   });
-  return candidates;
 }
 
 /**

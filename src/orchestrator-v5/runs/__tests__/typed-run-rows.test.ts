@@ -46,9 +46,8 @@ function mapFact(fact: Json) {
 }
 
 describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
-  it('pins the SQL trigger payload paths to the specification and captured Run fields', () => {
-    const sqlPaths = [...migration.matchAll(/^-- payload_path: (.+)$/gm)].map(match => match[1]);
-    expect(sqlPaths).toEqual(TYPED_RUN_PAYLOAD_PATHS);
+  it('maps the captured Run fields through the ONE TS specification', () => {
+    expect(TYPED_RUN_PAYLOAD_PATHS).toContain('result.input_snapshot');
 
     const fact = factFromRead(succeeded);
     const mapped = mapFact(fact);
@@ -247,7 +246,6 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     const scenarioId = fact.result.scenario_id;
     corrupt(fact);
     expect(toTypedRunRows(fact, { scenarioId })).toEqual({ quarantine: reason });
-    expect(migration).toContain(`'${reason}'`);
   });
 
   it.each([true, false, null])('copies producer permission %j independently of compose and goal-chance licences', permission => {
@@ -278,20 +276,32 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     if ('ok' in mapped) expect(mapped.ok).toMatchObject({ leading_option_id: null, constraint_may_name_leading_option: null });
   });
 
-  it('pins cancel propagation, compact quarantine storage, and explicit backfill mode without a DB', () => {
+  it('pins enqueue-only bounded lock handling, compact terminal storage, and recoverable claims', () => {
     const handlers = [...migration.matchAll(/EXCEPTION WHEN ([^\n]+) THEN/g)].map(match => match[1]);
-    expect(handlers).toEqual(['OTHERS', 'OTHERS', 'OTHERS']);
-    expect(migration).toContain("p_mode text DEFAULT 'trigger'");
-    expect(migration).toContain("analysis_run_from_fact(v_fact, 'backfill')");
-    expect(migration).toContain("'skipped_legacy'");
-    expect(migration).toContain("'skipped_refusal'");
-    expect(migration).toContain("'refusal_not_a_run'");
+    expect(handlers).toEqual(['lock_not_available']);
+    const trigger = migration.match(/CREATE FUNCTION public\.v5_handler_facts_enqueue_run\(\)([\s\S]*?)\$\$;/)?.[1];
+    expect(trigger).toContain("SET lock_timeout = '50ms'");
+    expect(trigger).not.toMatch(/\bSELECT\b|analysis_runs|analysis_run_options|analysis_run_quarantine/);
+    expect(migration).toContain('FOR UPDATE OF h SKIP LOCKED');
+    expect(migration).toContain('UNION');
+    expect(migration).not.toContain('CREATE FUNCTION public.analysis_run_from_fact');
+    expect(migration).not.toContain('CREATE FUNCTION public.backfill_analysis_runs');
+    expect(migration).not.toContain('CREATE VIEW public.latest_successful_run');
     const quarantineDefinition = migration.match(/CREATE TABLE public\.analysis_run_quarantine \(([\s\S]*?)\n\);/)?.[1];
     expect(quarantineDefinition).toBeDefined();
     expect(quarantineDefinition).not.toMatch(/\braw\b|\bJSONB\b/i);
-    for (const column of ['fact_id', 'scenario_id', 'reason', 'seen_at']) expect(quarantineDefinition).toContain(column);
-    expect(migration).toContain('INSERT INTO public.analysis_run_quarantine (fact_id, scenario_id, reason)');
-    expect(migration).toContain('producer verdict at Run time; compose applies further remove-only gates; NOT the final permission');
+    for (const column of ['fact_id', 'scenario_id', 'reason', 'detail', 'seen_at']) expect(quarantineDefinition).toContain(column);
+    const rollback = readFileSync(new URL('../../../../supabase/migrations/rollback/20261009010000_phase2_a_typed_runs_rollback.sql.do-not-apply', import.meta.url), 'utf8');
+    expect(rollback.replace(/^--.*$/gm, '').trim().split(';')[0]).toBe('DROP TRIGGER v5_handler_facts_enqueue_run ON public.v5_handler_facts');
+  });
+
+  it('options=[null] quarantines; no derivation-time revision is invented', () => {
+    const fact = factFromRead(succeeded);
+    const valid = mapFact(fact);
+    expect(valid).toHaveProperty('ok.scenario_revision', null);
+    expect(valid).toHaveProperty('ok.revision_source', 'legacy_unknown');
+    fact.result.input_snapshot.options = [null];
+    expect(mapFact(fact)).toHaveProperty('quarantine', expect.stringContaining('input_snapshot.options.0'));
   });
 
   it('uses only an explicitly attested graph identity, never the analysis-affecting currentness hash', () => {
@@ -312,79 +322,93 @@ import { canonicalJson, loadCorpus, parity2b } from '../../../../scripts/phase2/
 import { selectRunAnalysisFact } from '../../context/freshness.js';
 import { readLatestRun, type AnalysisRunReadRow } from '../read-latest-run.js';
 
-/** Models the actual view's status predicate and query order; does not invoke the fact selector. */
+/** Mock only transport paging/eligibility; selection runs in the real freshness core. */
 function typedTableClient(rows: AnalysisRunReadRow[]): Pick<SupabaseClient, 'from'> {
   return { from(table: string) {
-    expect(table).toBe('latest_successful_run');
+    expect(table).toBe('analysis_runs');
     let scenarioId: string;
-    let limit = 0;
-    const orders: { column: keyof AnalysisRunReadRow; ascending: boolean }[] = [];
+    let from = 0; let to = 499;
     const builder = {
       select() { return builder; },
-      eq(column: string, value: string) { expect(column).toBe('scenario_id'); scenarioId = value; return builder; },
-      order(column: keyof AnalysisRunReadRow, opts: { ascending: boolean }) { orders.push({ column, ...opts }); return builder; },
-      limit(n: number) { limit = n; return builder; },
-      returns() {
-        expect(orders).toEqual([
-          { column: 'scenario_revision', ascending: false }, { column: 'computed_at', ascending: false },
-          { column: 'run_id', ascending: false },
-        ]);
-        const selected = rows.filter(row => row.scenario_id === scenarioId && row.status === 'succeeded')
-          .sort((a, b) => {
-            for (const order of orders) {
-              const av = a[order.column]; const bv = b[order.column];
-              if (av !== bv) return ((av as string | number) < (bv as string | number) ? -1 : 1) * (order.ascending ? 1 : -1);
-            }
-            return 0;
-          }).slice(0, limit);
-        return Promise.resolve({ data: selected, error: null });
+      eq(column: string, value: string) { if (column === 'scenario_id') scenarioId = value;
+        else { expect(column).toBe('status'); expect(value).toBe('succeeded'); } return builder; },
+      order(column: string, opts: { ascending: boolean }) {
+        expect(column).toBe('fact_id'); expect(opts.ascending).toBe(true); return builder;
       },
+      range(a: number, b: number) { from = a; to = b; return builder; },
+      returns() { return Promise.resolve({ data: rows.filter(row => row.scenario_id === scenarioId && row.status === 'succeeded')
+        .sort((a, b) => a.fact_id.localeCompare(b.fact_id)).slice(from, to + 1), error: null }); },
     };
     return builder;
   } } as unknown as Pick<SupabaseClient, 'from'>;
 }
 function materialisedCorpus() {
   return parity2b().flatMap(entry => entry.run === null ? [] : [{ ...entry.run,
-    created_at: loadCorpus().find(c => c.case_id === entry.case_id)!.created_at,
+    fact_created_at: loadCorpus().find(c => c.case_id === entry.case_id)!.created_at,
+    created_at: '2026-10-10T00:00:00Z', // derivation time is deliberately unrelated
   }]);
 }
-describe('S1 2B shared corpus and dormant typed reader', () => {
-  it('reproduces expected.json in-process from the same 30 source payloads', () => {
-    expect(loadCorpus()).toHaveLength(30);
+describe('S1 TS golden corpus and dormant typed reader', () => {
+  it('reproduces expected.json in-process from the same 31 source payloads', () => {
+    expect(loadCorpus()).toHaveLength(31);
     expect(canonicalJson(parity2b())).toBe(readFileSync(new URL('../../../../scripts/phase2/corpus-2b/expected.json', import.meta.url), 'utf8'));
     const rows = parity2b();
     expect(rows.find(row => row.case_id === '30-huge-100-options')?.options).toHaveLength(100);
     expect(rows.find(row => row.case_id === '26-duplicate-run-id')?.quarantine?.reason).toBe('duplicate_run_id');
     expect(rows.find(row => row.case_id === '04-refusal-marker')?.disposition).toBe('skipped_refusal');
+    expect(rows.find(row => row.case_id === '31-null-input-option')?.quarantine?.reason).toBe('input_snapshot_invalid');
+    expect(rows.filter(row => row.run !== null).every(row => row.run?.scenario_revision === null && row.run.revision_source === 'legacy_unknown')).toBe(true);
   });
   it('same shared corpus: readLatestRun chooses selectRunAnalysisFact’s successful Run', async () => {
     const corpus = loadCorpus();
-    // Quarantine/duplicate isolation is the typed storage boundary. Compare the
-    // same surviving source facts, rather than asking the unvalidated pure selector
-    // to interpret malformed rows the typed table deliberately does not contain.
     const derivedIds = new Set(parity2b().flatMap(entry => entry.run === null ? [] : [entry.run.fact_id]));
-    const facts = [...corpus].filter(entry => derivedIds.has(entry.fact_id)).sort((a, b) => b.created_at.localeCompare(a.created_at))
+    const facts = [...corpus].filter(entry => derivedIds.has(entry.fact_id)).sort((a, b) => b.created_at.localeCompare(a.created_at) || b.fact_id.localeCompare(a.fact_id))
       .flatMap(entry => { const parsed = HandlerFactSchema.safeParse(entry.fact); return parsed.success ? [parsed.data] : []; });
     const selected = selectRunAnalysisFact(facts);
-    expect(selected?.fact.fact_type).toBe('run_analysis');
     if (selected?.fact.fact_type !== 'run_analysis') throw new Error('No corpus success');
     const actual = await readLatestRun(typedTableClient(materialisedCorpus()), corpus[0]!.scenario_id);
     expect(actual?.run_id).toBe(selected.fact.result.run_id);
     expect(actual?.computed_at).toBe(selected.computed_at);
-    expect(actual?.scenario_revision).toBe(7);
+    expect(actual?.scenario_revision).toBeNull();
   });
   it.each([false, true])('malformed-row isolation (corruption=%s) preserves the valid newest Run', async corrupt => {
     const corpus = loadCorpus();
-    const first = structuredClone(corpus[0]!);
-    const newest = structuredClone(corpus[9]!);
-    const bad = structuredClone(corpus[12]!); // probability 1.7
-    const entries = corrupt ? [first, bad, newest] : [first, newest];
-    const derived = parity2b(entries);
+    const first = structuredClone(corpus[0]!); const newest = structuredClone(corpus[9]!);
+    const bad = structuredClone(corpus[12]!);
+    const derived = parity2b(corrupt ? [first, bad, newest] : [first, newest]);
     expect(derived.filter(entry => entry.quarantine !== null)).toHaveLength(corrupt ? 1 : 0);
-    if (corrupt) expect(derived[1]?.quarantine?.fact_id).toBe(bad.fact_id);
-    const rows = derived.flatMap(entry => entry.run === null ? [] : [{ ...entry.run, created_at: first.created_at }]);
-    await expect(readLatestRun(typedTableClient(rows), first.scenario_id)).resolves.toMatchObject({
-      run_id: (newest.fact as Json).result.run_id, fact_id: newest.fact_id,
-    });
+    const rows = derived.flatMap(entry => entry.run === null ? [] : [{ ...entry.run, fact_created_at: first.created_at, created_at: first.created_at }]);
+    await expect(readLatestRun(typedTableClient(rows), first.scenario_id)).resolves.toMatchObject({ run_id: (newest.fact as Json).result.run_id, fact_id: newest.fact_id });
   });
+  it.each(['higher-revision-earlier-time', 'computed-time-tie', 'null-computed-time', 'both-null', 'insertion-tie', 'same-instant-different-ISO-text'] as const)(
+    'same selection as the fact selector: %s', async contrast => {
+      const corpus = loadCorpus();
+      const old = structuredClone(corpus[0]!); const newer = structuredClone(corpus[9]!);
+      const oldFact = HandlerFactSchema.parse(old.fact); const newFact = HandlerFactSchema.parse(newer.fact);
+      if (oldFact.fact_type !== 'run_analysis' || newFact.fact_type !== 'run_analysis') throw new Error('Fixture type');
+      const rows: AnalysisRunReadRow[] = parity2b([old, newer]).flatMap(entry => entry.run === null ? [] : [{ ...entry.run,
+        fact_created_at: entry.run.fact_id === newer.fact_id ? '2026-10-10T02:00:00Z' : '2026-10-10T01:00:00Z', created_at: '2026-10-11T00:00:00Z' }]);
+      expect(rows).toHaveLength(2);
+      rows[0] = { ...rows[0]!, scenario_revision: 9, revision_source: 'recorded' };
+      rows[1] = { ...rows[1]!, scenario_revision: 1, revision_source: 'recorded' };
+      if (contrast === 'computed-time-tie' || contrast === 'insertion-tie') {
+        newFact.result.computed_at = oldFact.result.computed_at;
+        rows[1] = { ...rows[1]!, computed_at: rows[0]!.computed_at };
+      }
+      if (contrast === 'null-computed-time' || contrast === 'both-null') {
+        delete newFact.result.computed_at; rows[1] = { ...rows[1]!, computed_at: null };
+      }
+      if (contrast === 'both-null') { delete oldFact.result.computed_at; rows[0] = { ...rows[0]!, computed_at: null }; }
+      if (contrast === 'insertion-tie') rows[0] = { ...rows[0]!, fact_created_at: rows[1]!.fact_created_at };
+      if (contrast === 'same-instant-different-ISO-text') {
+        oldFact.result.computed_at = '2026-10-10T01:00:00Z'; newFact.result.computed_at = '2026-10-10T01:00:00.000Z';
+        rows[0] = { ...rows[0]!, computed_at: oldFact.result.computed_at }; rows[1] = { ...rows[1]!, computed_at: newFact.result.computed_at };
+      }
+      // The sanctioned fact loader supplies created_at DESC, id DESC.
+      const ordered = rows.slice().sort((a, b) => b.fact_created_at.localeCompare(a.fact_created_at) || b.fact_id.localeCompare(a.fact_id))
+        .map(row => row.fact_id === old.fact_id ? oldFact : newFact);
+      const selected = selectRunAnalysisFact(ordered);
+      if (selected?.fact.fact_type !== 'run_analysis') throw new Error('No selected Run');
+      await expect(readLatestRun(typedTableClient(rows), old.scenario_id)).resolves.toHaveProperty('run_id', selected.fact.result.run_id);
+    });
 });

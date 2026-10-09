@@ -1,12 +1,11 @@
--- PROPOSAL ROLLBACK, DO NOT APPLY — removes only Phase 2(a)'s new objects.
--- Existing append RPCs, scenarios.revision and its trigger remain intact.
+-- PROPOSAL ROLLBACK. FIRST statement stops all new DB-side enqueue work.
+DROP TRIGGER v5_handler_facts_enqueue_run ON public.v5_handler_facts;
 SET LOCAL lock_timeout = '3s';
-
-DROP TRIGGER v5_handler_facts_derive_run ON public.v5_handler_facts;
-DROP FUNCTION public.v5_handler_facts_derive_run();
-DROP FUNCTION public.backfill_analysis_runs(int);
-DROP FUNCTION public.analysis_run_from_fact(public.v5_handler_facts, text);
-DROP VIEW public.latest_successful_run;
+DROP FUNCTION public.v5_handler_facts_enqueue_run();
+DROP FUNCTION public.claim_analysis_run_facts(uuid[], integer);
+DROP FUNCTION public.store_typed_analysis_run(uuid, jsonb, jsonb);
+DROP FUNCTION public.quarantine_analysis_fact(uuid, text, text);
+DROP TABLE public.analysis_run_queue;
 DROP TABLE public.analysis_run_options;
 DROP TABLE public.analysis_runs;
 DROP TABLE public.analysis_run_quarantine;

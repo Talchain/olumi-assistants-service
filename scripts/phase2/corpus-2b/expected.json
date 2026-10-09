@@ -80,9 +80,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-01-success",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "succeeded",
       "user_id": null
     }
@@ -179,9 +180,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-05-refusal-with-run",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "withheld",
       "user_id": null
     }
@@ -271,9 +273,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-08-failed",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "failed",
       "user_id": null
     }
@@ -341,9 +344,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-09-blocked",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "withheld",
       "user_id": null
     }
@@ -429,9 +433,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-10-multiple-options",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "succeeded",
       "user_id": null
     }
@@ -508,9 +513,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-11-missing-probability",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "succeeded",
       "user_id": null
     }
@@ -684,9 +690,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-20-unknown-enrichment",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "succeeded",
       "user_id": null
     }
@@ -816,9 +823,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-25-clock-skew",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "succeeded",
       "user_id": null
     }
@@ -908,9 +916,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-28-no-licence",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "succeeded",
       "user_id": null
     }
@@ -996,9 +1005,10 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-29-legacy-success-status",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "succeeded",
       "user_id": null
     }
@@ -1939,11 +1949,23 @@
         "snapshot_version": 1
       },
       "leading_option_id": null,
+      "revision_source": "legacy_unknown",
       "run_id": "2b-30-huge-100-options",
       "scenario_id": "712b0000-0000-4000-8000-000000000001",
-      "scenario_revision": 7,
+      "scenario_revision": null,
       "status": "succeeded",
       "user_id": null
     }
+  },
+  {
+    "case_id": "31-null-input-option",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "f2000000-0000-4000-8000-000000000031",
+      "reason": "input_snapshot_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
   }
 ]

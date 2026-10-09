@@ -1,3 +1,4 @@
+import { toTypedRunRows } from '../runs/typed-run-rows.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
 import type { LegacyAnalysisEditFacts } from '../types/handler-fact.js';
@@ -273,6 +274,18 @@ const isMissingAppendFunction = (error: unknown): boolean =>
   errCode(error) === 'PGRST202' || errCode(error) === '42883';
 let conditionalAppendMissingLogged = false;
 
+export interface AnalysisRunDrainResult {
+  derived: number;
+  quarantined: number;
+  skipped: number;
+  failed: number;
+  queueDepth: number | null;
+  oldestPendingAgeSeconds: number | null;
+}
+
+const drainRecord = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+
 export class SupabaseSessionStore implements SessionStore {
   /**
    * 2.174 fix c — set once when `append_turn_atomic_v4` answers PGRST202
@@ -392,7 +405,102 @@ export class SupabaseSessionStore implements SessionStore {
     return 'new';
   }
 
+  /** The ONE completion seam: the RPC has committed before background work is scheduled. */
   private async appendThroughRpc(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
+    const outcome = await this.appendThroughRpcInner(write, options);
+    if ('id' in outcome && !write.turn_id.endsWith(TURN_CLAIM_SUFFIX)) {
+      // A separate event-loop task, never awaited by the turn/response. The DB
+      // assigned the fact IDs, so resolve them after commit inside this task.
+      setImmediate(() => {
+        void this.deriveCommittedTurnAnalysisRuns(write, outcome.id).catch(() => {
+          log.warn({ event: 'analysis_run.after_commit_failed', turn_row_id: outcome.id },
+            'Committed turn unchanged; a later sweep will recover pending analysis facts');
+        });
+      });
+    }
+    return outcome;
+  }
+
+  private async deriveCommittedTurnAnalysisRuns(write: SessionTurnWrite, turnRowId: string): Promise<void> {
+    if (!write.handler_facts.some(f => f.fact_type === 'run_analysis' && !f.noop)) {
+      // Other completed turns still sweep missed enqueues and production work.
+      await this.deriveQueuedAnalysisRuns({ factIds: [], sweepLimit: 20 });
+      return;
+    }
+    const { data, error } = await this.client.from('v5_handler_facts').select('id')
+      .eq('v5_conversation_turn_id', turnRowId).eq('scenario_id', write.scenario_id)
+      .eq('action_type', 'run_analysis').eq('noop', false).returns<Array<{ id: string }>>();
+    // Even a failed ID lookup can recover this turn through the facts anti-join.
+    await this.deriveQueuedAnalysisRuns({ factIds: error ? [] : (data ?? []).map(row => row.id), sweepLimit: 20 });
+  }
+
+  /**
+   * Sanctioned derivation write door. Each RPC has its own transaction, none
+   * shares the append's transaction. Transient storage failures keep the lease
+   * pending for retry; duplicate execution IDs are terminal quarantines.
+   */
+  async deriveQueuedAnalysisRuns(opts: { factIds?: string[]; sweepLimit: number } = { sweepLimit: 20 }): Promise<AnalysisRunDrainResult> {
+    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, skipped: 0, failed: 0,
+      queueDepth: null, oldestPendingAgeSeconds: null };
+    try {
+      const limit = Number.isSafeInteger(opts.sweepLimit) && opts.sweepLimit > 0 ? Math.min(opts.sweepLimit, 20) : 20;
+      const { data, error } = await this.client.rpc('claim_analysis_run_facts', {
+        p_fact_ids: opts.factIds ?? [], p_sweep_limit: limit,
+      });
+      if (error) throw error;
+      const envelope = drainRecord(data);
+      if (!envelope || !Array.isArray(envelope.facts)) throw new Error('Invalid analysis claim receipt');
+      counts.queueDepth = typeof envelope.queue_depth === 'number' ? envelope.queue_depth : null;
+      counts.oldestPendingAgeSeconds = typeof envelope.oldest_pending_age_seconds === 'number' ? envelope.oldest_pending_age_seconds : null;
+      for (const value of envelope.facts) {
+        const row = drainRecord(value);
+        try {
+          if (!row || typeof row.fact_id !== 'string' || typeof row.scenario_id !== 'string') {
+            throw new Error('Invalid claimed fact identity');
+          }
+          const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, { scenarioId: row.scenario_id });
+          if ('ok' in mapped) {
+            const { options, ...run } = mapped.ok;
+            const stored = await this.client.rpc('store_typed_analysis_run', {
+              p_fact_id: row.fact_id, p_run: run, p_options: options,
+            });
+            if (stored.error) {
+              if (errCode(stored.error) !== '23505') throw stored.error;
+              const quarantined = await this.client.rpc('quarantine_analysis_fact', {
+                p_fact_id: row.fact_id, p_reason: 'duplicate_run_id', p_detail: '23505',
+              });
+              if (quarantined.error) throw quarantined.error;
+              if (quarantined.data === true) counts.quarantined += 1;
+              else counts.skipped += 1;
+            } else if (stored.data === true) counts.derived += 1;
+            else counts.skipped += 1;
+          } else {
+            const skipped = !('quarantine' in mapped);
+            const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal' in mapped ? 'skipped_refusal' : 'skipped_legacy';
+            const quarantined = await this.client.rpc('quarantine_analysis_fact', {
+              p_fact_id: row.fact_id, p_reason: reason, p_detail: null,
+            });
+            if (quarantined.error) throw quarantined.error;
+            if (skipped || quarantined.data !== true) counts.skipped += 1;
+            else counts.quarantined += 1;
+          }
+        } catch (error) {
+          counts.failed += 1;
+          log.warn({ event: 'analysis_run.fact_failed', fact_id: row?.fact_id, rpc_code: errCode(error) },
+            'Analysis fact remains pending; continuing the isolated drain');
+        }
+      }
+    } catch (error) {
+      counts.failed += 1;
+      log.warn({ event: 'analysis_run.claim_failed', rpc_code: errCode(error) }, 'Analysis sweep unavailable; committed turns unchanged');
+    }
+    log.info({ event: 'analysis_run.drain', queue_depth: counts.queueDepth,
+      oldest_pending_age_seconds: counts.oldestPendingAgeSeconds, derived: counts.derived,
+      quarantined: counts.quarantined, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
+    return counts;
+  }
+
+  private async appendThroughRpcInner(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
     if (options !== undefined && (write.graph != null || write.modelVersion !== undefined || write.briefText != null
       || write.coaching_state != null || write.turn_class !== 'direct_answer' || write.handler_id !== null
       || !write.response_emitted || write.turn_id.endsWith(TURN_CLAIM_SUFFIX) || !isAgentAnswerRow(write))) {

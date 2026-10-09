@@ -8,6 +8,7 @@ export interface CorpusCase {
   case_id: string;
   fact_id: string;
   scenario_id: string;
+  /** Scenario state in the fixture, deliberately NEVER used as evaluated Run provenance. */
   scenario_revision: number;
   created_at: string;
   fact: unknown;
@@ -18,13 +19,14 @@ export function loadCorpus(): CorpusCase[] {
     .map(name => JSON.parse(readFileSync(new URL(name, corpusDir), 'utf8')) as CorpusCase);
 }
 
-/** SQL retains its SQLSTATE/message; compare explicit semantic codes, never arbitrary diagnostic wording. */
+/** Storage retains its SQLSTATE/message; compare explicit semantic codes, never arbitrary diagnostic wording. */
 export function quarantineCode(reason: string): string {
   for (const code of ['result_shape', 'run_id_absent', 'run_id_invalid', 'scenario_id_mismatch',
     'leading_option_id_shape', 'summary_shape', 'constraint_may_name_leading_option_shape']) {
     if (reason === code) return code;
   }
   if (/duplicate key value.*analysis_runs_pkey|duplicate_run_id/.test(reason)) return 'duplicate_run_id';
+  if (/input_snapshot/.test(reason)) return 'input_snapshot_invalid';
   if (/computed_at/.test(reason)) return 'computed_at_invalid';
   if (/analysis_status/.test(reason)) return 'analysis_status_unsupported';
   if (/probability_of_goal_precision|Wilson|precision/.test(reason)) return 'precision_invalid';
@@ -45,7 +47,7 @@ export function parity2b(corpus = loadCorpus()) {
       const { options, ...row } = mapped.ok;
       return { case_id: entry.case_id, disposition: 'derived', run: {
         ...row, computed_at: new Date(row.computed_at).toISOString(), scenario_id: entry.scenario_id,
-        scenario_revision: entry.scenario_revision, user_id: null, fact_id: entry.fact_id,
+        user_id: null, fact_id: entry.fact_id,
       }, options: [...options].sort((a, b) => a.option_id < b.option_id ? -1 : a.option_id > b.option_id ? 1 : 0), quarantine: null };
     }
     const reason = conflict ? 'duplicate_run_id' : 'quarantine' in mapped ? quarantineCode(mapped.quarantine) : null;

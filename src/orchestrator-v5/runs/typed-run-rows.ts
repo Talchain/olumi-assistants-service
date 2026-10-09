@@ -23,11 +23,11 @@ const probability = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 
 /**
- * Persisted payload paths read by this specification and the SQL fact trigger.
+ * Persisted payload paths read by the ONE TS mapper.
  * [] denotes array entries; {option_id} denotes a key bound to that option.
  * The licence fields below belong to the single GOAL_CHANCE_LICENSED warning.
  * noop is a v5_handler_facts column, not part of the serialised payload.
- * Keep the migration header's `payload_path` comments in this exact order.
+ * Storage RPCs receive mapped rows, never interpret these payload paths.
  */
 export const TYPED_RUN_PAYLOAD_PATHS = [
   'fact_type',
@@ -88,6 +88,9 @@ export interface TypedRunOptionRow {
 /** Reference mapping for the SQL trigger; SQL owns scenario/user/revision/fact_id and the option rows' run_id. */
 export interface TypedRunRows {
   readonly run_id: string;
+  /** No evaluated revision exists in RunAnalysisResultSchema yet (commit B owns stamping it). */
+  readonly scenario_revision: null;
+  readonly revision_source: 'legacy_unknown';
   /** producer verdict at Run time; compose applies further remove-only gates; NOT the final permission */
   readonly leading_option_id: string | null;
   readonly constraint_may_name_leading_option: boolean | null;
@@ -270,6 +273,7 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
   }
   return { ok: {
     run_id: result.run_id,
+    scenario_revision: null, revision_source: 'legacy_unknown',
     leading_option_id: result.leading_option_id,
     constraint_may_name_leading_option: producerPermission,
     canonical_request_hash: result.input_snapshot.sent_digest,
