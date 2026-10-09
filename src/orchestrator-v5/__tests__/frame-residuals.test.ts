@@ -594,3 +594,36 @@ describe('FR build6 final owner uses the winning mirror cell', () => {
     expect(p.writes).toHaveLength(1); expect(build6MirrorQuantity(p.read())).toBe(20000);
   });
 });
+
+describe('FR buddy r2: a shadowed carrier never blocks a quantity-preserving edit', () => {
+  it('zero edit with a winning raw20 data cell and a shadowed raw60 top-level cell saves, keeps 20, leaves the shadow alone', async () => {
+    const shadow = { value: 0.6, raw_value: 60, cap: 100 };
+    const graph = {
+      goal_node_id: 'goal',
+      nodes: [
+        { id: 'goal', kind: 'goal', label: 'Quality' },
+        { id: 'f', kind: 'factor', label: 'Duration', observed_state: { value: 0.4, raw_value: 40, cap: 100, unit: 'days' } },
+        { id: 'o', kind: 'option', label: 'Full' },
+        { id: 'p', kind: 'option', label: 'Trial' },
+      ],
+      edges: [['o', 'f'], ['p', 'f'], ['f', 'goal']].map(([from, to]) => ({
+        from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive',
+      })),
+      options: [
+        { id: 'o', label: 'Full', data: { interventions: { f: { value: 0.2, raw_value: 20, cap: 100 } } }, interventions: { f: { ...shadow } } },
+        { id: 'p', label: 'Trial', interventions: {} },
+      ],
+    } as unknown as Graph;
+    const before = structuredClone(graph);
+    const out = await build6Event(structuredClone(graph), 'f', 'days');
+    expect(out.kind).toBe('mutated');
+    if (out.kind !== 'mutated') throw new Error('Expected mutation');
+    const after = out.mutatedGraph as Graph;
+    const option = (after.options as Record<string, unknown>[]).find(o => o.id === 'o')!;
+    const scale = buildFactorScaleMap((after.nodes as unknown as Record<string, unknown>[])).get('f');
+    expect(resolveRawInterventionValue(mergeInterventionSourceObjects(option).f, scale).value).toBe(20);
+    expect((option.interventions as Record<string, unknown>).f).toEqual(shadow);
+    // The real door accepts the projected write against the original base.
+    expect(() => assertUntouchedLevelQuantities(before, projectGraphForPersistence(after))).not.toThrow();
+  });
+});
