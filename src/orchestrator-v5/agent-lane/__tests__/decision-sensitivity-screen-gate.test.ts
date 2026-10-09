@@ -51,8 +51,6 @@ const SERVED: readonly (readonly [string, 'driver' | 'range', boolean])[] = [
 describe('S2i: served Runs whose screen shows a driver or a range hand the Agent no absence status', () => {
   it.each(SERVED)('RED at base: %s (%s; robustness %s)', (name, shows, robust) => {
     const body = fixture(name);
-    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
-    if (["waveB3-t1b-7addf05-run1-turn003.json", "waveB5-t1b-3fce64f-run1-turn003.json", "waveB7-t1b-7e3f8fb-explain-turn003.json", "served-w3-f440be4a-t1b-7ab6c1af.json", "cut9-prod-p1-1-7e3f8fb-challenge-turn004.json"].includes(name)) body.draft_graph = nonTimeGraph(body.draft_graph);
     const block = blockOf(body);
     const before = JSON.stringify(block);
     // PRECONDITION: the producers still say absence, so base handed it.
@@ -106,8 +104,6 @@ describe('S2i: each limb alone, with a control the screen shows nothing on', () 
 
   it('driver alone (served B5 T1b, author: robustness removed) → gated with the graph; with no labels the driver is not shown → handed', () => {
     const body = fixture('waveB5-t1b-3fce64f-run1-turn003.json');
-    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
-    body.draft_graph = nonTimeGraph(body.draft_graph);
     const block = noRobustness(blockOf(body));
     expect(absenceHanded(project(block, body.draft_graph))).toBe(false);
     const unlabelled = project(block);
@@ -146,16 +142,12 @@ describe('S2i: callers that pass no graph (Explain, saved-run facts) gate on the
   const result = noRobustness(read.analysis_result);
 
   it('screenGraph gates the driver limb; without it the statuses are handed', () => {
-    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
-    const currentGraph = nonTimeGraph(read.graph);
-    expect(absenceHanded(project(result, undefined, true, currentGraph))).toBe(false);
+    expect(absenceHanded(project(result, undefined, true, read.graph))).toBe(false);
     expect(project(result)).toMatchObject({ decision_sensitivity: { status: 'not_measured' }, tipping_point: { status: 'not_evaluated' } });
   });
 
   it('screenGraph decides the gate only: it never adds a fact the caller did not get before', () => {
-    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
-    const currentGraph = nonTimeGraph(read.graph);
-    const withScreen = project(result, undefined, true, currentGraph);
+    const withScreen = project(result, undefined, true, read.graph);
     const without = project(result);
     const { decision_sensitivity: _d, tipping_point: _t, ...rest } = without;
     expect(Object.keys(withScreen).sort()).toEqual(Object.keys(rest).sort());
@@ -163,15 +155,13 @@ describe('S2i: callers that pass no graph (Explain, saved-run facts) gate on the
   });
 
   it('saved-run facts (Explain and canonical state): the served readback hands no not_evaluated tipping point', () => {
-    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
-    const currentGraph = nonTimeGraph(read.graph);
     expect(read.analysis_state.run_state.kind).toBe('complete_current');
     const facts = (r: Json, raw?: unknown): Json => savedRunContextFacts('s2i', {
       graph_hash: read.graph_hash, analysis_state: read.analysis_state, analysis_result: r, ...(raw !== undefined ? { raw } : {}),
     }, { leader_may_be_named: false });
-    expect(facts(read.analysis_result, currentGraph).selected_run_reference).toBeDefined();
-    expect(facts(read.analysis_result, currentGraph)).not.toHaveProperty('tipping_point');
-    expect(facts(result, currentGraph)).not.toHaveProperty('tipping_point');
+    expect(facts(read.analysis_result, read.graph).selected_run_reference).toBeDefined();
+    expect(facts(read.analysis_result, read.graph)).not.toHaveProperty('tipping_point');
+    expect(facts(result, read.graph)).not.toHaveProperty('tipping_point');
     // CONTROL: no robustness and no labels → the screen shows nothing this projection can see → handed as before.
     expect(facts(result).tipping_point).toEqual({ status: 'not_evaluated' });
   });
@@ -188,12 +178,3 @@ describe('S2i: the author-twin for the licence the driver comes from', () => {
     expect(out.decision_sensitivity).toEqual({ status: 'none_measurable' });
   });
 });
-
-function nonTimeGraph<T>(graph: T): T {
-  const current = structuredClone(graph);
-  for (const node of (current as { nodes: Json[] }).nodes) if (node.kind === 'goal') {
-    delete node.goal_horizon_months;
-    delete node.goal_deadline_as_stated;
-  }
-  return current;
-}

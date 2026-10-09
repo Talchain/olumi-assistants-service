@@ -118,10 +118,18 @@ describe('SCI-DEEP comparator · licences, absence and construction', () => {
     for (const row of out.claims.filter(c => c.kind === 'goal_probability')) {
       expect(row).toMatchObject({ baseline: null, alternative: null, verdict: 'not_comparable' });
     }
+    // Same stored endpoints without the held deadline retain the original quantitative claims.
+    const contrast = compareStructuralChallenge({ baselineFact: runFact(A_BODY, A_GRAPH, 'hash-a'),
+      candidateFact: runFact(B_BODY, B_GRAPH, 'hash-b'), baselineGraph: { nodes: [{ id: GOAL, kind: 'goal' }] },
+      candidateGraph: { nodes: [{ id: GOAL, kind: 'goal' }] }, turnMayNameLeader: true,
+      reachable: ALL, goalNodeId: GOAL, goalLevelTarget: TARGET });
+    expect(contrast.ok).toBe(true);
+    if (contrast.ok) expect(contrast.claims.some(c => c.kind === 'goal_probability' && c.baseline !== null)).toBe(true);
     expect(out.certainty.baselineDisplay).toBeUndefined();
     expect(out.certainty.alternativeDisplay).toBeUndefined();
+    // DL 87114 (A), TIME: omit held exact certainty; preserve the candidate's empty recorded absence.
     expect(out.certainty.baseline).toBeUndefined();
-    expect(out.certainty.alternative).toBeUndefined();
+    expect(out.certainty.alternative).toEqual([]);
   });
   it('a link that cannot reach the goal: its goal claims hold BY CONSTRUCTION and say so (never robustness evidence)', () => {
     const { claims } = compare(runFact(A2_BODY, A2_GRAPH, 'hash-a2'), new Set(['an_unrelated_leaf']));

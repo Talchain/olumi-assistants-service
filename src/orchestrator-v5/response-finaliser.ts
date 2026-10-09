@@ -1,4 +1,3 @@
-import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
 import { authorshipReasonForRun } from './compose/authorship-reason-for-run.js';
 /**
  * V5 response finaliser — single structurally-guaranteed stamping point for
@@ -429,9 +428,6 @@ export function finaliseV5Response(
   response: OlumiResponse,
   ctx: FinaliserContext,
 ): FinalisedV5Response {
-  const gatedBlocks = (Array.isArray(response.blocks) ? response.blocks : []).map(block => block.type === 'analysis_result'
-    ? withReadTimeHorizonGate(block, ctx.graph) : block);
-  if (Array.isArray(response.blocks) && gatedBlocks.some((block, index) => block !== response.blocks[index])) response = { ...response, blocks: gatedBlocks };
   // Defensive ceeTrace scrub: V5 source code on this branch does not write
   // `ceeTrace` (verified by exhaustive grep), but the V5 golden-path replay
   // observed `ceeTrace.reason: "CEE"` on a Step 4 wire response from an
@@ -914,7 +910,6 @@ function attachRunDelta(
   if (ctx.priorFacts === undefined) return disclose('skipped', 'prior_facts_absent', response);
   const built = buildRunDelta({
     priorFacts: ctx.priorFacts,
-    currentGraph: ctx.graph,
     // Fail-closed on absence, per this member's own documented semantics.
     mayNameLeadingOption: ctx.mayNameLeadingOption === true
       && (ctx.goalScopeClaimInput === undefined || ctx.goalScopeClaimInput.status === 'clear'),

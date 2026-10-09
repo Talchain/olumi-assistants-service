@@ -21,7 +21,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { StructuralChallengeClaimV1, StructuralChallengeResultV1 } from '@talchain/schemas';
 import type { RunDeltaNoiseVerdictLiteral } from '@talchain/schemas/boundary';
 
-import { GOAL_FIGURES_HORIZON_NOT_TESTED, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
+import { readOptionResultSources, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
 import { collectProducerCertifiedConstraintIds, collectProducerNotDecisionGradeConstraintIds } from '../../orchestrator/context/constraint-feasibility.js';
 import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
 import { identicalArmGroups, sameArm, sameStat, usableArmsFromRows, type ArmOutcome } from './identical-arms-core.js';
@@ -323,7 +323,7 @@ function deltaOnlyBasis(noise: RunDeltaNoiseVerdictLiteral): StructuralChallenge
 export function compareStructuralChallenge(input: CompareStructuralChallengeInput): CompareStructuralChallengeOutput {
   // Both stored endpoints are read on their supplied graphs; neither the hash nor a stored display licences a deadline edit.
   const gatedFact = (fact: HandlerFact, graph: unknown): HandlerFact => fact.fact_type === 'run_analysis'
-    ? { ...fact, result: withReadTimeHorizonGate(fact.result, graph) } : fact;
+    ? { ...fact, result: withReadTimeHorizonGate(fact.result, graph, fact.result.enrichment) } : fact;
   input = { ...input, baselineFact: gatedFact(input.baselineFact, input.baselineGraph),
     candidateFact: gatedFact(input.candidateFact, input.candidateGraph) };
   const a: RunEchoes | null = readRunEchoes(input.baselineFact);
@@ -496,10 +496,8 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   }
 
   return { ok: true, pair_provenance, claims, certainty: {
-    baseline: goalFiguresWithheldWarnings(a.enrichment).some(w => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)
-      ? undefined : readStoredGoalCertainty((input.baselineFact as { result?: Rec }).result?.goal_certainty),
-    alternative: goalFiguresWithheldWarnings(b.enrichment).some(w => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)
-      ? undefined : readStoredGoalCertainty((input.candidateFact as { result?: Rec }).result?.goal_certainty),
+    baseline: readStoredGoalCertainty((input.baselineFact as { result?: Rec }).result?.goal_certainty),
+    alternative: readStoredGoalCertainty((input.candidateFact as { result?: Rec }).result?.goal_certainty),
     baselineDisplay: goalChanceDisplayForAgent(input.baselineFact.result),
     alternativeDisplay: goalChanceDisplayForAgent(input.candidateFact.result),
   }, ...identicalCarriers(candidateArmsIdentical && runArmsDistinct(input.baselineFact), candidateGroups),

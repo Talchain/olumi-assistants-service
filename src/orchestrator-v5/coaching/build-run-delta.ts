@@ -726,7 +726,6 @@ function selectRecordedPair(facts: readonly HandlerFact[], selected: SelectedRun
 export function buildRunDelta(input: {
   readonly priorFacts: readonly HandlerFact[];
   readonly mayNameLeadingOption: boolean;
-  readonly currentGraph?: unknown;
   /** Compare route only: FROM → TO, retaining the recorded dates. No fallback. */
   readonly selectedPair?: SelectedRunPair;
 }): BuildRunDeltaResult {
@@ -855,8 +854,8 @@ export function buildRunDelta(input: {
   const goalChances: RunDeltaGoalChanceDelta[] = [...optionIds(currentEchoes.enrichment)]
     .filter((id) => priorOptionIds.has(id)).map((option_id) => ({
       option_id,
-      prior: goalChanceSideOf((pair.prior as { result?: unknown }).result, option_id, input.currentGraph),
-      current: goalChanceSideOf((pair.current as { result?: unknown }).result, option_id, input.currentGraph),
+      prior: goalChanceSideOf((pair.prior as { result?: unknown }).result, option_id),
+      current: goalChanceSideOf((pair.current as { result?: unknown }).result, option_id),
     }));
   // ⭐ 0.70.0 (CANVAS 5936762171, RC 5936776917): WHY there are no shares, typed — only when the cause is known:
   //   - `prior_withheld`: THIS Run may show its shares, the earlier Run's were withheld → "compared for the first time";

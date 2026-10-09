@@ -1,4 +1,3 @@
-import { withReadTimeHorizonGate } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
@@ -1465,9 +1464,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       }
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
       if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) {
-        const view = after.json.canonical_analysis_view as { schema?: unknown; source?: unknown } | undefined;
-        analysisResult = withReadTimeHorizonGate(after.json.analysis_result, graph,
-          view?.schema === 'canonical_analysis_view.v1' && view.source === 'stored_run_facts' ? { checkedReadGraph: graph } : undefined);
+        // /graph has already gated this stored Run against the graph from the same read.
+        analysisResult = after.json.analysis_result;
       }
       // The selected run's own constraint verdict state, bound to the SAME fact as
       // `analysis_result` by the graph read (R&C #70 5842182272). `null` = not recorded.

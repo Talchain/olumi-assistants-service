@@ -384,7 +384,13 @@ export async function readScenarioAnalysis(
     // Same rule as the turn path: only `complete` licenses "never analysed".
     const durableAuthority = isScenarioAnalysisReasoningAuthority(factSet);
     const currentnessRead = readScenarioAnalysisClaimSafetyFact(factSet, params.scenarioId);
-    const facts = durableAuthority ? factSet.facts : hotWindow.facts;
+    const storedFacts = durableAuthority ? factSet.facts : hotWindow.facts;
+    // The raw stored envelope is still available here. Gate once before any selector or projection.
+    const facts = storedFacts.map(fact => {
+      if (fact.fact_type !== 'run_analysis') return fact;
+      const result = withReadTimeHorizonGate(fact.result, params.graph, fact.result.enrichment);
+      return result === fact.result ? fact : { ...fact, result };
+    });
     const factsReadOk = factSet.status === 'complete';
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
@@ -406,7 +412,7 @@ export async function readScenarioAnalysis(
       selected !== null && selected.fact.fact_type === 'run_analysis'
         ? (selected.fact as RunAnalysisHandlerFact)
         : null;
-    const analysisResult = fact !== null ? withReadTimeHorizonGate(buildAnalysisResultBlock(fact), params.graph) : null;
+    const analysisResult = fact !== null ? buildAnalysisResultBlock(fact) : null;
     // ⭐ #730's SHADOW CASE (Canonical, single-projection parity C2): a NEWER claim-bearing Run (partial or degraded —
     // the refusal marker makes no claim, `selectClaimBearingRunAnalysisFact`) that withheld the leader is never
     // overridden by the older success displayed here. The turn's entitlement reads that same claim; without this the
@@ -546,7 +552,7 @@ export async function readScenarioAnalysis(
       if (fact === null || builtResult === null || newerClaimWithholds) return undefined;
       const pair = selectTwoNewestRunAnalysisFacts(facts);
       if (pair === null || pair.current !== fact) return undefined;
-      const built = buildRunDelta({ priorFacts: facts, currentGraph: params.graph, mayNameLeadingOption: mayPresentLeaderClaimForFact(fact) });
+      const built = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: mayPresentLeaderClaimForFact(fact) });
       return built.kind === 'ok' ? built.delta : undefined;
     })();
     // ⭐ ONE RUN, ONE SERIALISATION (F1b; DL ruling 5949485462, lease 5950467893). The Run turn ships its block and pair

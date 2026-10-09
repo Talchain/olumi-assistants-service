@@ -582,7 +582,7 @@ export function buildAnalysisFromPriorFacts(
   const fact = selected.fact;
   if (fact.fact_type !== 'run_analysis') return null; // narrow for the type checker
 
-  const result = withReadTimeHorizonGate(fact.result, currentGraph);
+  const result = withReadTimeHorizonGate(fact.result, currentGraph, fact.result.enrichment);
   const labelMap = buildLabelMap(optionLabelSource);
   const labelFor = (optionId: string): string =>
     labelMap.get(optionId) ?? optionId;

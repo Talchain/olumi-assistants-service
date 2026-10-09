@@ -1,4 +1,3 @@
-import { withReadTimeHorizonGate } from '../goal-target/goal-horizon-verdict.js';
 /**
  * ⛔ THE AGENT NEVER STATES A CHANCE OF REACHING THE GOAL THAT THE RUN WITHHELD (MG's PLoT #416; AIQ 5884802000,
  * words 5885033487, ACK 5886183999; DL 5885276225: "Runtime consumes that decision in the reply").
@@ -164,7 +163,6 @@ export function targetVerdictWithoutGuidedLinks(graph: unknown, verdict: TargetT
  */
 export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   ...scopedDraft: [] | [GuidedSizingDraft | undefined] | [GuidedSizingDraft | undefined, string | null]): GoalChanceWithheld | undefined {
-  result = withReadTimeHorizonGate(result, graph);
   // An explicitly supplied empty draft also owns the scope; do not fall back to another read.
   const guided = scopedDraft.length > 0 ? scopedDraft[0] : guidedSizingForRun(result, graph);
   // The default words depend on the complete cause set below, including warning-only legacy Runs.

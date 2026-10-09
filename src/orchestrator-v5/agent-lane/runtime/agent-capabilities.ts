@@ -1,4 +1,3 @@
-import { withReadTimeHorizonGate } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
@@ -2229,10 +2228,8 @@ export function createAgentCapabilities(
         ? { constraint_verdict_state: r.json.analysis_constraint_verdict_state } : {}),
       ...(() => { const risks = r.json.analysis_leader_limit_risks;
         return risks === null || Array.isArray(risks) ? { leader_limit_risks: risks } : {}; })(),
-      ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result:
-        withReadTimeHorizonGate(r.json.analysis_result, g,
-          (r.json.canonical_analysis_view as { schema?: unknown; source?: unknown } | undefined)?.schema === 'canonical_analysis_view.v1'
-            && (r.json.canonical_analysis_view as { source?: unknown }).source === 'stored_run_facts' ? { checkedReadGraph: g } : undefined) } : {}),
+      // /graph is the canonical storage read; JSON decoding must not gate its safe projection again.
+      ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
       ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),
       ...(r.json.analysis_run_option_set !== undefined

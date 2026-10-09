@@ -1,4 +1,3 @@
-import { withReadTimeHorizonGate } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
@@ -118,7 +117,7 @@ export function projectCanonicalAnalysisCells(
   goalCertainty?: unknown,
 ): readonly { readonly option_id: string; readonly cell: CanonicalAnalysisCell }[] {
   const current = currentResult?.type === 'analysis_result';
-  const result = current ? withReadTimeHorizonGate(currentResult, graph) : null;
+  const result = current ? currentResult : null;
   const facts = goalChanceFactsForAgent(result, graph, current);
   const faces = goalChanceCellFacesForAgent(result, graph, current);
   const certainty = new Map((current ? readStoredGoalCertainty(goalCertainty) : undefined)
@@ -177,7 +176,7 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   const freshness = fact === null ? undefined : input.derivation?.freshness;
   const current = fact !== null && input.analysisState?.run_state.kind === 'complete_current'
     && input.currentResult?.type === 'analysis_result';
-  const result = current ? withReadTimeHorizonGate(input.currentResult, input.graph) : null;
+  const result = current ? input.currentResult : null;
   const facts = goalChanceFactsForAgent(result, input.graph, current);
   const drivers = new Map(goalChanceDriversForAgent(result, input.graph).map(row => [row.option_id, row.driver]));
   const availability = goalChanceDriverAvailabilityForAgent(result);

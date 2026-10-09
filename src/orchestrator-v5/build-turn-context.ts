@@ -1,3 +1,4 @@
+import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
 import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * Build a V5 TurnContext from an ingress payload.
@@ -833,11 +834,25 @@ export async function buildTurnContext(
       prior_turn_count: 0,
     });
   }
-  const {
-    facts: priorFacts,
-    factsWithTurn: priorFactsWithTurn,
-    readOk: factsReadOk,
-  } = priorFactsRead;
+  // Stored hot-window and durable Runs enter reasoning together with the persisted graph read above.
+  // Gate before reconciliation so every downstream selector receives the same fact bytes and row identities.
+  const gatedStoredFacts = new Map<HandlerFact, HandlerFact>();
+  const gateStoredFact = (fact: HandlerFact): HandlerFact => {
+    const existing = gatedStoredFacts.get(fact);
+    if (existing !== undefined) return existing;
+    if (fact.fact_type !== 'run_analysis') return fact;
+    const result = withReadTimeHorizonGate(fact.result, persistedScenarioStateRead.graph, fact.result.enrichment);
+    const gated = result === fact.result ? fact : { ...fact, result };
+    gatedStoredFacts.set(fact, gated);
+    return gated;
+  };
+  const priorFacts = priorFactsRead.facts.map(gateStoredFact);
+  const priorFactsWithTurn = priorFactsRead.factsWithTurn.map(entry => ({ ...entry, fact: gateStoredFact(entry.fact) }));
+  const factsReadOk = priorFactsRead.readOk;
+  const gatedDurableScenarioAnalysisFactRead = durableScenarioAnalysisFactRead.status === 'ok'
+    ? { ...durableScenarioAnalysisFactRead,
+      facts: durableScenarioAnalysisFactRead.facts.map(entry => ({ ...entry, fact: gateStoredFact(entry.fact) })) }
+    : durableScenarioAnalysisFactRead;
   /**
    * DID THE READ THAT PRODUCED `priorFacts` SUCCEED — ALL OF IT?
    *
@@ -882,7 +897,7 @@ export async function buildTurnContext(
     scenarioId: payload.scenario_id,
     hotWindowFacts: priorFacts,
     hotWindowFactsWithIdentity: priorFactsWithTurn,
-    durableRead: durableScenarioAnalysisFactRead,
+    durableRead: gatedDurableScenarioAnalysisFactRead,
   });
   const newestAnalysisFactRead = readScenarioAnalysisClaimSafetyFact(
     scenarioAnalysisFactSet,

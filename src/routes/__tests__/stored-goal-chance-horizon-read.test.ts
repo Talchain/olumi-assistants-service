@@ -26,7 +26,7 @@ import { goalChanceScreenLinesForAgent } from '../../orchestrator-v5/agent-lane/
 import { goalChanceWithheldForAgent } from '../../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { analysisResultForAgent } from '../../orchestrator-v5/agent-lane/decision-sensitivity.js';
 import { buildAnalysisFromPriorFacts } from '../../orchestrator-v5/context/analysis-fallback.js';
-import { buildAnalysisResultBlock } from '../../orchestrator-v5/compose.js';
+import { buildAnalysisResultBlock, composeToolCallResponse } from '../../orchestrator-v5/compose.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
@@ -104,17 +104,18 @@ describe('stored supported chance re-licensed against the current graph', () => 
     expect(after.canonical_analysis_view.options.every((r: Rec) => r.cell.kind === 'withheld')).toBe(true);
     expect(JSON.stringify(analysisResultForAgent(after.analysis_result, g))).not.toContain('probability_of_goal');
   });
-  it('direct stored readers, compose cells and legacy model fallback share the gate', () => {
+  it('prior-facts boundary withholds; pure Agent and cell projections consume the gated block', () => {
     const g = graph(), run = fact(g), block = buildAnalysisResultBlock(run);
     g.nodes.find((n: Rec) => n.kind === 'goal').goal_horizon_months = 12;
-    expect(goalChanceLicenceForAgent(block, g)).toBeUndefined();
-    expect(goalChanceSideOf(block, 'a', g)).toEqual({ kind: 'withheld' });
-    expect(goalChanceFactsForAgent(block, g, true)).toEqual({});
-    expect(goalChanceRangeDisplayForAgent(block, g)).toBeUndefined();
-    expect(goalChanceScreenLinesForAgent(block, g, true)).toEqual([]);
-    expect(goalChanceWithheldForAgent(block, g)).toBeDefined();
-    expect(projectCanonicalAnalysisCells(block, g).every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(JSON.stringify(analysisResultForAgent(block, undefined, true, g))).not.toContain('probability_of_goal');
+    const held = withReadTimeHorizonGate(block, g, run.result.enrichment);
+    expect(goalChanceLicenceForAgent(held)).toBeUndefined();
+    expect(goalChanceSideOf(held, 'a')).toEqual({ kind: 'withheld' });
+    expect(goalChanceFactsForAgent(held, g, true)).toEqual({});
+    expect(goalChanceRangeDisplayForAgent(held, g)).toBeUndefined();
+    expect(goalChanceScreenLinesForAgent(held, g, true)).toEqual([]);
+    expect(goalChanceWithheldForAgent(held, g)).toBeDefined();
+    expect(projectCanonicalAnalysisCells(held, g).every(row => row.cell.kind === 'withheld')).toBe(true);
+    expect(JSON.stringify(analysisResultForAgent(held, undefined, true, g))).not.toContain('probability_of_goal');
     const fallback = buildAnalysisFromPriorFacts([run], undefined, g);
     expect(fallback?.options).toHaveLength(2);
     expect(fallback?.options.every(row => row.probability_of_goal === undefined)).toBe(true);
@@ -132,7 +133,7 @@ describe('stored supported chance re-licensed against the current graph', () => 
     expect(withReadTimeHorizonGate(run, g)).toBe(run);
     expect(JSON.stringify(run)).toBe(bytes);
   });
-  it('evaluated carrier evidence survives public projection internally; a later horizon edit is still rechecked', async () => {
+  it('raw evaluated evidence gates the canonical read once; a later horizon edit is checked on reload', async () => {
     const g = graph(), goal = g.nodes.find((n: Rec) => n.kind === 'goal');
     goal.goal_horizon_months = 12;
     goal.nonlinear_identity = { operation: 'product', factor_ids: ['price', 'stock_at_h'], stated_in_brief: true };
@@ -156,19 +157,21 @@ describe('stored supported chance re-licensed against the current graph', () => 
       : { status: 404, json: {} }, SCENARIO);
     expect((analysisResultForAgent(decoded.analysisResult, decoded.graph) as Rec).goal_chance_display).toEqual({ a: 'about 63%', b: 'about 43%' });
     (decoded.graph as Rec).nodes.find((n: Rec) => n.kind === 'goal').goal_horizon_months = 6;
-    expect(goalChanceFactsForAgent(decoded.analysisResult, decoded.graph, true)).toEqual({});
+    const editedRead = await reload(run, decoded.graph as Rec);
+    expect(goalChanceFactsForAgent(editedRead.analysis_result, decoded.graph, true)).toEqual({});
     goal.goal_horizon_months = 6;
-    expect(projectCanonicalAnalysisCells(block, g).every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(goalChanceFactsForAgent(block, g, true)).toEqual({});
+    const held = withReadTimeHorizonGate(block, g, run.result.enrichment);
+    expect(projectCanonicalAnalysisCells(held, g).every(row => row.cell.kind === 'withheld')).toBe(true);
+    expect(goalChanceFactsForAgent(held, g, true)).toEqual({});
   });
   it('a licence-only stored display is gated even when no native result rows remain', () => {
     const g = graph(), result = { inference_warnings: [{ code: 'GOAL_CHANCE_LICENSED', severity: 'info',
       form: 'each', option_ids: ['a'], pct_by_option: { a: 63 } }] };
     g.nodes.find((n: Rec) => n.kind === 'goal').goal_horizon_months = 12;
     for (const stored of [result, { ...result, enrichment: {} }]) {
-      expect(goalChanceLicenceForAgent(stored, g)).toBeUndefined();
-      expect(goalChanceSideOf(stored, 'a', g)).toEqual({ kind: 'withheld' });
       const held = withReadTimeHorizonGate(stored, g) as Rec;
+      expect(goalChanceLicenceForAgent(held)).toBeUndefined();
+      expect(goalChanceSideOf(held, 'a')).toEqual({ kind: 'withheld' });
       expect((held.enrichment ?? held).inference_warnings).toContainEqual(expect.objectContaining({ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED' }));
     }
   });
@@ -178,8 +181,26 @@ describe('stored supported chance re-licensed against the current graph', () => 
       inference_warnings: [{ code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Range', option_ids: ['a'], range_by_option: {
         a: { low_pct: 23, high_pct: 90, low_rounding: 'whole', high_rounding: 'nearest_5', kind: 'link_strength', from: 'factor', to: 'goal', among: 'all' } } }] } };
     const held = withReadTimeHorizonGate(result, g);
-    expect(goalChanceRangeDisplayForAgent(result, g)).toBeUndefined();
+    expect(goalChanceRangeDisplayForAgent(held, g)).toBeUndefined();
     expect(held.enrichment.option_comparison[0]).toEqual({ option_id: 'a', win_probability: .8 });
     expect(withReadTimeHorizonGate(held, g)).toBe(held);
   });
+});
+
+// DL 87114: compose's no-new-Run branch reads a stored prior fact before projecting its result.
+it('prior-facts compose boundary withholds after H=12 is added, with a no-H contrast', () => {
+  const g = graph(), run = fact(g), bytes = JSON.stringify(run);
+  const read = () => composeToolCallResponse({ answerKind: 'functional', orientation: '', confirmation: 'Explained.',
+    coaching: null, stage: 'decide', handlerFacts: [], persistedGraph: g,
+    lifecycle: { priorFacts: [run], freshness: { freshness: 'fresh', reason: 'graph_hash_match', selected_fact_index: 0,
+      graph_hash_at_run: run.result.graph_hash_at_run!, current_graph_hash: run.result.graph_hash_at_run!,
+      computed_at: run.result.computed_at! }, requestId: 'prior-stored-boundary', scenarioId: SCENARIO } });
+  expect(JSON.stringify(read().blocks.find(b => b.type === 'analysis_result'))).toContain('probability_of_goal');
+  g.nodes.find((node: Rec) => node.kind === 'goal').goal_horizon_months = 12;
+  const held = read().blocks.find(b => b.type === 'analysis_result');
+  expect(JSON.stringify(held)).toContain('GOAL_FIGURES_HORIZON_NOT_TESTED');
+  expect(JSON.stringify(held)).not.toContain('probability_of_goal');
+  expect(JSON.stringify(held)).not.toContain('GOAL_CHANCE_LICENSED');
+  expect(JSON.stringify(held)).toContain('win_probability');
+  expect(JSON.stringify(run)).toBe(bytes);
 });

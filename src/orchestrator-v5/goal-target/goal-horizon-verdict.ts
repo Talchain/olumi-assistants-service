@@ -7,10 +7,6 @@ import { goalHorizonWithholdDetail } from './goal-horizon-detail.js';
 import { horizonSteadyAttested } from './horizon-basis.js';
 
 type Rec = Record<string, unknown>;
-// Server-only evidence from the selected stored Run. Symbols survive server object spreads but never JSON transport.
-const READ_IDENTITY_EVIDENCE = Symbol('stored-run-horizon-evaluations');
-const CHECKED_READ_GRAPH = Symbol('server-checked-read-graph');
-type WithReadEvidence = Rec & { [READ_IDENTITY_EVIDENCE]?: { identity_evaluations: unknown } };
 const recordOf = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
   && !Array.isArray(value) ? value as Rec : undefined;
 
@@ -36,8 +32,7 @@ function accumulationTestedAtGoalHorizon(graph: unknown, envelope?: unknown): bo
   const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
   if (product?.operation !== 'product') return false;
   const env = recordOf(envelope);
-  const evidence = (env as WithReadEvidence | undefined)?.[READ_IDENTITY_EVIDENCE];
-  const evaluations = evidence === undefined ? env?.identity_evaluations : evidence.identity_evaluations;
+  const evaluations = env?.identity_evaluations;
   const evaluated = env === undefined ? undefined : evaluatedIdentityCarriers(nodes,
     Array.isArray(evaluations) ? evaluations : undefined);
   if (evaluated === undefined ? product.stated_in_brief !== true : !evaluated.has(goal.id)) return false;
@@ -88,46 +83,20 @@ function withholdUntestedHorizonFigures<E>(response: E, graph: unknown): E {
   }, { keepOutcome: true, keepOrdering: true });
 }
 
-/** Carry only selected-Run evaluations across the server's safe block projection; no gate without a current graph. */
-export function withStoredHorizonEvidence<R>(result: R, storedEnvelope: unknown): R {
-  const block = recordOf(result);
-  const stored = recordOf(storedEnvelope);
-  if (block === undefined || stored === undefined) return result;
-  const evidence = { identity_evaluations: stored.identity_evaluations };
-  const projected = recordOf(block.enrichment);
-  return (projected === undefined ? { ...block, [READ_IDENTITY_EVIDENCE]: evidence }
-    : { ...block, enrichment: { ...projected, [READ_IDENTITY_EVIDENCE]: evidence } }) as R;
-}
-
 /**
  * DL #2895 P1b: hash equality does not cover a deadline edit. Reapply the horizon licence to today's graph on every
  * stored-result read. Never unlock a previously withheld Run: only a new Run can supply new figures.
  * Accept both a PLoT envelope and its public analysis_result block; preserve ordering exactly as the Run gate does.
  */
-export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, source?: { readonly storedEnvelope?: unknown; readonly checkedReadGraph?: unknown }): R {
-  let block = recordOf(result);
+export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, storedEnvelope?: unknown): R {
+  const block = recordOf(result);
   if (block === undefined) return result;
-  // The block builder supplies the raw selected envelope before its evaluation rows are dropped by safe transport.
-  // Retain only that Run's evaluation rows, not a cached verdict: every read still checks them against today's graph.
-  if (source?.storedEnvelope !== undefined) {
-    result = withStoredHorizonEvidence(result, source.storedEnvelope);
-    block = recordOf(result)!;
-  }
   const enrichment = recordOf(block.enrichment);
   const envelope = enrichment ?? block;
-  // Only the two trusted internal /graph decoders supply checkedReadGraph, from the SAME server-gated canonical read.
-  // Safe transport omits evaluations; bind its completed gate to the exact returned graph without adding wire fields.
-  // A later graph edit cannot reuse this stamp. Ordinary stored JSON never authors it.
-  if (source?.checkedReadGraph !== undefined) {
-    block = { ...block, [CHECKED_READ_GRAPH]: JSON.stringify(source.checkedReadGraph) };
-    result = block as R;
-  }
-  const checkedGraph = (block as Rec & { [CHECKED_READ_GRAPH]?: string })[CHECKED_READ_GRAPH];
-  if (checkedGraph !== undefined && checkedGraph === JSON.stringify(currentGraph)) return result;
   const warnings = [block.inference_warnings, enrichment?.inference_warnings]
     .flatMap(value => Array.isArray(value) ? value : []);
   if (warnings.some(value => recordOf(value)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED)
-    || goalHorizonVerdict(currentGraph, envelope) !== 'withhold') return result;
+    || goalHorizonVerdict(currentGraph, storedEnvelope ?? envelope) !== 'withhold') return result;
   // Legacy blocks can keep their only chance record beside an otherwise empty enrichment. Its ids still need gating.
   const outerDisplays = enrichment === undefined || !Array.isArray(block.inference_warnings) ? []
     : block.inference_warnings.filter(w => ['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(String(recordOf(w)?.code)));
@@ -159,6 +128,9 @@ export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, sou
     if ('options' in brief) brief.options = stripAliases(brief.options);
     held.decision_brief = brief;
   }
-  return (enrichment === undefined ? held : { ...block, enrichment: held,
+  // Exact 0/1 decisions are stored target displays too. Empty recorded absence contains no chance and stays byte-equal.
+  const { goal_certainty, ...withoutCertainty } = block;
+  const safeBlock = Array.isArray(goal_certainty) && goal_certainty.length > 0 ? withoutCertainty : block;
+  return (enrichment === undefined ? held : { ...safeBlock, enrichment: held,
     ...('inference_warnings' in block ? { inference_warnings: stripChanceRecords(block.inference_warnings) } : {}) }) as R;
 }

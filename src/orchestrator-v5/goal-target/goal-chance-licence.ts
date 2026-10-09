@@ -1,4 +1,4 @@
-import { goalHorizonVerdict, heldGoalHorizonMonths, withReadTimeHorizonGate } from './goal-horizon-verdict.js';
+import { goalHorizonVerdict, heldGoalHorizonMonths } from './goal-horizon-verdict.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
@@ -689,7 +689,7 @@ export function agentLicenceRecordOf(result: unknown): Rec | undefined {
  * No percentage travels: the Agent quotes each option's `probability_of_goal` from its own row. `undefined` when the Run
  * carries no single well-formed licence.
  */
-export function goalChanceLicenceForAgent(result: unknown, currentGraph?: unknown): {
+export function goalChanceLicenceForAgent(result: unknown): {
   form: GoalChanceForm; option_ids: string[]; leader_option_id?: string; similar_option_ids?: string[]; withheld_option_ids?: string[];
   sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
   shortfall_note_by_option?: Readonly<Record<string, string>>;
@@ -697,7 +697,6 @@ export function goalChanceLicenceForAgent(result: unknown, currentGraph?: unknow
   olumi_estimate_link_count?: number;
   goal_node_id?: string; goal_label?: string; option_labels_by_option?: Readonly<Record<string, string>>;
 } | undefined {
-  result = withReadTimeHorizonGate(result, currentGraph);
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
     .flatMap((w) => (Array.isArray(w) ? w : [])).filter((w): w is Rec => isRec(w) && w.code === GOAL_CHANCE_LICENSED);

@@ -7,6 +7,7 @@ const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 // DL #2895 P2: explicit file/reason pairs, never broad directory exemptions.
 const ALLOWLIST: Readonly<Record<string, string>> = {
   "orchestrator-v5/goal-target/goal-horizon-verdict.ts": "The sole goal-chance horizon verdict and read-time gate.",
+  "orchestrator-v5/goal-target/goal-record.ts": "S5 sole typed goal record reads protected goal fields; no chance permission.",
   "orchestrator-v5/goal-target/horizon-basis.ts": "Parked attestation predicate; always false until S5 2b provenance enforcement.",
   "schemas/cee-v3.ts": "Declares goal-month schema and protected stored attestation fields.",
   "schemas/value-warrant-guard.ts": "Schema guard allow/deny lists; not a chance decision.",
@@ -26,14 +27,20 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
 };
 
 const GATE_FILES = [
-  'routes/scenario-graph-analysis-read.ts', 'routes/canonical-analysis-view.ts', 'routes/agent-v1-turn.ts',
-  'orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'orchestrator-v5/agent-lane/decision-sensitivity.ts',
-  'orchestrator-v5/agent-lane/goal-certainty-for-agent.ts', 'orchestrator-v5/agent-lane/goal-chance-withheld.ts',
-  'orchestrator-v5/goal-target/goal-chance-licence.ts', 'orchestrator-v5/goal-target/goal-chance-range-agent.ts',
-  'orchestrator-v5/goal-target/goal-chance-sides.ts', 'orchestrator-v5/coaching/structural-challenge-compare.ts',
-  'orchestrator-v5/context/analysis-fallback.ts', 'orchestrator-v5/compose.ts', 'orchestrator-v5/response-finaliser.ts',
+  'orchestrator-v5/build-turn-context.ts',
+  'routes/scenario-graph-analysis-read.ts', 'routes/assist.v1.scenario-versions.ts',
+  'orchestrator-v5/coaching/structural-challenge-compare.ts',
+  'orchestrator-v5/context/analysis-fallback.ts', 'orchestrator-v5/compose.ts',
   'orchestrator-v5/tools/handlers/run-analysis.ts', 'orchestrator-v5/agent-lane/decision-input-ask.ts',
   'orchestrator-v5/agent-lane/reply/compose-reply.ts',
+] as const;
+const PURE_FILES = [
+  'routes/canonical-analysis-view.ts', 'routes/agent-v1-turn.ts',
+  'orchestrator-v5/agent-lane/runtime/agent-capabilities.ts',
+  'orchestrator-v5/agent-lane/decision-sensitivity.ts', 'orchestrator-v5/agent-lane/goal-certainty-for-agent.ts',
+  'orchestrator-v5/agent-lane/goal-chance-withheld.ts', 'orchestrator-v5/goal-target/goal-chance-licence.ts',
+  'orchestrator-v5/goal-target/goal-chance-range-agent.ts', 'orchestrator-v5/goal-target/goal-chance-sides.ts',
+  'orchestrator-v5/coaching/build-run-delta.ts', 'orchestrator-v5/response-finaliser.ts',
 ] as const;
 
 const TOKENS = /\b(?:horizon_basis\w*|goal_horizon_months)\b/;
@@ -48,7 +55,9 @@ const offenders = (files: readonly { path: string; text: string }[]) =>
   files.filter(file => TOKENS.test(file.text) && !Object.hasOwn(ALLOWLIST, file.path)).map(file => file.path);
 
 describe('S4: horizon token census', () => {
-  it('all 17 gate files route through the sole verdict or its two public gates', () => {
+  it('storage boundaries and producer paths use the sole verdict; pure readers and JSON decoders never re-gate', () => {
+    for (const file of PURE_FILES) expect(readFileSync(join(ROOT, file), 'utf8'), file).not.toContain('withReadTimeHorizonGate');
+    expect(readFileSync(join(ROOT, 'orchestrator-v5/goal-target/goal-horizon-verdict.ts'), 'utf8')).not.toContain('Symbol(');
     for (const file of GATE_FILES) {
       const source = readFileSync(join(ROOT, file), 'utf8');
       expect(source, file).toMatch(/(?:goalHorizonVerdict|withReadTimeHorizonGate|withholdGoalFiguresForUntestedHorizon)\(/);

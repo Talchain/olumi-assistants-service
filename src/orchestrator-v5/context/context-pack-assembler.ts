@@ -1863,7 +1863,6 @@ export function assembleContextPackWithSummary(
       ? null
       : buildRunDelta({
           priorFacts: input.priorFacts,
-          currentGraph: input.graph,
           mayNameLeadingOption: input.mayNameLeadingOption === true,
         });
   // Strip the frozen-empty `flip_thresholds` — see the projection comment and
@@ -2089,8 +2088,7 @@ export function assembleContextPackWithSummary(
     // unlike `goal_target`, `factor_values` and `focus` beside it. Those are
     // claims about the SAVED MODEL, so a non-canonical read cannot support
     // them. This is a claim about two PERSISTED RUN FACTS — already-committed
-    // analysis envelopes. The graph now narrows stored goal-chance displays only; this model-facing comparison
-    // excludes those displays and keeps the independently grounded ordering and input changes.
+    // analysis envelopes — and `buildRunDelta` never reads the graph at all.
     // Gating it on this turn's graph read would withhold a true, independently
     // grounded comparison because of an unrelated read failure, and the model
     // would then correctly report that it cannot compare the runs — a

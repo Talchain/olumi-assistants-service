@@ -78,6 +78,15 @@ describe('canonical view on the existing scenario read route', () => {
     expect(saved).toEqual(JSON.parse(original.toString()).j);
     const fact = capturedFact();
     const before = JSON.stringify(fact);
+    // DL 87114 (A), NON-TIME: parity uses the same current graph on both doors;
+    // remove only its deadline fields, retaining every captured number and stored fact.
+    const currentGraph = structuredClone(saved.graph);
+    for (const node of currentGraph.nodes) if (node.kind === 'goal') {
+      delete node.goal_horizon_months;
+      delete node.goal_deadline_as_stated;
+    }
+    store.readExistingScenario.mockResolvedValue({ userId: null, graph: currentGraph,
+      briefText: saved.brief_text, analysisInvalidatedAt: null, revision: 7 });
     // The capture's old projection hash does not match this source's graph
     // projection. Isolate ONLY the current-hash input for this parity row;
     // retain the historical stamp and every captured figure unchanged. The
@@ -86,12 +95,13 @@ describe('canonical view on the existing scenario read route', () => {
     hashInput.mockReturnValueOnce(fact.result.graph_hash_at_run);
     const response = await read();
     expect(response.analysis_state.run_state.kind).toBe('complete_current');
-    const expected = goalChanceFactsForAgent(buildAnalysisResultBlock(fact), saved.graph, true);
+    expect(response.graph).toEqual(currentGraph);
+    const expected = goalChanceFactsForAgent(buildAnalysisResultBlock(fact), currentGraph, true);
     const view = response.canonical_analysis_view;
     expect(view).toBeDefined();
     expect(view.source).toBe('stored_run_facts');
     expect(view.staleness).toMatchObject({ stale: false, revision: 7, run_revision: null, basis: 'analysis_graph_hash_interim' });
-    const faces = goalChanceCellFacesForAgent(buildAnalysisResultBlock(fact), saved.graph, true);
+    const faces = goalChanceCellFacesForAgent(buildAnalysisResultBlock(fact), currentGraph, true);
     expect(view.options.map((o: Json) => [o.option_id, o.cell])).toEqual(Object.entries(expected.goal_chance_display!).map(([option_id, display]) => [option_id, { kind: 'figure', display, face: faces.get(option_id) }]));
     expect(view.options.every((o: Json) => typeof o.cell.face === 'string' && o.cell.face.includes(o.cell.display))).toBe(true);
     expect(JSON.stringify(fact)).toBe(before);

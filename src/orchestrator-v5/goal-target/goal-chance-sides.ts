@@ -1,4 +1,3 @@
-import { withReadTimeHorizonGate } from './goal-horizon-verdict.js';
 import type { RunDeltaGoalChanceSide } from '@talchain/schemas/boundary';
 import { GOAL_FIGURES_WITHHELD_CODES } from '../../orchestrator/context/option-result-source.js';
 import { agentLicenceRecordOf } from './goal-chance-licence.js';
@@ -12,8 +11,7 @@ const pct = (v: unknown): v is number => typeof v === 'number' && Number.isInteg
 const rounding = (v: unknown): v is 'whole' | 'nearest_5' => v === 'whole' || v === 'nearest_5';
 
 /** Each Run keeps its own stored display licence; raw probabilities never re-license an older Run. */
-export function goalChanceSideOf(result: unknown, optionId: string, currentGraph?: unknown): RunDeltaGoalChanceSide {
-  result = withReadTimeHorizonGate(result, currentGraph);
+export function goalChanceSideOf(result: unknown, optionId: string): RunDeltaGoalChanceSide {
   const licence = agentLicenceRecordOf(result);
   const shown = rec(licence?.pct_by_option)?.[optionId];
   if (pct(shown)) {

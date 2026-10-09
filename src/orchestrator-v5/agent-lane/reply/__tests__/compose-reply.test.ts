@@ -1,3 +1,4 @@
+import { withReadTimeHorizonGate } from '../../../goal-target/goal-horizon-verdict.js';
 import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
 /**
  * ⭐ S-A REPLY SHAPE v1 (lane COPY-SHAPE, DL 0fd71f, 7 Oct 2026): the composer's contract, against Paul's words.
@@ -1834,7 +1835,9 @@ describe('Science §(ad) time-bound goal reply details', () => {
     const steady = { nodes: [{ ...graph.nodes[0]!, horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: graph.nodes[0]!.goal_horizon_months }] };
     const why = goalHorizonSteadyWhyLine(steady)!;
     const result = { type: 'analysis_result', enrichment: { option_comparison: [{ option_id: 'starter', probability_of_goal: .46, win_probability: .7 }] } };
-    const cells = projectCanonicalAnalysisCells(result as never, steady).map(row => row.cell);
+    // P1a TIME: this stored fixture enters through the read gate before the pure cell projection (DL 87114 (A)).
+    const held = withReadTimeHorizonGate(result, steady, result.enrichment);
+    const cells = projectCanonicalAnalysisCells(held as never, steady).map(row => row.cell);
     expect(cells[0]?.kind).toBe('withheld');
     const c = composeReplyShape({ faceContract: 'run', graph: steady, text: context,
       chanceCells: cells, horizonLine: "This model doesn't yet say whether any option gets there within 9 months." });

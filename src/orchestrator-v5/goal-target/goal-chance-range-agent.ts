@@ -1,4 +1,4 @@
-import { GOAL_HORIZON_STEADY_ATTESTED, withReadTimeHorizonGate } from './goal-horizon-verdict.js';
+import { GOAL_HORIZON_STEADY_ATTESTED } from './goal-horizon-verdict.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 /** Agent-only readers of the selected Run's licences. No inference from figures or prose. */
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -54,7 +54,6 @@ const rangeEnd = (v: number): string => v === 0 ? 'less than 1%' : v === 100 ? '
 
 /** PR-S1's carrier (`GOAL_CHANCE_RANGE`), read by its code. Conflicting records fail closed. */
 export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown): Record<string, GoalChanceRangeDisplay> | undefined {
-  result = withReadTimeHorizonGate(result, graph);
   const records = warningsOf(result).filter((w) => w.code === GOAL_CHANCE_RANGE);
   if (records.length !== 1) return undefined;
   const r = goalChanceRangeRecordOf(records[0]);
@@ -163,7 +162,6 @@ function pointDisplayForAgent(result: unknown, ranges: Record<string, GoalChance
 
 /** The screen's licensed drivers in option order; shared by its sentences and the estimate actions. */
 export function goalChanceDriversForAgent(result: unknown, graph: unknown): { option_id: string; driver: Rec }[] {
-  result = withReadTimeHorizonGate(result, graph);
   const licence = agentLicenceRecordOf(result);
   if (licence === undefined) return [];
   const display = pointDisplayForAgent(result, goalChanceRangeDisplayForAgent(result, graph), licence);
@@ -237,7 +235,6 @@ export function goalChanceDriverDisplayForAgent(result: unknown, graph: unknown)
  * `null` when no option's chance driver speaks (a withheld chance is silent).
  */
 export function whatChangesFaceLine(result: unknown, graph: unknown): string | null {
-  result = withReadTimeHorizonGate(result, graph);
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && id(n.id) && id(n.label)).map((n) => [n.id as string, n.label as string]));
@@ -277,7 +274,6 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   goal_chance_words?: string;
   goal_horizon_line?: string;
 } {
-  result = withReadTimeHorizonGate(result, graph);
   if (!current) return {};
   const licence = goalChanceLicenceForAgent(result);
   const ranges = goalChanceRangeDisplayForAgent(result, graph);
