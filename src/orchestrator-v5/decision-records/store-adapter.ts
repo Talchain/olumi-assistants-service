@@ -34,7 +34,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { SessionStore } from '../session/store.js';
+import type { loadScenarioAnalysisFactsForRead } from '../build-turn-context.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 
@@ -471,7 +471,7 @@ function errCode(e: unknown): string | undefined {
 export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
   constructor(
     private readonly client: SupabaseClient,
-    private readonly analysisSessionStore?: SessionStore,
+    private readonly analysisSessionStore?: Parameters<typeof loadScenarioAnalysisFactsForRead>[2],
   ) {}
 
   async createRecord(write: CreateDecisionRecordWrite): Promise<DecisionRecordWriteOutcome> {

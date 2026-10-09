@@ -13,7 +13,7 @@ const FRESHNESS = 'src/orchestrator-v5/context/freshness.ts';
  * R07 now delegates; R34 consumes this turn's producer facts (compose.ts:412,
  * 544/749; chip-generator.ts:479/998), not a stored execution. R09 DOES choose
  * a stored execution for claim-safety (reconciler.ts:609/642): C2 and S29
- * describe it, but C2 did not bold-label OWN. Reconciled n = 9 - 1 - 1 + 1 = 8.
+ * describe it, but C2 did not bold-label OWN. Reconciled start n = 9 - 1 - 1 + 1 = 8; R21 now delegates, leaving 7.
  * R50 was over-counted: history-store.ts:217/226/228 keeps only a neutral
  * conversation marker (runHistoryMarker:173-185), not stored Run authority.
  */
@@ -22,13 +22,12 @@ const OWN = [
   { id: 'R04', file: SESSION, name: 'readRunCurrentness', reason: 'Any-quality computed-time currentness port; distinct eligibility/ties.' },
   { id: 'R05', file: SESSION, name: 'readNewestRunDeliveryFor', reason: 'Newest delivery for one exact execution, not newest successful analysis.' },
   { id: 'R09', file: 'src/orchestrator-v5/context/reconcile-scenario-analysis-facts.ts', name: 'validateDurableContract', reason: 'C2/S29: stored-order first fact supplies claim-safety attestation (609/642); OWN omitted from bold census classification.' },
-  { id: 'R21', file: 'src/orchestrator-v5/coaching/coaching-cache-reader.ts', name: 'extractLatestCoachingSignalFromFacts', reason: 'First usable coaching metadata in stored order, compared to sidecar time.' },
-  { id: 'R26', file: 'src/orchestrator-v5/model-management/version-result-binding.ts', name: 'bind', reason: 'Saved-version identity/snapshot match; own historical tie rule.' },
-  { id: 'R27', file: 'src/orchestrator-v5/context/changed-since-run.ts', name: 'newestRunBoundary', reason: 'First DB-ordered execution boundary for mutation diff, any quality.' },
+  { id: 'R26', file: 'src/orchestrator-v5/model-management/version-result-binding.ts', name: 'bind', reason: 'Historical version identity binding uses computed_at DESC then run_id ASC; shared stable input-order ties would change the selected Run.' },
+  { id: 'R27', file: 'src/orchestrator-v5/context/changed-since-run.ts', name: 'newestRunBoundary', reason: 'DB execution order places mutation marks; shared computation ordering can change the boundary and which edits are marked.' },
   { id: 'R55', file: 'tools/v5-journey-replay/assurance/facts.ts', name: 'latestRunAnalysisHash', reason: 'Maintenance stored-Run hash: action_type filter plus created_at LIMIT 1; count-only summariseHandlerFacts is not selection.' },
 ] as const;
-const BASELINE = 8;
-const RECONCILED_OWN_IDS = ['R03', 'R04', 'R05', 'R09', 'R21', 'R26', 'R27', 'R55'];
+const BASELINE = 7;
+const RECONCILED_OWN_IDS = ['R03', 'R04', 'R05', 'R09', 'R26', 'R27', 'R55'];
 // Sanctioned set readers return collections, never implement a private single-Run choice.
 const sanctioned = new Set(['readFactsWithTurnFor', 'readRecentAppliedMutationFactsFor', 'readScenarioRunAnalysisFactsFor']);
 type Hit = { file: string; name: string; kind: 'query' | 'sort' | 'stored-order'; line: number };
@@ -88,7 +87,8 @@ function scanSource(file: string, input: string): Hit[] {
     if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) && node.name) {
       const name = node.name.getText(source);
       if (['extractLatestCoachingSignalFromFacts', 'newestRunBoundary'].includes(name)
-        && /run_analysis/.test(node.getText(source))) add(node, 'stored-order');
+        && /run_analysis/.test(node.getText(source))
+        && !/\borderRunAnalysisFacts\s*\(/.test(node.getText(source))) add(node, 'stored-order');
     }
     ts.forEachChild(node, visit);
   }
@@ -108,7 +108,7 @@ function scan() {
 describe('S1 Run-selection census ratchet', () => {
   let scanned: Hit[];
   beforeAll(() => { scanned = scan(); }, 30_000);
-  it('pins the remaining OWN reader families at n=8 (up AND down fail)', () => {
+  it('pins the remaining OWN reader families at n=7 (up AND down fail)', () => {
     const hits = scanned.filter(hit => hit.file !== FRESHNESS);
     const unknown = hits.filter(hit => !OWN.some(entry => entry.file === hit.file && entry.name === hit.name));
     expect(unknown, 'New private Run-selection site; delegate to freshness or justify census change').toEqual([]);
@@ -134,6 +134,15 @@ describe('S1 Run-selection census ratchet', () => {
     expect(scanSource('src/rogue.ts', `async function rogue() { const query = client.from('v5_handler_facts'); return query.order('computed_at', { ascending: false }).limit(1); }`)
       .map(hit => hit.kind)).toEqual(['query']);
     expect(scanSource('src/rogue.ts', sort).map(hit => hit.kind)).toEqual(['sort']);
+    const delegated = `function extractLatestCoachingSignalFromFacts(facts) {
+      for (const { fact } of orderRunAnalysisFacts(facts, { requireSuccessfulStatus: false })) {
+        if (fact.fact_type === 'run_analysis') return fact;
+      }
+    }`;
+    expect(scanSource('src/delegated.ts', delegated)).toEqual([]);
+    expect(scanSource('src/delegated.ts', delegated.replace('return fact;',
+      `return facts.sort((a,b) => b.result.computed_at.localeCompare(a.result.computed_at))[0];`))
+      .map(hit => hit.kind)).toEqual(['sort']);
     expect(scanSource('src/comment.ts', `/* ${query} */\n// ${sort}`)).toEqual([]);
   });
 });
