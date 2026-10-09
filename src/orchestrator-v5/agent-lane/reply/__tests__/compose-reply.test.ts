@@ -1,3 +1,5 @@
+import { withReadTimeHorizonGate } from '../../../goal-target/goal-horizon-verdict.js';
+import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
 /**
  * ⭐ S-A REPLY SHAPE v1 (lane COPY-SHAPE, DL 0fd71f, 7 Oct 2026): the composer's contract, against Paul's words.
  *
@@ -22,13 +24,15 @@ import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { scalingRatio } from '../../../../../tests/helpers/scaling-ratio.js';
 import {
-  composeReplyShape, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
+  composeReplyShape, shapeFromDerivedAnswerText, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
   HORIZON_MARKER, ROBUSTNESS_MARKER, WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE,
   type ReplyComposition, type FaceObligation,
 } from '../compose-reply.js';
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
 import { openQuestionsSegment, textAtRest, untestedHorizonLine } from '../../decision-input-ask.js';
 import { WIDENED_RISK_MARKER_DOWN, WIDENED_RISK_MARKER_MOVE } from '../../runtime/widen-draft.js';
+import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../../goal-target/zero-spread-horizon-line.js';
+import { goalHorizonSteadyWhyLine, goalHorizonWithholdDetail } from '../../../goal-target/goal-horizon-detail.js';
 
 const face = (c: ReplyComposition): string[] => (c.shape === null ? [] : [c.shape.headline, ...c.shape.bullets]);
 /** Every sentence of `original` is in `shipped`, verbatim (bullet markers aside). */
@@ -1801,5 +1805,59 @@ describe('r5 P05b widening inputs use the typed Draft/Run contract', () => {
     expect(c.shape!.detail).not.toContain(widenedLine);
     expect(c.shape!.detail).toContain("Olumi's estimates: 5, see Check estimates.");
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+});
+
+describe('Science §(ad) time-bound goal reply details', () => {
+  const graph = { nodes: [{ id: 'mrr', kind: 'goal', label: 'MRR', goal_horizon_months: 9 }] };
+  const note = goalHorizonWithholdDetail(graph)!;
+  const context = 'The shared model retains the current evidence and assumptions for review before the team considers which strategic issue to resolve next.';
+
+  it('the horizon cause owns the exact face and its stored detail once, even beside another target failure', () => {
+    const c = composeReplyShape({ faceContract: 'run', graph, text: `Your results are ready.\n\n${note}\n\n${context}`,
+      chanceCells: [{ kind: 'withheld', face: ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, why: note, reasons: [
+        { code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', message: 'The current level is missing.' },
+        { code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', message: note },
+      ] }],
+      horizonLine: "This model doesn't yet say whether any option gets there within 9 months." });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.shape!.headline).toBe(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
+    expect(c.shape!.detail.split(note)).toHaveLength(2);
+    expect(face(c).join('\n')).not.toContain(note);
+    expect(c.text).not.toContain(HORIZON_MARKER);
+    expect(c.text).not.toContain("This model doesn't yet say");
+    expect(c.text).not.toContain('%');
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+
+  it('a stored triple does not unlock the chance cells passed to compose-reply', () => {
+    // P1a (DL 87114 #2895): a stored triple does not unlock.
+    const steady = { nodes: [{ ...graph.nodes[0]!, horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: graph.nodes[0]!.goal_horizon_months }] };
+    const why = goalHorizonSteadyWhyLine(steady)!;
+    const result = { type: 'analysis_result', enrichment: { option_comparison: [{ option_id: 'starter', probability_of_goal: .46, win_probability: .7 }] } };
+    // P1a TIME: this stored fixture enters through the read gate before the pure cell projection (DL 87114 (A)).
+    const held = withReadTimeHorizonGate(result, steady, result.enrichment);
+    const cells = projectCanonicalAnalysisCells(held as never, steady).map(row => row.cell);
+    expect(cells[0]?.kind).toBe('withheld');
+    const c = composeReplyShape({ faceContract: 'run', graph: steady, text: context,
+      chanceCells: cells, horizonLine: "This model doesn't yet say whether any option gets there within 9 months." });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.text).not.toContain(why);
+    expect(c.text).not.toContain('%');
+    expect(c.text).not.toContain("This model doesn't yet say");
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+});
+
+
+describe('horizon-withheld replay presentation', () => {
+  it("recovers a bulletless shape only for the caller's exact typed horizon face", () => {
+    const shape = { headline: ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, bullets: [],
+      detail: "Your results are ready.\n\nYour goal is for month 9, and this model only has today's numbers." };
+    const text = deriveAnswerTextFromShape(shape);
+    expect(shapeFromDerivedAnswerText(text, shape.headline)).toEqual(shape);
+    expect(shapeFromDerivedAnswerText(text)).toBeNull();
+    expect(shapeFromDerivedAnswerText(text, 'A different face.')).toBeNull();
+    expect(shapeFromDerivedAnswerText("A plain reply.\n\nIts explanation.", shape.headline)).toBeNull();
   });
 });

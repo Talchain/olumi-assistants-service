@@ -1,3 +1,4 @@
+import { withReadTimeHorizonGate } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 /** List, compare, save and restore scenario versions.
  * The central ownership hook admits the verified caller before these handlers run.
  * These routes never create scenarios; their existence probes and payload, RPC,
@@ -658,7 +659,10 @@ export default async function route(app: FastifyInstance) {
           resultComparison = { status: "available", kind: "shared_run", recorded_run: bound.recordedRun };
         } else {
           // This route alone requests an explicit pair; ordinary turns keep chronology.
-          const built = buildRunDelta({ priorFacts: bound.facts, selectedPair: bound.selectedPair,
+          const built = buildRunDelta({ priorFacts: bound.facts.map(fact => fact.fact_type === 'run_analysis'
+              ? { ...fact, result: withReadTimeHorizonGate(fact.result,
+                fact.result.run_id === bound.selectedPair.prior.run_id ? records.from.graph : records.to.graph,
+                fact.result.enrichment) } : fact), selectedPair: bound.selectedPair,
             mayNameLeadingOption: bound.mayNameLeadingOption });
           // Reuse the final licence, projecting only the typed leader-claim fields.
           // Recorded input identities and values are facts, so must never enter a prose scrubber.

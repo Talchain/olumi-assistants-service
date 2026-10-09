@@ -14,6 +14,7 @@ import {
 } from '../decision-input-ask.js';
 import { GOAL_CHANCE_LICENSED } from '../../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../../goal-target/goal-chance-range.js';
+import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 
 type Rec = Record<string, unknown>;
 type Json = Record<string, any>;
@@ -37,62 +38,57 @@ const NO_TARGET = "This chance uses the model's numbers as they are today; the m
 const PLURAL = "These chances use the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
 const SHORT = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
 const PLURAL_SHORT = "These chances use the model's numbers as they are today; the model doesn't project how they change over time yet.";
-const CHANCE_FREE = "This model doesn't yet say whether any option gets there within 12 months.";
 const ONE_FIGURE = [{ kind: 'figure' as const, display: 'about 40%' }];
 const TWO_FIGURES = [...ONE_FIGURE, { kind: 'figure' as const, display: 'about 60%' }];
 const RANGE_CELL = { kind: 'range' as const, display: '20%–60%', detail: { range: '20%–60%', depends_on: {
   kind: 'link_strength' as const, from_label: 'Price', to_label: 'Revenue', among: 'unsized_links' as const,
 } } };
 
-describe('ONE reply horizon clause: exact held-target and present-number wording', () => {
-  it('withheld and none cells restore staging\'s chance-free wording, shared by host and Run warning', () => {
+describe('Science §(ad): one horizon selector retires old clauses on a positive H', () => {
+  it('withheld and none cells owe neither an old host clause nor the old Run warning', () => {
     const graph = graphWith();
-    const chanceCells = [{ kind: 'withheld' as const, why: 'Chance not shown yet', face: 'Not shown. The current level is missing.', reasons: [{ code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', message: 'Not shown. The current level is missing.' }] }, { kind: 'none' as const }];
-    const line = "This model doesn't yet say whether any option gets there within 12 months.";
-    expect(untestedHorizonLineForCells(graph, chanceCells)).toBe(line);
+    const chanceCells = [{ kind: 'withheld' as const, why: 'Chance not shown yet',
+      face: 'Not shown yet: needs month-by-month changes',
+      reasons: [{ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', message: 'Not shown yet: needs month-by-month changes' }] },
+    { kind: 'none' as const }];
+    expect(goalHorizonVerdict(graph)).toBe('withhold');
+    expect(untestedHorizonLineForCells(graph, chanceCells)).toBeNull();
     expect(decisionInputLines(graph, {
       restingText: 'Run ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false, chanceCells,
-    })).toEqual([line]);
-    const out = withUntestedHorizonWarning({ inference_warnings: [] }, graph, chanceCells);
-    expect(out.inference_warnings).toEqual([
-      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: line, node_ids: ['goal'] },
-    ]);
+    })).toEqual([]);
+    const envelope = { inference_warnings: [] };
+    expect(withUntestedHorizonWarning(envelope, graph, chanceCells)).toBe(envelope);
     expect(withA7AfterGate('Run ready.\n\nSaved.', graph, {
       builtOrRan: true, awaitingApproval: false, chanceCells,
-    }, 'Saved.')).toBe(`Run ready.\n\n${line}\n\nSaved.`);
+    }, 'Saved.')).toBe('Run ready.\n\nSaved.');
   });
 
-  it('figure/range count owns the chance form, including a mixed withheld cell', () => {
+  it('positive H suppresses old horizon wording even if an intermediate cell still contains a figure or range', () => {
     const figure = { kind: 'figure' as const, display: 'about 40%' };
-    const range = RANGE_CELL;
-    const withheld = { kind: 'withheld' as const, why: 'Chance not shown yet', face: 'Why this figure is withheld is not recorded.', reasons: [{ code: 'reason_not_recorded', message: null }] };
-    expect(untestedHorizonLineForCells(graphWith(), [figure, withheld])).toBe(FULL);
-    expect(untestedHorizonLineForCells(graphWith(), [range])).toBe(FULL);
-    expect(untestedHorizonLineForCells(graphWith(), [figure, range, withheld])).toBe(PLURAL);
+    const withheld = { kind: 'withheld' as const, why: 'Chance not shown yet',
+      face: 'Why this figure is withheld is not recorded.', reasons: [{ code: 'reason_not_recorded', message: null }] };
+    expect(untestedHorizonLineForCells(graphWith(), [figure, withheld])).toBeNull();
+    expect(untestedHorizonLineForCells(graphWith(), [RANGE_CELL])).toBeNull();
+    expect(untestedHorizonLineForCells(graphWith(), [figure, RANGE_CELL, withheld])).toBeNull();
   });
 
-  it('final cells replace an earlier chance-form warning and keep licence horizon wording aligned', () => {
+  it('normalization removes an earlier chance-form warning and its licence horizon metadata', () => {
     const graph = graphWith();
     const licence = { code: GOAL_CHANCE_LICENSED, severity: 'info', horizon_untested: true, horizon_line: FULL };
     const previous = { inference_warnings: [licence, { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: FULL }] };
     const out = withUntestedHorizonWarning(previous, graph, [{ kind: 'none' }]);
-    expect(out.inference_warnings).toEqual([
-      { code: GOAL_CHANCE_LICENSED, severity: 'info' },
-      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: "This model doesn't yet say whether any option gets there within 12 months." },
-    ]);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(out.inference_warnings).toEqual([{ code: GOAL_CHANCE_LICENSED, severity: 'info' },
+      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: "This model doesn't yet say whether any option gets there within 12 months." }]);
     expect(withShortHorizonBesideChance(out, graph, [{ kind: 'none' }])).toBe(out);
   });
 
-  it('two admitted range cells align recorded range and warning metadata to the same plural horizon', () => {
-    const range = RANGE_CELL;
+  it('positive H removes old range and warning horizon metadata instead of writing a plural disclaimer', () => {
     const record = { code: GOAL_CHANCE_RANGE, severity: 'info', option_ids: ['a', 'b'], horizon_untested: true, horizon_line: SHORT };
     const envelope = { inference_warnings: [record, { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: SHORT }] };
-    const out = withUntestedHorizonWarning(envelope, graphWith(), [range, range]);
-    expect(out.inference_warnings).toEqual([
-      { ...record, horizon_line: PLURAL },
-      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: PLURAL },
-    ]);
-    expect(withShortHorizonBesideChance(out, graphWith(), [range, range])).toBe(out);
+    const out = withUntestedHorizonWarning(envelope, graphWith(), [RANGE_CELL, RANGE_CELL]);
+    expect(out.inference_warnings).toEqual([{ code: GOAL_CHANCE_RANGE, severity: 'info', option_ids: ['a', 'b'] }]);
+    expect(withShortHorizonBesideChance(out, graphWith(), [RANGE_CELL, RANGE_CELL])).toBe(out);
   });
 
   it('a conflicted served range cannot become licensed when no held months remove the global warning', () => {
@@ -116,7 +112,7 @@ describe('ONE reply horizon clause: exact held-target and present-number wording
     }));
   });
 
-  it('normalizing a conflicted range to matching horizon words cannot license it or remove an admitted point', () => {
+  it('removing a positive-H qualifier cannot license a conflicted range or remove an admitted point', () => {
     const graph = clone(READ_B3.graph);
     graph.nodes.find((node: Json) => node.kind === 'goal').goal_horizon_months = 9;
     const result = clone(READ_B3.analysis_result);
@@ -126,7 +122,7 @@ describe('ONE reply horizon clause: exact held-target and present-number wording
     result.enrichment.option_comparison.find((option: Json) => option.option_id === 'continue_as_now').probability_of_goal = 0.4;
     const record = result.enrichment.inference_warnings.find((warning: Json) => warning.code === GOAL_CHANCE_RANGE);
     record.horizon_untested = true;
-    record.horizon_line = untestedHorizonLineForCells(graph, ONE_FIGURE);
+    record.horizon_line = untestedHorizonLine(graph, { besideChance: true });
     result.enrichment.inference_warnings.push({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: 'A conflicting original qualifier.' });
     const before = rangeCells(graph, result);
     expect(before.some(option => option.cell.kind === 'range')).toBe(false);
@@ -138,12 +134,12 @@ describe('ONE reply horizon clause: exact held-target and present-number wording
     const enrichment = withUntestedHorizonWarning(result.enrichment, graph, cells);
     const after = rangeCells(graph, { ...result, enrichment });
     expect(after).toEqual(before);
-    expect(enrichment.inference_warnings.find((warning: Json) => warning.code === GOAL_HORIZON_NOT_TESTED)?.message)
-      .toBe(untestedHorizonLineForCells(graph, cells));
+    expect(enrichment.inference_warnings.some((warning: Json) => warning.code === GOAL_HORIZON_NOT_TESTED)).toBe(false);
+    expect(untestedHorizonLineForCells(graph, cells)).toBeNull();
     expect(enrichment.inference_warnings.some((warning: Json) => warning.code === GOAL_CHANCE_RANGE_HORIZON_CONFLICT)).toBe(true);
   });
 
-  it('B1 Paul: the full sentence is byte-exact and strips only the money period from its target', () => {
+  it('the historical full formatter stays byte-exact for old-copy normalization and strips only the money period', () => {
     expect(untestedHorizonLine(graphWith(), { besideChance: true })).toBe(FULL);
     expect(untestedHorizonLine(graphWith())).toBe(FULL);
   });
@@ -218,28 +214,76 @@ describe('ONE reply horizon clause: exact held-target and present-number wording
     ]);
   });
 
-  it('chat A7 and Run warning inherit staging\'s exact chance-free line without visible cells', () => {
+  it('positive H without cells suppresses the old clause in the host and warning writer', () => {
     const graph = graphWith();
-    expect(decisionInputLines(graph, { restingText: 'Draft ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false })).toEqual([CHANCE_FREE]);
-    expect(withUntestedHorizonWarning({ inference_warnings: [] }, graph).inference_warnings).toEqual([
-      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: CHANCE_FREE, node_ids: ['goal'] },
-    ]);
-    expect(withUntestedHorizonWarning({ inference_warnings: [] }, graph, ONE_FIGURE).inference_warnings).toEqual([
-      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: FULL, node_ids: ['goal'] },
-    ]);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(decisionInputLines(graph, {
+      restingText: 'Draft ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false,
+    })).toEqual(["This model doesn't yet say whether any option gets there within 12 months."]);
+    const empty = { inference_warnings: [] };
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(withUntestedHorizonWarning(empty, graph)).toEqual({ inference_warnings: [{
+      code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: "This model doesn't yet say whether any option gets there within 12 months.", node_ids: ['goal'],
+    }] });
+    expect(withUntestedHorizonWarning(empty, graph, ONE_FIGURE)).toBe(empty);
   });
 
-  it('a Run with two visible chance cells gives its host and warning the same plural fact', () => {
+  it('two intermediate chance cells cannot restore a retired month-H disclaimer', () => {
     const graph = graphWith();
     expect(decisionInputLines(graph, {
       restingText: 'Run ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false, chanceCells: TWO_FIGURES,
-    })).toEqual([PLURAL]);
+    })).toEqual([]);
     expect(withA7AfterGate('Run ready.\n\nSaved.', graph, {
       builtOrRan: true, awaitingApproval: false, chanceCells: TWO_FIGURES,
-    }, 'Saved.')).toBe(`Run ready.\n\n${PLURAL}\n\nSaved.`);
-    expect(withUntestedHorizonWarning({ inference_warnings: [] }, graph, TWO_FIGURES).inference_warnings).toEqual([
-      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: PLURAL, node_ids: ['goal'] },
-    ]);
+    }, 'Saved.')).toBe('Run ready.\n\nSaved.');
+    const empty = { inference_warnings: [] };
+    expect(withUntestedHorizonWarning(empty, graph, TWO_FIGURES)).toBe(empty);
+  });
+
+  it('a stored triple does not unlock; intermediate chance cells still have no old disclaimer', () => {
+    const graph = graphWith({ horizon_basis: 'steady_attested', provenance: 'user_set',
+      horizon_basis_source: 'user_stated', horizon_basis_months: 12 });
+    // P1a (DL 87114 #2895): a stored triple does not unlock.
+    expect(goalHorizonVerdict(graph)).toBe('withhold');
+    expect(untestedHorizonLine(graph)).toBe(FULL); // Historical identity remains available to exact-copy normalization.
+    expect(untestedHorizonLineForCells(graph, TWO_FIGURES)).toBeNull();
+    expect(decisionInputLines(graph, {
+      restingText: 'Run ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false, chanceCells: TWO_FIGURES,
+    })).toEqual([]);
+    const previous = { inference_warnings: [{ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: FULL }] };
+    expect(withUntestedHorizonWarning(previous, graph, TWO_FIGURES).inference_warnings).toEqual([]);
+  });
+
+  it.each(['ai_inferred', 'from_brief', undefined])('steady_attested with %s provenance still withholds', (provenance) => {
+    const graph = graphWith({ horizon_basis: 'steady_attested', provenance,
+      horizon_basis_source: provenance, horizon_basis_months: 12 });
+    expect(goalHorizonVerdict(graph)).toBe('withhold');
+    expect(untestedHorizonLineForCells(graph, TWO_FIGURES)).toBeNull();
+  });
+
+  it('B1 accumulation shape remains computed at H, with no old horizon line', () => {
+    const graph = graphWith({ nonlinear_identity: { operation: 'product',
+      factor_ids: ['price', 'subscribers_at_h'], stated_in_brief: true } }) as Json;
+    const factors = ['subscribers_today', 'monthly_churn', 'monthly_signups'];
+    graph.nodes.push({ id: 'subscribers_at_h', kind: 'outcome', nonlinear_identity: { operation: 'accumulation',
+      factor_ids: factors, horizon_months: 12, rate_scale: 0.01, stated_in_brief: true } },
+    { id: 'price', kind: 'factor' }, ...factors.map(id => ({ id, kind: 'factor',
+      observed_state: { value: 1, source: 'user_override' } })));
+    const envelope = { inference_warnings: [], identity_evaluations: [
+      { node_id: 'goal', operation: 'product', factor_ids: ['price', 'subscribers_at_h'], evaluated: true },
+      { node_id: 'subscribers_at_h', operation: 'accumulation', factor_ids: factors, horizon_months: 12, evaluated: true },
+    ] };
+    expect(goalHorizonVerdict(graph)).toBe('computed_at_h');
+    expect(goalHorizonVerdict(graph, envelope)).toBe('computed_at_h');
+    expect(untestedHorizonLineForCells(graph, ONE_FIGURE)).toBeNull();
+    expect(withUntestedHorizonWarning(envelope, graph, ONE_FIGURE)).toBe(envelope);
+    expect(goalHorizonVerdict(graph, { identity_evaluations: [envelope.identity_evaluations[0]] })).toBe('withhold');
+    expect(goalHorizonVerdict(graph, { identity_evaluations: [envelope.identity_evaluations[0],
+      { ...envelope.identity_evaluations[1], horizon_months: 9 }] })).toBe('withhold');
+  });
+
+  it.each([undefined, 0, -1, 1.5, Number.NaN])('H=%s is absent under the positive-integer selector rule', (goal_horizon_months) => {
+    expect(goalHorizonVerdict(graphWith({ goal_horizon_months }))).toBe('no_horizon');
   });
 
   it('no single goal means no clause even beside a chance', () => {
@@ -253,5 +297,28 @@ describe('ONE reply horizon clause: exact held-target and present-number wording
       "This chance uses the model's numbers as they are today",
       "These chances use the model's numbers as they are today",
     ]);
+  });
+});
+
+
+describe('Science §(ad): recorded horizon withhold retires barred-range qualifier metadata', () => {
+  it.each([GOAL_CHANCE_RANGE, GOAL_CHANCE_RANGE_HORIZON_CONFLICT])('cleans %s without admitting its original range', code => {
+    const graph = clone(READ_B3.graph);
+    graph.nodes.find((node: Json) => node.kind === 'goal').goal_horizon_months = 9;
+    const result = clone(READ_B3.analysis_result);
+    result.enrichment.inference_warnings = result.enrichment.inference_warnings.filter((warning: Json) => warning.code !== GOAL_HORIZON_NOT_TESTED);
+    const range = result.enrichment.inference_warnings.find((warning: Json) => warning.code === GOAL_CHANCE_RANGE);
+    range.code = code; range.horizon_untested = true;
+    range.horizon_line = untestedHorizonLine(graph, { besideChance: true });
+    result.enrichment.inference_warnings.push({ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', severity: 'warning',
+      message: "Your goal is for month 9, and this model only has today's numbers." });
+    const before = rangeCells(graph, result);
+    expect(before.every(option => option.cell.kind === 'withheld')).toBe(true);
+    const enrichment = withUntestedHorizonWarning(result.enrichment, graph, before.map(option => option.cell));
+    const cleaned = enrichment.inference_warnings.find((warning: Json) => warning.code === code);
+    expect(cleaned).not.toHaveProperty('horizon_line');
+    expect(cleaned).not.toHaveProperty('horizon_untested');
+    expect(cleaned.range_by_option).toEqual(range.range_by_option);
+    expect(rangeCells(graph, { ...result, enrichment })).toEqual(before);
   });
 });

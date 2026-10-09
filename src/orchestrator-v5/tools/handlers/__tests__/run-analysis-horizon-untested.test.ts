@@ -1,21 +1,14 @@
 /**
- * ⭐ A7 AS A TYPED FACT ON THE RUN (DL 0df0e1 → Reasoning, 4 Oct; beat 2).
- *
- * The PL's beat-2 wording separates "no option reaches the target" from "the deadline is untested". Until now the second
- * existed only as chat text (the host's A7 line), so no surface beside the chat could say it without re-deriving A7. The
- * Run now carries it as ONE `info` inference warning, `GOAL_HORIZON_NOT_TESTED`, in A7's own sentence, from A7's own rule
- * (`untestedHorizonLine`, `decision-input-ask.ts`): the full sentence for held months, else the short present-number
- * basis beside the Run's chance. The chat host still says A7 only when held months have no scored duration limit.
- *
- * THE PATH: R3's served m1 graph (goal "MRR", `goal_horizon_months: 12`, one % limit) through the REAL loader and the REAL
- * handler; the PLoT client returns the served run body. Rung: TESTED (in-process), not a wire witness.
+ * Science §(ad): a held month-H goal owes either a computed horizon or the user's steady-level attestation.
+ * Otherwise the real Run producer withholds every option's goal figures. Historical horizon formatters remain
+ * byte-stable for normalization, but the typed chance-free/disclaimer warning is retired for positive integer H.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { RunAnalysisResultSchema } from '@talchain/schemas/orchestrator';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
-import { GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler, withholdGoalFiguresForMissingCurrentLevel } from '../run-analysis.js';
@@ -39,7 +32,6 @@ const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run
 const SCENARIO = 'c8108752-0000-4000-8000-0000000000a7';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const A7_12 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £85,000 within 12 months.";
-const A7_FREE_12 = "This model doesn't yet say whether any option gets there within 12 months.";
 const A7_SHORT = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
 const ONE_FIGURE = [{ kind: 'figure' as const, display: 'about 40%' }];
 
@@ -86,7 +78,7 @@ const warningsOf = (result: Json): Json[] => {
 };
 const horizonWarnings = (result: Json): Json[] => warningsOf(result).filter((w) => w.code === GOAL_HORIZON_NOT_TESTED);
 
-/** The served m1 goal with the user's figures on its route sized, so the Run SHOWS each option's goal chance. */
+/** The served m1 route sized with the user's figures; horizon admission remains an independent gate. */
 const sizedRoute = (): Json => {
   const g = clone(M1.graph);
   for (const e of g.edges as Json[]) {
@@ -126,81 +118,113 @@ const shareByDateGraph = (): Json => {
   ] };
 };
 
-describe('A7 is one rule: the chat line and the Run warning say the same sentence', () => {
-  it('PRECONDITION: the served goal holds the brief\'s 12 months and no limit is a duration', () => {
+describe('Science §(ad) replaces a held-horizon disclaimer with typed withhold', () => {
+  it('PRECONDITION: the served goal holds 12 months but its product has no accumulation carrier', () => {
     const goal = (M1.graph.nodes as Json[]).find((n) => n.kind === 'goal')!;
     expect(goal.goal_horizon_months).toBe(12);
     expect((M1.graph.goal_constraints as Json[]).map((k) => k.unit)).toEqual(['%']);
+    expect(goal.nonlinear_identity.operation).toBe('product');
+    const byId = new Map((M1.graph.nodes as Json[]).map((node) => [node.id, node]));
+    expect(goal.nonlinear_identity.factor_ids.some((id: string) => byId.get(id)?.nonlinear_identity?.operation === 'accumulation')).toBe(false);
   });
 
-  it('the low-level chance formatter retains its bytes; the host without cells says the chance-free fact', () => {
+  it('the low-level chance formatter retains its bytes; the host no longer emits its old horizon line', () => {
     expect(untestedHorizonLine(M1.graph)).toBe(A7_12);
-    const lines = decisionInputLines(M1.graph, { restingText: 'A sketch.', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
-    expect(lines).toContain(A7_FREE_12);
+    expect(decisionInputLines(M1.graph, {
+      restingText: 'A sketch.', questionsToggle: false, awaitingApproval: false, builtOrRan: true,
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    })).toEqual(["This model doesn't yet say whether any option gets there within 12 months."]);
   });
-});
 
-describe('the Run carries A7 as a typed warning (served m1 through the real handler)', () => {
-  it('RED: the served graph → exactly one GOAL_HORIZON_NOT_TESTED, info, in A7\'s words, naming the goal', async () => {
+  it('the served graph records run-wide HORIZON_NOT_TESTED and removes every option chance', async () => {
     const result = await runOn(M1.graph);
-    const w = horizonWarnings(result);
-    expect(w).toHaveLength(1);
-    expect(w[0]).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_FREE_12, node_ids: ['mrr'] });
+    const warnings = warningsOf(result);
+    expect(horizonWarnings(result)).toEqual([]);
+    expect(warnings).toContainEqual(expect.objectContaining({
+      code: GOAL_FIGURES_HORIZON_NOT_TESTED, severity: 'warning', node_ids: ['mrr'],
+      option_ids: ['59_price', 'current_price'], detail: { reason: 'HORIZON_NOT_TESTED' },
+    }));
+    for (const option of result.enrichment.option_comparison) expect(option).not.toHaveProperty('probability_of_goal');
   });
 
-  it('RED: it rides beside the target withhold, never in place of it (two separate facts)', async () => {
+  it('horizon withhold preserves the independent target-testability cause', async () => {
     const warnings = warningsOf(await runOn(M1.graph));
-    const codes = warnings.map((w) => w.code);
-    expect(codes).toContain(GOAL_FIGURES_TARGET_NOT_TESTABLE);
-    expect(codes).toContain(GOAL_HORIZON_NOT_TESTED);
+    expect(warnings.map((w) => w.code)).toEqual(expect.arrayContaining([
+      GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_HORIZON_NOT_TESTED,
+    ]));
     expect(warnings.find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)?.option_ids).toEqual(['59_price']);
   });
 
-  it('RED: a Run that SHOWS the goal chance still says the deadline is untested (the PL\'s distinction)', async () => {
+  it('sizing the route does not turn a steady-state chance into month-H evidence', async () => {
     const result = await runOn(sizedRoute());
     expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).toBe(false);
-    // r15 contract re-pin: "horizon form chosen by figure/range cell count". This served sized Run
-    // retains one shown chance; RED still requires the separate untested-deadline warning once.
-    expect(horizonWarnings(result).map((w) => w.message)).toEqual([A7_12]);
+    expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)).toBe(true);
+    expect(horizonWarnings(result)).toEqual([]);
+    for (const option of result.enrichment.option_comparison) expect(option).not.toHaveProperty('probability_of_goal');
   });
 
-  it('CONTROL: a duration limit scores the deadline → no horizon warning on a Run with no licensed chance, and no chat A7', async () => {
-    const g = withDurationLimit(M1.graph);
-    expect(horizonWarnings(await runOn(g))).toEqual([]);
-    expect(untestedHorizonLine(g)).toBeNull();
+  it('a stored user_stated triple does not unlock the chances', async () => {
+    const graph = sizedRoute();
+    const steadyGoal = graph.nodes.find((node: Json) => node.kind === 'goal');
+    Object.assign(steadyGoal, {
+      horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: steadyGoal.goal_horizon_months,
+    });
+    const result = await runOn(graph);
+    // P1a (DL 87114 #2895): a stored triple does not unlock.
+    expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)).toBe(true);
+    expect(horizonWarnings(result)).toEqual([]);
+    expect(result.enrichment.option_comparison.some((option: Json) => typeof option.probability_of_goal === 'number')).toBe(false);
   });
 
-  it('CONTROL: no held months and no licensed chance on the Run → no horizon warning (stored bytes as before)', async () => {
-    expect(horizonWarnings(await runOn(withoutHeldMonths()))).toEqual([]);
+  it.each(['ai_inferred', 'from_brief'])('%s steady_attested cannot license the month-H chance', async (provenance) => {
+    const graph = sizedRoute();
+    Object.assign(graph.nodes.find((node: Json) => node.kind === 'goal'), { horizon_basis: 'steady_attested', horizon_basis_source: provenance, horizon_basis_months: graph.nodes.find((node: Json) => node.kind === 'goal').goal_horizon_months });
+    const result = await runOn(graph);
+    expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)).toBe(true);
+    expect(horizonWarnings(result)).toEqual([]);
+    for (const option of result.enrichment.option_comparison) expect(option).not.toHaveProperty('probability_of_goal');
   });
 
-  it('R3 a Run that LICENSED a goal chance with no held months carries the SHORT form byte-exact, on the warning and the licence', () => {
+  it('a separate duration limit cannot substitute for computing the goal at H', async () => {
+    const graph = withDurationLimit(M1.graph);
+    const result = await runOn(graph);
+    expect(horizonWarnings(result)).toEqual([]);
+    expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)).toBe(true);
+    expect(untestedHorizonLine(graph)).toBeNull();
+  });
+
+  it('CONTROL: no held months and no licensed chance carries no horizon warning as before', async () => {
+    const result = await runOn(withoutHeldMonths());
+    expect(horizonWarnings(result)).toEqual([]);
+    expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)).toBe(false);
+  });
+
+  it('no-H licensed chance keeps the SHORT form byte-exact on the warning and licence', () => {
     const licence = { code: GOAL_CHANCE_LICENSED, severity: 'info', message: 'licensed', option_ids: ['a'] };
     const out = withShortHorizonBesideChance({ inference_warnings: [licence] }, withoutHeldMonths(), ONE_FIGURE) as Json;
     expect(horizonWarnings(out)).toHaveLength(1);
     expect(horizonWarnings(out)[0]).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_SHORT, node_ids: ['mrr'] });
     expect(out.inference_warnings[0]).toMatchObject({ code: GOAL_CHANCE_LICENSED, horizon_untested: true, horizon_line: A7_SHORT });
-    // CONTROLS: no licensed chance → the same object; a held month count already wrote the full sentence → the same object.
     const unlicensed = { inference_warnings: [] };
     expect(withShortHorizonBesideChance(unlicensed, withoutHeldMonths())).toBe(unlicensed);
-    const full = withUntestedHorizonWarning({ inference_warnings: [licence] }, M1.graph, ONE_FIGURE);
-    expect(withShortHorizonBesideChance(full, M1.graph, ONE_FIGURE)).toBe(full);
+    const positiveH = withUntestedHorizonWarning({ inference_warnings: [licence] }, M1.graph, ONE_FIGURE);
+    expect(withShortHorizonBesideChance(positiveH, M1.graph, ONE_FIGURE)).toBe(positiveH);
   });
 
-  it('R3 no-months draft chat A7 host owes no horizon line', () => {
-    const g = withoutHeldMonths();
-    expect(untestedHorizonLine(g)).toBeNull();
-    expect(decisionInputLines(g, {
+  it('no-H draft host keeps its existing silent bytes', () => {
+    const graph = withoutHeldMonths();
+    expect(untestedHorizonLine(graph)).toBeNull();
+    expect(decisionInputLines(graph, {
       restingText: 'A sketch.', questionsToggle: false, awaitingApproval: false, builtOrRan: true,
     }).filter((line) => line.startsWith("This chance uses the model's numbers as they are today"))).toEqual([]);
   });
 
-  it('R3 share_by_date owes no GOAL_HORIZON_NOT_TESTED warning', () => {
-    const g = shareByDateGraph();
-    expect(goalKindOf(g)).toBe('share_by_date');
-    expect(untestedHorizonLine(g, { besideChance: true })).toBeNull();
+  it('share_by_date keeps its own goal-kind rule and owes no old horizon warning', () => {
+    const graph = shareByDateGraph();
+    expect(goalKindOf(graph)).toBe('share_by_date');
+    expect(untestedHorizonLine(graph, { besideChance: true })).toBeNull();
     const envelope = { inference_warnings: [] };
-    expect(withUntestedHorizonWarning(envelope, g)).toBe(envelope);
+    expect(withUntestedHorizonWarning(envelope, graph)).toBe(envelope);
     expect(horizonWarnings(envelope)).toEqual([]);
   });
 });
@@ -264,21 +288,34 @@ describe('the current-level producer records the engine refusal as a typed optio
   });
 });
 
-describe('withUntestedHorizonWarning withholds nothing', () => {
+describe('withUntestedHorizonWarning no longer writes an old clause on positive H', () => {
   const envelope = { results: [{ option_id: 'a', probability_of_goal: 0.4 }], inference_warnings: [{ code: 'X', message: 'x', severity: 'info' }] };
 
-  it('appends after the existing warnings and leaves every other key as it was', () => {
-    const out = withUntestedHorizonWarning(clone(envelope), M1.graph) as Json;
-    expect(out.inference_warnings.map((w: Json) => w.code)).toEqual(['X', GOAL_HORIZON_NOT_TESTED]);
-    const { inference_warnings: _a, ...rest } = out;
-    const { inference_warnings: _b, ...before } = envelope;
-    expect(rest).toEqual(before);
+  it('the pure normalizer leaves the original envelope and figures untouched; the producer owns withhold', () => {
+    const before = clone(envelope);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(withUntestedHorizonWarning(before, M1.graph)).toEqual({ ...envelope, inference_warnings: [
+      ...envelope.inference_warnings, { code: GOAL_HORIZON_NOT_TESTED, severity: 'info',
+        message: "This model doesn't yet say whether any option gets there within 12 months.", node_ids: ['mrr'] },
+    ] });
+    expect(before).toEqual(envelope);
   });
 
-  it('is idempotent, and returns the envelope itself when the rule does not hold', () => {
-    const once = withUntestedHorizonWarning(clone(envelope), M1.graph);
+  it('removes a previous horizon warning and its licence metadata once, preserving other bytes', () => {
+    const licence = { code: GOAL_CHANCE_LICENSED, severity: 'info', horizon_untested: true, horizon_line: A7_12 };
+    const previous = { ...clone(envelope), inference_warnings: [...envelope.inference_warnings, licence,
+      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_12 }] };
+    const once = withUntestedHorizonWarning(previous, M1.graph);
+    expect(once).toEqual({ ...envelope, inference_warnings: [...envelope.inference_warnings,
+      { code: GOAL_CHANCE_LICENSED, severity: 'info' },
+      // Q-c (DL 87114): one horizon-limit statement per surface.
+      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: "This model doesn't yet say whether any option gets there within 12 months." }] });
     expect(withUntestedHorizonWarning(once, M1.graph)).toBe(once);
+  });
+
+  it('returns the envelope itself for no-H, duration-limited H, and an ambiguous goal', () => {
     const limited = clone(envelope);
+    expect(withUntestedHorizonWarning(limited, withoutHeldMonths())).toBe(limited);
     expect(withUntestedHorizonWarning(limited, withDurationLimit(M1.graph))).toBe(limited);
     const twoGoals = { ...M1.graph, nodes: [...M1.graph.nodes, { id: 'mrr2', kind: 'goal', label: 'MRR 2', goal_horizon_months: 6 }] };
     expect(withUntestedHorizonWarning(limited, twoGoals)).toBe(limited);

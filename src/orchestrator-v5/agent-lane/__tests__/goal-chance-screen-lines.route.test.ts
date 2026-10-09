@@ -3,6 +3,9 @@
  * a range" with no figure). The REAL agent route, a scripted OpenAI `fetch` (no provider is contacted), and the SERVED
  * b3-2 readback (`waveB3-unseen2-7addf05-readback-run1.json`, keys untouched). The expected line is the one the UI drew on
  * that Run (`waveB-screen-chance-lines-20261007.json`, source unseen-b3-2). Harness copied from the S2e route test.
+ * Historical Run captures are forwarded by the mocked downstream route: these
+ * rows preserve recorded screen permissions and do not prove a new chance at H.
+ * Science §(ad)'s real producer withholding is tested in goal-horizon-verdict.route.test.ts.
  */
 import { readFileSync } from 'node:fs';
 import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
@@ -24,7 +27,7 @@ type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
 /** B5 T1b on 3fce64f: three point lines on the `each` licence, leader withheld (near tie); the gate deleted the chat's copy. */
 const READ_T1B = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
-/** The live HEAD-B1 pilot, copied locally with its graph, Run and original displayed face/detail. */
+/** Historical static B1 pilot before the accumulation carrier, with its original face/detail. */
 const READ_B1 = JSON.parse(readFileSync(new URL('./fixtures/r11b-head-b1.json', import.meta.url), 'utf8')) as Json;
 // Exact B2 was not captured in this tree; the constructed fixture records its source and alterations.
 const RANGE_WINS_B2 = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-range-wins.json', import.meta.url), 'utf8')) as Json;
@@ -174,6 +177,12 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(count(body.assistant_text, fullSentence), 'one full horizon sentence in whole reply').toBe(1);
     expect(body.assistant_text).toBe(deriveAnswerTextFromShape(shape));
   };
+  const expectNoRetiredHorizon = (body: Body): void => {
+    expect(composeInput?.horizonLine).toBeUndefined();
+    expect(faceUnits(body)).not.toContain(HORIZON_MARKER);
+    expect(body.assistant_text).not.toMatch(/This chance uses|These chances use|This model doesn't yet say whether any option gets there/);
+    expect(body.assistant_text).not.toContain("doesn't project");
+  };
   const estimateScreenLine = () => {
     READ = structuredClone(READ_T1B);
     READ.graph.nodes.find((n: Json) => n.id === 'raise_prices_10').label = 'Raise to £59';
@@ -191,9 +200,10 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   const expectMandatoryFindings = (body: Body) => {
     expect(body._answer_shape, 'R2 T1b coaching reply carries one shape').toBeDefined();
     const units = [body._answer_shape!.headline, ...body._answer_shape!.bullets];
-    const horizon = untestedHorizonLine(READ.graph, { besideChance: true, plural: true })!;
-    expect(units, 'exact mandatory finding identities, then short horizon marker; no optional framing/W/E').toEqual([...SCREEN_T1B_SAID_ONCE, HORIZON_MARKER]);
-    expectHorizonMarker(body, SCREEN_T1B_SAID_ONCE.at(-1)!, horizon);
+    // This route harness forwards a historical licence, bypassing the Run producer.
+    // §(ad)'s new producer coverage belongs to goal-horizon-verdict.route.test.ts.
+    expect(units, 'exact recorded finding identities, with no retired time-bound disclaimer or optional framing/W/E').toEqual(SCREEN_T1B_SAID_ONCE);
+    expectNoRetiredHorizon(body);
     expect(composition?.measure?.face_words, 'T1b is re-measured below its old 137-word face').toBeLessThan(120);
     expect(units.join('\n')).not.toContain('What would change it:');
     expect(units.join('\n')).not.toContain("Olumi's estimates:");
@@ -228,6 +238,9 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       goal_threshold_unit: '£/month', goal_horizon_months: 12 }, goalFields);
     READ.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
     analysisResult = structuredClone(READ.analysis_result);
+    // A mocked historical licence isolates the reply contract. A positive H
+    // without a typed producer withhold does not license a new Run at H; this
+    // harness neither computes nor rewrites the producer's stored permission.
     analysisResult.enrichment.inference_warnings = [{
       code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance is licensed.', form: 'each',
       option_ids: ['raise_prices_10'], pct_by_option: { raise_prices_10: 67 },
@@ -244,15 +257,15 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     ['invalid options', (view: ReturnType<typeof projectCanonicalAnalysisView>) => ({ ...view, options: {} })],
     ['invalid cell', (view: ReturnType<typeof projectCanonicalAnalysisView>) => ({ ...view, options: [{ option_id: 'bad', cell: { kind: 'figure' } }] })],
     ['invalid range', (view: ReturnType<typeof projectCanonicalAnalysisView>) => ({ ...view, options: [{ option_id: 'bad', cell: { kind: 'range', display: 'between 1% and 2%', detail: {} } }] })],
-  ] as const)('r11d %s canonical_analysis_view: no marker, chance-free horizon, one warning on live and replay', async (_name, override) => {
+  ] as const)('r11d %s canonical_analysis_view: no marker or retired horizon disclaimer; one warning on live and replay', async (_name, override) => {
     READ = structuredClone(READ_B1);
     analysisResult = structuredClone(READ.analysis_result);
     canonicalReadOverride = override;
     const b = await turn(run('Your results are ready. You can view them now or ask me to explain them.'), 'Run it');
     expect(composeInput?.chanceCells).toEqual([]);
     expect(withholdMarkers(b)).toEqual([]);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
     expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
-    expect(b.assistant_text).not.toMatch(/This chance uses|These chances use/);
     const warnings = () => warn.mock.calls.filter((call: unknown[]) => (call[0] as { event?: unknown } | undefined)?.event === 'agent_lane.canonical_analysis_view_unavailable');
     expect(warnings()).toHaveLength(1);
     expect(warnings()[0]![0]).toMatchObject({ scenario_id: SCENARIO });
@@ -273,6 +286,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
     expect(composeInput?.chanceCells?.every(cell => cell.kind === 'none'), 'READ owns the cells').toBe(true);
     expect(withholdMarkers(b), 'locally recomputed withholds cannot supply a marker').toEqual([]);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
     expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
     await expectStoredAndReplayed(b);
     expect(composeInput?.chanceCells?.every(cell => cell.kind === 'none'), 'replay READ owns the cells too').toBe(true);
@@ -289,7 +303,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     await expectStoredAndReplayed(b);
   });
 
-  it('r11b B1 pilot: withheld canonical cells give one face marker and the chance-free horizon once', async () => {
+  it('r11b historical static B1 pilot: withheld causes keep one marker and omit the retired horizon clause', async () => {
     READ = structuredClone(READ_B1);
     analysisResult = structuredClone(READ.analysis_result);
     // Exercise the Run's real producer, including when an earlier identity withhold already removed its figures.
@@ -300,9 +314,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run(READ_B1.before_text), 'Run it');
     expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
     expect(composeInput?.chanceCells?.every(cell => cell.kind === 'withheld')).toBe(true);
-    expect(b.assistant_text).not.toMatch(/This chance uses|These chances use/);
-    const horizon = "This model doesn't yet say whether any option gets there within 12 months.";
-    expect(count(b.assistant_text, horizon), 'the exact staging chance-free horizon survives once').toBe(1);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
     expect(withholdMarkers(b), 'one marker is supplied by the Run cells despite three detail withhold sentences').toHaveLength(1);
     expect(withholdMarkers(b)[0], 'distinct identity and current-level causes cannot be replaced by one partial cause').toBe(WITHHOLD_FALLBACK_MARKER);
     for (const sentence of [
@@ -406,7 +419,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(composeInput?.widenedRiskMarker).toBe(WIDENED_RISK_MARKER_DOWN);
   });
 
-  it.each([1, 2] as const)('r11b mixed %s shown: figure cells choose horizon grammar beside exactly one withheld marker', async shown => {
+  it.each([1, 2] as const)('r11b mixed %s historical figures: recorded permissions survive beside one withheld marker without a disclaimer', async shown => {
     oneChance();
     const licence = analysisResult.enrichment.inference_warnings[0];
     if (shown === 2) {
@@ -421,13 +434,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
     expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'figure')).toHaveLength(shown);
     expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'withheld')).toHaveLength(1);
-    const prefix = shown === 1 ? 'This chance uses' : 'These chances use';
-    const otherPrefix = shown === 1 ? 'These chances use' : 'This chance uses';
-    expect(b.assistant_text).toContain(prefix);
-    expect(b.assistant_text).not.toContain(otherPrefix);
-    expect(count(b.assistant_text, "doesn't project")).toBe(1);
+    expectNoRetiredHorizon(b);
     expect(withholdMarkers(b)).toEqual(["Not shown: MRR's current level is missing"]);
-    expect(faceUnits(b)).toContain(HORIZON_MARKER);
     await expectStoredAndReplayed(b);
   });
 
@@ -441,17 +449,15 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(b._answer_shape).toBeUndefined();
   });
 
-  it('B1 Paul Run: marker beside chance, exact full horizon in detail once, with one next step', async () => {
+  it('historical static B1-shaped licence: recorded chance and next step survive without a horizon disclaimer', async () => {
     const line = oneChance();
-    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
     const next = 'What evidence should we check next?';
     const b = await turn(run(`Your comparison is ready. ${next}`), 'Run it');
     expect(composeInput?.faceContract).toBe('run');
     const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
-    expectHorizonMarker(b, line.chance, horizon);
+    expect(units).toContain(line.chance);
+    expectNoRetiredHorizon(b);
     expect(units.at(-1)).toBe(next);
-    expect(count(b.assistant_text, horizon)).toBe(1);
-    expect(count(b.assistant_text, "doesn't project")).toBe(1);
     await expectStoredAndReplayed(b);
   });
 
@@ -463,20 +469,19 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(count(b.assistant_text, horizon)).toBe(1);
   });
 
-  it('no target + months: marker beside chance, exact no-target horizon in detail once', async () => {
+  it('historical licence with no target + months: recorded chance survives without a no-target horizon disclaimer', async () => {
     const line = oneChance({ goal_threshold_raw: undefined, goal_threshold: undefined, goal_threshold_cap: undefined });
-    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll get there within 12 months.";
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
-    expectHorizonMarker(b, line.chance, horizon);
-    expect(count(b.assistant_text, horizon)).toBe(1);
+    expect(faceUnits(b)).toContain(line.chance);
+    expectNoRetiredHorizon(b);
   });
 
-  it('hiring Run: horizon carries its own target words rather than pricing assumptions', async () => {
+  it('historical hiring licence: its chance survives with no retired horizon or pricing assumptions', async () => {
     const line = oneChance({ label: 'Hire engineers', goal_threshold_raw: 6, goal_threshold_unit: 'engineers', goal_horizon_months: 9 });
-    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach 6 engineers within 9 months.";
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
-    expectHorizonMarker(b, line.chance, horizon);
-    expect(count(b.assistant_text, horizon)).toBe(1);
+    expect(faceUnits(b)).toContain(line.chance);
+    expectNoRetiredHorizon(b);
+    expect(b.assistant_text).not.toContain('reach £20,000');
   });
 
   it('share_by_date Run: event-by-date chances model time and carry no horizon clause anywhere', async () => {
@@ -527,18 +532,16 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     for (const line of lines) expect(face).toContain(line.chance);
   });
 
-  it('two chances: plural horizon once across the whole reply even when the narrator echoes its singular fact', async () => {
+  it('two historical chances: both survive and the narrator’s retired singular horizon fact is removed', async () => {
     oneChance();
     const licence = analysisResult.enrichment.inference_warnings[0];
     licence.option_ids.push('keep_pricing_as_it_is');
     licence.pct_by_option.keep_pricing_as_it_is = 20;
     const singular = untestedHorizonLine(READ.graph)!;
-    const plural = untestedHorizonLine(READ.graph, { besideChance: true, plural: true })!;
     const b = await turn(run(`Review the recorded assumptions.\n\n${singular}`), 'Run it');
     const lines = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
-    expectHorizonMarker(b, lines.at(-1)!.chance, plural);
-    expect(count(b.assistant_text, plural)).toBe(1);
-    expect(count(b.assistant_text, "doesn't project")).toBe(1);
+    for (const line of lines) expect(faceUnits(b)).toContain(line.chance);
+    expectNoRetiredHorizon(b);
   });
 
   it('W current licensed Run: same selected result and graph; face order chance, horizon marker, W, E', async () => {

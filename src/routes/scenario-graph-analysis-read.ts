@@ -112,6 +112,8 @@ import {
   deriveDecisionContextGraphHash,
   loadScenarioAnalysisFactsForRead,
 } from '../orchestrator-v5/build-turn-context.js';
+import { withReadTimeHorizonGate } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
 import { attachComputedAt } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 import {
@@ -382,7 +384,13 @@ export async function readScenarioAnalysis(
     // Same rule as the turn path: only `complete` licenses "never analysed".
     const durableAuthority = isScenarioAnalysisReasoningAuthority(factSet);
     const currentnessRead = readScenarioAnalysisClaimSafetyFact(factSet, params.scenarioId);
-    const facts = durableAuthority ? factSet.facts : hotWindow.facts;
+    const storedFacts = durableAuthority ? factSet.facts : hotWindow.facts;
+    // The raw stored envelope is still available here. Gate once before any selector or projection.
+    const facts = storedFacts.map(fact => {
+      if (fact.fact_type !== 'run_analysis') return fact;
+      const result = withReadTimeHorizonGate(fact.result, params.graph, fact.result.enrichment);
+      return result === fact.result ? fact : { ...fact, result };
+    });
     const factsReadOk = factSet.status === 'complete';
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
@@ -570,6 +578,8 @@ export async function readScenarioAnalysis(
     ).response;
     const boundResult = builtResult === null ? null
       : ((licensed.blocks as unknown[] | undefined)?.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as typeof builtResult | undefined) ?? null;
+    const horizonHeld = (boundResult as { enrichment?: { inference_warnings?: readonly { code?: unknown }[] } } | null)
+      ?.enrichment?.inference_warnings?.some(w => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED) === true;
     const runDelta = licensed.run_delta as typeof builtRunDelta;
     // ⭐ 0.79 SD-1 Slice R (DL ruling #87, option A): what the selected Run's turn DELIVERED (its Phase 3 blocks and
     // `analysis_ready` options), so a reload or a second device says what the Run's turn said. The agent lane records it
@@ -579,7 +589,8 @@ export async function readScenarioAnalysis(
     // the leader gate still serves or omits, with no leader rewriting. A failed read or corrupt row omits it.
     const deliveredRecord = await (async () => {
       // A selected `fact` is already a FRESH Run (`selected` above); `current_read` re-gates on `complete_current`.
-      if (fact === null || boundResult === null || newerClaimWithholds) return undefined;
+      // Delivered cards can contain stored chance prose. They are serve-or-omit, so cannot outlive the horizon licence.
+      if (fact === null || boundResult === null || newerClaimWithholds || horizonHeld) return undefined;
       const runId = fact.result.run_id;
       if (runId === undefined || store.readNewestRunDeliveryFor === undefined) return undefined;
       let delivery: Awaited<ReturnType<NonNullable<typeof store.readNewestRunDeliveryFor>>>;
@@ -693,6 +704,8 @@ export async function readScenarioAnalysis(
             // The ONE reader both legs use (the Agent turn reads this same key through it too, DL 5887273384): only an
             // array the published contract accepts is carried, `[]` included; anything else is not recorded.
             ...(() => {
+              // Exact stored 0/1 decisions are target claims too; they cannot bypass the result's current horizon gate.
+              if (horizonHeld) return {};
               const certainty = readStoredGoalCertainty(fact.result.goal_certainty);
               return certainty === undefined ? {} : { analysis_goal_certainty: certainty };
             })(),
