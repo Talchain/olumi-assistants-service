@@ -18,7 +18,7 @@ function hiring() {
       { label: 'Maintain current staffing', provenance: 'ai_proposed', is_status_quo: null, changes: [], interventions: [] as { factor_label: string; value: number; value_kind: string; unit: string; provenance: string }[] },
     ],
     factors: [
-      { label: 'Tech leads', role: 'controllable' as const, baseline_known: true, baseline_value: 0, unit: 'people', plausible_max: 5, provenance: 'ai_proposed' },
+      { label: 'Tech leads', role: 'controllable' as const, baseline_known: false, baseline_value: 0, unit: 'people', plausible_max: 5, provenance: 'ai_proposed' },
       { label: 'Developers', role: 'controllable' as const, baseline_known: false, baseline_value: 5, unit: 'people', plausible_max: 20, provenance: 'ai_proposed' },
     ],
     risks: [{ label: 'Onboarding disruption', provenance: 'ai_proposed' }, { label: 'Leadership mismatch', provenance: 'ai_proposed' }],
@@ -58,32 +58,37 @@ function invalidRisk() {
 }
 
 describe('provisional hiring construction uses real admission and registration payload', () => {
-  it('fits the actual structured schema, keeps the flow count, and asks for the unknown stock baseline', async () => {
+  it('fits the actual structured schema, adds headcount once, and retains estimated provenance', async () => {
     const validate = new Ajv({ strict: false }).compile(buildCandidateSchema());
     expect(validate(hiring()), JSON.stringify(validate.errors)).toBe(true);
     const prepared = prepareProvisionalCandidate(hiring());
-    expect(prepared.additions_without_total).toEqual([expect.objectContaining({ factor: 'Developers', value: 2, reason: 'baseline_unknown' })]);
+    expect(prepared.additions_without_total).toEqual([]);
     expect(prepared.provenance_demoted).toEqual([]);
     expect(prepared.candidate.factors[1]).toMatchObject({ baseline_known: false, baseline_value: 5, provenance: 'ai_proposed' });
-    expect(prepared.candidate.options[1].interventions).toEqual([]);
-    expect(prepared.candidate.options[1].changes).toContain('Developers');
-    // Science §(af): a typed known-zero count stores the stated one as its level.
-    expect(prepared.candidate.options[0].interventions?.[0]).toMatchObject({ value: 1, value_kind: 'absolute', provenance: 'explicit' });
+    expect(prepared.candidate.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'ai_proposed' });
+    // RC fix (3): "hire a tech lead" is ONE MORE on an estimated baseline of 0 — a total of 1, and Olumi's.
+    expect(prepared.candidate.options[0].interventions?.[0]).toMatchObject({ value: 1, value_kind: 'absolute', provenance: 'ai_proposed' });
     expect(prepareProvisionalCandidate(prepared.candidate).candidate).toEqual(prepared.candidate);
     const { result, graph, calls } = await construct(hiring());
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(calls).toBe(1);
     const option = graph?.nodes.find((n) => n.label === 'Hire two developers');
-    // The estimate of five is not the user's S₀: no invented total seven.
-    expect(option?.interventions ?? {}).not.toHaveProperty('developers');
-    expect((result.not_represented as string[]).join(' ')).toContain('Tell me the current level of "Developers"');
+    // P2 A5: the level names the factor it is keyed by. "Developers" is an ESTIMATED baseline, framed only by the node's
+    // scale_frame (20), and since AIQ Q2 (CEE #2139 5859746452) such a level is the one form: raw 7 (5 today + 2),
+    // the factor's own unit (`one-intervention-form.test.ts` (h)), so PLoT receives 7, not 0.35.
+    expect(option?.interventions).toEqual({
+      developers: {
+        value: 0.35, raw_value: 7, unit: 'people', source: 'cee_hypothesis',
+        target_match: { node_id: 'developers', match_type: 'exact_id', confidence: 'high' },
+      },
+    });
     expect(graph?.nodes.find((n) => n.id === 'developers')?.scale_frame).toBe(20);
     expect(graph?.nodes.find((n) => n.kind === 'goal')).not.toHaveProperty('goal_threshold_raw');
     // RC fix (1): the current-state option carries NO levels — it is held (#1838), not set to the baselines.
     expect(graph?.nodes.find((n) => n.id === 'maintain_current_staffing')).not.toHaveProperty('interventions');
     // RC fix (4): #1838's disclosure reaches the Agent, verbatim.
-    expect(result.not_represented, JSON.stringify(result.not_represented)).toContain(
-      "'Maintain current staffing' reads as carrying on as now, so I connected it to Tech leads with no level of its own; "
+    expect(result.not_represented).toContain(
+      "'Maintain current staffing' reads as carrying on as now, so I connected it to Tech leads and Developers with no level of its own; "
       + 'the analysis holds each at its starting value, which may be an estimate rather than a figure you gave. '
       + 'If carrying on as now would itself change any of them, say how.',
     );
@@ -128,7 +133,7 @@ describe('provisional hiring construction uses real admission and registration p
   ])('B1 RED: an unresolvable addition degrades to a level-free change and is said, never refused: %s', async (fault, said) => {
     const c: CandidateModel = hiring();
     if (fault === 'missing baseline') c.factors[1].baseline_value = null;
-    else { c.factors[1].baseline_known = true; c.options[1].interventions![0].unit = 'developers'; }
+    else c.options[1].interventions![0].unit = 'developers';
     const { result, graph, calls } = await construct(c);
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(result).not.toHaveProperty('refusal');
@@ -216,8 +221,7 @@ describe('provisional hiring construction uses real admission and registration p
   it('B3 control: a finding the adopted retry genuinely resolved is NOT carried', async () => {
     const first = hiring(); (first.factors[1] as { baseline_value: number | null }).baseline_value = null;
     // The retry states the current headcount, so "hire two" becomes a real total.
-    const retry = hiring(); retry.factors[1].baseline_known = true;
-    const { result, graph } = await construct(withRiskShortcut(first), retry);
+    const { result, graph } = await construct(withRiskShortcut(first), hiring());
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(graph?.edges.some((e) => e.from === 'developers' && e.to === 'onboarding_disruption')).toBe(true);
     expect(result).not.toHaveProperty('additions_without_total');

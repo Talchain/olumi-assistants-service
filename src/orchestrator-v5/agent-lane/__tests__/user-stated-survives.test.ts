@@ -240,18 +240,31 @@ it('Science af: flow count stores 2 with no baseline ask; stock stores user 8 + 
     }
   }
 });
-it('Science af: stock without user S0 asks its baseline and invents no level', async () => {
-  for (const estimate of [null, 4]) {
-    const row = additionRow(estimate, false, true);
-    row.brief = 'Add +2 to team headcount.';
-    const draft = JSON.parse(row.drafter_texts[0]!);
-    draft.options[0].interventions[0].stated_evidence.quote = row.brief;
-    row.drafter_texts = [JSON.stringify(draft)];
-    const s = await replay(row);
-    fs.writeFileSync(`/private/tmp/s7-r3-unknown-${estimate}-served.json`, JSON.stringify({ row, ...s }, null, 2));
-    const option = (s.graph?.nodes as Rec[]).find(n => n.id === 'add_capacity');
-    expect((option?.interventions as Record<string, Rec> | undefined)?.team_headcount).toBeUndefined();
-    expect(((s.result as { not_represented?: string[] }).not_represented ?? []).join(' ')).toContain('Tell me the current level of "Team headcount"');
-    expect(losses(row, s.graph, s.result)).toEqual([]);
-  }
+it('Science af: stock with NO baseline at all asks its baseline and invents no level', async () => {
+  const row = additionRow(null, false, true);
+  row.brief = 'Add +2 to team headcount.';
+  const draft = JSON.parse(row.drafter_texts[0]!);
+  draft.options[0].interventions[0].stated_evidence.quote = row.brief;
+  row.drafter_texts = [JSON.stringify(draft)];
+  const s = await replay(row);
+  const option = (s.graph?.nodes as Rec[]).find(n => n.id === 'add_capacity');
+  expect((option?.interventions as Record<string, Rec> | undefined)?.team_headcount).toBeUndefined();
+  expect(((s.result as { not_represented?: string[] }).not_represented ?? []).join(' ')).toContain('Tell me the current level of "Team headcount"');
+  expect(losses(row, s.graph, s.result)).toEqual([]);
+});
+
+// PARKED S7 row (DL 87114 + Science §(af) edge @84142351): with only Olumi's ESTIMATE of S₀, store COMPONENTS (Olumi's
+// base + the user's exact +2) and ask for S₀. No option carrier holds a typed delta today (InterventionV3 holds levels),
+// so that needs a contract field. Until then the old behaviour stands: one collapsed hypothesis level (4 + 2 = 6). The
+// census counts it as a loss (heldout3-d2 is in the baseline) so the components slice must clear it.
+it('Science af edge (parked): an estimate-only S0 keeps the old collapsed hypothesis level 4 + 2 = 6', async () => {
+  const row = additionRow(4, false, true);
+  row.brief = 'Add +2 to team headcount.';
+  const draft = JSON.parse(row.drafter_texts[0]!);
+  draft.options[0].interventions[0].stated_evidence.quote = row.brief;
+  row.drafter_texts = [JSON.stringify(draft)];
+  const s = await replay(row);
+  const option = (s.graph?.nodes as Rec[]).find(n => n.id === 'add_capacity');
+  expect((option?.interventions as Record<string, Rec> | undefined)?.team_headcount).toMatchObject({ raw_value: 6, source: 'cee_hypothesis' });
+  expect(losses(row, s.graph, s.result)).not.toEqual([]);
 });

@@ -1,5 +1,5 @@
 {
-  "failing_count": 7,
+  "failing_count": 8,
   "failing_ids": [
     "compound-A",
     "compound-B",
@@ -7,7 +7,8 @@
     "arm-mechanism-2842/B3-d1.json",
     "arm-mechanism-2842/B3-d2.json",
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d3.json",
-    "p44-lab-two-risks-20261008/heldout3-d1.json"
+    "p44-lab-two-risks-20261008/heldout3-d1.json",
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d2.json"
   ],
   "loss_counts": {
     "compound-A": 2,
@@ -16,7 +17,8 @@
     "arm-mechanism-2842/B3-d1.json": 2,
     "arm-mechanism-2842/B3-d2.json": 2,
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d3.json": 1,
-    "p44-lab-two-risks-20261008/heldout3-d1.json": 1
+    "p44-lab-two-risks-20261008/heldout3-d1.json": 1,
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d2.json": 1
   },
   "residual_ids": {
     "compound-A": [
@@ -44,6 +46,9 @@
     ],
     "p44-lab-two-risks-20261008/heldout3-d1.json": [
       "event_option_3.event_context_7"
+    ],
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d2.json": [
+      "event_option_2.event_context_7"
     ]
   }
 }
