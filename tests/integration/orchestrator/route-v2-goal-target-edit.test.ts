@@ -122,7 +122,6 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
     readAnalysisInvalidatedAt: async () => null,
     readMostRecentPendingActions: async () => [],
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => persisted,
     loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),

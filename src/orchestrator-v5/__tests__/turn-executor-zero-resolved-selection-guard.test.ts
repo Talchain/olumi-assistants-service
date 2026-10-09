@@ -253,7 +253,6 @@ vi.mock('../session/index.js', () => ({
     readNewestAnalysisFactFor: async () => RUN_ANALYSIS_FACT,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => PERSISTED_GRAPH,
     loadGraphAndBriefText: async () => {
       if (harness.graphReadMode === 'degraded') {

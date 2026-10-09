@@ -260,7 +260,7 @@ export function isAutoInitiatedRunAnalysisFact(fact: HandlerFact): boolean {
  *   1. THERE IS NOWHERE TO WRITE THE RECORD. `v5_handler_facts` is append-only
  *      in code: of the `SessionStore` methods, nine WRITE (`append`,
  *      `claimTurnFence`, `markTurnStopped`, `invalidateScoped`, `invalidateAll`,
- *      `storeDraftGraph`, `ensureScenarioExists`, `markGraphWriteFailed`,
+ *      `ensureScenarioExists`, `markGraphWriteFailed`,
  *      `resolveScenarioDraftLoss`) and the three that name a fact
  *      (`readFactsFor`, `readFactsWithTurnFor`, `readNewestAnalysisFactFor`) are
  *      ALL reads. `supabase-store.ts` issues exactly two `.update(` calls, both

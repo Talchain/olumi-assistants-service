@@ -55,7 +55,6 @@ describe('agent route: real structural challenge press reachability', () => {
   let link = LINK;
   let plotCalls: { body: Rec; requestId: string; opts?: PLoTClientRunOpts }[];
   let append: Mock<SessionStore['append']>;
-  let graphWrite: Mock<SessionStore['storeDraftGraph']>;
   const provider = vi.fn(async () => new Response(JSON.stringify({
     output: [{ type: 'message', content: [{ type: 'output_text', text: 'normal' }] }],
   }), { status: 200 }));
@@ -162,9 +161,7 @@ describe('agent route: real structural challenge press reachability', () => {
       return { id };
     });
     transport.store.readCommittedTurn = vi.fn(async (_sid, id) => rows.get(id) ?? null);
-    graphWrite = vi.fn(async () => {});
     transport.store.append = append;
-    transport.store.storeDraftGraph = graphWrite;
     const { readScenarioAnalysis } = await import('../../../routes/scenario-graph-analysis-read.js');
     const read = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'licensed-read' });
     expect(read.analysis_state?.run_state.kind).toBe('complete_current');
@@ -198,7 +195,6 @@ describe('agent route: real structural challenge press reachability', () => {
       expect(write.modelVersion).toBeUndefined();
     }
     expect(append.mock.calls.find(([write]) => write.turn_id === turnId)?.[0].assistantMessage).toBe(body.assistant_text);
-    expect(graphWrite).not.toHaveBeenCalled();
     expect(transport.plot!.validatePatch).not.toHaveBeenCalled();
   }
 
