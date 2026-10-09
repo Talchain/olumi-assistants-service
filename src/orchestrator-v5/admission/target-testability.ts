@@ -29,6 +29,7 @@ import { limitNeedsTodaysLevel, sayGoalChange } from '../agent-lane/limit-frame.
 import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { levelOf as accumulationInputLevelOf } from '../agent-lane/accumulation-identity.js';
+import { readGoalRecord } from '../goal-target/goal-record.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -138,8 +139,12 @@ function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolea
     const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
     return os !== undefined && finite(os.raw_value) ? { unit: os.unit, label: String(id) } : undefined;
   });
-  if (unary) return levels[0] !== undefined && typeof levels[0].unit === 'string'
-    && typeof goal.goal_threshold_unit === 'string' && sameUnit(goal.goal_threshold_unit, levels[0].unit);
+  if (unary) {
+    // S5: the target's unit through the one goal record, never a new raw read.
+    const targetUnit = typeof goal.id === 'string' ? readGoalRecord({ nodes }, goal.id)?.target?.unit : undefined;
+    return levels[0] !== undefined && typeof levels[0].unit === 'string' && typeof targetUnit === 'string'
+      && sameUnit(targetUnit, levels[0].unit);
+  }
   if (levels[0] === undefined || levels[1] === undefined) return false;
   // Codex r2 P1 (#2816): the factors' units must compose into the TARGET's currency and period (a target edited to
   // another currency keeps the confirmed identity; nothing downstream converts it).

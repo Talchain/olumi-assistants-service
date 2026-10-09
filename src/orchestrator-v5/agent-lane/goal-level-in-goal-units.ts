@@ -13,6 +13,7 @@ import { readMoneyTotal, readUnitParts } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
 import { levelBeforeTermsTail } from './identity-proposal.js';
 import { heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
+import { readGoalRecord } from '../goal-target/goal-record.js';
 import { GOAL_LEVEL_FROM_IDENTITY_INPUTS } from '../admission/identity-evaluations.js';
 
 export { GOAL_LEVEL_FROM_IDENTITY_INPUTS } from '../admission/identity-evaluations.js';
@@ -61,7 +62,8 @@ function sayGoalLevels(warnings: unknown, graph: unknown): unknown {
     const accumulation = rec(operand?.nonlinear_identity);
     const month = heldGoalHorizonMonths(goal);
     const atH = month !== undefined && accumulation?.operation === 'accumulation' && accumulation.horizon_months === month;
-    const wordsGoal = atH && goal !== undefined ? { ...goal, unit: goal.goal_threshold_unit } : goal;
+    const targetUnit = atH && typeof goal?.id === 'string' ? readGoalRecord(graph, goal.id)?.target?.unit : undefined;
+    const wordsGoal = atH && goal !== undefined ? { ...goal, unit: targetUnit } : goal;
     const message = r.message.replace(OWN_UNITS, `: ${goalLevelWords(value, wordsGoal)}${levelBeforeTermsTail(graph)};`);
     return { ...r, message: atH ? message.replace(/\btoday(?=:)/, `at month ${month}`) : message };
   });

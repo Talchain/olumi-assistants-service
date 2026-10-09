@@ -1,5 +1,5 @@
 {
-  "source_sha": "4542418c4306d894002c1246d49df001dad9cc72",
+  "source_sha": "92932f0de3a9bfedbd93b156c383f7e1fcc235f1",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -614,7 +614,7 @@
       "src/cee/unified-pipeline/stages/threshold-sweep.ts": 1,
       "src/cee/unified-pipeline/types.ts": 1,
       "src/cee/validation/integrity-sentinel.ts": 3,
-      "src/orchestrator-v5/admission/target-testability.ts": 11,
+      "src/orchestrator-v5/admission/target-testability.ts": 9,
       "src/orchestrator-v5/agent-lane/admit-model.ts": 17,
       "src/orchestrator-v5/agent-lane/break-even.ts": 7,
       "src/orchestrator-v5/agent-lane/current-level-answer.ts": 2,
@@ -622,7 +622,6 @@
       "src/orchestrator-v5/agent-lane/goal-certainty.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 17,
-      "src/orchestrator-v5/agent-lane/goal-level-in-goal-units.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-sense-reading.ts": 2,
       "src/orchestrator-v5/agent-lane/identity-proposal.ts": 3,
       "src/orchestrator-v5/agent-lane/label-head-unit.ts": 2,
@@ -803,7 +802,7 @@
     "goal_threshold_cap_provenance": 36,
     "goal_threshold_frame": 135,
     "goal_threshold_raw": 238,
-    "goal_threshold_unit": 219,
+    "goal_threshold_unit": 216,
     "pickGoalThresholdTrio": 18,
     "quantity_frame": 12,
     "readHeldGoalComparator": 20,
@@ -816,7 +815,7 @@
     "threshold_source": 33,
     "unit_reading": 79
   },
-  "total_references": 2355,
+  "total_references": 2352,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
