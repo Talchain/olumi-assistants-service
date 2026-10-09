@@ -646,6 +646,8 @@ export interface HandlerOutcome {
    * reconciling them is the wrong move — the review needs THIS one.
    */
   readonly __run_graph_snapshot?: unknown;
+  /** Server-only: the scenario revision of the snapshot this Run analysed, frozen before dispatch (B2). */
+  readonly __run_evaluated_revision?: { readonly run_id: string; readonly revision: number };
   /**
    * ⭐ THE GRAPH AND GOAL THE RUN'S GOAL-READING TAIL WAS BUILT FROM — server-only, never the wire (AIQ 5895590866 (2)).
    * Set by `run_analysis` only when Olumi's reading of the goal spoke. The registry forwarder rebuilds the tail from it

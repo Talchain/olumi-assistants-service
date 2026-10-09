@@ -181,6 +181,8 @@ export interface SessionTurnWrite {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  /** Frozen Run snapshot revisions, carried outside strict fact payloads (B2). */
+  readonly run_evaluated_revisions?: Readonly<Record<string, number>>;
   /** Scenario revision from the turn-start server read; v6 requires it. */
   readonly expectedRevision?: number;
   /**

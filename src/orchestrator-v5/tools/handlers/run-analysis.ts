@@ -336,6 +336,7 @@ function withholdStatedOperator<C>(goalConstraints: C): C {
  * The reader produces them; PLoT consumes them; the handler is the conduit.
  */
 export interface RunAnalysisScenarioSnapshot {
+  readonly evaluatedScenarioRevision?: number;
   /** Production reader attests current scope; a failed pending read throws before PLoT. */
   readonly goalScopeClaimInput?: GoalScopeClaimInput;
   /** The current graph (PLoT consumes as-is). */
@@ -597,6 +598,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // Freeze the read-B identity before dispatch; never consult the store for this Run again (B2).
+    const evaluatedScenarioRevision = snapshot.evaluatedScenarioRevision;
+    const frozenRevision = typeof evaluatedScenarioRevision === 'number'
+      && Number.isSafeInteger(evaluatedScenarioRevision) && evaluatedScenarioRevision >= 0
+      ? evaluatedScenarioRevision : undefined;
     const shareChanceBlocked = shareChanceRunBlock(snapshot.rawPersistedGraph ?? snapshot.graph);
     if (shareChanceBlocked !== null) {
       throw new HandlerInvocationFailedError('The deadline chance needs a usable stated range and date', {
@@ -3216,6 +3222,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     return {
       assistant_text: summary,
       handler_facts: [parsed.data],
+      ...(frozenRevision !== undefined
+        ? { __run_evaluated_revision: { run_id: runId, revision: frozenRevision } } : {}),
       llm_calls_used: 0,
       ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),
       // Internal channel (never the wire envelope directly) — the
