@@ -1,6 +1,5 @@
 import {
   RunAnalysisHandlerFactSchema,
-  type HandlerFact,
   type RunAnalysisHandlerFact,
 } from '@talchain/schemas/orchestrator';
 import type { LeaderLicence } from '../compose/leader-licence.js';
@@ -131,7 +130,11 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
   // Class refusal_not_a_run: a refusal attempt computed nothing. Match the shared predicate before
   // current-schema validation: it does not require fact_version or Run fields.
   if (source !== undefined && sourceResult !== undefined
-    && isAnalysisRefusalFact(source as unknown as HandlerFact)
+    && isAnalysisRefusalFact({
+      fact_type: source.fact_type,
+      noop: source.noop,
+      result: { enrichment: recordOf(sourceResult.enrichment) },
+    })
     && (!Object.hasOwn(sourceResult, 'run_id') || sourceResult.run_id === null)) {
     return { skipped_refusal: true };
   }

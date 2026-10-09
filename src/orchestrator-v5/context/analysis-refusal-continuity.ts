@@ -71,10 +71,21 @@ export function buildAnalysisRefusalFact(
   return RunAnalysisHandlerFactSchema.parse(candidate);
 }
 
+/** Fields needed to recognise a marker before validating the complete Run schema. */
+interface AnalysisRefusalFactInput {
+  readonly fact_type?: unknown;
+  readonly noop?: unknown;
+  readonly result: {
+    readonly enrichment?: { readonly analysis_status?: unknown } | null;
+  };
+}
+
 /** True only for the refusal marker above; partial/degraded results stay apart. */
 export function isAnalysisRefusalFact(
   fact: HandlerFact,
-): fact is RunAnalysisHandlerFact {
+): fact is RunAnalysisHandlerFact;
+export function isAnalysisRefusalFact(fact: AnalysisRefusalFactInput): boolean;
+export function isAnalysisRefusalFact(fact: HandlerFact | AnalysisRefusalFactInput): boolean {
   return (
     fact.fact_type === 'run_analysis' &&
     fact.noop === false &&
