@@ -1,3 +1,4 @@
+import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
@@ -218,7 +219,7 @@ import { meetsLimit } from '../limit-operator-words.js';
 import { levelLimitNodeDecision, thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
 import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participation-guard.js';
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
-import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
+import { goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
@@ -1321,7 +1322,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     const comparator = readHeldGoalComparator(g.raw, n.id);
     // ⭐ S-E GOALS (C6): the deadline the goal holds, in British words, and a goal measured as a chance said as such, so the
     // Agent never re-asks a recorded deadline and never treats the chance as a quantity.
-    const deadline = goalDeadlineOf(n);
+    const deadline = goalDeadlineFromRecord(g.raw, n.id);
     return {
       id: n.id,
       label: n.label,
@@ -3190,7 +3191,7 @@ export function createAgentCapabilities(
     const op = parent.operations[0]!, a = op.value as ApprovedTeamTime;
     if (op.path !== a.team_id || opts.commitOptionLevels === undefined) return { ok: false, mutated: false, applied: false, refusal: 'unavailable' };
     const part = draftedTeamPartOf(approvedRead.raw);
-    if (part === null || part.team.id !== a.team_id || part.goal.id !== a.goal_id || goalDeadlineOf(part.goal) !== a.deadline) {
+    if (part === null || part.team.id !== a.team_id || part.goal.id !== a.goal_id || goalDeadlineFromRecord(approvedRead.raw, part.goal.id) !== a.deadline) {
       return { ok: false, mutated: false, applied: false, refusal: 'superseded' };
     }
     const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: approvedRead.graph_hash,
@@ -3215,6 +3216,39 @@ export function createAgentCapabilities(
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
       observed_state: held.team.observed_state,
       ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
+  };
+
+  /** Consume the exact held card through the approved batch, then read back through the door's verdict on its committed bytes. */
+  const applyGoalSteady = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!;
+    const months = (op.value as { months?: unknown } | undefined)?.months;
+    if (ctx.typed_approval_of !== parent.proposal_id || typeof months !== 'number' || !Number.isInteger(months)
+      || months <= 0 || heldGoalHorizonMonths(before.nodes.find(n => n.id === op.path && n.kind === 'goal')) !== months
+      || opts.commitOptionLevels === undefined) {
+      return { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied' };
+    }
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
+      turn_id: authorisationTurnId(parent.proposal_id), links: [], levels: [], goal_steady: { goal_id: op.path, months } });
+    if (res.status === 'stale' || res.status === 'refused') {
+      return { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: res.status };
+    }
+    if (res.status === 'unconfirmed') {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed',
+        detail: 'Your answer was sent but could not be confirmed in the saved model.' };
+    }
+    // The read strips the basis proof (S5 2b), so the attestation is read back from the door's own committed bytes.
+    const check = await readGraph(ctx.scenario_id);
+    if (check === null || res.goal_steady_attested !== true
+      || heldGoalHorizonMonths(check.nodes.find(n => n.id === op.path && n.kind === 'goal')) !== months) {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed',
+        detail: 'Your answer was sent but could not be confirmed in the saved model.' };
+    }
+    const receipts = res.receipt === null ? [] : [res.receipt];
+    proposals.markApplied(parent.proposal_id, receipts);
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
+      follow_up: 'Recorded as your judgement. Then run the analysis again.' };
   };
 
   /**
@@ -3243,7 +3277,7 @@ export function createAgentCapabilities(
     // The date the goal holds NOW must still be the one the card was made against: another write moved it otherwise. A goal
     // that already holds THIS card's date is a retry of a write that landed (Codex buddy r2 on #2742: an "unconfirmed" first
     // approval): it goes on to the writer, whose verified no-op and the read-back below confirm it.
-    const heldNow = goalDeadlineOf(goal) ?? null;
+    const heldNow = goalDeadlineFromRecord(approvedRead.raw, op.path) ?? null;
     if (heldNow !== v.expected_deadline && heldNow !== v.deadline) {
       return notApplied('model_changed_since_approval', 'The goal\u2019s deadline changed after this was offered, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
     }
@@ -3271,7 +3305,7 @@ export function createAgentCapabilities(
     }
     if (res.status === 'unconfirmed') {
       const reread = await readGraph(ctx.scenario_id);
-      if (reread !== null && goalDeadlineOf(reread.nodes.find(n => n.id === op.path)) === v.deadline
+      if (reread !== null && goalDeadlineFromRecord(reread.raw, op.path) === v.deadline
         && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference)) {
         proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], ...(draftedTeamPartOf(approvedRead.raw) !== null ? { expected_postimage: reread.raw } : {}) });
       }
@@ -3286,7 +3320,7 @@ export function createAgentCapabilities(
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
-    const holds = goalDeadlineOf(check?.nodes.find((n) => n.id === op.path)) === v.deadline;
+    const holds = goalDeadlineFromRecord(check?.raw, op.path) === v.deadline;
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         detail: 'This deadline was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
@@ -4654,7 +4688,7 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineOf(part.goal);
+      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
         detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
       const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
@@ -4719,7 +4753,7 @@ export function createAgentCapabilities(
             : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this deadline is for. Ask the user which goal they mean.` };
       }
       const goal = goals[0]!;
-      const held = goalDeadlineOf(goal);
+      const held = goalDeadlineFromRecord(g.raw, goal.id);
       const date = sayDate(stated.date);
       if (held === stated.date) {
         return { ok: false, mutated: false, refusal: 'already_held',
@@ -6271,6 +6305,7 @@ export function createAgentCapabilities(
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 

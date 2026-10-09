@@ -1,8 +1,6 @@
 [
   "Which option does better on \"MRR\"? Olumi reads \"MRR\" as depending on \"Pro plan price\" times \"Pro subscribers at month 12\". Olumi's analysis multiplies them when every part has a figure and together they match \"MRR\" (within 5%); otherwise it adds those effects up and cannot say which option does better on \"MRR\".",
   "What is \"Monthly Pro churn\" today? Your limit (less than 8%) can only be checked against Olumi's estimate of 6%, not a figure you gave, until you give yours.",
-  "Olumi estimated that raising \"New Pro subscribers per month\" by 1 subscriber/month raises \"Pro subscribers at month 12\" by 8 subscribers, which is more than the analysis can represent on the ranges these two are measured on, so it was not used: a placeholder stands in for it. How much does \"New Pro subscribers per month\" change \"Pro subscribers at month 12\"?",
-  "Olumi estimated that raising \"Pro subscribers at month 12\" by 1 subscriber raises \"MRR\" by 49 £/month, which is more than the analysis can represent on the ranges these two are measured on, so it was not used: a placeholder stands in for it. How much does \"Pro subscribers at month 12\" change \"MRR\"?",
   "What is current MRR, and does the £20k MRR goal cover the Pro plan only or all plans?",
   "How many Pro subscribers are there today? The provisional model assumes 200.",
   "How many new Pro subscribers are added per month today? The provisional model assumes 15.",
