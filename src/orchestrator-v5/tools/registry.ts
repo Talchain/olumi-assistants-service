@@ -493,6 +493,7 @@ export interface HandlerInvocation {
    * handlers and existing test fixtures stay unaffected; `null` is the
    * explicit "no flip evidence available" form.
    */
+  readonly selectedRunEnrichment?: Record<string, unknown>;
   readonly flipSummary?: import('../compose/flip-proposal.js').FlipSummary | null;
   /**
    * M1 / System B referent continuity — the ONE option established by the

@@ -25,6 +25,7 @@
  *         `readOptionResultSources` refuses to read them (PR Review CR @ 0e1fd8c1).
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
+import { hasMeasuredFlipThresholdFor, hasAttestedNoFlipForRun } from '../claims/flip-threshold-licence.js';
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 import { goalChanceDriverAvailabilityForAgent, goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, runHasGoalChanceLicenceRecord } from '../goal-target/goal-chance-range-agent.js';
@@ -124,15 +125,16 @@ const inUnit = (value: number, unit: string | null): string => {
   return classifyUnitScaleClass(suffix) === 'percent' && suffix.length === 1 ? `${n}${suffix}` : `${n} ${suffix}`;
 };
 
-export function tippingPointOf(enrichment: unknown): TippingPoint {
+export function tippingPointOf(enrichment: unknown, subjectFactorId: string | null | undefined): TippingPoint {
   const e = recordOf(enrichment);
   if (e === undefined) return { status: 'not_evaluated' };
   const rows = readTopLevelFlipRows(e);
   if (rows.length === 0) return { status: 'not_evaluated' };
-  const first = rows.find((r) => r.kind === 'flip_pair' && r.current_value !== null && r.flip_value !== null
+  const first = rows.find((r) => r.kind === 'flip_pair' && (subjectFactorId === undefined || r.factor_id === subjectFactorId)
+    && hasMeasuredFlipThresholdFor(e, r.factor_id) && r.current_value !== null && r.flip_value !== null
     && flipRowScaleIsDisplaySafe({ value_scale: r.value_scale }, r.current_value, r.flip_value));
   if (first === undefined) {
-    return rows.every((r) => r.kind === 'attested_no_flip') ? { status: 'no_flip_in_range' } : { status: 'unresolved' };
+    return hasAttestedNoFlipForRun(e) ? { status: 'no_flip_in_range' } : { status: 'unresolved' };
   }
   const current = inUnit(first.current_value!, first.unit);
   const threshold = inUnit(first.flip_value!, first.unit);
@@ -252,7 +254,7 @@ export function analysisResultForAgent(result: unknown, graph?: unknown, current
           : options.every((o) => o.status === 'none_licensed') ? 'none_licensed' : 'not_recorded' };
     }
   }
-  const tipping = tippingPointOf(enrichment);
+  const tipping = tippingPointOf(current ? enrichment : undefined, undefined);
   if (!(shown && tipping.status === 'not_evaluated')) out.tipping_point = tipping;
   return out;
 }

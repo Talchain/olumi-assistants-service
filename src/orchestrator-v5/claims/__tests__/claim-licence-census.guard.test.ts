@@ -18,12 +18,25 @@ import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from 
 import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { untestedHorizonLineForCells, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import { buildAnalysisResultHeadline } from '../../coaching/analysis-result-headline.js';
-import { tippingPointOf, decisionSensitivityOf } from '../../agent-lane/decision-sensitivity.js';
+import { tippingPointOf, decisionSensitivityOf, analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
 import { tippingPointCoachingFor } from '../../agent-lane/tipping-point-coaching.js';
 import { buildWinnerNamingReplacement } from '../../compose/winner-naming-egress-guard.js';
 import { DOMINANT_DRIVER_MEASURED_TAIL, hasMeasuredFlipThresholdFor } from '../../compose/lens-selector.js';
 import { deliveredRecordWithThresholdLicence } from '../../../routes/delivered-record-licence.js';
 
+import { assembleContextPack } from '../../context/context-pack-assembler.js';
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { selectLens } from '../../compose/lens-selector.js';
+import { buildReviewCardBlocks, buildGraphNodeLookup } from '../../compose/phase3-blocks.js';
+import { flipThresholdFallbackBody } from '../../compose/flip-threshold-card-row.js';
+import { formatAnalysisForContext, tippingRiskPhrase } from '../../format/format-analysis-for-context.js';
+import { tryPostAnalysisAdviceGate } from '../../routing/post-analysis-advice-gate.js';
+import { composeWhatWouldFlipFallback, composeWithheldSensitivityBody, ATTESTED_NO_FLIP_SENTENCE, ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE } from '../../tools/handlers/explanation-fallback.js';
+import { composeOptionTargetedFlipAnswer } from '../../tools/handlers/whatif/compose-option-targeted-flip.js';
+import { filterFlipSummaryEntries } from '../../compose/flip-proposal.js';
+import { pickLatestFlipSummary } from '../../coaching/pick-flip-summary.js';
+import { readTopLevelFlipRows } from '../../context/flip-threshold-rows.js';
+import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 // CI data (scripts/ci), not src: see the note at the end of claim-licence-registry.ts.
 const CLAIM_LICENCE_REGISTRY = JSON.parse(readFileSync(new URL('../../../../scripts/ci/claim-licence-registry.json', import.meta.url), 'utf8')) as readonly ClaimLicenceEntry[];
 
@@ -204,7 +217,200 @@ const assertDominantDriverTailMismatch = () => {
   expect(hasMeasuredFlipThresholdFor(ddEnrichment(), DD_OTHER), 'MISMATCH: a Leeds pair cannot license a subscribers tail').toBe(false);
   expect(ddReloadBody(DD_OTHER, ddEnrichment()), 'MISMATCH on reload: tail stripped').not.toContain(DOMINANT_DRIVER_MEASURED_TAIL);
 };
+const FL_SERVED = JSON.parse(readFileSync(resolve(root, 'tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json'), 'utf8')) as Json;
+// Author controls transplant witnessed Leeds rows; all doors consume the selected carrier.
+const flFact = (enrichment: Json, at = '2026-10-09T00:00:00.000Z'): RunAnalysisHandlerFact => ({
+  fact_type: 'run_analysis', fact_version: 1, noop: false, result: { scenario_id: 'census-flip',
+    leading_option_id: 'opt_leeds', summary: 'Analysis complete.', computed_at: at, graph_hash_at_run: 'fl-current',
+    enrichment: { ...enrichment, graph: { nodes: [
+      { id: DD_MEASURED, kind: 'factor', label: 'Leeds Site Activation' },
+      { id: DD_OTHER, kind: 'factor', label: 'Monthly subscribers' },
+      { id: 'opt_leeds', kind: 'option', label: 'Leeds' },
+      { id: 'opt_bristol', kind: 'option', label: 'Bristol' },
+      { id: 'opt_status_quo', kind: 'option', label: 'Status Quo' },
+    ], edges: [] } },
+  },
+}) as unknown as RunAnalysisHandlerFact;
+const flSummary = (e: Json) => {
+  const summary = pickLatestFlipSummary([flFact(e)]);
+  if (summary !== null) {
+    expect(summary).not.toHaveProperty('selectedRunEnrichment');
+    expect(filterFlipSummaryEntries(summary, new Set())).not.toHaveProperty('selectedRunEnrichment');
+  }
+  return summary;
+};
+const flProjection = { status: 'complete', leading_option: { label: 'Leeds', probability: 0.7 },
+  runner_up: null, margin_pp: null, robustness_band: null,
+  top_drivers: [{ factor_label: 'Leeds Site Activation', sensitivity_value: 0.5 }] };
+const flNoFlip = object(object(JSON.parse(readFileSync(resolve(root,
+  'tests/fixtures/cross-service/witness-2267-attested-no-flip.json'), 'utf8'))).runs).f as Json;
+const flNoWords = (words: unknown) => expect(JSON.stringify(words) ?? '').not.toMatch(/could change if|moves from|moves far enough|threshold signal|analysis found (?:a )?single-factor tipping point|no single factor on its own reached|no single-factor tipping point at all|reached a tipping point|has a tipping point|would lead instead|could flip|would flip|before the most-supported option changes/);
+const flLens = (e: Json, id: string, category: string) => selectLens(flFact({ ...e,
+  factor_sensitivity: [{ factor_id: id, factor_label: 'Subject', influence_score: 0.5, influence_rank: 1, flip_risk_category: category },
+    { factor_id: 'other-equal', influence_score: 0.5, influence_rank: 2 }],
+}))?.body ?? null;
+const flCards = (e: Json, id: string) => {
+  const f = flFact({ ...e, decision_review: { flip_thresholds: [{ factor_id: id,
+    factor_label: id === DD_MEASURED ? 'Leeds Site Activation' : 'Monthly subscribers',
+    narrative: 'If the factor moves far enough, the most-supported option would change.' }] } });
+  return buildReviewCardBlocks(f, buildGraphNodeLookup(f), { created_at: '2026-10-09T00:00:00.000Z', graph_hash_at_generation: 'fl-current' })
+    .filter(b => b.card_kind === 'flip_threshold');
+};
+const flFormat = (e: Json, id: string) => {
+  const row = readTopLevelFlipRows(ddEnrichment()).find(r => r.factor_id === DD_MEASURED)!;
+  return formatAnalysisForContext({ status: 'complete', leading_option: null, runner_up: null, margin_pp: null,
+    robustness_band: null, top_drivers: [], fragile_edges: [], flip_thresholds: [{ factor_id: id,
+      factor_label: 'Subject', current_value: row.current_value, flip_value: row.flip_value, unit: row.unit,
+      no_flip_within_bounds: false }] }, { analysisFreshness: 'fresh', selectedRunEnrichment: e });
+};
+const flPack = (enrichment: Json, freshness = 'fresh') => assembleContextPack({
+  payload: makeMessagePayload(), priorTurns: [], priorFacts: [flFact(ddEnrichment())],
+  selectedRunEnrichment: enrichment,
+  analysis: { analysis_status: 'complete', winner: { option_id: 'opt_leeds', option_label: 'Leeds', win_probability: 0.7 },
+    options: [], top_drivers: [], robustness_level: 'moderate', fragile_edge_count: 0, margin: 0.4, margin_pp: 40,
+    flip_thresholds: [{ factor_id: DD_MEASURED, factor_label: 'Leeds', current_value: 50, flip_value: 77, unit: null }] },
+  coachingContext: { freshness, analysis_present: true, readiness_status: null, rerun_required: freshness !== 'fresh',
+    usable_for_prose: true, usable_for_chips: freshness === 'fresh', blocked: false, actionable_blocker_count: 0 },
+} as Parameters<typeof assembleContextPack>[0]).display_analysis;
+const flAdvice = (e: Json, id: string) => {
+  const result = tryPostAnalysisAdviceGate({ message: 'What would flip this?', freshness: 'fresh',
+    analysis: { status: 'success', leading_option: { label: 'Leeds' }, top_drivers: [{ factor_label: 'Subject' }] },
+    decisionReview: { flip_thresholds: [{ factor_id: id, factor_label: 'Subject' }] }, selectedRunEnrichment: e, flipClaimPosture: 'attested_no_flip' });
+  expect(result.matched).toBe(true);
+  return result.matched ? result.assistant_text : '';
+};
+const flFallback = (e: Json) => {
+  const summary = flSummary(e);
+  const controlled = summary?.entries.find(entry => entry.factor_id !== DD_MEASURED)?.factor_id;
+  return composeWhatWouldFlipFallback(flProjection, e, null, summary == null ? summary
+    : filterFlipSummaryEntries(summary, new Set(controlled == null ? [] : [controlled])));
+};
+const flTarget = (e: Json, target = 'opt_bristol', permission = true) => composeOptionTargetedFlipAnswer({ selectedRunEnrichment: e,
+  target: { id: target, label: 'Target' }, flipSummary: flSummary(e), leadingOptionId: 'opt_leeds', mayNameLeadingOption: permission,
+});
+const flTipRead = (e: Json) => ({ graphHash: FL_SERVED.graph_hash as string, analysisResult: { type: 'analysis_result',
+  computed_against_hash: FL_SERVED.graph_hash, enrichment: e }, analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-09T00:00:00.000Z' } } });
+const flOtherRun = () => {
+  const selected = flFact({}, '2026-10-09T01:00:00.000Z');
+  expect(pickLatestFlipSummary([flFact(ddEnrichment()), selected]), 'MISMATCH: other Run cannot fill selected Run').toBeNull();
+  flNoWords(composeWhatWouldFlipFallback(flProjection, {}, null, pickLatestFlipSummary([flFact(ddEnrichment()), selected])));
+};
+const flBehaviourRows: Record<string, () => void> = {
+  'flip_threshold.factor.tip': () => {
+    expect(tippingPointOf(FL_SERVED.enrichment, 'pro_plan_price')).toHaveProperty('say', expect.stringContaining('could change if'));
+    expect(tippingPointOf({}, DD_MEASURED)).not.toHaveProperty('say');
+    expect(tippingPointOf({ ...object(FL_SERVED.enrichment), flip_thresholds_status: 'unavailable' }, 'pro_plan_price')).not.toHaveProperty('say');
+    flNoWords(object(analysisResultForAgent(flTipRead(object(FL_SERVED.enrichment)).analysisResult, undefined, false)).tipping_point);
+  },
+  'flip_threshold.factor.coaching': () => {
+    expect(tippingPointCoachingFor('cee-sci-hero-contract', flTipRead(object(FL_SERVED.enrichment)), {}, 'pro_plan_price').reply).toContain('could change if');
+    flNoWords(tippingPointCoachingFor('cee-sci-hero-contract', flTipRead({}), {}, 'pro_plan_price').reply);
+    flNoWords(tippingPointCoachingFor('cee-sci-hero-contract', flTipRead({ ...object(FL_SERVED.enrichment), flip_thresholds_status: 'unavailable' }), {}, 'pro_plan_price').reply);
+  },
+  'flip_threshold.factor.card_fallback': () => {
+    expect(flipThresholdFallbackBody('Leeds', '50%', '77%', ddEnrichment(), DD_MEASURED)).toContain('moves from');
+    expect(flipThresholdFallbackBody('Leeds', '50%', '77%', {}, DD_MEASURED)).toBeNull();
+  },
+  'flip_threshold.factor.isolated': () => {
+    expect(flLens(ddEnrichment(), DD_MEASURED, 'isolated')).toContain('could flip');
+    flNoWords(flLens({}, DD_MEASURED, 'isolated'));
+  },
+  'flip_threshold.factor.correlated': () => {
+    expect(flLens(ddEnrichment(), DD_MEASURED, 'correlated')).toContain('could change');
+    flNoWords(flLens({}, DD_MEASURED, 'correlated'));
+  },
+  'flip_threshold.factor.cards': () => {
+    expect(flCards(ddEnrichment(), DD_MEASURED)).toHaveLength(1);
+    expect(flCards({}, DD_MEASURED)).toEqual([]);
+  },
+  'flip_threshold.factor.format': () => {
+    expect(flFormat(ddEnrichment(), DD_MEASURED)?.tipping_points).toHaveLength(1);
+    expect(flPack(ddEnrichment())?.tipping_points).toHaveLength(1);
+    expect(flPack({})?.tipping_points).toBeUndefined();
+    expect(flPack(ddEnrichment(), 'stale')?.tipping_points).toEqual([{ label: 'Leeds', risk: 'only a large increase would flip the result' }]);
+    expect(flFormat({}, DD_MEASURED)?.tipping_points).toBeUndefined();
+    expect(tippingRiskPhrase(50, 77, false, ddEnrichment(), DD_MEASURED)).toContain('flip');
+    expect(tippingRiskPhrase(50, 77, false, {}, DD_MEASURED)).toBeNull();
+    const own = readTopLevelFlipRows(flNoFlip)[0]!.factor_id;
+    expect(tippingRiskPhrase(null, null, true, flNoFlip, own)).toContain('no flip point');
+    expect(tippingRiskPhrase(null, null, true, {}, own)).toBeNull();
+    const raw = { status: 'complete', leading_option: null, runner_up: null, margin_pp: null, robustness_band: null, top_drivers: [], fragile_edges: [],
+      flip_thresholds: [{ factor_id: DD_MEASURED, factor_label: 'Leeds', current_value: 50, flip_value: 77, unit: null, no_flip_within_bounds: false }] };
+    expect(formatAnalysisForContext(raw, { analysisFreshness: 'stale', selectedRunEnrichment: ddEnrichment() })?.tipping_points).toEqual([{ label: 'Leeds', risk: 'only a large increase would flip the result' }]);
+  },
+  'flip_threshold.factor.advice': () => {
+    expect(flAdvice(ddEnrichment(), DD_MEASURED)).toContain('threshold signal');
+    expect(flAdvice(flNoFlip, DD_OTHER)).toContain(ATTESTED_NO_FLIP_SENTENCE);
+    flNoWords(flAdvice({}, DD_MEASURED));
+  },
+  'flip_threshold.run.attested': () => {
+    expect(flFallback(flNoFlip)).toContain(ATTESTED_NO_FLIP_SENTENCE);
+    expect(flFallback({})).not.toContain(ATTESTED_NO_FLIP_SENTENCE);
+    expect(flFallback({ ...flNoFlip, flip_thresholds_status: 'unavailable' })).not.toContain(ATTESTED_NO_FLIP_SENTENCE);
+    expect(composeWithheldSensitivityBody(flProjection, flSummary(flNoFlip), flNoFlip)).toContain(ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE);
+    expect(composeWithheldSensitivityBody(flProjection, flSummary({ ...flNoFlip, flip_thresholds_status: 'unavailable' }), { ...flNoFlip, flip_thresholds_status: 'unavailable' })).not.toContain(ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE);
+  },
+  'flip_threshold.factor.fallback': () => {
+    expect(flFallback(ddEnrichment())).toContain('has a tipping point');
+    expect(composeWithheldSensitivityBody(flProjection, flSummary(ddEnrichment()), ddEnrichment())).toContain('found a single-factor tipping point');
+    flNoWords(flFallback({}));
+    expect(composeWhatWouldFlipFallback({ ...flProjection, robustness_band: 'fragile' }, {}, null, null)).not.toContain('could change the most-supported option');
+  },
+  'flip_threshold.run.refusal': () => {
+    expect(flTarget(flNoFlip)?.text).toContain('no single-factor tipping point at all');
+    const noProof = { ...flNoFlip, flip_thresholds_status: 'unavailable' };
+    expect(flTarget(noProof)?.text).not.toContain('no single-factor tipping point at all');
+    // Available measurements with no target winner license a tested-set refusal.
+    expect(flTarget(ddEnrichment(), 'other-option')?.text).toContain('none of the single-factor');
+    expect(flTarget({ ...ddEnrichment(), flip_thresholds_status: 'unavailable' }, 'other-option')?.text).toContain('did not isolate');
+  },
+  'flip_threshold.factor.generic': () => {
+    expect(flTarget(ddEnrichment(), 'other-option', false)?.text).toContain('reached a tipping point');
+    expect(flTarget({ ...ddEnrichment(), flip_thresholds_status: 'unavailable' }, 'other-option', false)?.text).not.toContain('reached a tipping point');
+    expect(flTarget(ddEnrichment())?.kind).toBe('addressed');
+    expect(flTarget({ ...flNoFlip, flip_thresholds_status: 'unavailable' }, 'other-option', false)?.text).not.toContain('no single-factor tipping point at all');
+  },
+};
+const flMismatchRows: Record<string, () => void> = {
+  'flip_threshold.factor.tip': () => flNoWords(tippingPointOf(FL_SERVED.enrichment, DD_MEASURED)),
+  'flip_threshold.factor.coaching': () => {
+    flNoWords(tippingPointCoachingFor('cee-sci-hero-contract', flTipRead(object(FL_SERVED.enrichment)), {}, DD_MEASURED).reply);
+    const other = { ...flTipRead(object(FL_SERVED.enrichment)), analysisState: { run_state: { kind: 'complete_stale', computed_at: '2026-10-09T00:00:00.000Z' } } };
+    flNoWords(tippingPointCoachingFor('cee-sci-hero-contract', other, {}, 'pro_plan_price').reply);
+  },
+  'flip_threshold.factor.card_fallback': () => expect(flipThresholdFallbackBody('Subscribers', '50', '77', ddEnrichment(), DD_OTHER)).toBeNull(),
+  'flip_threshold.factor.isolated': () => flNoWords(flLens(ddEnrichment(), DD_OTHER, 'isolated')),
+  'flip_threshold.factor.correlated': () => flNoWords(flLens(ddEnrichment(), DD_OTHER, 'correlated')),
+  'flip_threshold.factor.cards': () => expect(flCards(ddEnrichment(), DD_OTHER)).toEqual([]),
+  'flip_threshold.factor.format': () => {
+    expect(flFormat(ddEnrichment(), DD_OTHER)?.tipping_points).toBeUndefined();
+    expect(tippingRiskPhrase(50, 77, false, ddEnrichment(), DD_OTHER)).toBeNull();
+    expect(tippingRiskPhrase(null, null, true, flNoFlip, DD_MEASURED)).toBeNull();
+  },
+  'flip_threshold.factor.advice': () => flNoWords(flAdvice(ddEnrichment(), DD_OTHER)),
+  'flip_threshold.run.attested': () => { expect(flFallback(ddEnrichment())).not.toContain(ATTESTED_NO_FLIP_SENTENCE); flOtherRun(); },
+  'flip_threshold.factor.fallback': () => {
+    const summary = flSummary(ddEnrichment())!;
+    const transplanted = { ...summary, entries: summary.entries.map(e => ({ ...e, factor_id: DD_OTHER } )) };
+    flNoWords(composeWhatWouldFlipFallback(flProjection, ddEnrichment(), null, transplanted));
+    flNoWords(composeWithheldSensitivityBody(flProjection, transplanted, ddEnrichment()));
+    const wrongTarget = { ...summary, entries: summary.entries.map(e => ({ ...e, alternative_winner_id: 'other-option', alternative_winner_label: 'Other' })) };
+    expect(composeWhatWouldFlipFallback(flProjection, ddEnrichment(), null, wrongTarget)).not.toContain('Other would lead instead');
+    flOtherRun();
+  },
+  'flip_threshold.run.refusal': () => { expect(flTarget(ddEnrichment())?.text).not.toContain('no single-factor tipping point at all'); flOtherRun(); },
+  'flip_threshold.factor.generic': () => {
+    const summary = flSummary(ddEnrichment())!;
+    const input = { target: { id: 'opt_bristol', label: 'Target' }, leadingOptionId: 'opt_leeds', mayNameLeadingOption: true };
+    const wrongFactor = { ...summary, entries: summary.entries.map(e => ({ ...e, factor_id: DD_OTHER })) };
+    flNoWords(composeOptionTargetedFlipAnswer({ selectedRunEnrichment: ddEnrichment(), ...input, flipSummary: wrongFactor })?.text);
+    const wrongTarget = { ...summary, entries: summary.entries.map(e => ({ ...e, alternative_winner_id: 'other-option' })) };
+    flNoWords(composeOptionTargetedFlipAnswer({ selectedRunEnrichment: ddEnrichment(), ...input, target: { id: 'other-option', label: 'Other' }, flipSummary: wrongTarget })?.text);
+    flNoWords(composeOptionTargetedFlipAnswer({ selectedRunEnrichment: ddEnrichment(), ...input, mayNameLeadingOption: false, flipSummary: wrongFactor })?.text);
+  },
+};
 const rowTests: Record<string, () => void | Promise<void>> = {
+  ...flBehaviourRows,
   'flip_threshold.dominant_driver.subject': () => {
     expect(hasMeasuredFlipThresholdFor(ddEnrichment(), DD_MEASURED), 'MATCH: the measured subject').toBe(true);
     expect(ddReloadBody(DD_MEASURED, ddEnrichment()), 'MATCH on reload: kept').toContain(DOMINANT_DRIVER_MEASURED_TAIL);
@@ -216,19 +422,19 @@ const rowTests: Record<string, () => void | Promise<void>> = {
   'flip_threshold.record': () => {
     const served = JSON.parse(readFileSync(resolve(root,
       'tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json'), 'utf8')) as Json;
-    const measured = tippingPointOf(served.enrichment);
+    const measured = tippingPointOf(served.enrichment, undefined);
     expect(measured.status).toBe('found');
     if (measured.status !== 'found') throw new Error('Served crossing required');
     expect(measured.say).toContain('rises above 55.76 GBP/month');
-    expect(tippingPointOf({})).not.toHaveProperty('say');
+    expect(tippingPointOf({}, undefined)).not.toHaveProperty('say');
     const result = { type: 'analysis_result', computed_against_hash: served.graph_hash, enrichment: served.enrichment };
     const current = { graphHash: served.graph_hash as string, analysisResult: result,
       analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-03T00:00:00.000Z' } } };
-    expect(tippingPointCoachingFor('cee-sci-hero-contract', current).reply).toBe(measured.say);
+    expect(tippingPointCoachingFor('cee-sci-hero-contract', current, undefined, undefined).reply).toBe(measured.say);
     const stale = { ...current, analysisState: { run_state: { kind: 'complete_stale', computed_at: '2026-10-03T00:00:00.000Z' } } };
-    expect(tippingPointCoachingFor('cee-sci-hero-contract', stale).reply).not.toContain('55.76');
+    expect(tippingPointCoachingFor('cee-sci-hero-contract', stale, undefined, undefined).reply).not.toContain('55.76');
     const absent = { ...current, analysisResult: { ...result, enrichment: {} } };
-    expect(tippingPointCoachingFor('cee-sci-hero-contract', absent).reply).not.toContain('could change if');
+    expect(tippingPointCoachingFor('cee-sci-hero-contract', absent, undefined, undefined).reply).not.toContain('could change if');
   },
   'sensitivity.record': () => {
     // Existing served PIN2 fixture, with explicit author mutation to a resolved/template row as in
@@ -361,6 +567,7 @@ const assertPlainLeaderMismatch = (): void => {
   ] }), 'MISMATCH: the plain-share claim for A needs its own result').toBe('');
 };
 const subjectMismatchRows: Record<string, () => void | Promise<void>> = {
+  ...flMismatchRows,
   'leader.headline': assertLeaderMismatch, 'leader.plain': assertPlainLeaderMismatch,
   'leader.stored': assertStoredWinnerMismatch,
   'chance.record': assertChanceMismatch, 'range.record': assertRangeMismatch, 'driver.record': assertDriverMismatch,
@@ -482,10 +689,7 @@ describe('claim licence discovery and zero-target ratchet', () => {
     }
     const dropped = CLAIM_LICENCE_REGISTRY.filter(e => e.class !== 'not_a_claim'
       && e.reason === 'licence not bound to subject');
-    expect(dropped.map(e => e.id).sort()).toEqual([
-      'agent-lane/decision-sensitivity#tippingPointOf',
-      'agent-lane/tipping-point-coaching#tippingPointCoachingFor',
-    ]); // Global crossing selectors remain unbound; no signature-based downgrade.
+    expect(dropped.map(e => e.id).sort()).toEqual([]);
     for (const entry of dropped) {
       expect(entry.licence, entry.id).toBeNull();
       expect(entry.readerSubjectParameter, entry.id).toBeNull();

@@ -3554,6 +3554,7 @@ export async function runTurnExecutor(
         analysisStalenessReason:
           analysisAuthority !== undefined ? promptAnalysisStalenessReason : analysisStalenessReason,
         displayAnalysisSource: promptAnalysisSummary,
+        selectedRunEnrichment: promptAnalysisSourceFact?.result.enrichment as Record<string, unknown> | undefined,
         // One already-derived claim-safety verdict governs every model-facing
         // analysis channel. The assembler applies this before its single
         // whole-pack ceiling, so withheld bytes cannot displace authorised
@@ -9514,6 +9515,7 @@ export async function runTurnExecutor(
           // producer attested it cannot. Same canonical selector as the two
           // lines above; undefined ⇒ pre-2.278 copy, byte-identical.
           flipClaimPosture: pickLatestFlipClaimPosture(context.prior_facts),
+          selectedRunEnrichment: asRunAnalysisFact(selectRunAnalysisFact(context.prior_facts)?.fact ?? null)?.result.enrichment as Record<string, unknown> | undefined,
           // AI Harness capability 1 — UNCONDITIONAL since 2026-07-20 (O-7
           // wave 2: CEE_POST_ANALYSIS_LOOP_ENABLED deleted, live-true on
           // staging). Thread the already-derived canonical analysis state +
@@ -12256,6 +12258,7 @@ export async function runTurnExecutor(
       const routedFlipSummary = isExplanationHandler
         ? pickLatestFlipSummary(context.prior_facts)
         : undefined;
+      const routedFlipEnrichment = asRunAnalysisFact(selectRunAnalysisFact(context.prior_facts)?.fact ?? null)?.result.enrichment as Record<string, unknown> | undefined;
       const routedFlipSummaryFiltered =
         routedFlipSummary != null
           ? filterFlipSummaryEntries(
@@ -12346,6 +12349,7 @@ export async function runTurnExecutor(
             ? pickLatestDefaultedAssumptions(context.prior_facts)
             : undefined,
           flipSummary: routedFlipSummaryFiltered,
+          selectedRunEnrichment: routedFlipEnrichment ?? {},
           flipTargetOption,
           // Same fact as `flipSummary` (shared `selectRunAnalysisFact`), under
           // the same same-source guard, so "is the target the current leader?"
@@ -13596,6 +13600,7 @@ export async function runTurnExecutor(
             ? {
                 projection: analysisProjection,
                 flipSummary: routedFlipSummaryFiltered,
+          selectedRunEnrichment: routedFlipEnrichment ?? {},
               }
             : null,
           // The separation half. `composeWithheldReasonTail` consults it ONLY
@@ -17112,6 +17117,7 @@ export async function runTurnExecutor(
               : flipSummary;
           deterministicAnalyticalAnswer = composeWhatWouldFlipFallback(
             projection,
+            (asRunAnalysisFact(selectRunAnalysisFact(context.prior_facts)?.fact ?? null)?.result.enrichment as Record<string, unknown> | undefined) ?? {},
             rawRobustness,
             flipSummaryFiltered,
             defaultedAssumptions,

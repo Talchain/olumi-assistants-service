@@ -263,6 +263,7 @@ export interface WithheldExplanationProjection {
  * probe exists — would quietly stop covering the largest part of the answer.
  */
 export interface WithheldSensitivityEvidence {
+  readonly selectedRunEnrichment: Record<string, unknown>;
   readonly projection: AnalysisProjectionSummary | null | undefined;
   readonly flipSummary: FlipSummary | null | undefined;
 }
@@ -443,7 +444,7 @@ export function projectExplanationAnswerForWithheldClaim(
     // tail ships alone, exactly as it does today.
     const body =
       sensitivity && analysisExistenceProven
-        ? composeWithheldSensitivityBody(sensitivity.projection, sensitivity.flipSummary)
+        ? composeWithheldSensitivityBody(sensitivity.projection, sensitivity.flipSummary, sensitivity.selectedRunEnrichment)
         : null;
     const bodyFragment = body === null ? '' : ` ${body}`;
     return {
@@ -615,7 +616,7 @@ function assertSubstitutedCopyIsLeaderFree(): void {
   const bodyProbes: Array<readonly [string, string]> = [];
   for (const [pName, projection] of projections) {
     for (const [fName, flip] of flipSummaries) {
-      const body = composeWithheldSensitivityBody(projection, flip);
+      const body = composeWithheldSensitivityBody(projection, flip, {});
       if (body === null) continue;
       bodiesProduced += 1;
       bodyProbes.push([`sensitivity-body:${pName}:${fName}`, body] as const);

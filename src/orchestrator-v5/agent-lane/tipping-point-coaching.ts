@@ -41,12 +41,12 @@ function noLeaderToFlip(licence: LicenceRead): string | null {
 
 /** The existing Explain control owns currentness and full Run binding; this consumer neither computes nor grants it. */
 export function tippingPointCoachingFor(
-  scenarioId: string, read: RunExplanationRead & { readonly analysisReady?: unknown }, licence: LicenceRead = read,
+  scenarioId: string, read: RunExplanationRead & { readonly analysisReady?: unknown }, licence: LicenceRead = read, subjectFactorId: string | null | undefined,
 ): TippingPointCoaching {
   const bound = runExplanationChip(scenarioId, read);
   if (bound === null) return { kind: 'unavailable', reply: RUN_EXPLANATION_UNAVAILABLE_TEXT };
   const result = read.analysisResult as { enrichment?: unknown };
-  const fact = tippingPointOf(result.enrichment);
+  const fact = tippingPointOf(result.enrichment, subjectFactorId);
   if (fact.status !== 'found') {
     // A "no threshold" answer is about THIS Run as much as a found one: it keeps the Run key the route re-checks (Codex P1 #2542).
     return { kind: 'no_signal', run_key: bound.id, status: fact.status, reply: noLeaderToFlip(licence) ?? (fact.status === 'no_flip_in_range'

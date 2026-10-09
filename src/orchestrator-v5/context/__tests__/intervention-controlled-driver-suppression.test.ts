@@ -111,7 +111,7 @@ describe('explanation fallback composers — Spine A contract', () => {
     const projection = buildAnalysisProjectionSummary(
       analysisWith([CONTROLLED, EXTERNAL], controlledSet),
     );
-    const text = composeWhatWouldFlipFallback(projection ?? undefined);
+    const text = composeWhatWouldFlipFallback(projection ?? undefined, {});
     expect(text).not.toContain('Factory Capacity');
     expect(text).toContain('Market Demand');
   });

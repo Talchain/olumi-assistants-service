@@ -21,13 +21,13 @@ const AT = '2026-10-03T00:00:00.000Z';
 const result = { type: 'analysis_result', computed_against_hash: HASH, enrichment: POSITIVE.enrichment };
 const current: RunExplanationRead = { graphHash: HASH, analysisResult: result,
   analysisState: { run_state: { kind: 'complete_current', computed_at: AT } } };
-const plan = tippingPointCoachingFor(SID, current);
+const plan = tippingPointCoachingFor(SID, current, undefined, undefined);
 if (plan.kind !== 'found') throw new Error('Served positive must produce the contract test plan');
 
 describe('deterministic tipping-point coaching and checker/fallback', () => {
   it('uses the existing Run identity control and exact factor threshold, with no EVPPI prerequisite', () => {
     expect(plan.run_key).toBe(runExplanationChip(SID, current)!.id);
-    expect(plan.fact).toEqual(tippingPointOf(POSITIVE.enrichment));
+    expect(plan.fact).toEqual(tippingPointOf(POSITIVE.enrichment, undefined));
     expect(plan.reply).toBe('Pro plan price is a factor that could change this: the comparison could change if it rises above 55.76 GBP/month.');
     expect(settleTippingPointCoaching(plan, plan.reply)).toMatchObject({ reply: plan.reply, passed: true, failed: [] });
     expect(tippingPointDirective(plan)).toContain(JSON.stringify(plan.reply));
@@ -61,26 +61,26 @@ describe('deterministic tipping-point coaching and checker/fallback', () => {
 
   it.each(['complete_stale', 'never_run', 'running', 'unknown'])('uses existing currentness refusal for %s', kind => {
     expect(tippingPointCoachingFor(SID, { ...current,
-      analysisState: { run_state: { kind, computed_at: AT } } })).toMatchObject({ kind: 'unavailable' });
+      analysisState: { run_state: { kind, computed_at: AT } } }, undefined, undefined)).toMatchObject({ kind: 'unavailable' });
   });
 
   it('refuses missing result/Run identity instead of quoting history', () => {
-    expect(tippingPointCoachingFor(SID, { ...current, analysisResult: undefined }).kind).toBe('unavailable');
-    expect(tippingPointCoachingFor(SID, { ...current, analysisState: { run_state: { kind: 'complete_current' } } }).kind)
+    expect(tippingPointCoachingFor(SID, { ...current, analysisResult: undefined }, undefined, undefined).kind).toBe('unavailable');
+    expect(tippingPointCoachingFor(SID, { ...current, analysisState: { run_state: { kind: 'complete_current' } } }, undefined, undefined).kind)
       .toBe('unavailable');
   });
 
   it('keeps the served no-signal control silent about a crossing', () => {
     const noSignal = tippingPointCoachingFor(SID, { ...current,
-      analysisResult: { ...CONTROL, type: 'analysis_result', computed_against_hash: HASH } });
+      analysisResult: { ...CONTROL, type: 'analysis_result', computed_against_hash: HASH } }, undefined, undefined);
     expect(noSignal).toMatchObject({ kind: 'no_signal', status: 'no_flip_in_range' });
     expect(noSignal.reply).not.toMatch(/could change if|55\.76|most important/iu);
   });
 
   it('reconstructs the same fact from a canonical cold read, with no transcript', () => {
-    expect(tippingPointCoachingFor(SID, JSON.parse(JSON.stringify(current)))).toEqual(plan);
+    expect(tippingPointCoachingFor(SID, JSON.parse(JSON.stringify(current)), undefined, undefined)).toEqual(plan);
     const newer = tippingPointCoachingFor(SID, { ...current,
-      analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-03T00:01:00.000Z' } } });
+      analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-03T00:01:00.000Z' } } }, undefined, undefined);
     expect(newer.kind).toBe('found');
     if (newer.kind === 'found') expect(newer.run_key).not.toBe(plan.run_key);
   });
@@ -89,7 +89,7 @@ describe('deterministic tipping-point coaching and checker/fallback', () => {
     for (const unit of ['%', 'GBP over 6 months']) {
       const e = { flip_thresholds: [{ factor_id: 'conversion', factor_label: 'Conversion', current_value: 5,
         flip_value: 4.2, unit, value_scale: 'display', flip_reason: 'found' }] };
-      const p = tippingPointCoachingFor(SID, { ...current, analysisResult: { ...result, enrichment: e } });
+      const p = tippingPointCoachingFor(SID, { ...current, analysisResult: { ...result, enrichment: e } }, undefined, undefined);
       expect(p.kind).toBe('found');
       if (p.kind === 'found') expect(settleTippingPointCoaching(p, p.reply).passed).toBe(true);
     }
@@ -151,15 +151,15 @@ describe('a withheld leader says there is nothing to flip; a licensed one keeps 
   it('PRECONDITION: the served claim is withheld and the contrast claim is licensed, by the one licence', () => {
     expect(leaderLicenceFromState(stateOf(NEAR_TIE), ADMISSION)).toBe('withheld');
     expect(leaderLicenceFromState(stateOf(LICENSED), ADMISSION)).toBe('permitted');
-    expect(tippingPointOf(NO_FLIP_IN_RANGE)).toMatchObject({ status: 'no_flip_in_range' });
-    expect(tippingPointOf(NO_ROW).status).not.toMatch(/^(found|no_flip_in_range)$/);
+    expect(tippingPointOf(NO_FLIP_IN_RANGE, undefined)).toMatchObject({ status: 'no_flip_in_range' });
+    expect(tippingPointOf(NO_ROW, undefined).status).not.toMatch(/^(found|no_flip_in_range)$/);
     expect(NO_LEADER_TO_FLIP_TEXT).toEqual({ near_tie: NEAR_TIE_REPLY, withheld: WITHHELD_REPLY });
   });
 
   it.each([['no grounded row', NO_ROW], ['no flip in range', NO_FLIP_IN_RANGE]])(
     'RED: served near-tie, %s → nothing to flip, the options too close, same Run key', (_name, enrichment) => {
       const read = at(NEAR_TIE, enrichment);
-      const out = tippingPointCoachingFor(SID, read);
+      const out = tippingPointCoachingFor(SID, read, undefined, undefined);
       expect(out).toMatchObject({ kind: 'no_signal', run_key: runExplanationChip(SID, read)!.id });
       expect(out.reply).toBe(NEAR_TIE_REPLY);
     });
@@ -170,19 +170,19 @@ describe('a withheld leader says there is nothing to flip; a licensed one keeps 
     ['a limit not shown met', { permitted: false, withheld_reason: 'constraint_verdict_withheld', separation: 'separated' }],
     ['the reason not recorded', { permitted: false }],
   ])('RED: withheld for %s → nothing to flip, with no cause and no next step', (_name, claim) => {
-    const out = tippingPointCoachingFor(SID, at(claim, NO_ROW));
+    const out = tippingPointCoachingFor(SID, at(claim, NO_ROW), undefined, undefined);
     expect(out.reply).toBe(WITHHELD_REPLY);
     expect(out.reply).not.toMatch(/too close|limit|estimate|figure|\bask me\b|\btell me\b|\brun\b/iu);
   });
 
   it('CONTROL: a licensed leader keeps both "no threshold" sentences exactly', () => {
-    expect(tippingPointCoachingFor(SID, at(LICENSED, NO_ROW)).reply).toBe(LICENSED_NO_ROW);
-    expect(tippingPointCoachingFor(SID, at(LICENSED, NO_FLIP_IN_RANGE)).reply)
+    expect(tippingPointCoachingFor(SID, at(LICENSED, NO_ROW), undefined, undefined).reply).toBe(LICENSED_NO_ROW);
+    expect(tippingPointCoachingFor(SID, at(LICENSED, NO_FLIP_IN_RANGE), undefined, undefined).reply)
       .toBe('This analysis has no factor threshold to quote within the ranges it checked.');
   });
 
   it('CONTROL: a FOUND crossing keeps its exact sentence on a withheld Run (only the "no threshold" words change)', () => {
-    expect(tippingPointCoachingFor(SID, at(NEAR_TIE, POSITIVE.enrichment))).toMatchObject({ kind: 'found', reply: plan.reply });
+    expect(tippingPointCoachingFor(SID, at(NEAR_TIE, POSITIVE.enrichment), undefined, undefined)).toMatchObject({ kind: 'found', reply: plan.reply });
   });
 
   // Codex P1 #2569 (class: the words use an earlier licence than the response). The Run binding stays the press read's.
@@ -192,7 +192,7 @@ describe('a withheld leader says there is nothing to flip; a licensed one keeps 
     ['cause changed', NEAR_TIE, { permitted: false, withheld_reason: 'goal_scope_unresolved' }, WITHHELD_REPLY],
   ])('RED: licence %s by the response\'s read on the SAME Run → that read decides the words', (_name, pressClaim, finalClaim, said) => {
     const read = at(pressClaim, NO_ROW);
-    const out = tippingPointCoachingFor(SID, read, { analysisState: stateOf(finalClaim), analysisReady: ADMISSION });
+    const out = tippingPointCoachingFor(SID, read, { analysisState: stateOf(finalClaim), analysisReady: ADMISSION }, undefined);
     expect(out).toMatchObject({ kind: 'no_signal', run_key: runExplanationChip(SID, read)!.id, reply: said });
   });
 

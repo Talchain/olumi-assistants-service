@@ -22,6 +22,7 @@
  *  - One next-step nudge at the end so the response is actionable.
  */
 
+import { hasMeasuredFlipThresholdFor, hasMeasuredFlipToOptionFor, hasAttestedNoFlipForRun } from '../../claims/flip-threshold-licence.js';
 import type {
   AnalysisProjectionSummary,
   AnalysisProjectionDriver,
@@ -649,6 +650,7 @@ export function composeExplainResultsFallback(
  */
 export function composeWhatWouldFlipFallback(
   projection: AnalysisProjectionSummary | undefined,
+  enrichment: Record<string, unknown>,
   rawRobustness?: RawRobustnessSignals | null,
   flipSummary?: FlipSummary | null,
   defaultedAssumptions?: DefaultedAssumptionsSignal | null,
@@ -726,9 +728,10 @@ export function composeWhatWouldFlipFallback(
       ? flipSummary
       : null;
   const flipVerdict = flip !== null ? flip.overall_status : null;
-  const flippabilityClaimAllowed = flip === null || flip.margin_supports_flip;
+  const flippabilityClaimAllowed = flip != null && flip.margin_supports_flip
+    && flip.entries.some(e => hasMeasuredFlipThresholdFor(enrichment, e.factor_id));
 
-  if (flipVerdict === 'no_practical_flip') {
+  if (flipVerdict === 'no_practical_flip' && hasAttestedNoFlipForRun(enrichment)) {
     // flip_value null + reason no_effect_within_bounds across the tested
     // factors: say so plainly. No fragility/flippability claim.
     sentences.push(ATTESTED_NO_FLIP_SENTENCE);
@@ -739,7 +742,8 @@ export function composeWhatWouldFlipFallback(
     // by the separate flip-proposal chip, which honours the value_scale
     // contract); the prose names the factor so we never misprint a scale.
     const namedEntries = flip!.entries
-      .filter((e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value))
+      .filter((e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value)
+        && hasMeasuredFlipThresholdFor(enrichment, e.factor_id))
       .slice(0, 2);
     const concrete = namedEntries.map((e) => e.factor_label);
     if (concrete.length === 1) {
@@ -765,7 +769,7 @@ export function composeWhatWouldFlipFallback(
     // the pre-repair prose. We name the option only; no probability, no margin.
     if (concrete.length > 0) {
       const altWinner = resolveAgreedAlternativeWinner(namedEntries);
-      if (altWinner !== null) {
+      if (altWinner !== null && namedEntries.every(e => hasMeasuredFlipToOptionFor(enrichment, e.factor_id, altWinner.id))) {
         sentences.push(`If that happened, ${altWinner.display} would lead instead.`);
       }
     }
@@ -904,6 +908,7 @@ export const ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE = ((): string => {
 export function composeWithheldSensitivityBody(
   projection: AnalysisProjectionSummary | null | undefined,
   flipSummary: FlipSummary | null | undefined,
+  enrichment: Record<string, unknown>,
 ): string | null {
   const sentences: string[] = [];
 
@@ -931,7 +936,7 @@ export function composeWithheldSensitivityBody(
       ? flipSummary
       : null;
   if (flip !== null) {
-    if (flip.overall_status === 'no_practical_flip') {
+    if (flip.overall_status === 'no_practical_flip' && hasAttestedNoFlipForRun(enrichment)) {
       sentences.push(ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE);
     } else if (flip.overall_status === 'insufficient_data') {
       sentences.push('The analysis did not isolate a single-factor tipping point here.');
@@ -953,7 +958,8 @@ export function composeWithheldSensitivityBody(
       // likely. A finite threshold says a flip was FOUND at a value, not that
       // the factor is likely to reach it.
       const withThreshold = flip.entries.filter(
-        (e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value),
+        (e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value)
+          && hasMeasuredFlipThresholdFor(enrichment, e.factor_id),
       );
       const named = withThreshold.slice(0, 2);
       // "including" when more exist, so naming a subset does not imply the

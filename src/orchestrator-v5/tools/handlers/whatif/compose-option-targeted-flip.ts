@@ -57,6 +57,8 @@
  * merely not making it today.
  */
 
+import { readTopLevelFlipRows } from '../../../context/flip-threshold-rows.js';
+import { hasMeasuredFlipThresholdFor, hasMeasuredFlipToOptionFor, hasAttestedNoFlipForRun } from '../../../claims/flip-threshold-licence.js';
 import {
   resolveAlternativeWinner,
   type FlipEntry,
@@ -128,6 +130,7 @@ const NAMED_FACTOR_CAP = 2;
  * off the SAME `run_analysis` fact the flip rows did.
  */
 export interface OptionTargetedFlipInput {
+  readonly selectedRunEnrichment: Record<string, unknown>;
   readonly target: TargetOption;
   readonly flipSummary: FlipSummary | null | undefined;
   /** IDENTITY of the option currently leading; `null` ⇒ unknown, NOT "none". */
@@ -163,7 +166,16 @@ function describeFactorMove(entry: FlipEntry): string {
   return `${entry.factor_label} passes its tipping point`;
 }
 
-function composeRefusalText(target: TargetOption, reason: OptionTargetedFlipRefusalReason): string {
+/** The refusal the selected Run licenses: a no-flip claim needs its producer evidence; otherwise the limitation. */
+function composeRefusalText(target: TargetOption, reason: OptionTargetedFlipRefusalReason, enrichment: Record<string, unknown>): string {
+  const measured = enrichment.flip_thresholds_status !== 'unavailable'
+    ? readTopLevelFlipRows(enrichment).filter(row => row.kind === 'flip_pair') : [];
+  const unlicensed = (reason === 'no_practical_flip' && !hasAttestedNoFlipForRun(enrichment))
+    || (reason === 'no_flip_to_target' && (measured.length === 0 || measured.some(row => row.alternative_winner_id === target.id)));
+  return refusalTemplate(target, unlicensed ? 'indeterminate' : reason);
+}
+
+function refusalTemplate(target: TargetOption, reason: OptionTargetedFlipRefusalReason): string {
   switch (reason) {
     case 'no_flip_to_target':
       return (
@@ -244,6 +256,7 @@ function composePositionUnstatedText(
   target: TargetOption,
   reason: PositionUnstatedReason,
   flipSummary: FlipSummary,
+  enrichment: Record<string, unknown>,
 ): string {
   const opening =
     reason === 'withheld'
@@ -252,19 +265,20 @@ function composePositionUnstatedText(
         `This analysis could not put a single option forward, so I cannot say where ${target.label} stands on it.`
       : `I cannot tell from what this run recorded where ${target.label} stands, so I would rather not guess.`;
 
-  return `${opening} ${composeGenericFactorPicture(flipSummary)}`;
+  return `${opening} ${composeGenericFactorPicture(flipSummary, enrichment)}`;
 }
 
 /** The position-neutral factor picture. Says which factors move, never who wins. */
-function composeGenericFactorPicture(flipSummary: FlipSummary): string {
-  if (flipSummary.overall_status === 'no_practical_flip') {
+function composeGenericFactorPicture(flipSummary: FlipSummary, enrichment: Record<string, unknown>): string {
+  if (flipSummary.overall_status === 'no_practical_flip' && hasAttestedNoFlipForRun(enrichment)) {
     return 'Within the tested ranges, the analysis found no single-factor tipping point at all.';
   }
   if (flipSummary.overall_status === 'insufficient_data') {
     return 'The analysis did not isolate a single-factor tipping point on this run.';
   }
   const named = flipSummary.entries
-    .filter((e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value))
+    .filter((e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value)
+      && hasMeasuredFlipThresholdFor(enrichment, e.factor_id))
     .slice(0, NAMED_FACTOR_CAP);
   if (named.length === 0) {
     return 'The analysis did not isolate a single-factor tipping point on this run.';
@@ -288,7 +302,7 @@ function composeGenericFactorPicture(flipSummary: FlipSummary): string {
 export function composeOptionTargetedFlipAnswer(
   input: OptionTargetedFlipInput,
 ): OptionTargetedFlipAnswer | null {
-  const { target, flipSummary, leadingOptionId } = input;
+  const { target, flipSummary, leadingOptionId, selectedRunEnrichment: enrichment } = input;
   // FAIL CLOSED on an unstated permission: a caller that did not populate it is
   // a caller whose verdict we cannot read, and "unknown" must never license copy
   // that presupposes where the target stands.
@@ -304,7 +318,8 @@ export function composeOptionTargetedFlipAnswer(
       ? flipSummary.entries.filter((e) => {
           if (typeof e.flip_value !== 'number' || !Number.isFinite(e.flip_value)) return false;
           const winner = resolveAlternativeWinner(e);
-          return winner !== null && winner.id === target.id;
+          return winner !== null && winner.id === target.id
+            && hasMeasuredFlipToOptionFor(enrichment, e.factor_id, target.id);
         })
       : [];
 
@@ -326,7 +341,7 @@ export function composeOptionTargetedFlipAnswer(
       ? { kind: 'already_leading', text: composeAlreadyLeadingText(target), target }
       : {
           kind: 'position_unstated',
-          text: composePositionUnstatedText(target, 'withheld', flipSummary),
+          text: composePositionUnstatedText(target, 'withheld', flipSummary, enrichment),
           target,
           reason: 'withheld',
         };
@@ -354,7 +369,7 @@ export function composeOptionTargetedFlipAnswer(
     // withheld leader. See composePositionUnstatedText.
     return {
       kind: 'position_unstated',
-      text: composePositionUnstatedText(target, 'withheld', flipSummary),
+      text: composePositionUnstatedText(target, 'withheld', flipSummary, enrichment),
       target,
       reason: 'withheld',
     };
@@ -366,7 +381,7 @@ export function composeOptionTargetedFlipAnswer(
     // we decline to place it rather than guess.
     return {
       kind: 'position_unstated',
-      text: composePositionUnstatedText(target, 'leader_unknown', flipSummary),
+      text: composePositionUnstatedText(target, 'leader_unknown', flipSummary, enrichment),
       target,
       reason: 'leader_unknown',
     };
@@ -377,7 +392,7 @@ export function composeOptionTargetedFlipAnswer(
   if (flipSummary.overall_status === 'no_practical_flip') {
     return {
       kind: 'refused',
-      text: composeRefusalText(target, 'no_practical_flip'),
+      text: composeRefusalText(target, 'no_practical_flip', enrichment),
       target,
       reason: 'no_practical_flip',
     };
@@ -385,14 +400,14 @@ export function composeOptionTargetedFlipAnswer(
   if (flipSummary.overall_status === 'insufficient_data') {
     return {
       kind: 'refused',
-      text: composeRefusalText(target, 'indeterminate'),
+      text: composeRefusalText(target, 'indeterminate', enrichment),
       target,
       reason: 'indeterminate',
     };
   }
   return {
     kind: 'refused',
-    text: composeRefusalText(target, 'no_flip_to_target'),
+    text: composeRefusalText(target, 'no_flip_to_target', enrichment),
     target,
     reason: 'no_flip_to_target',
   };
@@ -432,7 +447,7 @@ function assertTargetedCopyIsLeaderFree(): void {
 
   const probes: Array<readonly [string, string]> = [];
   for (const reason of ['no_flip_to_target', 'no_practical_flip', 'indeterminate'] as const) {
-    probes.push([`refusal:${reason}`, composeRefusalText(target, reason)]);
+    probes.push([`refusal:${reason}`, refusalTemplate(target, reason)]);
   }
   for (const direction of ['increase', 'decrease', 'sideways', null]) {
     const one = [entry(direction)];
@@ -453,7 +468,7 @@ function assertTargetedCopyIsLeaderFree(): void {
     for (const reason of ['withheld', 'leader_unknown'] as const) {
       probes.push([
         `position_unstated:${reason}:${status}`,
-        composePositionUnstatedText(target, reason, summary),
+        composePositionUnstatedText(target, reason, summary, {}),
       ]);
     }
   }

@@ -160,7 +160,7 @@ function project(answer: string, sensitivity?: WithheldSensitivityEvidence | nul
  *                                                        'structurally_invariant'
  *   summariseFlipEntries(readFlipEntries(...)).overall_status = 'no_practical_flip'
  */
-const CAPTURE_6EDB1CDB: WithheldSensitivityEvidence = {
+const CAPTURE_6EDB1CDB: WithheldSensitivityEvidence = { selectedRunEnrichment: {},
   projection: projection([]),
   flipSummary: flipSummary('no_practical_flip', [
     { factor_id: 'ab78e513', factor_label: 'Monthly Churn Rate', flip_value: null },
@@ -176,7 +176,7 @@ const CAPTURE_6EDB1CDB: WithheldSensitivityEvidence = {
  *                                  flip_reason 'structurally_invariant'
  *   summariseFlipEntries(readFlipEntries(...)).overall_status = 'no_practical_flip'
  */
-const CAPTURE_73D5C152: WithheldSensitivityEvidence = {
+const CAPTURE_73D5C152: WithheldSensitivityEvidence = { selectedRunEnrichment: {},
   projection: projection([
     { factor_label: 'Cash Runway', sensitivity_value: 0.3214285714285715 },
   ]),
@@ -192,7 +192,7 @@ const CAPTURE_73D5C152: WithheldSensitivityEvidence = {
  * SYNTHETIC — not either captured session. Keeps the `insufficient_data` branch
  * covered now that both real runs are known to resolve `no_practical_flip`.
  */
-const SYNTHETIC_INSUFFICIENT: WithheldSensitivityEvidence = {
+const SYNTHETIC_INSUFFICIENT: WithheldSensitivityEvidence = { selectedRunEnrichment: {},
   projection: projection([{ factor_label: 'Cash Runway', sensitivity_value: 0.4 }]),
   flipSummary: flipSummary('insufficient_data', [
     { factor_id: 'f1', factor_label: 'Sales Cycle Duration', flip_value: null },
@@ -292,7 +292,7 @@ describe('the withhold guarantee is unchanged', () => {
   it('the alternative-winner sentence the permitted voice emits is never reproduced', () => {
     // `concrete` is the only status whose permitted-voice branch names the
     // option that would lead. This is the case that would catch it coming back.
-    const concrete: WithheldSensitivityEvidence = {
+    const concrete: WithheldSensitivityEvidence = { selectedRunEnrichment: {},
       projection: projection([{ factor_label: 'Cash Runway', sensitivity_value: 0.4 }]),
       flipSummary: flipSummary('concrete', [
         { factor_id: 'f1', factor_label: 'Monthly Churn Rate', flip_value: 0.041 },
@@ -337,7 +337,7 @@ describe('the withhold guarantee is unchanged', () => {
     ['producer order [A,B,C]', THREE],
     ['⭐ THE REORDERED TWIN [C,A,B]', REORDERED],
   ])('%s: names factors without claiming a likelihood or an investigation priority', (_name, entries) => {
-    const out = project(LEADER_ANSWER, {
+    const out = project(LEADER_ANSWER, { selectedRunEnrichment: {},
       projection: projection([{ factor_label: 'Cash Runway', sensitivity_value: 0.4 }]),
       flipSummary: flipSummary('concrete', entries),
     } as WithheldSensitivityEvidence);
@@ -354,7 +354,7 @@ describe('the withhold guarantee is unchanged', () => {
   });
 
   it('a single finite threshold states the found tipping point, with no superlative', () => {
-    const out = project(LEADER_ANSWER, {
+    const out = project(LEADER_ANSWER, { selectedRunEnrichment: {},
       projection: projection([{ factor_label: 'Cash Runway', sensitivity_value: 0.4 }]),
       flipSummary: flipSummary('concrete', [THREE[0]!]),
     } as WithheldSensitivityEvidence);
@@ -364,7 +364,7 @@ describe('the withhold guarantee is unchanged', () => {
   });
 
   it('exactly two, with none omitted, does not say "including"', () => {
-    const out = project(LEADER_ANSWER, {
+    const out = project(LEADER_ANSWER, { selectedRunEnrichment: {},
       projection: projection([{ factor_label: 'Cash Runway', sensitivity_value: 0.4 }]),
       flipSummary: flipSummary('concrete', [THREE[0]!, THREE[1]!]),
     } as WithheldSensitivityEvidence);
@@ -404,22 +404,22 @@ describe('the body may not presuppose a result the read could not establish', ()
 
 describe('absent data yields silence, never a hedge', () => {
   const NOTHING: ReadonlyArray<readonly [string, WithheldSensitivityEvidence]> = [
-    ['no projection and no flip summary', { projection: null, flipSummary: null }],
-    ['empty drivers, no flip summary', { projection: projection([]), flipSummary: null }],
+    ['no projection and no flip summary', { selectedRunEnrichment: {}, projection: null, flipSummary: null }],
+    ['empty drivers, no flip summary', { selectedRunEnrichment: {}, projection: projection([]), flipSummary: null }],
     [
       'flip status none',
-      { projection: projection([]), flipSummary: flipSummary('none', []) },
+      { selectedRunEnrichment: {}, projection: projection([]), flipSummary: flipSummary('none', []) },
     ],
     [
       'a near-zero driver only — below the materiality threshold',
-      {
+      { selectedRunEnrichment: {},
         projection: projection([{ factor_label: 'Cash Runway', sensitivity_value: 0.001 }]),
         flipSummary: null,
       },
     ],
     [
       'concrete status but no entry carries a finite threshold',
-      {
+      { selectedRunEnrichment: {},
         projection: projection([]),
         flipSummary: flipSummary('concrete', [
           { factor_id: 'f1', factor_label: 'Monthly Churn Rate', flip_value: null },
@@ -429,7 +429,7 @@ describe('absent data yields silence, never a hedge', () => {
   ];
 
   it.each(NOTHING)('composes nothing for %s', (_label, evidence) => {
-    expect(composeWithheldSensitivityBody(evidence.projection, evidence.flipSummary)).toBeNull();
+    expect(composeWithheldSensitivityBody(evidence.projection, evidence.flipSummary, {})).toBeNull();
   });
 
   it.each(NOTHING)('ships today\'s copy EXACTLY for %s — no hedge sentence', (_label, evidence) => {
@@ -446,7 +446,7 @@ describe('absent data yields silence, never a hedge', () => {
     expect(
       composeWithheldSensitivityBody(
         CAPTURE_73D5C152.projection,
-        CAPTURE_73D5C152.flipSummary,
+        CAPTURE_73D5C152.flipSummary, {},
       ),
     ).not.toBeNull();
     expect(project(LEADER_ANSWER, CAPTURE_73D5C152).text).not.toBe(

@@ -148,7 +148,7 @@ describe('explain and flip fallbacks: the leader and runner-up are said in this 
   });
 
   it('flip fallback: exact leader sentence', () => {
-    const text = composeWhatWouldFlipFallback(ANALYSIS, null, null, null);
+    const text = composeWhatWouldFlipFallback(ANALYSIS, {}, null, null, null);
     expect(text).toContain("In this model, 'Hire Senior Engineer' was supported by 62% of runs.");
     expect(text).not.toMatch(/performs best|currently leads/);
   });

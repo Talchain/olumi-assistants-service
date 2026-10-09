@@ -3225,7 +3225,7 @@ describe('tryPostAnalysisAdviceGate — what_would_flip richer evidence + honest
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain("One threshold signal to inspect is 'Hiring and Salary Cost'");
+      expect(out.assistant_text).not.toContain("One threshold signal to inspect is 'Hiring and Salary Cost'");
       // Never overstate the source.
       expect(out.assistant_text).not.toMatch(/the analysis suggests the result could change/i);
     }

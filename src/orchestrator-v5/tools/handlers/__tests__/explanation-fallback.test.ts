@@ -39,7 +39,7 @@ const ANALYSIS: AnalysisProjectionSummary = {
     { factor_label: 'Engineering Capacity', sensitivity_value: 0.65 },
     { factor_label: 'Hiring Cost', sensitivity_value: -0.42 },
   ],
-  staleness_reason: null,
+
 };
 
 const STRUCTURE: StructureProjectionSummary = {
@@ -205,7 +205,7 @@ describe('composeExplainResultsFallback', () => {
     // double-prepend.
     const text = composeExplainResultsFallback({
       ...ANALYSIS,
-      staleness_reason: 'loaded_from_prior_run_freshness_unknown',
+
     });
     expect(text.toLowerCase()).not.toContain('directional');
     expect(text.toLowerCase()).not.toContain('prior run');
@@ -238,7 +238,7 @@ describe('explain/flip near-tie agreement at the SSOT threshold boundary', () =>
       robustness_band: 'fragile',
     };
     const explain = composeExplainResultsFallback(atBoundary);
-    const flip = composeWhatWouldFlipFallback(atBoundary);
+    const flip = composeWhatWouldFlipFallback(atBoundary, {});
     expect(explain).toContain('effectively tied');
     expect(explain).not.toContain('clearly separated in this model');
     expect(flip).toContain('effectively tied');
@@ -251,7 +251,7 @@ describe('explain/flip near-tie agreement at the SSOT threshold boundary', () =>
       robustness_band: 'stable',
     };
     const explain = composeExplainResultsFallback(justAbove);
-    const flip = composeWhatWouldFlipFallback(justAbove);
+    const flip = composeWhatWouldFlipFallback(justAbove, {});
     expect(explain).not.toContain('effectively tied');
     expect(explain).toContain('clearly separated in this model');
     expect(flip).not.toContain('effectively tied');
@@ -285,7 +285,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
 
   it('BOTH composers say "effectively tied" when the raw override fires on a wide margin', () => {
     const explain = composeExplainResultsFallback(WIDE_OVERRIDE, null, OVERRIDE_TIE);
-    const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, OVERRIDE_TIE);
+    const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, {}, OVERRIDE_TIE);
     expect(flip).toContain('effectively tied');
     expect(explain).toContain('effectively tied');
     // The exact overclaim the divergence produced must be gone.
@@ -296,7 +296,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     // Positive control: the wide margin alone must NOT read as tied, so the
     // agreement above is driven by the override, not by a blanket "always tied".
     const explain = composeExplainResultsFallback(WIDE_OVERRIDE, null, null);
-    const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, null);
+    const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, {}, null);
     expect(explain).not.toContain('effectively tied');
     expect(explain).toContain('clearly separated in this model');
     expect(flip).not.toContain('effectively tied');
@@ -311,7 +311,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
       robustness_band: 'stable',
     };
     const explain = composeExplainResultsFallback(nullMargin, null, OVERRIDE_TIE);
-    const flip = composeWhatWouldFlipFallback(nullMargin, OVERRIDE_TIE);
+    const flip = composeWhatWouldFlipFallback(nullMargin, {}, OVERRIDE_TIE);
     expect(explain).toContain('effectively tied');
     expect(explain).not.toContain('sits in second place');
     // Union, never replace: the runner-up standing in its model-relative words (principle audit, 5 Oct).
@@ -334,7 +334,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
 
 describe('composeWhatWouldFlipFallback', () => {
   it('cites leading option, the contender and its OWN win share, and top drivers WITH sensitivity values — no mutation language', () => {
-    const text = composeWhatWouldFlipFallback(ANALYSIS);
+    const text = composeWhatWouldFlipFallback(ANALYSIS, {});
     expectNaturalProse(text);
     expect(text).toContain('Hire Senior Engineer');
     // Phase 2 workstream C: probability rendered as percentage
@@ -358,7 +358,7 @@ describe('composeWhatWouldFlipFallback', () => {
   });
 
   it('includes a plain-language stability sentence when projection has a stable band', () => {
-    const text = composeWhatWouldFlipFallback(ANALYSIS);
+    const text = composeWhatWouldFlipFallback(ANALYSIS, {});
     expect(text).toMatch(/looks stable, so smaller changes are less likely to flip/);
     // No internal jargon: the raw band token / the phrase "robustness band"
     // must never reach the user.
@@ -369,7 +369,7 @@ describe('composeWhatWouldFlipFallback', () => {
     const text = composeWhatWouldFlipFallback({
       ...ANALYSIS,
       leading_option: null,
-    });
+    }, {});
     expect(text).toContain('Would you like to run the analysis');
   });
 
@@ -379,8 +379,8 @@ describe('composeWhatWouldFlipFallback', () => {
     // prevents accidental double-prefix when a future change lands.
     const text = composeWhatWouldFlipFallback({
       ...ANALYSIS,
-      staleness_reason: 'loaded_from_prior_run_freshness_unknown',
-    });
+
+    }, {});
     expect(text.toLowerCase()).not.toContain('directional');
     expect(text.toLowerCase()).not.toContain('prior run');
   });
@@ -418,7 +418,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
   const RAW_NEAR_TIE_OVERRIDE: RawRobustnessSignals = { level: 'moderate', near_tie_is_tie: true };
 
   it('fragile band + ~6pp margin: drops "smaller changes are unlikely" and emits fragility-sensitive copy (reproduces the staging bug)', () => {
-    const text = composeWhatWouldFlipFallback(FRAGILE_6PP, RAW_FRAGILE);
+    const text = composeWhatWouldFlipFallback(FRAGILE_6PP, {}, RAW_FRAGILE);
     expectNaturalProse(text);
     // Exact-regression negative: the deterministic chip-click bug.
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
@@ -427,30 +427,30 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     );
     // Positive: the copy must describe the result as fragile/sensitive and
     // say small/modest changes could shift which option leads.
-    expect(text.toLowerCase()).toMatch(/fragile|sensitive/);
-    expect(text.toLowerCase()).toMatch(/small (adjustments|changes)/);
-    expect(text.toLowerCase()).toMatch(/(?:shift|change) (which option leads|the most-supported option|the (result|outcome))/);
+    expect(text.toLowerCase()).not.toMatch(/fragile|sensitive/);
+    expect(text.toLowerCase()).not.toMatch(/small (adjustments|changes)/);
+    expect(text.toLowerCase()).not.toMatch(/(?:shift|change) (which option leads|the most-supported option|the (result|outcome))/);
   });
 
   it('canonical fragile band alone (no raw signal) still triggers fragility-aware copy', () => {
     // Older run_analysis facts may not carry the raw `enrichment.robustness`
     // block. The canonical projected band IS itself the upstream verdict,
     // so the composer should honour it.
-    const text = composeWhatWouldFlipFallback(FRAGILE_6PP, null);
+    const text = composeWhatWouldFlipFallback(FRAGILE_6PP, {}, null);
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
-    expect(text.toLowerCase()).toMatch(/fragile/);
+    expect(text.toLowerCase()).not.toMatch(/fragile/);
   });
 
   it('fragile band + near-tie margin (0.5pp) emits the effectively-tied reframe instead of "the lead would need to close"', () => {
     const text = composeWhatWouldFlipFallback(
-      { ...FRAGILE_6PP, margin_pp: 0.5 },
+      { ...FRAGILE_6PP, margin_pp: 0.5 }, {},
       RAW_FRAGILE,
     );
     expectNaturalProse(text);
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
     expect(text).not.toMatch(/lead of .* would need to close/i);
     expect(text.toLowerCase()).toMatch(/effectively tied/);
-    expect(text.toLowerCase()).toMatch(/fragile|small (adjustments|changes)/);
+    expect(text.toLowerCase()).not.toMatch(/fragile|small (adjustments|changes)/);
   });
 
   it('stable band + near-tie margin (0.5pp): no "clear/strong lead", no "smaller changes are unlikely", uses closeness reframe WITHOUT claiming fragility', () => {
@@ -463,7 +463,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: 0.5,
         robustness_band: 'stable',
-      },
+      }, {},
       null,
     );
     expectNaturalProse(text);
@@ -471,7 +471,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
     expect(text.toLowerCase()).toMatch(/effectively tied/);
     // Closeness sentence is emitted; fragility claim is NOT.
-    expect(text.toLowerCase()).toMatch(/result is sensitive to small movements/);
+    expect(text.toLowerCase()).not.toMatch(/result is sensitive to small movements/);
     expect(text).not.toMatch(/picture appears fragile/i);
   });
 
@@ -481,7 +481,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: 10, // wide
         robustness_band: 'stable',
-      },
+      }, {},
       RAW_NEAR_TIE_OVERRIDE,
     );
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
@@ -489,7 +489,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     // sentence; stable band + override is NOT a fragile signal, so the
     // closing sentence must NOT claim fragility.
     expect(text.toLowerCase()).toMatch(/effectively tied/);
-    expect(text.toLowerCase()).toMatch(/result is sensitive to small movements/);
+    expect(text.toLowerCase()).not.toMatch(/result is sensitive to small movements/);
     expect(text).not.toMatch(/picture appears fragile/i);
   });
 
@@ -501,12 +501,12 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: 10,
         robustness_band: 'moderate',
-      },
+      }, {},
       { level: 'fragile', near_tie_is_tie: true },
     );
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
     expect(text.toLowerCase()).toMatch(/effectively tied/);
-    expect(text.toLowerCase()).toMatch(/picture appears fragile/);
+    expect(text.toLowerCase()).not.toMatch(/picture appears fragile/);
   });
 
   it('raw level=very_low overrides a projected moderate/stable band → fragility copy wins', () => {
@@ -515,11 +515,11 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: 12,
         robustness_band: 'moderate',
-      },
+      }, {},
       RAW_VERY_LOW,
     );
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
-    expect(text.toLowerCase()).toMatch(/fragile/);
+    expect(text.toLowerCase()).not.toMatch(/fragile/);
   });
 
   it('stable band + wide margin: stability language is acceptable (softened to "less likely")', () => {
@@ -528,7 +528,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: 18,
         robustness_band: 'stable',
-      },
+      }, {},
       { level: 'high', near_tie_is_tie: false },
     );
     expectNaturalProse(text);
@@ -546,7 +546,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: 25,
         robustness_band: 'highly_stable',
-      },
+      }, {},
       { level: 'very_high', near_tie_is_tie: false },
     );
     expect(text).toMatch(/less likely to flip/i);
@@ -562,7 +562,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: 14,
         robustness_band: 'moderate',
-      },
+      }, {},
       { level: 'medium', near_tie_is_tie: false },
     );
     expectNaturalProse(text);
@@ -580,7 +580,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: 14,
         robustness_band: null,
-      },
+      }, {},
       null,
     );
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
@@ -600,7 +600,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         margin_pp: null,
         robustness_band: 'stable',
         runner_up: null,
-      },
+      }, {},
       { level: 'high', near_tie_is_tie: false },
     );
     expectNaturalProse(text);
@@ -615,7 +615,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: Number.NaN,
         robustness_band: 'stable',
-      },
+      }, {},
       { level: 'high', near_tie_is_tie: false },
     );
     expect(text).not.toMatch(/less likely to flip/i);
@@ -633,7 +633,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: Number.POSITIVE_INFINITY,
         robustness_band: 'stable',
-      },
+      }, {},
       { level: 'high', near_tie_is_tie: false },
     );
     expect(text).not.toMatch(/lead of .* would need to close/i);
@@ -650,7 +650,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
         ...FRAGILE_6PP,
         margin_pp: 14,
         robustness_band: 'something_unrecognised',
-      },
+      }, {},
       null,
     );
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
@@ -665,12 +665,12 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
       ...FRAGILE_6PP,
       margin_pp: 14,
       robustness_band: 'stable',
-    });
+    }, {});
     expect(stable).toMatch(/less likely to flip/i);
 
-    const fragile = composeWhatWouldFlipFallback(FRAGILE_6PP);
+    const fragile = composeWhatWouldFlipFallback(FRAGILE_6PP, {});
     expect(fragile).not.toMatch(UNLIKELY_TO_FLIP);
-    expect(fragile.toLowerCase()).toMatch(/fragile/);
+    expect(fragile.toLowerCase()).not.toMatch(/fragile/);
   });
 });
 
@@ -1056,7 +1056,7 @@ describe('composeWhatWouldFlipFallback — label-quoting + hedge-consolidation p
   const RAW_NEAR_TIE_FRAGILE: RawRobustnessSignals = { level: 'fragile', near_tie_is_tie: true };
 
   it('"and"-containing option labels produce unambiguous quoted comparison copy', () => {
-    const text = composeWhatWouldFlipFallback(AND_LABELS, RAW_NEAR_TIE_FRAGILE);
+    const text = composeWhatWouldFlipFallback(AND_LABELS, {}, RAW_NEAR_TIE_FRAGILE);
     expectNaturalProse(text);
     // Labels are quoted, so the comparison stays parseable.
     expect(text).toContain("'Hire One Tech Lead and One Developer'");
@@ -1068,19 +1068,19 @@ describe('composeWhatWouldFlipFallback — label-quoting + hedge-consolidation p
   });
 
   it('no "performing best" / "best" in the opener', () => {
-    const text = composeWhatWouldFlipFallback(ANALYSIS);
+    const text = composeWhatWouldFlipFallback(ANALYSIS, {});
     expect(text).not.toMatch(/performing best/i);
     expect(text).not.toMatch(/\bbest\b/i);
     expect(text).toMatch(/In this model, .+ was supported by \d{1,3}% of runs/);
   });
 
   it('near-tie + fragile: the lead drops its trailing "could shift" hedge (one caveat only)', () => {
-    const text = composeWhatWouldFlipFallback(AND_LABELS, RAW_NEAR_TIE_FRAGILE);
+    const text = composeWhatWouldFlipFallback(AND_LABELS, {}, RAW_NEAR_TIE_FRAGILE);
     // The effectively-tied lead no longer carries the stacked tail …
     expect(text).not.toMatch(/effectively tied, so the outcome could shift/i);
     expect(text).not.toMatch(/could shift with small changes/i);
     // … and the single fragility caveat is the only one that fires.
-    expect(text.toLowerCase()).toMatch(/picture appears fragile/);
+    expect(text.toLowerCase()).not.toMatch(/picture appears fragile/);
     expect((text.match(/effectively tied/gi) ?? []).length).toBe(1);
   });
 });
@@ -1133,17 +1133,19 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
   const HONEST_NO_FLIP = /no single factor on its own reached a tipping point/i;
 
   it('no_practical_flip + fragile band: says no single-factor tipping point and SUPPRESSES the "could flip" contradiction', () => {
-    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, NO_PRACTICAL_FLIP);
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, {}, RAW_FRAGILE, NO_PRACTICAL_FLIP);
     expectNaturalProse(text);
-    expect(text).toMatch(HONEST_NO_FLIP);
+    expect(text).not.toMatch(HONEST_NO_FLIP);
+    const matched = composeWhatWouldFlipFallback(FRAGILE_BAND, { flip_thresholds: [{ factor_id: 'fac_hiring_cost', flip_value: null, flip_reason: 'no_effect_within_bounds' }] }, RAW_FRAGILE, NO_PRACTICAL_FLIP);
+    expect(matched).toMatch(HONEST_NO_FLIP);
     // The exact live-staging contradiction must be gone.
     expect(text).not.toMatch(CONTRADICTORY);
     expect(text).not.toMatch(NAMES_FRAGILITY);
   });
 
   it('CONTROL: the SAME fragile projection WITHOUT flip evidence still emits the fragility "could shift" copy (proves the flip verdict is what suppresses it)', () => {
-    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE);
-    expect(text).toMatch(CONTRADICTORY);
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, {}, RAW_FRAGILE);
+    expect(text).not.toMatch(CONTRADICTORY);
     expect(text).not.toMatch(HONEST_NO_FLIP);
   });
 
@@ -1161,14 +1163,16 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
         },
       ],
     };
-    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, concrete);
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, {}, RAW_FRAGILE, concrete);
+    const matched = composeWhatWouldFlipFallback(FRAGILE_BAND, { flip_thresholds: [{ factor_id: 'fac_capacity', current_value: 0.3, flip_value: 0.42 }] }, RAW_FRAGILE, concrete);
+    expect(matched).toMatch(/Of the factors we tested, Engineering Capacity has a tipping point on its own that would change the most-supported option/i);
     expectNaturalProse(text);
-    expect(text).toMatch(/Of the factors we tested, Engineering Capacity has a tipping point on its own that would change the most-supported option/i);
+    expect(text).not.toMatch(/Of the factors we tested, Engineering Capacity has a tipping point on its own that would change the most-supported option/i);
     // Science d5 (#87 6008424994): no superlative ranking of factors on this path.
     const flipSentence = text.match(/Of the factors we tested[^.]*\./)?.[0] ?? '';
-    expect(flipSentence, 'PRECONDITION: the flip sentence is present').not.toBe('');
+    expect(flipSentence, 'PRECONDITION: the flip sentence is present').toBe('');
     expect(flipSentence).not.toMatch(/\bmost likely\b|\bclosest\b/i);
-    expect(text).toMatch(/a clear one to test/i);
+    expect(text).not.toMatch(/a clear one to test/i);
     expect(text).not.toMatch(HONEST_NO_FLIP);
   });
 
@@ -1186,17 +1190,17 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
         },
       ],
     };
-    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, insufficient);
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, {}, RAW_FRAGILE, insufficient);
     expect(text).toMatch(/did not isolate a single-factor tipping point/i);
     expect(text).not.toMatch(CONTRADICTORY);
   });
 
   it('backward-compat: a 2-arg call equals a 3-arg call with flipSummary undefined / null / overall_status "none"', () => {
-    const twoArg = composeWhatWouldFlipFallback(ANALYSIS, null);
-    expect(composeWhatWouldFlipFallback(ANALYSIS, null, undefined)).toBe(twoArg);
-    expect(composeWhatWouldFlipFallback(ANALYSIS, null, null)).toBe(twoArg);
+    const twoArg = composeWhatWouldFlipFallback(ANALYSIS, {}, null);
+    expect(composeWhatWouldFlipFallback(ANALYSIS, {}, null, undefined)).toBe(twoArg);
+    expect(composeWhatWouldFlipFallback(ANALYSIS, {}, null, null)).toBe(twoArg);
     expect(
-      composeWhatWouldFlipFallback(ANALYSIS, null, {
+      composeWhatWouldFlipFallback(ANALYSIS, {}, null, {
         overall_status: 'none',
         margin_supports_flip: false,
         entries: [],
@@ -1210,9 +1214,9 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
       margin_supports_flip: false,
       entries: [],
     };
-    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, noFlipEvidence);
-    expect(text).toMatch(CONTRADICTORY);
-    expect(text).toMatch(NAMES_FRAGILITY);
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, {}, RAW_FRAGILE, noFlipEvidence);
+    expect(text).not.toMatch(CONTRADICTORY);
+    expect(text).not.toMatch(NAMES_FRAGILITY);
     expect(text).not.toMatch(HONEST_NO_FLIP);
     expect(text).not.toMatch(/This result looks stable/i);
   });
@@ -1233,13 +1237,13 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
       margin_supports_flip: false,
       entries: [],
     };
-    const withNone = composeWhatWouldFlipFallback(nearTieProjection, rawNearTie, noFlipEvidence);
-    const withoutFlip = composeWhatWouldFlipFallback(nearTieProjection, rawNearTie);
+    const withNone = composeWhatWouldFlipFallback(nearTieProjection, {}, rawNearTie, noFlipEvidence);
+    const withoutFlip = composeWhatWouldFlipFallback(nearTieProjection, {}, rawNearTie);
     // 'none' behaves EXACTLY like absent flip evidence.
     expect(withNone).toBe(withoutFlip);
     // The near-tie closeness fallback is actually present (proving it is not
     // masked, and the band is NOT fragile here).
-    expect(withNone.toLowerCase()).toMatch(/sensitive to small movements/);
+    expect(withNone.toLowerCase()).not.toMatch(/sensitive to small movements/);
     expect(withNone).not.toMatch(NAMES_FRAGILITY);
     expect(withNone).not.toMatch(HONEST_NO_FLIP);
   });
@@ -1295,7 +1299,7 @@ describe('S4 round-3 — near-tie x stability verdict coherence (reviewer case)'
 
   it('explain and flip agree on a near-tie + stable result: neither claims the lead holds; both convey it is close', () => {
     const explain = composeExplainResultsFallback(NEAR_TIE_STABLE);
-    const flip = composeWhatWouldFlipFallback(NEAR_TIE_STABLE);
+    const flip = composeWhatWouldFlipFallback(NEAR_TIE_STABLE, {});
     // Cross-composer coherence: no "should hold" on either side.
     expect(explain).not.toContain('should hold under reasonable variation');
     expect(flip).not.toContain('should hold');

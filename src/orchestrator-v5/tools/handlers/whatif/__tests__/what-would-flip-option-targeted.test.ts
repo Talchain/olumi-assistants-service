@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
+import { composeOptionTargetedFlipAnswer } from '../compose-option-targeted-flip.js';
 import { createWhatWouldFlipHandler } from '../../what-would-flip.js';
 import type { HandlerInvocation } from '../../../registry.js';
 import type { AnalysisProjectionSummary } from '../../../../context/projection-summaries.js';
@@ -70,6 +71,7 @@ function makeInvocation(over: {
   flipTargetOption?: TargetOption | null;
   flipSummary?: FlipSummary | null;
   sonnetValid?: boolean;
+  selectedRunEnrichment?: Record<string, unknown>;
   message?: string;
   /** Defaults to a PERMITTING verdict with a leader that is neither target. */
   mayNameLeadingOption?: boolean;
@@ -113,6 +115,7 @@ function makeInvocation(over: {
       ? { answer_text: SONNET_ANSWER, answer_text_valid: true }
       : { answer_text: '', answer_text_valid: false, answer_validation_error: 'too_short' },
     analysisProjection: PROJECTION,
+    selectedRunEnrichment: over.selectedRunEnrichment ?? {},
     flipSummary: over.flipSummary === undefined ? FLIPS_TO_HIRE : over.flipSummary,
     flipTargetOption: over.flipTargetOption ?? null,
     mayNameLeadingOption: over.mayNameLeadingOption ?? true,
@@ -137,8 +140,8 @@ describe('what_would_flip — the answer addresses the option the user named', (
 
   it('the named option IS the one that flips ⇒ an addressed answer', async () => {
     const out = await handler(makeInvocation({ flipTargetOption: HIRE }));
-    expect(out.assistant_text).toContain('Hire Two Senior Engineers Locally would lead instead');
-    expect(out.assistant_text).toContain('Engineering Capacity');
+    expect(out.assistant_text).not.toContain('Hire Two Senior Engineers Locally would lead instead');
+    expect(out.assistant_text).not.toContain('Engineering Capacity');
   });
 
   it('the targeted answer OUTRANKS a valid Sonnet answer', async () => {
@@ -237,7 +240,7 @@ describe('NO named option ⇒ existing behaviour, untouched', () => {
   it('the deterministic composer keeps the generic prose', async () => {
     const out = await handler(makeInvocation({ flipTargetOption: null, sonnetValid: false }));
     expect(out.assistant_text).toMatch(/In this model, .+ was supported by \d{1,3}% of runs\./);
-    expect(out.assistant_text).toContain('would lead instead');
+    expect(out.assistant_text).not.toContain('would lead instead');
   });
 });
 
@@ -251,5 +254,49 @@ describe('NO flip evidence ⇒ existing behaviour, even with a named option', ()
     );
     expect(withTarget.assistant_text).toBe(without.assistant_text);
     expect(withTarget.assistant_text).toContain('Sonnet wrote this answer');
+  });
+});
+
+const MEASURED = { flip_thresholds: [{ factor_id: 'fac_eng_capacity', current_value: 0.4,
+  flip_value: 0.62, alternative_winner_id: HIRE.id }] };
+const ATTESTED = { flip_thresholds: [{ factor_id: 'fac_eng_capacity', flip_value: null,
+  flip_reason: 'structurally_invariant' }] };
+const INDETERMINATE = 'The analysis did not isolate a single-factor tipping point on this run, so it cannot say ' +
+  `what would change this result in favour of ${OFFSHORE.label}. Running the analysis again, ` +
+  'or widening the range on a factor you can influence, would give it more to work with.';
+const NEXT_STEP = ' Testing two or more factors together, or widening the range on one you can influence, would be the next thing to try.';
+
+describe('r2 refusal reasons through the real composer', () => {
+  it.each([
+    ['indeterminate', 'insufficient_data', MEASURED, INDETERMINATE],
+    ['indeterminate', 'insufficient_data', {}, INDETERMINATE],
+    ['no_flip_to_target', 'concrete', MEASURED,
+      'Within the tested ranges, none of the single-factor changes the analysis probed would ' +
+      `change this result in favour of ${OFFSHORE.label}.` + NEXT_STEP],
+    ['no_flip_to_target', 'concrete', {}, INDETERMINATE],
+    ['no_practical_flip', 'no_practical_flip', ATTESTED,
+      'Within the tested ranges, the analysis found no single-factor tipping point at all, so ' +
+      `nothing it probed would change this result in favour of ${OFFSHORE.label}.` + NEXT_STEP],
+    ['no_practical_flip', 'no_practical_flip', {}, INDETERMINATE],
+  ] as const)('%s with %j enrichment preserves the honest sentence', (reason, status, selectedRunEnrichment, text) => {
+    const result = composeOptionTargetedFlipAnswer({ selectedRunEnrichment,
+      target: OFFSHORE, flipSummary: { ...FLIPS_TO_HIRE, overall_status: status },
+      leadingOptionId: 'opt_status_quo', mayNameLeadingOption: true });
+    expect(result).toMatchObject({ kind: 'refused', reason, text });
+  });
+
+  it.each([
+    { ...MEASURED, flip_thresholds_status: 'unavailable' },
+    { flip_thresholds: [{ ...MEASURED.flip_thresholds[0], alternative_winner_id: OFFSHORE.id }] },
+  ])('no_flip_to_target needs available measurements and no measured winner equal to target', selectedRunEnrichment => {
+    expect(composeOptionTargetedFlipAnswer({ selectedRunEnrichment,
+      target: OFFSHORE, flipSummary: FLIPS_TO_HIRE, leadingOptionId: 'opt_status_quo',
+      mayNameLeadingOption: true })?.text).toBe(INDETERMINATE);
+  });
+
+  it('matched selected-Run pair restores the addressed handler answer beside the summary-only negative', async () => {
+    const out = await handler(makeInvocation({ flipTargetOption: HIRE, selectedRunEnrichment: MEASURED }));
+    expect(out.assistant_text).toContain('Hire Two Senior Engineers Locally would lead instead');
+    expect(out.assistant_text).toContain('Engineering Capacity');
   });
 });

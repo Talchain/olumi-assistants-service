@@ -198,7 +198,7 @@ describe('F6 egress — no double emission with the deterministic composers', ()
    */
   it.each([
     ['explain_results', () => composeExplainResultsFallback(projection, null, null, SIGNAL)],
-    ['what_would_flip', () => composeWhatWouldFlipFallback(projection, null, null, SIGNAL)],
+    ['what_would_flip', () => composeWhatWouldFlipFallback(projection, {}, null, null, SIGNAL)],
   ])('%s — composer discloses once, egress adds nothing', (_name, compose) => {
     const composed = compose();
 

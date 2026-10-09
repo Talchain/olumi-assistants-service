@@ -427,7 +427,7 @@ function whatWouldChangeAnswer(scenarioId: string, read: Parameters<typeof tippi
     && leaderLicenceFromState(licence.analysisState, licence.analysisReady) !== 'withheld') {
     return { text: sentText ?? measured.turn.reply, tippingTurn: null, measured };
   }
-  const tippingTurn = tippingPointCoachingFor(scenarioId, read, licence);
+  const tippingTurn = tippingPointCoachingFor(scenarioId, read, licence, undefined);
   return { text: tippingTurn.kind === 'found' ? settleTippingPointCoaching(tippingTurn, tippingTurn.reply).reply : tippingTurn.reply,
     tippingTurn, measured: null };
 }

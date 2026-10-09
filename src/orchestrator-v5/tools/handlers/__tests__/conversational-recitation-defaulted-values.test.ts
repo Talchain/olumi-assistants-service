@@ -274,10 +274,10 @@ describe('conversational recitation — defaulted values', () => {
 
   describe('FALSEHOOD 1 — the disclosure the analyse turn already makes', () => {
     it('the flip fallback carries the disclosure and drops the stability line', () => {
-      const before = composeWhatWouldFlipFallback(clearStableProjection(), null, null, null);
+      const before = composeWhatWouldFlipFallback(clearStableProjection(), {}, null, null, null);
       expect(before).toContain(DEPLOYED_STABILITY_LINE);
 
-      const after = composeWhatWouldFlipFallback(clearStableProjection(), null, null, {
+      const after = composeWhatWouldFlipFallback(clearStableProjection(), {}, null, null, {
         count: 1,
         factorCount: 1,
         named: ['Market Conditions'],
@@ -306,8 +306,8 @@ describe('conversational recitation — defaulted values', () => {
     it('BYTE-IDENTICAL when there is no signal (fail-safe direction)', () => {
       // The pre-existing copy is reproduced exactly when nothing is defaulted,
       // so this change cannot alter an honest turn.
-      expect(composeWhatWouldFlipFallback(clearStableProjection(), null, null, null)).toBe(
-        composeWhatWouldFlipFallback(clearStableProjection(), null, null),
+      expect(composeWhatWouldFlipFallback(clearStableProjection(), {}, null, null, null)).toBe(
+        composeWhatWouldFlipFallback(clearStableProjection(), {}, null, null),
       );
       expect(composeExplainResultsFallback(clearStableProjection(), null, null, null)).toBe(
         composeExplainResultsFallback(clearStableProjection(), null, null),

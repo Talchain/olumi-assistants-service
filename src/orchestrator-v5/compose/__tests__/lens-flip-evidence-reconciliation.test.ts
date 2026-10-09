@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { BODY_BY_RATIONALE, TITLE_BY_LENS, selectLens } from '../lens-selector.js';
+import { BODY_BY_RATIONALE, TITLE_BY_LENS, selectLens, rankInterventions } from '../lens-selector.js';
 
 function loadFixture(name: string): Record<string, unknown> {
   return JSON.parse(
@@ -54,6 +54,8 @@ function factFrom(enrichment: Record<string, unknown>): RunAnalysisHandlerFact {
     },
   } as unknown as RunAnalysisHandlerFact;
 }
+
+import { buildCoachingBlocks, buildGraphNodeLookup, buildLensSurface } from '../phase3-blocks.js';
 
 import { assertsFlippability } from '../../__tests__/support/flip-claim-matcher.support.js';
 
@@ -132,14 +134,14 @@ describe('RED-first — no flippability claim on an attested-no-flip turn', () =
     );
     const withoutEvidence = selectLens(factFrom({ factor_sensitivity: run.factor_sensitivity }));
 
-    expect(withoutEvidence!.rationaleCode).toBe('FLIP_RISK_ISOLATED');
+    expect(withoutEvidence!.rationaleCode).toBe('DOMINANT_DRIVER');
     expect(withEvidence!.rationaleCode).not.toBe(withoutEvidence!.rationaleCode);
-    expect(assertsFlippability(withoutEvidence!.body)).toBe(true);
+    expect(assertsFlippability(withoutEvidence!.body)).toBe(false);
     expect(assertsFlippability(withEvidence!.body)).toBe(false);
   });
 });
 
-describe('POSITIVE CONTROL — a run with a REAL flip keeps its honest flip copy', () => {
+describe('subject binding — matched flip and Leeds-activation transplant', () => {
   // If the gate over-fired, this is what would catch it: witness-2265 runA is
   // the first real measured factor flip in the programme's history.
   const realFlipFact = factFrom({
@@ -150,13 +152,28 @@ describe('POSITIVE CONTROL — a run with a REAL flip keeps its honest flip copy
     flip_thresholds: REAL_FLIP.flip_thresholds,
   });
 
-  it('keeps the FLIP_RISK_ISOLATED rationale', () => {
-    expect(selectLens(realFlipFact)!.rationaleCode).toBe('FLIP_RISK_ISOLATED');
+  it('matched factor keeps the FLIP_RISK_ISOLATED rationale and byte-identical body', () => {
+    const matched = factFrom({
+      factor_sensitivity: [{ factor_id: 'fac_leeds_site', influence_score: 0.5, influence_rank: 1, flip_risk_category: 'isolated' }],
+      flip_thresholds: REAL_FLIP.flip_thresholds,
+    });
+    expect(selectLens(matched)!.rationaleCode).toBe('FLIP_RISK_ISOLATED');
+    expect(selectLens(matched)!.body).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
   });
 
-  it('keeps the flip-language body — a TRUE claim is never suppressed', () => {
-    expect(assertsFlippability(selectLens(realFlipFact)!.body)).toBe(true);
-    expect(selectLens(realFlipFact)!.body).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
+  it('withholds flip-language for fac_leeds_activation when the measured pair belongs to fac_leeds_site', () => {
+    expect(assertsFlippability(selectLens(realFlipFact)!.body)).toBe(false);
+    expect(selectLens(realFlipFact)!.rationaleCode).toBe('DOMINANT_DRIVER');
+    expect(selectLens(realFlipFact)!.body.trim().length).toBeGreaterThan(0);
+    const ctx = { created_at: '2026-10-09T00:00:00.000Z', graph_hash_at_generation: 'gh_a1b2c3d4e5f60001' };
+    const surface = buildLensSurface(realFlipFact, ctx, null);
+    const coaching = buildCoachingBlocks(realFlipFact, buildGraphNodeLookup(realFlipFact), ctx);
+    for (const body of [selectLens(realFlipFact)?.body, surface?.suggestion.body, ...coaching.map(block => block.body)]) {
+      if (body !== undefined) expect(body.trim().length).toBeGreaterThan(0);
+    }
+    for (const candidate of rankInterventions(realFlipFact).candidates) {
+      expect(candidate.rationaleCode).not.toMatch(/^FLIP_RISK_/);
+    }
   });
 
   it('keeps the shipped title', () => {
@@ -164,7 +181,7 @@ describe('POSITIVE CONTROL — a run with a REAL flip keeps its honest flip copy
   });
 });
 
-describe('BACKWARD COMPATIBILITY — absent flip evidence changes nothing', () => {
+describe('absent flip evidence falls through to the qualitative driver', () => {
   const marginals = {
     factor_sensitivity: [
       { factor_id: 'fac_a', influence_score: 0.5, influence_rank: 1, flip_risk_category: 'isolated' },
@@ -172,15 +189,15 @@ describe('BACKWARD COMPATIBILITY — absent flip evidence changes nothing', () =
     ],
   };
 
-  it('no flip_thresholds key at all → unchanged FLIP_RISK_ISOLATED', () => {
+  it('no flip_thresholds key at all → qualitative dominant driver', () => {
     const sel = selectLens(factFrom(marginals))!;
-    expect(sel.rationaleCode).toBe('FLIP_RISK_ISOLATED');
-    expect(sel.body).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
+    expect(sel.rationaleCode).toBe('DOMINANT_DRIVER');
+    expect(sel.body.trim().length).toBeGreaterThan(0);
   });
 
   it('empty flip_thresholds → unchanged (absent ≠ attested)', () => {
     const sel = selectLens(factFrom({ ...marginals, flip_thresholds: [] }))!;
-    expect(sel.rationaleCode).toBe('FLIP_RISK_ISOLATED');
+    expect(sel.rationaleCode).toBe('DOMINANT_DRIVER');
   });
 
   it('unattested null rows → unchanged (a failure to find is not an attestation)', () => {
@@ -190,7 +207,7 @@ describe('BACKWARD COMPATIBILITY — absent flip evidence changes nothing', () =
         flip_thresholds: [{ factor_id: 'fac_a', factor_label: 'A', flip_value: null }],
       }),
     )!;
-    expect(sel.rationaleCode).toBe('FLIP_RISK_ISOLATED');
+    expect(sel.rationaleCode).toBe('DOMINANT_DRIVER');
   });
 });
 
@@ -263,7 +280,7 @@ describe('the 2.211-① CORRELATED YIELD must apply to the no-flip counterpart t
   };
 
   it('CONTROL — the flip-language correlated code yields (pre-existing behaviour)', () => {
-    const sel = selectLens(factFrom(correlatedPlusPreMortem))!;
+    const sel = selectLens(factFrom({ ...correlatedPlusPreMortem, flip_thresholds: [{ factor_id: 'fac_a', current_value: 0.5, flip_value: 0.7 }] }))!;
     expect(sel.lens).toBe('pre_mortem');
     expect(sel.displacementCause).toBe('correlated_yield');
     expect(sel.displacedLens).toBe('sensitivity_flip_risk');

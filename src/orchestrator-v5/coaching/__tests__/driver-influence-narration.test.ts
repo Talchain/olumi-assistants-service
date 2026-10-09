@@ -325,7 +325,7 @@ describe('DGAI #341 — top_drivers rank by influence_score (per-option shape)',
 
 describe('DGAI #341 — what_would_flip fallback names the influence top and never self-contradicts', () => {
   it('composed through the real chain, names Technical Leadership Capacity, not Market Timing Pressure', () => {
-    const text = composeWhatWouldFlipFallback(projectionFromEnrichment(ENRICHMENT_341));
+    const text = composeWhatWouldFlipFallback(projectionFromEnrichment(ENRICHMENT_341), {});
     expect(text).toContain(
       'Movement on Technical Leadership Capacity or Founder Equity Dilution would shift this result the most.',
     );
@@ -344,7 +344,7 @@ describe('DGAI #341 — what_would_flip fallback names the influence top and nev
       ENRICHMENT_341,
       new Set(['fac_tlc', 'fac_fed']),
     );
-    const text = composeWhatWouldFlipFallback(projection);
+    const text = composeWhatWouldFlipFallback(projection, {});
     expect(text).not.toContain('would shift this result the most');
     expect(text).not.toContain('Market Timing Pressure');
   });

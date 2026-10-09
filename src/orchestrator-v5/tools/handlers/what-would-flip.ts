@@ -169,7 +169,7 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
     // from the turn's own derivations, never re-derived here.
     const targeted =
       invocation.flipTargetOption != null
-        ? composeOptionTargetedFlipAnswer({
+        ? composeOptionTargetedFlipAnswer({ selectedRunEnrichment: invocation.selectedRunEnrichment ?? {},
             target: invocation.flipTargetOption,
             flipSummary: invocation.flipSummary,
             leadingOptionId: invocation.analysisLeadingOptionId ?? null,
@@ -183,7 +183,7 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
         : sonnetValid
           ? explanation!.answer_text
           : composeWhatWouldFlipFallback(
-              invocation.analysisProjection,
+              invocation.analysisProjection, invocation.selectedRunEnrichment ?? {},
               invocation.rawRobustness ?? null,
               invocation.flipSummary ?? null,
               // Same fact, same same-run guard as `rawRobustness` above: the

@@ -265,6 +265,7 @@ export interface ContextPackAnalysisFragileEdge {
  * 'no_effect_within_bounds'`).
  */
 export interface ContextPackAnalysisFlipThreshold {
+  readonly factor_id?: string | null;
   readonly factor_label: string;
   readonly current_value: number | null;
   readonly flip_value: number | null;
@@ -800,6 +801,7 @@ export interface ContextPack {
 }
 
 export interface AssembleContextPackInput {
+  readonly selectedRunEnrichment?: Record<string, unknown>;
   // v0.7.0: assembler only operates on message-kind turns (system events
   // take a deterministic pre-TurnExecutor path in route-v2.ts).
   readonly payload: MessageTurnPayload;
@@ -1788,16 +1790,13 @@ export function assembleContextPackWithSummary(
     input.interventionControlledFactorIds,
     currentFactorIds,
   );
-  const displayRawAnalysis = hasDistinctDisplayAnalysisSource
-    ? projectAnalysis(
-        budgeted.analysis,
-        // `projectAnalysis` intentionally drops this legacy parameter. Keep
-        // the split source explicit without creating a second inert contract.
-        null,
-        input.interventionControlledFactorIds,
-        currentFactorIds,
-      )
-    : rawAnalysis;
+  const displayRawAnalysis = projectAnalysis(
+    budgeted.analysis,
+    null,
+    input.interventionControlledFactorIds,
+    currentFactorIds,
+    true,
+  );
   const projectedGraphBeforeAuthority: ContextPackGraph = budgeted.compactedGraph
     ? projectCompactGraph(budgeted.compactedGraph, input.compactedConstraints ?? null)
     : projectGraph(input.graph ?? null);
@@ -1920,6 +1919,7 @@ export function assembleContextPackWithSummary(
   // second place formatting the same numbers.
   const displayAnalysis = formatAnalysisForContext(displayRawAnalysis, {
     analysisFreshness: input.coachingContext?.freshness,
+    selectedRunEnrichment: input.selectedRunEnrichment,
   });
   // Selection-aware answering (hop 4). `buildTurnContext` already resolved the
   // selection against canonical state; this only PLACES it.
@@ -2573,8 +2573,9 @@ export function projectTopDrivers(
  * Map a per-option `FlipThreshold` (compactAnalysis derivation — always a
  * complete numeric pair) into the widened tipping-point projection shape.
  */
-function tippingFromFlipThreshold(entry: FlipThreshold): ContextPackAnalysisFlipThreshold {
+function tippingFromFlipThreshold(entry: FlipThreshold, retainFactorIds = false): ContextPackAnalysisFlipThreshold {
   return {
+    ...(retainFactorIds ? { factor_id: entry.factor_id } : {}),
     factor_label: entry.factor_label,
     current_value: entry.current_value,
     flip_value: entry.flip_value,
@@ -2583,7 +2584,7 @@ function tippingFromFlipThreshold(entry: FlipThreshold): ContextPackAnalysisFlip
   };
 }
 
-function tippingFromSignal(entry: TippingPointSignal): ContextPackAnalysisFlipThreshold {
+function tippingFromSignal(entry: TippingPointSignal, retainFactorIds = false): ContextPackAnalysisFlipThreshold {
   // ROADMAP 2.205 — carry the display licence through, both keys or neither.
   // `factor_id` is still stripped here (internal match key only); the licence
   // was already resolved against it upstream.
@@ -2596,6 +2597,7 @@ function tippingFromSignal(entry: TippingPointSignal): ContextPackAnalysisFlipTh
       ? entry.flip_display
       : null;
   return {
+    ...(retainFactorIds ? { factor_id: entry.factor_id } : {}),
     factor_label: entry.factor_label,
     current_value: entry.current_value,
     flip_value: entry.flip_value,
@@ -2683,6 +2685,7 @@ export function projectAnalysis(
   stalenessReason: string | null,
   controlledFactorIds?: ReadonlySet<string>,
   currentFactorIds?: ReadonlySet<string>,
+  retainFactorIds = false,
 ): ContextPackAnalysis | null {
   if (analysis === null) return null;
 
@@ -2801,12 +2804,12 @@ export function projectAnalysis(
           tippingSignals,
           controlledFactorIds,
           'projectAnalysis.flip_thresholds',
-        ).map(tippingFromSignal)
+        ).map(entry => tippingFromSignal(entry, retainFactorIds))
       : filterLeverControlledFactorEntries(
           analysis.flip_thresholds ?? [],
           controlledFactorIds,
           'projectAnalysis.flip_thresholds',
-        ).map(tippingFromFlipThreshold);
+        ).map(entry => tippingFromFlipThreshold(entry, retainFactorIds));
 
   // 6. P0b-1: drop lever-SOURCED fragile edges before they reach the prose /
   //    validation surfaces (explain_results, explanation-fallback, advice gate —

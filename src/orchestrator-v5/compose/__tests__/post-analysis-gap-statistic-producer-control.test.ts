@@ -220,7 +220,7 @@ function everySite(): Site[] {
       probeSite: 'explanation-fallback.ts:240',
       mode: 'flip',
       band,
-      text: composeWhatWouldFlipFallback(projection(band), null, null),
+      text: composeWhatWouldFlipFallback(projection(band), {}, null, null),
       preFixSentence: `For "${RUNNER_LABEL}" to overtake it, the lead of ${qty} would need to close.`,
     });
   }

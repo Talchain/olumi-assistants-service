@@ -79,6 +79,7 @@ function assertNoBannedProse(s: string | undefined): void {
 }
 
 interface FactInput {
+  readonly measuredFlipPairs?: readonly Record<string, unknown>[];
   readonly graphHash?: string | null;
   readonly decisionReview?: Record<string, unknown>;
   readonly graphNodes?: ReadonlyArray<Record<string, unknown>>;
@@ -89,6 +90,7 @@ interface FactInput {
 
 function makeFact(input: FactInput = {}): RunAnalysisHandlerFact {
   const enrichment: Record<string, unknown> = {};
+  if (input.measuredFlipPairs !== undefined) enrichment.flip_thresholds = input.measuredFlipPairs;
   if (input.decisionReview !== undefined) {
     enrichment.decision_review = input.decisionReview;
   }
@@ -333,6 +335,7 @@ describe('buildReviewCardBlocks — flip_threshold card_kind', () => {
   it('emits one card per flip_threshold entry with factor_label from the LLM', () => {
     const blocks = buildReviewCardBlocks(
       makeFact({
+        measuredFlipPairs: [{ factor_id: 'fac_delivery_risk', current_value: 0.3, flip_value: 0.7 }, { factor_id: 'fac_cost_overrun', current_value: 10000, flip_value: 50000 }],
         decisionReview: {
           flip_thresholds: [
             {
@@ -1499,6 +1502,7 @@ describe('Round-3 fail-closed lookup-miss invariants', () => {
 
   it('flip_threshold: title uses canonical graph label (not LLM-supplied factor_label) when lookup hits', () => {
     const fact = makeFact({
+      measuredFlipPairs: [{ factor_id: 'fac_delivery_risk', current_value: 0.3, flip_value: 0.7 }],
       decisionReview: {
         flip_thresholds: [
           {
@@ -1703,6 +1707,7 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
 
   it('flip_threshold card survives with banned recommendation language rewritten', () => {
     const fact = makeFact({
+      measuredFlipPairs: [{ factor_id: 'fac_delivery_risk', current_value: 0.3, flip_value: 0.7 }],
       decisionReview: {
         flip_thresholds: [
           {
@@ -1899,14 +1904,14 @@ describe('Round-4 raw-ID telemetry redaction (P1.2)', () => {
 
     // Exactly one warn fired and its payload omits the raw token suffix.
     const calls = warnSpy.mock.calls.filter(
-      ([payload]) =>
+      ([payload]: readonly unknown[]) =>
         typeof payload === 'object' &&
         payload !== null &&
         (payload as Record<string, unknown>).event === 'v5.phase3.block_dropped',
     );
     expect(calls.length).toBeGreaterThan(0);
     const idDropCall = calls.find(
-      ([payload]) =>
+      ([payload]: readonly unknown[]) =>
         (payload as Record<string, unknown>).drop_reason ===
         'prose_guard_raw_id',
     );
@@ -1934,7 +1939,7 @@ describe('Round-4 raw-ID telemetry redaction (P1.2)', () => {
     });
     buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
     const call = warnSpy.mock.calls.find(
-      ([payload]) =>
+      ([payload]: readonly unknown[]) =>
         (payload as Record<string, unknown>).drop_reason ===
         'prose_guard_forbidden_phrase',
     );
@@ -1967,7 +1972,7 @@ describe('Round-4 raw-ID telemetry redaction (P1.2)', () => {
       expect(dropCall).toBeUndefined();
       // …and the rewrite is visible with gate id + term.
       const rewriteCall = infoSpy.mock.calls.find(
-        ([payload]) =>
+        ([payload]: readonly unknown[]) =>
           typeof payload === 'object' &&
           payload !== null &&
           (payload as Record<string, unknown>).event ===

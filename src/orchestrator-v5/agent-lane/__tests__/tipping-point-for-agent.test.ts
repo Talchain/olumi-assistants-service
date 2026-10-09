@@ -19,56 +19,56 @@ describe('typed tipping-point fact from the served corpus', () => {
     expect(POSITIVE.graph_hash).toBe('0e19bb826dd6fde4');
     expect(rows[0]).toMatchObject({ factor_id: 'pro_plan_price', current_value: 49, flip_value: 55.76,
       unit: 'GBP/month', value_scale: 'display', flip_reason: 'found' });
-    expect(tippingPointOf(ENRICHMENT)).toEqual({ status: 'found', factor_id: 'pro_plan_price', label: 'Pro plan price',
+    expect(tippingPointOf(ENRICHMENT, undefined)).toEqual({ status: 'found', factor_id: 'pro_plan_price', label: 'Pro plan price',
       current_value: 49, threshold: 55.76, direction: 'increase', unit: 'GBP/month',
       current_display: '49 GBP/month', threshold_display: '55.76 GBP/month', say: SAY });
   });
   it('keeps the producer order, independently of EVPPI order or values', () => {
     const swapped = tippingPointOf({ ...withRows([rows[1]!, rows[0]!, rows[2]!]),
-      factor_evppi: [{ factor_id: 'pro_plan_price', status: 'resolved', evppi: 999 }] });
+      factor_evppi: [{ factor_id: 'pro_plan_price', status: 'resolved', evppi: 999 }] }, undefined);
     expect(swapped).toMatchObject({ status: 'found', factor_id: 'feature_development_spend', direction: 'increase', threshold: 17330 });
-    expect(tippingPointOf({ ...ENRICHMENT, factor_evppi: [] })).toEqual(tippingPointOf(ENRICHMENT));
+    expect(tippingPointOf({ ...ENRICHMENT, factor_evppi: [] }, undefined)).toEqual(tippingPointOf(ENRICHMENT, undefined));
   });
   it('skips a display-unsafe first crossing and selects the next usable existing-order row', () => {
-    expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: 'model' }, rows[1]!, rows[2]!]))).toMatchObject({
+    expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: 'model' }, rows[1]!, rows[2]!]), undefined)).toMatchObject({
       status: 'found', factor_id: 'feature_development_spend', direction: 'increase',
     });
   });
   it('uses the shared legacy display predicate without a second stricter validator', () => {
-    expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: undefined }]))).toMatchObject({ status: 'found', threshold: 55.76 });
-    expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: undefined, current_value: 0.49, flip_value: 0.5576 }])))
+    expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: undefined }]), undefined)).toMatchObject({ status: 'found', threshold: 55.76 });
+    expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: undefined, current_value: 0.49, flip_value: 0.5576 }]), undefined))
       .toEqual({ status: 'unresolved' });
   });
   it('does not round a distinguishable threshold into today’s value', () => {
-    expect(tippingPointOf(withRows([{ ...rows[0]!, current_value: 100.2, flip_value: 100.4 }]))).toMatchObject({
+    expect(tippingPointOf(withRows([{ ...rows[0]!, current_value: 100.2, flip_value: 100.4 }]), undefined)).toMatchObject({
       status: 'found', current_display: '100.2 GBP/month', threshold_display: '100.4 GBP/month',
     });
   });
   it('retains direction from the shared parser and describes a decreasing crossing correctly', () => {
-    expect(tippingPointOf(withRows([{ ...rows[0]!, current_value: 60, flip_value: 55.76, direction: 'increase' }]))).toMatchObject({
+    expect(tippingPointOf(withRows([{ ...rows[0]!, current_value: 60, flip_value: 55.76, direction: 'increase' }]), undefined)).toMatchObject({
       direction: 'decrease', say: SAY.replace('rises above', 'falls below'),
     });
   });
   it('keeps no-signal distinct from unresolved and unavailable, without a tipping sentence', () => {
     const controlRows = (CONTROL.enrichment as Rec).flip_thresholds as Rec[];
     expect(controlRows.every(r => r.flip_value === null && r.flip_reason === 'structurally_invariant')).toBe(true);
-    expect(tippingPointOf(CONTROL.enrichment)).toEqual({ status: 'no_flip_in_range' });
-    expect(tippingPointOf(withRows([{ ...rows[0]!, flip_value: null, flip_reason: 'candidate_cap_exceeded' }])))
+    expect(tippingPointOf(CONTROL.enrichment, undefined)).toEqual({ status: 'no_flip_in_range' });
+    expect(tippingPointOf(withRows([{ ...rows[0]!, flip_value: null, flip_reason: 'candidate_cap_exceeded' }]), undefined))
       .toEqual({ status: 'unresolved' });
-    expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: 'model' }]))).toEqual({ status: 'unresolved' });
-    expect(tippingPointOf(withRows([]))).toEqual({ status: 'not_evaluated' });
-    expect(tippingPointOf(undefined)).toEqual({ status: 'not_evaluated' });
+    expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: 'model' }]), undefined)).toEqual({ status: 'unresolved' });
+    expect(tippingPointOf(withRows([]), undefined)).toEqual({ status: 'not_evaluated' });
+    expect(tippingPointOf(undefined, undefined)).toEqual({ status: 'not_evaluated' });
     expect(JSON.stringify(analysisResultForAgent(CONTROL))).not.toContain('a factor that could change this');
   });
   it('does not depend on alternative-winner identity or label', () => {
-    expect(tippingPointOf(withRows([{ ...rows[0]!, alternative_winner_id: null, alternative_winner_label: null }])))
-      .toEqual(tippingPointOf(ENRICHMENT));
+    expect(tippingPointOf(withRows([{ ...rows[0]!, alternative_winner_id: null, alternative_winner_label: null }]), undefined))
+      .toEqual(tippingPointOf(ENRICHMENT, undefined));
   });
   it('preserves the enclosing Run binding and does not mutate the stored result', () => {
     const before = JSON.stringify(block);
     const out = analysisResultForAgent(block) as Rec;
     expect(out.computed_against_hash).toBe('0e19bb826dd6fde4');
-    expect(out.tipping_point).toEqual(tippingPointOf(ENRICHMENT));
+    expect(out.tipping_point).toEqual(tippingPointOf(ENRICHMENT, undefined));
     // S2i (DL GO): robustness ran on this Run, so the screen shows it and no absence status is handed to the Agent.
     expect(out).not.toHaveProperty('decision_sensitivity');
     expect(JSON.stringify(block)).toBe(before);
@@ -76,7 +76,7 @@ describe('typed tipping-point fact from the served corpus', () => {
   it.each([false, true])('retains the threshold under leader licence %s, with no winner fields', (leader_may_be_named) => {
     const out = modelFacingToolResult('run_analysis', { result: analysisResultForAgent(block),
       claim_permissions: { leader_may_be_named } }) as { result: { tipping_point: Rec } };
-    expect(out.result.tipping_point).toEqual(tippingPointOf(ENRICHMENT));
+    expect(out.result.tipping_point).toEqual(tippingPointOf(ENRICHMENT, undefined));
     expect(JSON.stringify(out.result.tipping_point)).not.toMatch(/additional_advertising|Additional advertising|new_leading_option/u);
   });
 });

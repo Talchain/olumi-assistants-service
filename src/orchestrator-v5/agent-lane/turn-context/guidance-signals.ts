@@ -339,7 +339,7 @@ export function assembleGuidanceSignals(i: GuidanceSignalInputs): GuidanceSignal
     'run.withheld_reason': str(claim?.withheld_reason),
     'run.leader_option_id': leader,
     'run.decision_sensitivity': sensitivityOf(block),
-    'run.tipping_point': tippingPointOf(enrichmentOf(block)),
+    'run.tipping_point': tippingPointOf(enrichmentOf(block), undefined),
     'model.goal_present': goal !== undefined,
     'model.goal_label': typeof goal?.label === 'string' ? goal.label : null,
     'model.goal_horizon': goal?.goal_horizon ?? null,

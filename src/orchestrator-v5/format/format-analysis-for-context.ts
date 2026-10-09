@@ -20,6 +20,7 @@
  * (the function does not accept its own output as input).
  */
 
+import { hasMeasuredFlipThresholdFor, hasAttestedNoFlipForFactor } from '../claims/flip-threshold-licence.js';
 import type {
   ContextPackAnalysis,
   ContextPackAnalysisDriver,
@@ -127,6 +128,7 @@ export interface DisplaySafeRankedOption {
  * narrow licence; it is a wrong one.
  */
 export interface FormatAnalysisOptions {
+  readonly selectedRunEnrichment?: Record<string, unknown>;
   /**
    * The live `deriveAnalysisFreshness` verdict for this turn
    * (`ContextPack.coaching_context.freshness`). The flip-point licence opens
@@ -840,16 +842,16 @@ function enforceDisplayAnalysisBudget(out: MutableDisplaySafeAnalysis): void {
  * Lane 21 — banded tipping-risk phrase (doctrine A2: the LLM never sees the
  * raw current/flip values).
  *
- *   tippingRiskPhrase(100, 88, false)
+ *   tippingRiskPhrase(100, 88, false, measuredEnrichment, 'factor')
  *     → "a moderate decrease could flip the result"     (12% relative shift)
- *   tippingRiskPhrase(0.3, 0.297, false)
+ *   tippingRiskPhrase(0.3, 0.297, false, measuredEnrichment, 'factor')
  *     → "close to a tipping point — a small decrease could flip the result"
- *   tippingRiskPhrase(10, 20, false)
+ *   tippingRiskPhrase(10, 20, false, measuredEnrichment, 'factor')
  *     → "only a large increase would flip the result"
- *   tippingRiskPhrase(0, 5, false)
+ *   tippingRiskPhrase(0, 5, false, measuredEnrichment, 'factor')
  *     → "an increase in this factor could flip the result"  (relative
  *        distance undefined at current = 0 — direction only, no band)
- *   tippingRiskPhrase(null, null, true)
+ *   tippingRiskPhrase(null, null, true, attestedEnrichment, 'factor')
  *     → "no flip point found within the tested range"       (producer-attested)
  *
  * Returns null when nothing can be said safely (no flip pair, no attested
@@ -859,7 +861,11 @@ export function tippingRiskPhrase(
   currentValue: number | null,
   flipValue: number | null,
   noFlipWithinBounds: boolean,
+  enrichment: Record<string, unknown>,
+  subjectFactorId: string | null,
 ): string | null {
+  if (noFlipWithinBounds ? !hasAttestedNoFlipForFactor(enrichment, subjectFactorId)
+    : !hasMeasuredFlipThresholdFor(enrichment, subjectFactorId)) return null;
   if (noFlipWithinBounds) return 'no flip point found within the tested range';
   if (
     typeof currentValue !== 'number' ||
@@ -1048,11 +1054,14 @@ export function formatFlipPointDisplay(
 function formatTippingPoint(
   entry: ContextPackAnalysisFlipThreshold,
   licenceOpen: boolean,
+  enrichment: Record<string, unknown>,
 ): DisplaySafeTippingPoint | null {
   const risk = tippingRiskPhrase(
     entry.current_value,
     entry.flip_value,
     entry.no_flip_within_bounds,
+    enrichment,
+    entry.factor_id ?? null,
   );
   if (risk === null) return null;
   // ROADMAP 2.205 — the band is ALWAYS emitted; the licensed number is
@@ -1152,7 +1161,7 @@ export function formatAnalysisForContext(
   // Banded tipping risks. Entries with nothing safe to say are dropped by
   // the formatter (null risk), never fabricated.
   const tipping = (raw.flip_thresholds ?? [])
-    .map((e) => formatTippingPoint(e, flipLicenceOpen))
+    .map((e) => formatTippingPoint(e, flipLicenceOpen, options.selectedRunEnrichment ?? {}))
     .filter((t): t is DisplaySafeTippingPoint => t !== null);
   if (tipping.length > 0) {
     out.tipping_points = tipping;

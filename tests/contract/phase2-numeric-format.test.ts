@@ -106,7 +106,7 @@ describe('phase2 numeric format — what_would_flip fallback', () => {
     'renders probabilities as percentages and margins as "percentage points" (leader=$leader_probability)',
     (fixture) => {
       const projection = buildProjection(fixture);
-      const prose = composeWhatWouldFlipFallback(projection);
+      const prose = composeWhatWouldFlipFallback(projection, {});
 
       const expectedLeaderDisplay = formatProbability(fixture.leader_probability);
       expect(prose).toContain(expectedLeaderDisplay);

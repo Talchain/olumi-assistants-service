@@ -69,6 +69,7 @@
  *     enforcement.
  */
 
+import { hasMeasuredFlipThresholdFor } from '../claims/flip-threshold-licence.js';
 import { z } from 'zod';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import {
@@ -871,6 +872,7 @@ export function buildReviewCardBlocks(
       dr,
       lookup,
       ctx,
+      readRecord(fact.result.enrichment) ?? {},
       readAttestedFlipWinners(fact),
       typeof fact.result.leading_option_id === 'string' && fact.result.leading_option_id.length > 0
         ? fact.result.leading_option_id
@@ -2880,6 +2882,7 @@ function buildFlipThresholdCards(
   dr: Record<string, unknown>,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
+  enrichment: Record<string, unknown>,
   attestedWinnerIdByFactorId: ReadonlyMap<string, string>,
   leadingOptionId: string | null,
 ): readonly ReviewCardBlock[] {
@@ -2907,6 +2910,10 @@ function buildFlipThresholdCards(
     const row = readFlipThresholdCardRow(raw);
     if (row === null) continue;
     const { factor_id: factorId, narrative } = row;
+    if (!hasMeasuredFlipThresholdFor(enrichment, row.factor_id)) {
+      emitDrop({ block_type: "review_card", kind: "flip_threshold", reason: "unmeasured_flip", field: "factor_id" });
+      continue;
+    }
     // Round-3 review correction: drop when the LLM-claimed factor isn't
     // in the canonical graph lookup. Prior behaviour fell back to the
     // LLM-provided factor_label, but we have no proof the LLM honoured
@@ -2992,7 +2999,7 @@ function buildFlipThresholdCards(
       // SHARED function the display licence checks the digits against, so the
       // licence can never believe digits survived a cut they did not.
       body: namesUnattestedOption
-        ? flipThresholdFallbackBody(ref.label, row.current_display, row.flip_display)
+        ? flipThresholdFallbackBody(ref.label, row.current_display, row.flip_display, enrichment, factorId)
         : flipThresholdCardBody(narrative),
       ...reviewCardSignals('flip_threshold', 'warning'),
       target_refs: [ref] as readonly TargetRef[],
@@ -3000,6 +3007,7 @@ function buildFlipThresholdCards(
       action_intent: 'what_would_flip' as ActionIntentLiteral,
       action_label: truncate('Explore what flips this', ACTION_LABEL_MAX),
     };
+    if (candidate.body === null) continue;
     const block = validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
       block_type: 'review_card',
       kind: 'flip_threshold',

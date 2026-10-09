@@ -1,3 +1,4 @@
+import { hasMeasuredFlipThresholdFor } from '../claims/flip-threshold-licence.js';
 /**
  * THE flip-threshold review-card row predicate — ONE definition, two readers.
  *
@@ -172,7 +173,10 @@ export function flipThresholdFallbackBody(
   factorLabel: string,
   currentDisplay: string | null,
   flipDisplay: string | null,
-): string {
+  enrichment: Record<string, unknown>,
+  subjectFactorId: string | null,
+): string | null {
+  if (!hasMeasuredFlipThresholdFor(enrichment, subjectFactorId)) return null;
   const body =
     currentDisplay !== null && flipDisplay !== null
       ? `If ${factorLabel} moves from ${currentDisplay} to ${flipDisplay}, the most-supported option would change.`

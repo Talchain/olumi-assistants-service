@@ -302,18 +302,26 @@ describe('Lane 21 display-safe breadth', () => {
     ).not.toHaveProperty('options');
   });
 
+  const measured = { flip_thresholds: [
+    { factor_id: 'marketing', current_value: 100, flip_value: 88 },
+    { factor_id: 'engineering', current_value: 0.3, flip_value: 0.297 },
+    { factor_id: 'large', current_value: 10, flip_value: 20 },
+    { factor_id: 'zero', current_value: 0, flip_value: 5 },
+    { factor_id: 'offshore', flip_value: null, flip_reason: 'structurally_invariant' },
+  ] };
   it('renders tipping points as banded risk phrases — never raw values', () => {
     const out = formatAnalysisForContext(
       rawAnalysis({
         flip_thresholds: [
           // |88-100|/100 = 12% → moderate decrease
-          { factor_label: 'Marketing Spend', current_value: 100, flip_value: 88, unit: 'GBP', no_flip_within_bounds: false },
+          { factor_id: 'marketing', factor_label: 'Marketing Spend', current_value: 100, flip_value: 88, unit: 'GBP', no_flip_within_bounds: false },
           // |0.297-0.3|/0.3 = 1% → small decrease (close to tipping point)
-          { factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.297, unit: null, no_flip_within_bounds: false },
+          { factor_id: 'engineering', factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.297, unit: null, no_flip_within_bounds: false },
           // producer-attested no-flip
-          { factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
+          { factor_id: 'offshore', factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
         ],
       }),
+      { selectedRunEnrichment: measured },
     );
     expect(out!.tipping_points).toEqual([
       { label: 'Marketing Spend', risk: 'a moderate decrease could flip the result' },
@@ -327,11 +335,16 @@ describe('Lane 21 display-safe breadth', () => {
   });
 
   it('renders a large-shift tipping phrase and a direction-only phrase for zero current values', () => {
-    expect(tippingRiskPhrase(10, 20, false)).toBe('only a large increase would flip the result');
-    expect(tippingRiskPhrase(0, 5, false)).toBe('an increase in this factor could flip the result');
-    expect(tippingRiskPhrase(null, null, true)).toBe('no flip point found within the tested range');
-    expect(tippingRiskPhrase(null, null, false)).toBeNull();
-    expect(tippingRiskPhrase(10, null, false)).toBeNull();
+    expect(tippingRiskPhrase(100, 88, false, measured, 'other')).toBeNull();
+    expect(tippingRiskPhrase(0.3, 0.297, false, measured, 'other')).toBeNull();
+    expect(tippingRiskPhrase(10, 20, false, measured, 'large')).toBe('only a large increase would flip the result');
+    expect(tippingRiskPhrase(10, 20, false, measured, 'other')).toBeNull();
+    expect(tippingRiskPhrase(0, 5, false, measured, 'zero')).toBe('an increase in this factor could flip the result');
+    expect(tippingRiskPhrase(0, 5, false, measured, 'other')).toBeNull();
+    expect(tippingRiskPhrase(null, null, true, measured, 'offshore')).toBe('no flip point found within the tested range');
+    expect(tippingRiskPhrase(null, null, true, measured, 'other')).toBeNull();
+    expect(tippingRiskPhrase(null, null, false, measured, 'large')).toBeNull();
+    expect(tippingRiskPhrase(10, null, false, measured, 'large')).toBeNull();
   });
 
   it('renders the fragile-edge count as a string alongside the label list', () => {
@@ -407,9 +420,9 @@ describe('Lane 21 display-safe breadth', () => {
         ],
         fragile_edge_count: 9,
         flip_thresholds: [
-          { factor_label: 'Marketing Spend', current_value: 100, flip_value: 88, unit: 'GBP', no_flip_within_bounds: false },
-          { factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.297, unit: null, no_flip_within_bounds: false },
-          { factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
+          { factor_id: 'marketing', factor_label: 'Marketing Spend', current_value: 100, flip_value: 88, unit: 'GBP', no_flip_within_bounds: false },
+          { factor_id: 'engineering', factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.297, unit: null, no_flip_within_bounds: false },
+          { factor_id: 'offshore', factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
         ],
         evidence_gaps: [
           { factor_label: 'Talent Market Tightness', voi_score: 0.63 },
@@ -612,6 +625,7 @@ describe('Lane 30 runtime char-budget enforcement', () => {
       })),
       fragile_edge_count: 9,
       flip_thresholds: Array.from({ length: 3 }, (_, i) => ({
+        factor_id: `flip_${i}`,
         factor_label: `Flip ${LONG(i + 1)}`,
         current_value: 100,
         flip_value: 88,
@@ -627,14 +641,14 @@ describe('Lane 30 runtime char-budget enforcement', () => {
     });
 
   it('keeps the serialised projection inside the budget at runtime (long-label fixture)', () => {
-    const out = formatAnalysisForContext(oversized());
+    const out = formatAnalysisForContext(oversized(), { selectedRunEnrichment: { flip_thresholds: Array.from({ length: 3 }, (_, i) => ({ factor_id: `flip_${i}`, current_value: 100, flip_value: 88 })) } });
     const serialised = JSON.stringify(out, null, 2);
     expect(serialised.length).toBeLessThanOrEqual(DISPLAY_ANALYSIS_CHAR_BUDGET);
     assertNoNumbersAnywhere(out);
   });
 
   it('truncation is DISCLOSED, never silent, and preserves the priority sections', () => {
-    const out = formatAnalysisForContext(oversized());
+    const out = formatAnalysisForContext(oversized(), { selectedRunEnrichment: { flip_thresholds: Array.from({ length: 3 }, (_, i) => ({ factor_id: `flip_${i}`, current_value: 100, flip_value: 88 })) } });
     expect(out!.truncation_note).toBeDefined();
     expect(out!.truncation_note).toContain('truncated');
     // Highest keep-priority content survives.
@@ -646,7 +660,7 @@ describe('Lane 30 runtime char-budget enforcement', () => {
   });
 
   it('drops flip/VOI before sensitivities, and sensitivities before the option list', () => {
-    const out = formatAnalysisForContext(oversized());
+    const out = formatAnalysisForContext(oversized(), { selectedRunEnrichment: { flip_thresholds: Array.from({ length: 3 }, (_, i) => ({ factor_id: `flip_${i}`, current_value: 100, flip_value: 88 })) } });
     // VOI + tipping must be gone before top_drivers is touched; if
     // top_drivers is absent then flip/VOI must also be absent.
     if (out!.top_drivers !== undefined) {
@@ -666,7 +680,7 @@ describe('Lane 30 runtime char-budget enforcement', () => {
   });
 
   it('discloses which sections were omitted', () => {
-    const out = formatAnalysisForContext(oversized());
+    const out = formatAnalysisForContext(oversized(), { selectedRunEnrichment: { flip_thresholds: Array.from({ length: 3 }, (_, i) => ({ factor_id: `flip_${i}`, current_value: 100, flip_value: 88 })) } });
     // The oversized fixture cannot fit with VOI + tipping present; both are
     // named in the disclosure once dropped.
     expect(out!.truncation_note).toContain('value_of_information');
@@ -962,7 +976,8 @@ describe('ROADMAP 2.54b VOI never-silent disclosure', () => {
         top_drivers: Array.from({ length: 5 }, (_, i) => rawDriver(`Driver ${LONG(i + 1)}`, 0.9 - i * 0.1)),
         evidence_gaps: [{ factor_label: `Gap ${LONG(1)}`, voi_score: 0.63 }],
         flip_thresholds: Array.from({ length: 3 }, (_, i) => ({
-          factor_label: `Flip ${LONG(i + 1)}`,
+          factor_id: `flip_${i}`,
+        factor_label: `Flip ${LONG(i + 1)}`,
           current_value: 100,
           flip_value: 88,
           unit: 'GBP',

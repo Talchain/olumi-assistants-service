@@ -37,9 +37,12 @@ const LEADER_ID = 'opt_status_quo';
 function composeOptionTargetedFlipAnswer(
   target: TargetOption,
   flipSummary: FlipSummary | null | undefined,
-  over: { leadingOptionId?: string | null; mayNameLeadingOption?: boolean } = {},
+  over: { leadingOptionId?: string | null; mayNameLeadingOption?: boolean; enrichment?: Record<string, unknown> } = {},
 ): OptionTargetedFlipAnswer | null {
   return composeRaw({
+    // S3: the selected Run's own producer rows license the flip claims. By default the harness supplies exactly the rows
+    // this summary describes (measured pairs, or attested no-flip rows); a case about the licence passes its own.
+    selectedRunEnrichment: over.enrichment ?? measuredEnrichmentFor(flipSummary),
     target,
     flipSummary,
     leadingOptionId: over.leadingOptionId === undefined ? LEADER_ID : over.leadingOptionId,
@@ -61,6 +64,19 @@ function entry(over: Partial<FlipEntry> = {}): FlipEntry {
     alternative_winner_label: 'Hire Two Senior Engineers Locally',
     ...over,
   };
+}
+
+/** The selected Run's producer rows behind a summary: a measured flip_pair per entry, or attested no-flip rows. */
+function measuredEnrichmentFor(flipSummary: FlipSummary | null | undefined): Record<string, unknown> {
+  if (flipSummary == null) return {};
+  if (flipSummary.overall_status === 'no_practical_flip') {
+    const ids = flipSummary.entries.length > 0 ? flipSummary.entries.map(e => e.factor_id) : ['fac_probe_none'];
+    return { flip_thresholds_status: 'available', flip_thresholds: ids.map(factor_id => ({ factor_id, flip_value: null, flip_reason: 'no_effect_within_bounds' })) };
+  }
+  return { flip_thresholds_status: 'available', flip_thresholds: flipSummary.entries
+    .filter(e => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value))
+    .map(e => ({ factor_id: e.factor_id, current_value: 0, flip_value: Math.abs(e.flip_value as number) + 1,
+      alternative_winner_id: e.alternative_winner_id, alternative_winner_label: e.alternative_winner_label })) };
 }
 
 function summary(entries: FlipEntry[], status: FlipSummary['overall_status']): FlipSummary {
@@ -375,6 +391,7 @@ describe('F1 — the target may BE the option that has already won', () => {
 
   it('FAIL CLOSED: an unstated permission is treated as withholding', () => {
     const a = composeRaw({
+      selectedRunEnrichment: {},
       target: OFFSHORE,
       flipSummary: FLIPS_TO_HIRE,
       leadingOptionId: 'opt_status_quo',
@@ -387,6 +404,7 @@ describe('F1 — the target may BE the option that has already won', () => {
     for (const leadingOptionId of [null, undefined, '']) {
       // composeRaw directly: the harness substitutes a default for `undefined`.
       const a = composeRaw({
+        selectedRunEnrichment: {},
         target: OFFSHORE,
         flipSummary: FLIPS_TO_HIRE,
         leadingOptionId,
@@ -502,5 +520,22 @@ describe('WITHHELD RUNS — targeted prose survives its own egress', () => {
         `${HIRE.label} currently leads, so it beats Maintain Current Team (Status Quo).`,
       ),
     ).toBe(true);
+  });
+});
+
+describe('S3 licence — the selected Run must have measured the factor it names (subject + Run)', () => {
+  const otherFactorOnly = { flip_thresholds_status: 'available', flip_thresholds: [
+    { factor_id: 'fac_unrelated', current_value: 0, flip_value: 1, alternative_winner_id: 'opt_hire_local' }] };
+  it('MATCH: the summary rows measured in this Run → addressed', () => {
+    expect(composeOptionTargetedFlipAnswer(HIRE, FLIPS_TO_HIRE)!.kind).toBe('addressed');
+  });
+  it('MISMATCH: a pair for another factor licenses nothing → not addressed, no factor named as a tipping point', () => {
+    const a = composeOptionTargetedFlipAnswer(HIRE, FLIPS_TO_HIRE, { enrichment: otherFactorOnly })!;
+    expect(a.kind).not.toBe('addressed');
+    expect(a.text).not.toContain('Engineering Capacity');
+  });
+  it('absent: no producer rows → the limitation, never a bare next step', () => {
+    const a = composeOptionTargetedFlipAnswer(OFFSHORE, summary([], 'no_practical_flip'), { enrichment: {} })!;
+    expect(a.text).toContain('did not isolate a single-factor tipping point');
   });
 });

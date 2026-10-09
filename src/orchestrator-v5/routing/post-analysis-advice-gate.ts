@@ -43,6 +43,7 @@
  * dispatch — do not duplicate the matcher in another file.
  */
 
+import { hasMeasuredFlipThresholdFor, hasAttestedNoFlipForRun } from '../claims/flip-threshold-licence.js';
 import {
   hasSufficientReadinessData,
   summariseReadiness,
@@ -249,6 +250,7 @@ export type AdviceClass =
   | 'what_would_flip_free_text';
 
 export interface AdviceGateInput {
+  readonly selectedRunEnrichment?: Record<string, unknown>;
   readonly message: string;
   readonly analysis: AdviceGateAnalysis | null | undefined;
   /**
@@ -1508,6 +1510,7 @@ export function tryPostAnalysisAdviceGate(
   const flipFocusSection = deriveFlipFocusSection(matchedClass, analysis);
 
   const composeInput: ComposeInput = {
+    selectedRunEnrichment: input.selectedRunEnrichment,
     leadingLabel,
     topDriverLabel,
     analysis,
@@ -1748,7 +1751,7 @@ function describeCopySource(
   } else if (cls === 'what_would_flip_free_text') {
     // Mirror the composer precedence: a named flip threshold (decision_review)
     // → the fragile edge it points at → the top driver → bare projection.
-    if (deriveFlipStatus(input.decisionReview).kind === 'flip_found') {
+    if (deriveFlipStatus(input.decisionReview, input.selectedRunEnrichment ?? {}).kind === 'flip_found') {
       copy_source = 'decision_review';
       fields.push('decision_review');
     } else if (renderableFragileEdges(a).length > 0) {
@@ -1808,6 +1811,7 @@ function suggestedActionsForClass(
 }
 
 interface ComposeInput {
+  readonly selectedRunEnrichment?: Record<string, unknown>;
   readonly leadingLabel: string;
   readonly topDriverLabel: string | null;
   readonly analysis: AdviceGateAnalysis;
@@ -1872,6 +1876,7 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
         // above already receives this; the class whose question IS the flip
         // question did not. See the beat-3 note in composeWhatWouldFlip.
         input.flipClaimPosture,
+        input.selectedRunEnrichment ?? {},
       );
   }
 }
@@ -2518,6 +2523,7 @@ function isCleanFactorLabel(label: unknown): label is string {
 
 function deriveFlipStatus(
   decisionReview: Record<string, unknown> | undefined,
+  enrichment: Record<string, unknown>,
 ): FlipStatus {
   if (decisionReview == null) return { kind: 'unknown' };
   const thresholds = decisionReview['flip_thresholds'];
@@ -2528,7 +2534,7 @@ function deriveFlipStatus(
     const entry = readRecord(raw);
     if (entry === null) continue;
     const label = entry['factor_label'];
-    if (isCleanFactorLabel(label)) {
+    if (isCleanFactorLabel(label) && hasMeasuredFlipThresholdFor(enrichment, typeof entry.factor_id === 'string' ? entry.factor_id : null)) {
       return { kind: 'flip_found', factor_label: label.trim() };
     }
   }
@@ -2541,7 +2547,8 @@ function composeWhatWouldFlip(
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
   decisionReview: Record<string, unknown> | undefined,
-  flipClaimPosture?: FlipClaimPosture | undefined,
+  flipClaimPosture: FlipClaimPosture | undefined,
+  enrichment: Record<string, unknown>,
 ): string {
   // ROADMAP 2.278 continued (14 Aug 2026) — THE FIFTH, UNSWEPT SURFACE.
   //
@@ -2577,7 +2584,7 @@ function composeWhatWouldFlip(
   // Which path takes a turn is decided by whether the advice gate's narrow
   // pattern matches, so the SILENT path is also the fastest and the one that
   // fires on the tightest phrasings of the question.
-  const noFlip = flipClaimPosture === 'attested_no_flip';
+  const noFlip = hasAttestedNoFlipForRun(enrichment);
   // Top driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
   // margin, robustness and fragile edges are optional and degrade
   // gracefully. Numerics pass-through only — F.6 invariant.
@@ -2615,7 +2622,7 @@ function composeWhatWouldFlip(
   const focus = selectFlipFocus(analysis);
   const topEdge = focus?.kind === 'fragile_edge' ? focus.edge : undefined;
   const driverA = focus?.kind === 'top_driver' ? focus.driver : undefined;
-  const flip = deriveFlipStatus(decisionReview);
+  const flip = deriveFlipStatus(decisionReview, enrichment);
   const sentences: string[] = [];
 
   // 1. Closeness / standing — lead with closeness on a near-tie, otherwise a

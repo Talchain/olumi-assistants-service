@@ -195,7 +195,7 @@ describe('resolveAgreedAlternativeWinner — agreement is decided on the ID', ()
 describe('deterministic what_would_flip answer — carries the attested alternative winner', () => {
   it('names the option PLoT attested, sourced from the id', () => {
     const text = composeWhatWouldFlipFallback(
-      PROJECTION,
+      PROJECTION, {},
       RAW,
       concreteSummary([
         entry({ alternative_winner_id: 'opt_two_mid', alternative_winner_label: 'Hire Two Mid-Level' }),
@@ -208,7 +208,7 @@ describe('deterministic what_would_flip answer — carries the attested alternat
 
   it('DISAGREEMENT 1, past the composer — an id-echoed label is NEVER printed as a name, and no internal token reaches the answer', () => {
     const text = composeWhatWouldFlipFallback(
-      PROJECTION,
+      PROJECTION, {},
       RAW,
       concreteSummary([
         entry({ alternative_winner_id: 'opt_7f3a91', alternative_winner_label: 'opt_7f3a91' }),
@@ -223,7 +223,7 @@ describe('deterministic what_would_flip answer — carries the attested alternat
 
   it('DISAGREEMENT 2, past the composer — colliding labels on different ids name NO winner', () => {
     const text = composeWhatWouldFlipFallback(
-      PROJECTION,
+      PROJECTION, {},
       RAW,
       concreteSummary([
         entry({
@@ -246,14 +246,14 @@ describe('deterministic what_would_flip answer — carries the attested alternat
   });
 
   it('POSITIVE CONTROL — an entry with NO alternative_winner_id still resolves via the existing path, byte-identical to the pre-repair answer', () => {
-    const withoutId = composeWhatWouldFlipFallback(PROJECTION, RAW, concreteSummary([entry()]));
+    const withoutId = composeWhatWouldFlipFallback(PROJECTION, {}, RAW, concreteSummary([entry()]));
     expect(withoutId).toMatch(CONCRETE_SENTENCE);
     expect(withoutId).not.toMatch(NAMES_ALTERNATIVE);
 
     // The repair is PURELY ADDITIVE: the same fixture plus a resolvable winner
     // yields the same answer with exactly one sentence appended.
     const withId = composeWhatWouldFlipFallback(
-      PROJECTION,
+      PROJECTION, {},
       RAW,
       concreteSummary([
         entry({ alternative_winner_id: 'opt_two_mid', alternative_winner_label: 'Hire Two Mid-Level' }),
@@ -263,7 +263,7 @@ describe('deterministic what_would_flip answer — carries the attested alternat
   });
 
   it('POSITIVE CONTROL — the id-carrying entry changes NOTHING outside the concrete branch (no_practical_flip is unaffected)', () => {
-    const text = composeWhatWouldFlipFallback(PROJECTION, RAW, {
+    const text = composeWhatWouldFlipFallback(PROJECTION, {}, RAW, {
       overall_status: 'no_practical_flip',
       margin_supports_flip: false,
       entries: [

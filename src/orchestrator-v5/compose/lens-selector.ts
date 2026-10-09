@@ -110,11 +110,11 @@
  * protocol exists to elicit.
  */
 
+import { hasMeasuredFlipThresholdFor } from '../claims/flip-threshold-licence.js';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
   readFlipClaimPosture,
-  readTopLevelFlipRows,
   type FlipClaimPosture,
 } from '../context/flip-threshold-rows.js';
 import {
@@ -961,7 +961,7 @@ function evaluateSensitivityFlipRisk(signals: AnalysisSignals): EvaluatorHit | n
   const isolated = signals.factors.find(
     (f) => f.flipRiskCategory === FLIP_RISK_ISOLATED_CATEGORY,
   );
-  if (isolated) {
+  if (isolated && (noFlip || hasMeasuredFlipThresholdFor(signals.enrichment, isolated.factorId))) {
     return {
       code: noFlip ? 'SENSITIVITY_ISOLATED_NO_FLIP' : 'FLIP_RISK_ISOLATED',
       subjectFactorId: isolated.factorId,
@@ -971,7 +971,7 @@ function evaluateSensitivityFlipRisk(signals: AnalysisSignals): EvaluatorHit | n
   const correlated = signals.factors.find(
     (f) => f.flipRiskCategory === FLIP_RISK_CORRELATED_CATEGORY,
   );
-  if (correlated) {
+  if (correlated && (noFlip || hasMeasuredFlipThresholdFor(signals.enrichment, correlated.factorId))) {
     return {
       code: noFlip ? 'SENSITIVITY_CORRELATED_NO_FLIP' : 'FLIP_RISK_CORRELATED',
       subjectFactorId: correlated.factorId,
@@ -1567,16 +1567,7 @@ const CORRELATED_YIELD_CODES: ReadonlySet<LensRationaleCode> = new Set([
 ]);
 
 /** A measurement licenses only its subject in this selected Run's enrichment. */
-export function hasMeasuredFlipThresholdFor(
-  enrichment: Record<string, unknown>,
-  subjectFactorId: string | null,
-): boolean {
-  return subjectFactorId !== null &&
-    enrichment.flip_thresholds_status !== 'unavailable' &&
-    readTopLevelFlipRows(enrichment).some(
-      (row) => row.kind === 'flip_pair' && row.factor_id === subjectFactorId,
-    );
-}
+export { hasMeasuredFlipThresholdFor } from '../claims/flip-threshold-licence.js';
 
 function buildSelection(
   lens: LensId,

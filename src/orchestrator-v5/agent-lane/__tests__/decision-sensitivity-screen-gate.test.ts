@@ -55,7 +55,7 @@ describe('S2i: served Runs whose screen shows a driver or a range hand the Agent
     const before = JSON.stringify(block);
     // PRECONDITION: the producers still say absence, so base handed it.
     expect(decisionSensitivityOf(block.enrichment).status).toMatch(/^(not_measured|none_measurable)$/u);
-    expect(tippingPointOf(block.enrichment)).toEqual({ status: 'not_evaluated' });
+    expect(tippingPointOf(block.enrichment, undefined)).toEqual({ status: 'not_evaluated' });
     expect(robustnessComputed(block)).toBe(robust);
     const out = project(block, body.draft_graph);
     expect(Object.keys(out[shows === 'driver' ? 'goal_chance_driver_display' : 'goal_chance_range_display']).length).toBeGreaterThan(0);
@@ -86,7 +86,7 @@ describe('S2i: the Run behind the cut 9 PRODUCTION Explain ("Which assumption ma
     const read = fixture('cut9-prod-p1-2-7e3f8fb-readback-run1.json').j as Json;
     expect(read.analysis_state.run_state.kind).toBe('complete_current');
     expect(decisionSensitivityOf(read.analysis_result.enrichment).status).toMatch(/^(not_measured|none_measurable)$/u);
-    expect(tippingPointOf(read.analysis_result.enrichment)).toEqual({ status: 'not_evaluated' });
+    expect(tippingPointOf(read.analysis_result.enrichment, undefined)).toEqual({ status: 'not_evaluated' });
     expect(absenceHanded(project(read.analysis_result, undefined, true, read.graph))).toBe(false);
     expect(absenceHanded(project(read.analysis_result, read.graph))).toBe(false);
   });
@@ -130,7 +130,7 @@ describe('S2i: each limb alone, with a control the screen shows nothing on', () 
     const perLimit = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json', import.meta.url), 'utf8')) as Json;
     const block = clone(blockOf(body));
     block.enrichment.flip_thresholds = perLimit.enrichment.flip_thresholds;
-    const finding = tippingPointOf(block.enrichment);
+    const finding = tippingPointOf(block.enrichment, undefined);
     expect(finding.status).not.toBe('not_evaluated');
     expect(project(block, body.draft_graph).tipping_point).toEqual(finding);
   });

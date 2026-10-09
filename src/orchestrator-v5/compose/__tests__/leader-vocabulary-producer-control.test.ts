@@ -128,7 +128,7 @@ function everyProducerOutput(): Sample[] {
         out.push({
           producer: 'composeWhatWouldFlipFallback',
           branch,
-          text: composeWhatWouldFlipFallback(p, null, null),
+          text: composeWhatWouldFlipFallback(p, {}, null, null),
         });
       }
     }
