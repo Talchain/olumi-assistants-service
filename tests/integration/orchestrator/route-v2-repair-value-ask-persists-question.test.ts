@@ -55,7 +55,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
     storeDraftGraph: async () => undefined,
     loadGraph: loadGraphMock,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    loadGraphAndBriefText: async (scenarioId: string) => ({ revision: 7, graph: await loadGraphMock(scenarioId), briefText: null }),
     readMostRecentPendingActions: readPendingsMock,
   }),
   resetSessionStoreForTests: () => {},

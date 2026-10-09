@@ -14669,6 +14669,10 @@ export async function runTurnExecutor(
           // rows D / F on a DEGRADED read — reuse the strict reread already
           // performed above (single round trip, no TOCTOU vs `hasServerModel`).
           persistedBase = degradedRereadGraph;
+        } else if (useAppendV6()) {
+          // Merge onto the exact snapshot whose revision commitTurn submits.
+          // A later graph read paired with canonicalRevision would mix identities.
+          persistedBase = resolvedCanonicalGraphForCommit!.graph;
         } else {
           // rows D / F — today's behaviour: strict-read the persisted graph. A
           // degraded/unavailable read FAILS CLOSED here (→ STATE_COMMIT_FAILED;

@@ -52,7 +52,7 @@ import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runt
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
-import { isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
+import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { ModelWriteOwnershipRefused, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readSuccessfulDoorEntries } from '../orchestrator-v5/ownership/door-ownership.js';
@@ -3069,7 +3069,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
-        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
+        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
           // The reply the user reads is composed from this text plus Olumi's status line.
@@ -3794,6 +3794,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // No possible writes remain: release the claim, so a retry of the SAME
       // turn_id can run. Earlier writes or unknown outcomes keep the claim.
       const released = await releaseUnwrittenTurnClaim();
+      if (err instanceof ModelReadFailedError) {
+        const refusal = { error: toErrorV1(err, req) };
+        return reply.code(503).send(refusal.error);
+      }
       if (isRevisionConflict(err)) {
         const refusal = { error: {
           ...toErrorV1(err, req),
@@ -4480,7 +4484,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? { text, status: null as string | null, stripped: [] as string[] }
       : fastPath === 'approve'
         ? (editsRefusedThisTurn ? { text, status: null as string | null, stripped: [] as string[] }
-          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }), text })
+          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }),
+              // A specific partial follow-up is already the narrator's authoritative status.
+              text: result.tool_results.some(r => r.mutated === true && r.applied === false
+                && typeof r.outcome === 'string' && r.follow_up === text) ? '' : text })
         : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
