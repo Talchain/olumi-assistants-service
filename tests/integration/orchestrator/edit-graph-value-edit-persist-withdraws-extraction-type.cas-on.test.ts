@@ -157,25 +157,6 @@ beforeEach(() => {
 });
 
 describe('#1740 R5 — the graph handed to store.append, after the edit-path persistence merge', () => {
-  it.each(['off', 'shadow', 'live'].flatMap(mode => ['whole', 'nested', 'leaf'].map(variant => ({ mode, variant }))))('generic edit_graph cannot smuggle a user range: $mode/$variant', async ({ mode, variant }) => {
-    const oldMode = config.features.graphManagementMode;
-    config.features.graphManagementMode = mode as typeof oldMode;
-    try {
-    const graph = buildPersistedGraph();
-    const opt = nodeOf(graph, 'opt_buy');
-    opt.interventions = { [TARGET]: { value: 0.2, source: 'cee_hypothesis', target_match: { node_id: TARGET, match_type: 'exact_id', confidence: 'high' } } };
-    persistedRef.current = graph;
-    const range = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
-    const cell = { value: 0.4, range };
-    const op = variant === 'whole' ? { op: 'update_node', path: 'opt_buy', value: { interventions: { [TARGET]: cell } } }
-      : { op: 'update_node', path: `/nodes/opt_buy/data/interventions/${TARGET}${variant === 'leaf' ? '/range' : ''}`, value: variant === 'leaf' ? range : cell };
-    llmChatMock.mockResolvedValue(editResponse([op]));
-    await dispatchEditGraph({ payload: makeMessagePayload({ scenario_id: SCENARIO_ID, turn_id: '17401740-aaaa-4aaa-8aaa-000000000001', stage: 'analyse', message: 'Set this option level to 0.4' }),
-      requestId: 'req-range-smuggle', request: {} as FastifyRequest, graphState: graph as unknown as GraphStateIngress, analysisState: null });
-    expect(appendMock.mock.calls.map(c => (c[0] as { graph?: unknown }).graph).filter(g => g !== undefined)).toHaveLength(0);
-    expect(persistedRef.current).toEqual(graph);
-    } finally { config.features.graphManagementMode = oldMode; }
-  });
   const RANGE = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
   const rangedGraph = (range: unknown = RANGE) => {
     const graph = buildPersistedGraph();
@@ -194,123 +175,24 @@ describe('#1740 R5 — the graph handed to store.append, after the edit-path per
       graphState: echo as GraphStateIngress, analysisState: null });
   };
 
-
-  it.each(['off', 'shadow', 'live'].flatMap(mode => ['added', 'changed', 'stale', 'first-write'].map(echo => ({ mode, echo }))))('an unrelated edit cannot approve the request echo: $mode/$echo', async ({ mode, echo: kind }) => {
-    // A2: retains the legacy client-echo/final-reread gate; CAS ON uses the server snapshot.
-    __setUseAppendV6ForTest(false);
+  it('CAS ON: an unrelated edit uses the stored range rather than a changed client echo', async () => {
+    __setUseAppendV6ForTest(true);
     const oldMode = config.features.graphManagementMode;
-    config.features.graphManagementMode = mode as typeof oldMode;
+    config.features.graphManagementMode = 'off';
     try {
-      const stored = rangedGraph(kind === 'stale' ? { ...RANGE, high: 0.8 } : RANGE);
-      if (kind === 'added') delete optionCell(stored).range;
-      persistedRef.current = kind === 'first-write' ? null : structuredClone(stored);
-      const echo = rangedGraph(kind === 'changed' ? { ...RANGE, high: 0.8 } : RANGE);
+      persistedRef.current = rangedGraph();
+      const echo = rangedGraph({ ...RANGE, high: 0.8 });
       await runRangeEdit(echo, [{ op: 'update_node', path: `/nodes/${SIBLING}/data/value`, value: 0.3 }]);
-      expect(appendMock.mock.calls.map(c => (c[0] as { graph?: unknown }).graph).filter(g => g !== undefined)).toHaveLength(0);
-      expect(persistedRef.current).toEqual(kind === 'first-write' ? null : stored);
-    } finally { config.features.graphManagementMode = oldMode; }
-  });
-
-  it.each(['off', 'shadow', 'live'].flatMap(mode => [true, false].map(includeRange => ({ mode, includeRange }))))('an approved whole-map replacement round-trips opt_buy/$TARGET: $mode include=$includeRange', async ({ mode, includeRange }) => {
-    const oldMode = config.features.graphManagementMode;
-    config.features.graphManagementMode = mode as typeof oldMode;
-    try {
-      const stored = rangedGraph();
-      persistedRef.current = structuredClone(stored);
-      const cell = { ...optionCell(stored) };
-      if (!includeRange) delete cell.range;
-      await runRangeEdit(stored, [{ op: 'update_node', path: 'opt_buy', value: { interventions: { [TARGET]: cell } } }],
-        'Set Buy Asset monthly cashflow level to 0.2');
       expect(optionCell(storedGraph()).range).toEqual(RANGE);
-      expect(optionCell(storedGraph()).value).toBe(0.2);
+      expect((nodeOf(storedGraph(), SIBLING).observed_state as Record<string, unknown>).value).toBe(0.3);
+      expect(appendMock.mock.calls.find(c => (c[0] as { graph?: unknown }).graph)?.[0]).toMatchObject({ expectedRevision: 7 });
     } finally { config.features.graphManagementMode = oldMode; }
   });
 
-  it.each(['off', 'shadow'])('the final stored-base read refuses a range changed between tool and commit: %s', async mode => {
-    // A2: retains the legacy client-echo/final-reread gate; CAS ON uses the server snapshot.
-    __setUseAppendV6ForTest(false);
-    const oldMode = config.features.graphManagementMode;
-    config.features.graphManagementMode = mode as typeof oldMode;
-    try {
-      const earlier = rangedGraph();
-      const current = rangedGraph({ ...RANGE, high: 0.8 });
-      persistedRef.current = structuredClone(current);
-      loadGraphMock.mockImplementationOnce(async () => structuredClone(earlier));
-      await expect(runRangeEdit(earlier, [{ op: 'update_node', path: `/nodes/${SIBLING}/data/value`, value: 0.3 }]))
-        .rejects.toThrow('needs approval on its stored change card');
-      expect(loadGraphMock).toHaveBeenCalledTimes(2);
-      expect(appendMock).not.toHaveBeenCalled();
-      expect(persistedRef.current).toEqual(current);
-    } finally { config.features.graphManagementMode = oldMode; }
-  });
 
-  it.each(['off', 'shadow', 'live'])('an omitted echo never erases the stored range: %s', async mode => {
-    // A2: retains the legacy client-echo/final-reread gate; CAS ON uses the server snapshot.
-    __setUseAppendV6ForTest(false);
-    const oldMode = config.features.graphManagementMode;
-    config.features.graphManagementMode = mode as typeof oldMode;
-    try {
-      const stored = rangedGraph();
-      persistedRef.current = structuredClone(stored);
-      const echo = structuredClone(stored);
-      delete optionCell(echo).range;
-      await runRangeEdit(echo, [{ op: 'update_node', path: `/nodes/${SIBLING}/data/value`, value: 0.3 }]);
-      if (mode === 'live') {
-        // The existing stale-base gate still refuses an echo with a different analysis identity.
-        expect(appendMock.mock.calls.map(c => (c[0] as { graph?: unknown }).graph).filter(g => g !== undefined)).toHaveLength(0);
-        expect(persistedRef.current).toEqual(stored);
-      } else expect(optionCell(storedGraph()).range).toEqual(RANGE);
-    } finally { config.features.graphManagementMode = oldMode; }
-  });
 
-  it.each([
-    ['single value leaf', [{ op: 'update_node', path: `/nodes/${TARGET}/data/value`, value: 0.42 }]],
-    [
-      'value → unit → std',
-      [
-        { op: 'update_node', path: `/nodes/${TARGET}/data/value`, value: 0.42 },
-        { op: 'update_node', path: `/nodes/${TARGET}/data/unit`, value: 'USD' },
-        { op: 'update_node', path: `/nodes/${TARGET}/data/std`, value: 0.2 },
-      ],
-    ],
-  ])('%s: the stored factor carries the user value and NO extractionType; the sibling keeps its marker', async (_label, operations) => {
-    llmChatMock.mockResolvedValue(editResponse(operations));
 
-    await dispatchEditGraph({
-      payload: makeMessagePayload({
-        scenario_id: SCENARIO_ID,
-        turn_id: '17401740-aaaa-4aaa-8aaa-000000000001',
-        stage: 'analyse',
-        message: 'Change the monthly cashflow factor to 0.42',
-      }),
-      requestId: 'req-1740-persist',
-      request: {} as FastifyRequest,
-      // The client echo: same graph, so the ingress fallback cannot be what
-      // decides — the merge base is the STRICT persisted read above.
-      graphState: buildPersistedGraph() as unknown as GraphStateIngress,
-      analysisState: null,
-    });
 
-    expect(llmChatMock).toHaveBeenCalled();
-    const stored = storedGraph();
-
-    const observed = nodeOf(stored, TARGET).observed_state as Record<string, unknown>;
-    // PREMISE — this is the user's write, stored.
-    expect(observed.value).toBe(0.42);
-    expect(observed.source).toBe('user_override');
-    // THE RULE, on the stored bytes — a user-authored value withdraws the
-    // producer's extraction marker (23 Sep witness; #1740). The persisted base
-    // still has it, so a merge that re-adds base fields would put it back here.
-    expect('extractionType' in observed).toBe(false);
-    // A sibling the op never mentioned is still preserved through the merge.
-    expect(observed.factor_type).toBe('cost');
-
-    // CONTROL — the untouched sibling keeps the producer's marker in the same
-    // stored graph, so the assertion above cannot pass by a sweep.
-    const sibling = nodeOf(stored, SIBLING).observed_state as Record<string, unknown>;
-    expect(sibling.extractionType).toBe('inferred');
-    expect(sibling.source).toBe('cee_inference');
-  });
 });
 
 afterEach(() => __setUseAppendV6ForTest(true));

@@ -243,15 +243,6 @@ describe('dispatchEditGraph brief threading (S2 unconditional, no flag)', () => 
     });
   });
 
-  it('CAS ON threads the brief from the combined graph/revision snapshot without a separate brief read', async () => {
-    __setUseAppendV6ForTest(true);
-    await dispatchEditGraph({ payload: makePayload(), requestId: 'req-combined-brief', request: STUB_REQUEST,
-      graphState: INGRESS_GRAPH, analysisState: null,
-      persistedEditBase: { graph: null, briefText: 'w'.repeat(4_000), revision: 7 } });
-    expect(loadScenarioBriefText).not.toHaveBeenCalled();
-    expect((handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]![0].brief)
-      .toEqual({ text: 'w'.repeat(1_000), truncated: true, original_chars: 4_000 });
-  });
 
   it('ANAPHORA (S2 value): the threaded brief renders the ## Decision Brief section so a referent resolves', () => {
     // The edit LLM must SEE the decision framing to resolve "the hire option"

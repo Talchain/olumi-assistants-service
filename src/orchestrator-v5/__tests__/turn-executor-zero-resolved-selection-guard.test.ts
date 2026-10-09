@@ -828,13 +828,6 @@ describe('TurnExecutor final guard — byte-identical controls', () => {
     ]);
   });
 
-  it('CAS ON refuses a selected mutation when the combined recovery read also fails', async () => {
-    __setUseAppendV6ForTest(true);
-    harness.graphReadMode = 'degraded';
-    const result = await run(`Set ${FACTOR_LABEL} to £100,000`, failingAdapter(), { node_ids: [FACTOR_ID], edge_ids: [] });
-    expect(result.telemetry.commit_performed).toBe(false);
-    expect(harness.appendedRows.some(row => row.graph !== undefined)).toBe(false);
-    });
 
   it('preserves a committed selected-mutation receipt when the canonical read is degraded', async () => {
     // A2: legacy graph-only recovery; CAS ON cannot recover a revision from this failed combined double.

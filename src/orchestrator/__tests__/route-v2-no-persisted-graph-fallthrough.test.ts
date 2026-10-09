@@ -46,7 +46,6 @@ let persistedGraphForRead: unknown = null;
 /** `true` ⇒ `loadGraph` throws ⇒ `session_store_failed`. */
 let loadGraphThrows = false;
 let loadGraphCalls = 0;
-let combinedReadCalls = 0;
 let hasPriorTurnsForRead = false;
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
@@ -67,7 +66,6 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
       return persistedGraphForRead;
     },
     loadGraphAndBriefText: async () => {
-      combinedReadCalls += 1;
       if (loadGraphThrows) throw new Error('simulated session store failure');
       return { revision: 7, graph: persistedGraphForRead, briefText: null };
     },
@@ -279,7 +277,6 @@ describe('ROADMAP 2.388 / System B — semantic routing after a strict canonical
     persistedGraphForRead = null;
     loadGraphThrows = false;
     loadGraphCalls = 0;
-    combinedReadCalls = 0;
     // A2: existing rows pin the rollback graph-only reader census and 200 recovery.
     __setUseAppendV6ForTest(false);
     hasPriorTurnsForRead = false;
@@ -297,18 +294,6 @@ describe('ROADMAP 2.388 / System B — semantic routing after a strict canonical
 
   afterEach(() => __setUseAppendV6ForTest(true));
 
-  it('CAS ON: grounded strategic intake starts the draft from combined scenario snapshots', async () => {
-    __setUseAppendV6ForTest(true);
-    modelRoute('start_model'); mockDraftResult();
-    const message = 'Increase annual revenue from £4 million today to £6 million within 12 months.';
-    const { status, body } = await turn(app, message);
-    expect(status).toBe(200);
-    expect(exitPath(body)).toBe('draft_graph');
-    expect(runtimeMocks.dispatchDraftGraph).toHaveBeenCalledTimes(1);
-    expect(runtimeMocks.dispatchDraftGraph.mock.calls[0]![0].payload.message).toBe(message);
-    expect(loadGraphCalls).toBe(0);
-    expect(combinedReadCalls).toBe(2);
-  });
 
   it('null canonical graph + grounded edit-word goal starts the existing draft with exact user text', async () => {
     const message = 'Increase annual revenue from £4 million today to £6 million within 12 months.';

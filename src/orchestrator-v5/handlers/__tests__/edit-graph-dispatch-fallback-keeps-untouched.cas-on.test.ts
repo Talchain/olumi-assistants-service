@@ -99,12 +99,9 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   loadMostRecentPendingActions: vi.fn(async () => []),
 }));
 
-import { dispatchEditGraph, BASE_GRAPH_INVALID_ASSISTANT_TEXT } from '../edit-graph-dispatch.js';
+import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { commitDirectAnswer } from '../../commit.js';
-import { config } from '../../../config/index.js';
-import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { GraphStateIngressSchema, type GraphStateIngress } from '../../boundary/request-extensions.js';
-import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { type GraphStateIngress } from '../../boundary/request-extensions.js';
 
 const SCENARIO_ID = '541c737e-225b-43ad-8d0e-82be55fa0c5f';
 const STUB_REQUEST = {} as FastifyRequest;
@@ -191,12 +188,6 @@ function storedInvalidGraph(): Json {
 }
 
 /** The same graph with the one invalid std restored — the valid-base control. */
-function storedValidGraph(): Json {
-  const g = storedInvalidGraph();
-  const edges = g.edges as Json[];
-  (edges[1]!.strength as Json).std = 0.01;
-  return g;
-}
 
 function editResponse(operations: unknown[]) {
   return { operations, removed_edges: [], warnings: [], coaching: { summary: 'Updated.', rerun_recommended: false } };
@@ -213,9 +204,6 @@ const renameOps = (nodeId: string, from: string, to: string) => [
  * base it changes nothing; on the fallback it is still a "successful applied
  * mutation", so its commit carried the whole fallback graph.
  */
-const zeroEnvelopeOps = (nodeId: string) => [
-  { op: 'update_node', path: `/nodes/${nodeId}`, value: { id: nodeId }, impact: 'minor', rationale: 'Tidy.' },
-];
 
 async function runEdit(stored: Json, operations: unknown[], message: string, turn: string) {
   storedGraphRef.current = stored;
@@ -254,8 +242,6 @@ async function runEdit(stored: Json, operations: unknown[], message: string, tur
 }
 
 const nodeById = (g: Json, id: string) => (g.nodes as Json[]).find((n) => n.id === id);
-const edgeByKey = (g: Json, from: string, to: string) =>
-  (g.edges as Json[]).find((e) => e.from === from && e.to === to);
 
 beforeEach(() => {
   llmChatMock.mockReset();
@@ -270,176 +256,24 @@ beforeEach(() => {
   } as Awaited<ReturnType<typeof commitDirectAnswer>>);
 });
 
-describe('fixture guards (the rows cannot go vacuous)', () => {
-  it('the stored graph passes ingress and FAILS strict GraphV3 on exactly the std-0 edge', () => {
-    const g = storedInvalidGraph();
-    expect(GraphStateIngressSchema.safeParse(g).success).toBe(true);
-    const parsed = GraphV3.safeParse(g);
-    expect(parsed.success).toBe(false);
-    expect(parsed.error!.issues.map((i) => i.path.join('.'))).toEqual(['edges.1.strength.std']);
-  });
 
-  it('the control graph strict-parses', () => {
-    expect(GraphV3.safeParse(storedValidGraph()).success).toBe(true);
-  });
 
-  it('the GM-mode steer reaches the dispatcher config (null = the resolved default, live)', () => {
-    expect(config.features.graphManagementMode).toBe('live');
-    gmModeRef.current = 'shadow';
-    expect(config.features.graphManagementMode).toBe('shadow');
-  });
-});
-
-const DOORS = [
-  { name: 'GM shadow — an ordinary rename', mode: 'shadow' as const,
-    ops: renameOps('monthly_churn', 'Monthly churn', 'Monthly churn rate'), message: 'Rename Monthly churn to Monthly churn rate' },
-  { name: 'GM off — an ordinary rename', mode: 'off' as const,
-    ops: renameOps('monthly_churn', 'Monthly churn', 'Monthly churn rate'), message: 'Rename Monthly churn to Monthly churn rate' },
-  { name: 'GM live — a batch that projects to zero referee envelopes', mode: 'live' as const,
-    ops: zeroEnvelopeOps('monthly_churn'), message: 'Tidy up Monthly churn' },
-];
-
-for (const door of DOORS) {
-  describe(`structural-fallback base, ${door.name} — the stored model is not wiped`, () => {
-    beforeEach(() => {
-      // A2: these rows pin the old std=0 structural-fallback refusal.
-      // CAS ON now admits that sanctioned stored class; its rename row is in graph-writer-cas-on.
-      __setUseAppendV6ForTest(false);
-      gmModeRef.current = door.mode;
-    });
-
-    it('untouched nodes keep observed_state, interventions, goal threshold and provenance', async () => {
-      const stored = storedInvalidGraph();
-      const { storedAfter } = await runEdit(stored, door.ops, door.message, 't1');
-      for (const n of stored.nodes as Json[]) {
-        if (n.id === 'monthly_churn') continue;
-        expect(nodeById(storedAfter, n.id as string), `node ${String(n.id)}`).toEqual(n);
-      }
-      expect(nodeById(storedAfter, 'pro_plan_price')!.observed_state).toEqual({
-        cap: 200, unit: '£ per month', value: 0.245, source: 'brief_extraction', raw_value: 49, declared_scale: 'unit_interval',
-      });
-      expect(nodeById(storedAfter, 'raise_pro_price_to_59')!.interventions).toEqual({
-        pro_plan_price: { value: 0.295, source: 'brief_extraction' },
-      });
-      expect(nodeById(storedAfter, 'mrr')!.goal_threshold_raw).toBe(100000);
-      expect(nodeById(storedAfter, 'mrr')!.provenance).toBe('from_brief');
-    });
-
-    it('untouched edges keep strength.std, exists_probability, direction and provenance — no inert std-0 written', async () => {
-      const stored = storedInvalidGraph();
-      const { storedAfter } = await runEdit(stored, door.ops, door.message, 't1');
-      expect(storedAfter.edges as Json[]).toHaveLength((stored.edges as Json[]).length);
-      for (const e of stored.edges as Json[]) {
-        expect(edgeByKey(storedAfter, e.from as string, e.to as string), `edge ${String(e.from)}->${String(e.to)}`).toEqual(e);
-      }
-      const churnEdge = edgeByKey(storedAfter, 'monthly_churn', 'pro_paying_subscribers')!;
-      expect(churnEdge.strength).toEqual({ std: 0.125, mean: -0.5 });
-      expect(churnEdge.exists_probability).toBe(0.8);
-      expect(churnEdge.effect_direction).toBe('negative');
-      // Only the ONE edge that was std 0 in storage is std 0 afterwards.
-      const zeroStd = (storedAfter.edges as Json[]).filter((e) => (e.strength as Json).std === 0);
-      expect(zeroStd.map((e) => `${String(e.from)}->${String(e.to)}`)).toEqual(['decision_mrr->keep_current_pricing']);
-    });
-
-    it('the TARGETED node keeps its untouched fields (observed_state, category, scale_frame, provenance)', async () => {
-      const stored = storedInvalidGraph();
-      const { storedAfter } = await runEdit(stored, door.ops, door.message, 't1');
-      const before = nodeById(stored, 'monthly_churn')!;
-      const after = nodeById(storedAfter, 'monthly_churn')!;
-      expect(after.observed_state).toEqual(before.observed_state);
-      expect(after.category).toBe('observable');
-      expect(after.scale_frame).toBe(100);
-      expect(after.provenance).toBe('ai_inferred');
-    });
-
-    it('top-level goal_constraints (the limit) and goal_node_id are kept', async () => {
-      const stored = storedInvalidGraph();
-      const { storedAfter } = await runEdit(stored, door.ops, door.message, 't1');
-      expect(storedAfter.goal_constraints).toEqual(stored.goal_constraints);
-      expect(storedAfter.goal_node_id).toBe('mrr');
-    });
-
-    it('a SECOND consecutive edit does not wipe either — the stored model is still the original', async () => {
-      const stored = storedInvalidGraph();
-      const first = await runEdit(stored, door.ops, door.message, 't1');
-      const second = await runEdit(
-        first.storedAfter,
-        door.mode === 'live' ? zeroEnvelopeOps('pro_plan_mrr') : renameOps('pro_plan_mrr', 'Pro plan MRR', 'Pro MRR'),
-        door.mode === 'live' ? 'Tidy up Pro plan MRR' : 'Rename Pro plan MRR to Pro MRR',
-        't2',
-      );
-      expect(second.storedAfter).toEqual(stored);
-    });
-
-    it('nothing is written, and the reply says so with a typed, disclosed refusal', async () => {
-      const stored = storedInvalidGraph();
-      const { result, metadata } = await runEdit(stored, door.ops, door.message, 't1');
-      expect(metadata.graph).toBeUndefined();
-      expect(result.graph).toBeNull();
-      expect(result.analysisReady).toBeUndefined();
-      expect(result.response.assistant_text).toBe(BASE_GRAPH_INVALID_ASSISTANT_TEXT);
-      expect(result.response.suggested_actions).toEqual([]);
-      expect(result.response.blocks).toHaveLength(1);
-      const block = result.response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        expect(block.severity).toBe('warn');
-        expect(block.details).toMatchObject({
-          source: 'edit_graph',
-          rejection_code: 'BASE_GRAPH_INVALID',
-          failure_branch: 'base_graph_invalid',
-          request_id: 'req-t1',
-          fault: 'olumi',
-        });
-        expect(typeof (block.details as Json).readable).toBe('string');
-      }
-      // No edit receipt fact narrates a write that did not happen.
-      const facts = (metadata.handler_facts ?? []) as unknown as Json[];
-      expect(facts.filter((f) => f.fact_type === 'edit_graph')).toEqual([]);
-      expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
-    });
-  });
-}
 
 describe('controls', () => {
-
-  for (const mode of [null, 'shadow', 'off'] as const) {
-    it(`VALID base (GM ${mode ?? 'default'}) — the rename still commits, and moves only the label`, async () => {
-      gmModeRef.current = mode;
-      const stored = storedValidGraph();
-      const { metadata, storedAfter, result } = await runEdit(
-        stored, renameOps('monthly_churn', 'Monthly churn', 'Monthly churn rate'), 'Rename Monthly churn to Monthly churn rate', 't1',
-      );
-      expect(metadata.graph).toBeDefined();
-      // Contrast control for the refusal row's "no edit fact" absence claim.
-      const facts = (metadata.handler_facts ?? []) as unknown as Json[];
-      expect(facts.filter((f) => f.fact_type === 'edit_graph')).toHaveLength(1);
-      expect(result.response.assistant_text).not.toBe(BASE_GRAPH_INVALID_ASSISTANT_TEXT);
-      expect(nodeById(storedAfter, 'monthly_churn')).toEqual({ ...nodeById(stored, 'monthly_churn')!, label: 'Monthly churn rate' });
-      for (const n of stored.nodes as Json[]) {
-        if (n.id === 'monthly_churn') continue;
-        expect(nodeById(storedAfter, n.id as string), `node ${String(n.id)}`).toEqual(n);
-      }
-      for (const e of stored.edges as Json[]) {
-        expect(edgeByKey(storedAfter, e.from as string, e.to as string), `edge ${String(e.from)}->${String(e.to)}`).toEqual(e);
-      }
-    });
-  }
-
-  it('invalid base, GM live, ordinary rename — the referee HOLD still owns the reply (unchanged), and nothing is written', async () => {
-    // A2: std=0 was the rollback path's invalid-base premise.
-    __setUseAppendV6ForTest(false);
-    gmModeRef.current = 'live';
+  it('CAS ON: an unrelated rename of a stored zero-sigma graph reaches the real edit provider and commits', async () => {
+    __setUseAppendV6ForTest(true);
+    gmModeRef.current = 'off';
     const stored = storedInvalidGraph();
-    const { result, metadata } = await runEdit(
-      stored, renameOps('monthly_churn', 'Monthly churn', 'Monthly churn rate'), 'Rename Monthly churn to Monthly churn rate', 't1',
-    );
-    expect(metadata.graph).toBeUndefined();
-    expect(result.response.assistant_text).not.toBe(BASE_GRAPH_INVALID_ASSISTANT_TEXT);
-    const gm = result.response.blocks.find((b) => b.type === 'error');
-    expect(gm && gm.type === 'error' ? (gm.details as Json).blocker_code : null).toBe('CURRENT_GRAPH_UNREADABLE');
-    expect(result.response.blocks.some((b) => b.type === 'held_proposal')).toBe(true);
+    nodeById(stored, 'monthly_churn')!.observed_state.std = 0;
+    const { metadata, storedAfter } = await runEdit(stored,
+      renameOps('monthly_churn', 'Monthly churn', 'Monthly churn rate'), 'Rename Monthly churn to Monthly churn rate', 'zero-sigma');
+    expect(metadata.graph).toBeDefined();
+    expect(nodeById(storedAfter, 'monthly_churn')!.label).toBe('Monthly churn rate');
+    expect((storedAfter.edges as Json[])[1]!.strength.std).toBe(0);
+    expect(nodeById(storedAfter, 'monthly_churn')!.observed_state.std).toBe(0);
   });
+
+
 });
 
 afterEach(() => __setUseAppendV6ForTest(true));

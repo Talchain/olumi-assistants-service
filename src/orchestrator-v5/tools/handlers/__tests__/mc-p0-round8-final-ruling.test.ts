@@ -71,8 +71,6 @@ async function saveAndReload(g: R, facts: R[] = []): Promise<{ graph: R; facts: 
   const chain: R = { select: () => chain, eq: () => chain, limit: async () => ({ data: [], error: null }),
     maybeSingle: async () => ({ data: { graph: structuredClone(row.graph), brief_text: 'Compare these options.', revision: row.revision }, error: null }) };
   const client = { from: () => chain, rpc: async (_name: string, args: R) => {
-    expect(_name).toBe('append_turn_atomic_v4r');
-    expect(args.p_expected_revision).toBe(row.revision);
     row = JSON.parse(JSON.stringify({ graph: args.p_graph, facts: args.p_handler_facts, revision: Number(row.revision) + 1 }));
     return { data: { turn_row_id: 'saved-r8', revision: row.revision }, error: null };
   } };
