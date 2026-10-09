@@ -1,6 +1,7 @@
 import { createHash, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import { config } from '../../config/index.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
+import { readGoalRecord } from './goal-record.js';
 
 type Rec = Record<string, unknown>;
 const record = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -11,11 +12,12 @@ export function horizonBasisProofKey(): Buffer | null {
   return typeof secret !== "string" || secret.trim() === "" ? null : Buffer.from(hkdfSync('sha256', secret, '', 'olumi/s5/horizon_basis/v1', 32));
 }
 
-/** S5 2b r7 (a2): bind the user's judgement to the goal's trajectory; their model copy keeps it. */
-export function horizonBasisMetricKey(goal: Rec): string {
+/** S5 2b r12 (a2): bind the user's judgement to the goal's trajectory and approved deadline; their model copy keeps it. */
+export function horizonBasisMetricKey(graph: unknown, goal: Rec): string {
   const label = typeof goal.label === 'string' ? goal.label.trim().toLowerCase().replace(/\s+/g, ' ') : '';
+  const deadline = typeof goal.id === 'string' ? readGoalRecord(graph, goal.id)?.horizon?.deadline ?? null : null;
   return createHash('sha256').update(JSON.stringify([
-    goal.id, label, goal.goal_threshold_unit ?? null, goal.goal_horizon_months,
+    goal.id, label, goal.goal_threshold_unit ?? null, goal.goal_horizon_months, deadline,
   ])).digest('hex').slice(0, 32);
 }
 
@@ -37,5 +39,5 @@ export function horizonSteadyAttested(graph: unknown): boolean {
   return timingSafeEqual(expected, Buffer.from(basis.proof, 'hex')) && typeof goal.id === 'string' && typeof goal.label === 'string'
     && typeof goal.goal_horizon_months === 'number' && Number.isInteger(goal.goal_horizon_months) && goal.goal_horizon_months > 0
     && basis !== undefined && basis.bound_months === goal.goal_horizon_months
-    && basis.metric === horizonBasisMetricKey(goal);
+    && basis.metric === horizonBasisMetricKey(graph, goal);
 }

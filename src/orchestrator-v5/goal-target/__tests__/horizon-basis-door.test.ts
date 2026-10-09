@@ -88,7 +88,7 @@ const goalOf = (g: Rec, id = 'goal'): Rec => g.nodes.find((n: Rec) => n.id === i
 const metric = (g: Rec, id = 'goal') => {
   const goal = goalOf(g, id);
   return createHash('sha256').update(JSON.stringify([id, goal.label.trim().toLowerCase().replace(/\s+/g, ' '),
-    goal.goal_threshold_unit ?? null, goal.goal_horizon_months])).digest('hex').slice(0, 32);
+    goal.goal_threshold_unit ?? null, goal.goal_horizon_months, goal.goal_horizon?.deadline ?? null])).digest('hex').slice(0, 32);
 };
 const attested = (): Rec => {
   const g = seed();
@@ -204,8 +204,10 @@ describe('S5 horizon_basis door: real ingress and commit paths, stored meaning b
       .toMatchObject({ kind: 'refused', reason: 'goal_month_changed' });
     expect(w.writes).toHaveLength(0);
   });
-  it.each(['label', 'unit', 'months', 'id'])('R4 key voids after %s moves', field => {
-    const issued = applyGoalSteadyEdit(seed(), { goal_id: 'goal', months: 9 }, SCENARIO);
+  it.each(['label', 'unit', 'months', 'id', 'deadline'])('R4 key voids after %s moves', field => {
+    const base = seed();
+    if (field === 'deadline') goalOf(base).goal_horizon = { deadline: '2027-07-09' };
+    const issued = applyGoalSteadyEdit(base, { goal_id: 'goal', months: 9 }, SCENARIO);
     if (issued.kind !== 'mutated') throw new Error('not written');
     const g = issued.mutatedGraph;
     expect(horizonSteadyAttested(g)).toBe(true);
@@ -213,12 +215,40 @@ describe('S5 horizon_basis door: real ingress and commit paths, stored meaning b
     if (field === 'unit') goalOf(g).goal_threshold_unit = '£/year';
     if (field === 'months') goalOf(g).goal_horizon_months = 12;
     if (field === 'id') goalOf(g).id = 'other_goal';
+    if (field === 'deadline') goalOf(g).goal_horizon = { deadline: '2027-07-10' };
     expect(horizonSteadyAttested(g)).toBe(false);
+    if (field === 'deadline') {
+      expect(goalOf(g).goal_horizon_months).toBe(9);
+      expect(horizonBasisWriteIsAuthorised(issued.horizonBasisWrite, base, SCENARIO)).toBe(true);
+      expect(horizonBasisWriteIsAuthorised(issued.horizonBasisWrite, g, SCENARIO)).toBe(false);
+    }
     if (field === 'months') {
       // Pin the metric's month binding independently: bound_months mismatch must not mask M5.
       goalOf(g).horizon_basis.bound_months = 12;
+      // Keep the proof valid so HMAC rejection cannot mask a metric that ignores months (M5).
+      const b = goalOf(g).horizon_basis;
+      const key = Buffer.from(hkdfSync('sha256', proofConfig.secret!, '', 'olumi/s5/horizon_basis/v1', 32));
+      b.proof = createHmac('sha256', key).update(JSON.stringify(['goal', b.bound_months, b.metric, b.basis, b.source])).digest('hex');
       expect(horizonSteadyAttested(g)).toBe(false);
     }
+  });
+  it('R4 key voids when a deadline appears with unchanged months', () => {
+    const g = attested();
+    expect(horizonSteadyAttested(g)).toBe(true);
+    goalOf(g).goal_horizon = { deadline: '2027-07-09' };
+    expect(goalOf(g).goal_horizon_months).toBe(9);
+    expect(horizonSteadyAttested(g)).toBe(false);
+  });
+  it('R4 unchanged deadline keeps the attestation after serialization', () => {
+    const base = seed(); goalOf(base).goal_horizon = { deadline: '2027-07-09' };
+    const issued = applyGoalSteadyEdit(base, { goal_id: 'goal', months: 9 }, SCENARIO);
+    if (issued.kind !== 'mutated') throw new Error('not written');
+    const g = clone(issued.mutatedGraph);
+    expect(goalOf(g).goal_horizon).toEqual({ deadline: '2027-07-09' });
+    expect(goalOf(g).goal_horizon_months).toBe(9);
+    expect(horizonBasisMetricKey(g, goalOf(g))).toBe(metric(g));
+    expect(horizonSteadyAttested(g)).toBe(true);
+    expect(horizonBasisWriteIsAuthorised(issued.horizonBasisWrite, g, SCENARIO)).toBe(true);
   });
   it('R4 a copy into another scenario KEEPS the attestation', () => {
     // S5 slice 2b r7, a2: the user's judgement is about the GOAL trajectory, not its scenario container.
@@ -230,9 +260,9 @@ describe('S5 horizon_basis door: real ingress and commit paths, stored meaning b
     expect(horizonSteadyAttested(copied)).toBe(true);
     expect(applyGoalSteadyEdit(copied, { goal_id: 'goal', months: 9 }, 'different-scenario')).toEqual({ kind: 'unchanged' });
   });
-  it('R4 normalisation and exact key match r7 scenario-free sha256 tuple', () => {
+  it('R4 normalisation and exact key match r12 scenario-free sha256 tuple', () => {
     const g = attested(); goalOf(g).label = '  SERVICE   quality  ';
-    expect(horizonBasisMetricKey(goalOf(g))).toBe(metric(g));
+    expect(horizonBasisMetricKey(g, goalOf(g))).toBe(metric(g));
     expect(horizonSteadyAttested(g)).toBe(true);
   });
   it.each([false, true])('R5 register/import drops a complete client forgery (existing: %s)', async existing => {
@@ -391,7 +421,7 @@ describe('S5 r1 append-door provenance', () => {
   it.each(['update_node', 'add_node'])('P1-1 generic approval %s cannot forge a correctly bound basis', async op => {
     const g = seed(), w = world(g);
     const forged = clone(goalOf(attested()));
-    if (op === 'add_node') { forged.id = 'b'; forged.horizon_basis.metric = horizonBasisMetricKey(forged); }
+    if (op === 'add_node') { forged.id = 'b'; forged.horizon_basis.metric = horizonBasisMetricKey({ nodes: [forged], edges: [] }, forged); }
     const apply = createApplyOperations({ scenarioId: SCENARIO, requestId: 'r1-approval', store: w.store });
     const pendingResult = apply({ proposalId: 'r1-forge', idempotencyKey: TURN,
       modelRevision: (await currentModelRevision(SCENARIO, { store: w.store }))!,
