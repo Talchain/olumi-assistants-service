@@ -54,7 +54,7 @@ function candidate(horizon: number | null): CandidateModel {
 }
 
 /** The goal node a fresh GraphV3 parse of the registered bytes holds. */
-async function registeredGoal(brief: string, horizon: number | null): Promise<Rec> {
+async function registeredGoal(brief: string, horizon: number | null, firstQuestion?: string): Promise<Rec> {
   let stored: string | undefined;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
@@ -66,6 +66,7 @@ async function registeredGoal(brief: string, horizon: number | null): Promise<Re
   const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate(horizon)) });
   const result = await buildModelFromBrief(SCENARIO, brief, dispatch, call) as Rec;
   expect(result.ok, JSON.stringify(result).slice(0, 300)).toBe(true);
+  if (firstQuestion !== undefined) expect((result.open_questions as string[])[0]).toBe(firstQuestion);
   const goals = GraphV3.parse(JSON.parse(stored!)).nodes.filter((n) => n.kind === 'goal');
   expect(goals).toHaveLength(1);
   return goals[0] as Rec;
@@ -116,8 +117,8 @@ describe('attestHorizon: the brief confirms the drafter\'s month count, or it is
     expect(attestHorizon(BRIEF, { horizon_months: 18 })).toEqual({ months: null, wording: 'within 12 months', status: 'unresolved' });
   });
 
-  it('CONTRAST: a deadline in number words is under-claimed (unchanged from G1: "eighteen months" is never held)', () => {
-    expect(attestHorizon(withDeadline('within twelve months'), { horizon_months: 12 }).status).toBe('absent');
+  it.each([['within twelve months', 12], ['at month 9', 9]])('CONTRAST: %s is proposed, never silently held', (words, months) => {
+    expect(attestHorizon(withDeadline(words), { horizon_months: months })).toMatchObject({ months: null, proposed_months: months, status: 'unresolved' });
   });
 
   it('absence-tolerant: no brief, no goal, or an older candidate with no horizon', () => {
@@ -159,4 +160,14 @@ describe('G1 holds exactly what attestHorizon attests, on the registered goal', 
     expect(held.horizon.status).toBe('attested');
     expect((held.nodes[0] as Rec).goal_horizon_months).toBe(12);
   });
+});
+
+
+it('at month 9 asks the proposed numeric count while a calendar-word deadline still asks its date', async () => {
+  const numeric = await registeredGoal(withDeadline('at month 9'), 18,
+    'Does "MRR" get there within 9 months? The model holds no deadline yet, so no result answers that.');
+  expect(numeric.goal_horizon_months).toBeUndefined();
+  const calendar = await registeredGoal(withDeadline('by the end of March'), 9,
+    'Which date does "by the end of March" mean? It is the deadline your brief sets for "MRR"; the model keeps your words but no date, so no result answers whether it is met by then.');
+  expect(calendar.goal_horizon_months).toBeUndefined();
 });

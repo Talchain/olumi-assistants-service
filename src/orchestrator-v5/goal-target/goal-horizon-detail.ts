@@ -3,6 +3,7 @@ import { GOAL_HORIZON_STEADY_ATTESTED, heldGoalDeadline, heldGoalHorizonMonths }
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { readGoalRecord } from './goal-record.js';
 import { accumulationOptionScopes } from '../agent-lane/accumulation-identity.js';
+import { readUnitParts } from '../agent-lane/same-unit.js';
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { sayDate } from './deadline-date.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/projector.js';
@@ -113,10 +114,27 @@ const inflowSpreadWords = (node: Rec): string => {
   return source === 'user_stated' || source === 'user_ratified' ? 'about a quarter' : 'about half';
 };
 
+/** The rate-goal alternative is derived only from this admitted stock reading's own graph. */
+export function goalStockOneOffChoice(graph: unknown): string | null {
+  const held = goalStockAccumulationOf(graph);
+  if (held === null || readUnitParts(readGoalRecord(graph, String(held.goal.id))?.target?.unit)?.period !== 'month') return null;
+  const raw = rec(held.inflow.observed_state)?.raw_value;
+  const unit = readGoalRecord(graph, String(held.goal.id))?.target?.unit;
+  return !finite(raw) || typeof unit !== 'string' ? null : `No, it's a one-off ${sayFigureAsWritten(raw, unit).replace(/ \/ month$/, ' a month')}`;
+}
+
 /** Net versus gross is the drafter's reading, disclosed on the existing correction card. */
 export function goalStockNetReadingLine(graph: unknown): string | null {
   const held = goalStockAccumulationOf(graph);
   const amount = held === null || !positiveInflow(held.inflow) ? null : spokenFigure(held.inflow);
+  if (held?.netZero && amount !== null && goalStockOneOffChoice(graph) !== null) {
+    const value = rec(held.inflow.observed_state)!.raw_value as number;
+    const unit = readGoalRecord(graph, String(held.goal.id))?.target?.unit;
+    const figure = sayFigureAsWritten(value, String(unit)).replace(/ \/ month$/, ' a month');
+    const increment = sayFigureAsWritten(value * held.month, String(unit)).replace(/ \/ month$/, '');
+    const monthly = figure.replace(/ a month$/, '');
+    return `Olumi read ‘${figure}’ as ‘${String(held.goal.label)}’ growing by ${monthly} every month (about ${increment} more by month ${held.month}), after any losses.`;
+  }
   return held?.netZero && amount !== null
     ? `Olumi read ‘+${amount}’ as the change after any losses.` : null;
 }
@@ -140,8 +158,14 @@ export function goalStockMethodWhyLine(graph: unknown, options: readonly { inter
   const same = options.length > 0 && scopes.find(scope => scope.carrier_id === held.carrier.id)?.sameForEveryOption === true;
   const factors = [...new Set(options.flatMap(o => rec(o.interventions) ? Object.keys(o.interventions as Rec) : []))];
   const factor = factors.length === 1 ? held.nodes.find(n => n.id === factors[0]) : undefined;
+  const reference = held.goal.goal_horizon_reference_date;
+  const deadline = readGoalRecord(graph, String(held.goal.id))?.horizon?.deadline;
+  const referenceLine = typeof reference === 'string' && held.goal.goal_horizon_stated_months === undefined ? ` Whole months completed from ${sayDate(reference)}.` : '';
+  const remainder = typeof reference === 'string' && typeof deadline === 'string' && held.goal.goal_horizon_stated_months === undefined
+    && reference.slice(8) !== deadline.slice(8);
+  const disclosure = remainder ? ` Month ${held.month} is the last full month before ${sayDate(deadline!)}.` : '';
   return `Starts from today's ${start} and adds ${addition} each month${held.netZero ? ' (Olumi read that as the change after any losses)' : ''}, give or take ${inflowSpreadWords(held.inflow)}, up to month ${held.month}${same ? ', the same for every option' : ''}.`
-    + (typeof factor?.label === 'string' && factor.label.trim() !== '' ? ` Each option then changes ‘${factor.label.trim()}’ from there.` : '');
+    + (typeof factor?.label === 'string' && factor.label.trim() !== '' ? ` Each option then changes ‘${factor.label.trim()}’ from there.` : '') + referenceLine + disclosure;
 }
 
 /** The existing Run snapshot retains exactly the settings dispatched, including held baseline settings. */

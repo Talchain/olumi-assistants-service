@@ -799,6 +799,15 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "not read as its warrant. It is a DURATION, not a level of the goal metric: " +
       "out of the analysis hash and outside `carriesValue` / `NODE_QUANTITY_FIELDS`.",
   },
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_horizon_stated_months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the same field-scoped duration warrant as goal_horizon_months: its unit is whole months " +
+      "(`.int().positive()`), and the S4 deadline door writes it only from the user's literal stated duration " +
+      "on the approved deadline card. Generic AI mutations cannot write it (field-safety pipeline-owned roots). " +
+      "Absence means no literal duration was stated; target-level qualifiers do not attest this duration.",
+  },
   // ── UNWARRANTED, ADJUDICATED: a link size's written range (declared 30 Sep 2026, A4, CEE #2409) ──────────
   {
     id: "unwarranted:cee.EdgeV3::provenance.natural_effect.stated_range.low",
