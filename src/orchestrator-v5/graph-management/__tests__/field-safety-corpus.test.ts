@@ -119,11 +119,14 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       'goal_deadline_as_stated',
       'goal_direction',
       'goal_horizon_months',
+      'goal_horizon_reference_date',
+      'goal_horizon_stated_months',
       // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level — construction only.
       'goal_level_reading',
       // MG #2306 (29 Sep): Olumi's reading of a decrease target — CEE-owned; only construction writes it.
       'goal_scope',
       'goal_sense_reading',
+      'goal_stock_reading',
       // S4 §(ad): the horizon basis stamps are CEE-owned.
       'horizon_basis',
       'horizon_basis_months',
@@ -142,7 +145,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
 });
 
 // ---------------------------------------------------------------------------
-// B. THE 24 SMUGGLE NAMES, SPELLED OUT BY HAND
+// B. THE 27 SMUGGLE NAMES, SPELLED OUT BY HAND
 // ---------------------------------------------------------------------------
 
 /**
@@ -171,6 +174,9 @@ const SMUGGLE_NAMES = [
   // G1 (27 Sep): the goal's stated direction and deadline joined the CEE-owned roots.
   'goal_direction',
   'goal_horizon_months',
+  'goal_horizon_reference_date',
+  'goal_horizon_stated_months',
+  'goal_stock_reading',
   // PJ-E-A2 part 2 (28 Sep): the deadline in the brief's own words — the same G1 class.
   'goal_deadline_as_stated',
   // MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
@@ -189,7 +195,7 @@ const SMUGGLE_NAMES = [
   'relies_on',
 ] as const;
 
-describe('corpus B — the 24 smuggle names, hand-written', () => {
+describe('corpus B — the 27 smuggle names, hand-written', () => {
   it('each is owned by CEE and is NOT an intervention contract key', () => {
     for (const name of SMUGGLE_NAMES) {
       expect(PIPELINE_OWNED_ROOTS.has(name), `${name} owned`).toBe(true);
@@ -399,5 +405,19 @@ describe('event_risk.v1 slice 2a — field safety', () => {
     expect(PIPELINE_OWNED_ROOTS.has('event_risk')).toBe(true);
     expect(nodeUpdate('event_risk', block).blocker?.code).toBe(PIPELINE_OWNED_FIELD);
     expect(addNode({ event_risk: block }).blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+  });
+});
+
+
+describe('S4 temporal authority cannot be forged by an AI mutation', () => {
+  it('R2: add_node and patch refuse a one-off reading, forged reference and forged stated duration', () => {
+    for (const [field, value] of [
+      ['goal_stock_reading', 'one_off'],
+      ['goal_horizon_reference_date', '2020-01-01'],
+      ['goal_horizon_stated_months', 99],
+    ] as const) {
+      expect(addNode({ [field]: value }).blocker?.code, `${field} add`).toBe(PIPELINE_OWNED_FIELD);
+      expect(nodeUpdate(field, value).blocker?.code, `${field} patch`).toBe(PIPELINE_OWNED_FIELD);
+    }
   });
 });

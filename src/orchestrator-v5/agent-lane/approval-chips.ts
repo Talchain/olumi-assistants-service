@@ -236,7 +236,10 @@ export function approvalChipsFor(
     const words = identityWordsFor(labelSourceFor?.(proposalId));
     return words === undefined ? []
       : [{ id: approvalChipIdFor(proposalId), label: words.startsWith('Olumi reads ‘') && (stored === undefined || identityReadingOf(stored)?.operation !== 'sum') ? "Yes, that's how" : approve.label,
-        message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
+        message: identityApproveMessage(words), detail: words },
+        ...(stored !== undefined && identityReadingOf(stored)?.one_off_words !== undefined
+          ? [{ id: approvalChipIdFor(proposalId) + ':one-off', label: identityReadingOf(stored)!.one_off_words!,
+            message: `No — ${words}`, detail: words }] : [AMEND_CHIP])];
   }
   // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
   if (tool === 'propose_link_effect') {
@@ -682,7 +685,8 @@ export function typedApprovalOf(body: unknown): string | undefined {
   const id = (body as { chip?: { id?: unknown } } | null | undefined)?.chip?.id;
   if (typeof id !== 'string' || !id.startsWith(APPROVE_PREFIX)) return undefined;
   const named = id.slice(APPROVE_PREFIX.length);
-  const proposalId = named.endsWith(':reserve') ? named.slice(0, -':reserve'.length) : named;
+  const proposalId = named.endsWith(':reserve') ? named.slice(0, -':reserve'.length)
+    : named.endsWith(':one-off') ? named.slice(0, -':one-off'.length) : named;
   // `gmh_…` is a held add-option or add-risk on the product's own seam (C52, SLICE C2): the same typed, zero-call approval.
   return /^prop_[0-9a-f]{6,64}$/.test(proposalId) || /^gmh_[0-9a-f]{12}$/.test(proposalId) ? proposalId : undefined;
 }
