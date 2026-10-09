@@ -1,0 +1,4 @@
+Load gate exit: 0
+{"load":16.2880859375,"threshold":25}
+node scripts/ci/goal-record-census.mjs --check < /dev/null
+S5 goal-record census: 703 field/file references match baseline
