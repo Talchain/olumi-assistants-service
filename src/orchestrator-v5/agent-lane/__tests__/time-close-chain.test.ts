@@ -16,6 +16,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { holdStatedGoalAttributes, withdrawUnstatedBaselineStamps, figureTheUserWroteFor } from '../stated-by-user.js';
 import { attestHorizon } from '../horizon-attestation.js';
+import { readUnitParts } from '../same-unit.js';
 import { admitStructuralGoalAccumulation } from '../accumulation-identity.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
 import { identityApproveMessage } from '../identity-card.js';
@@ -74,7 +75,7 @@ function draft(): Rec {
   expect(node(graph, 'monthly_additions').observed_state.source).toBe('brief_extraction');
   return graph;
 }
-function world(initial = draft(), badZero = false, reference: string | null = `${R}T12:00:00Z`, recovery?: 'unconfirmed' | 'failed-read') {
+function world(initial = draft(), badZero = false, reference: string | null = `${R}T12:00:00Z`, recovery?: 'unconfirmed' | 'failed-read', scenarioCreatedAt?: string | null) {
   let bytes = JSON.stringify(initial);
   const proposals = new ProposalStore();
   const writes: Rec[] = [];
@@ -90,7 +91,7 @@ function world(initial = draft(), badZero = false, reference: string | null = `$
     if (failedReadbacks > 0 && path.endsWith('/graph')) { failedReadbacks--; return { status: 503, json: {} }; }
     if (path.endsWith('/versions')) return { status: 200, json: { versions: reference === null ? [] : [{ version_id: 'draft-v1', sequence: 1, created_at: reference,
       creation: { kind: 'initial', source_turn_id: registrationTurnId(SID, constructionOperationId(SID, BRIEF)) } }] } };
-    if (path.endsWith('/graph')) return { status: 200, json: { graph: read(), graph_hash: hash(read()), brief_text: BRIEF } };
+    if (path.endsWith('/graph')) return { status: 200, json: { graph: read(), graph_hash: hash(read()), brief_text: BRIEF, scenario_created_at: scenarioCreatedAt } };
     throw new Error(path);
   };
   const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
@@ -150,6 +151,35 @@ function dateWrite(graph: Rec, deadline: string, stated_months?: number): Rec {
   return GraphV3.parse(JSON.parse(JSON.stringify(out.mutatedGraph))) as Rec;
 }
 describe('S4 time close, real deadline and identity doors plus real Run', () => {
+  it('guest scenario_created_at supplies R: deadline Yes holds H=5 and offers stock', async () => {
+    const w = world(draft(), false, null, undefined, '2026-10-09T10:00:00Z');
+    expect((await w.deadline()).applied).toBe(true);
+    expect(goal(w.read())).toMatchObject({ goal_horizon: { deadline: '2027-03-31' }, goal_horizon_months: 5,
+      goal_horizon_reference_date: R });
+    const offered = await w.offer(); expect(offered.ok, JSON.stringify(offered)).toBe(true);
+    expect((await w.confirm(offered)).applied).toBe(true);
+    const fact = await run(w.read());
+    expect(JSON.stringify(buildAnalysisResultBlock(fact as never))).toContain('Whole months completed from 9 October 2026. Month 5 is the last full month before 31 March 2027.');
+  });
+  it('signed-in CONTRAST construction version wins across month boundary over scenario_created_at', async () => {
+    const w = world(draft(), false, '2026-09-30T10:00:00Z', undefined, '2026-10-01T10:00:00Z');
+    const context = { scenario_id: SID, authenticated_user_id: '550e8400-e29b-41d4-a716-446655440001', request_id: 'version-wins', user_text: '31 March 2027', user_turn_text: '31 March 2027' };
+    const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: '31 March 2027', rationale: 'The user stated this deadline.' });
+    expect(offered.public_label).toContain('from 30 September 2026');
+    expect(await w.caps.authoriseChange({ ...context, user_text: 'Yes', user_turn_text: 'Yes' }, { proposal_id: String(offered.proposal_id) })).toMatchObject({ applied: true });
+    expect(goal(w.read())).toMatchObject({ goal_horizon_months: 6, goal_horizon_reference_date: '2026-09-30' });
+  });
+  it.each([undefined, null, 'not-a-timestamp'])('guest has no usable scenario_created_at (%s): date-only fallback', async scenarioCreatedAt => {
+    const w = world(draft(), false, null, undefined, scenarioCreatedAt);
+    const context = { scenario_id: SID, authenticated_user_id: null, request_id: 'bad-scenario-date', user_text: 'within 6 months', user_turn_text: 'within 6 months' };
+    const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', rationale: 'The user stated this deadline.' });
+    expect(offered.public_label).toBe('Is your deadline 1 August 2027 (6 months from today)?');
+    expect(await w.caps.authoriseChange({ ...context, user_text: 'Yes', user_turn_text: 'Yes' }, { proposal_id: String(offered.proposal_id) })).toMatchObject({ applied: true });
+    expect(goal(w.read()).goal_horizon_months).toBeUndefined();
+    expect(goal(w.read()).goal_horizon_reference_date).toBeUndefined();
+    expect((await w.offer()).ok).toBe(false);
+  });
+
   it('chain: draft has no H; deadline Yes records H; structural card; confirm; Run; canonical reload holds Why', async () => {
     const w = world();
     expect(readGoalRecord(w.read(), String(goal(w.read()).id))?.horizon?.months).toBeUndefined();
@@ -240,7 +270,7 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     expect((await w.offer()).ok).toBe(true);
   });
   it('no versions CONTRAST: explicit as of on the card supplies R only after Yes', async () => {
-    const w = world(draft(), false, null);
+    const w = world(draft(), false, null, undefined, '2026-10-01T10:00:00Z');
     const context = { scenario_id: SID, authenticated_user_id: null, request_id: 'as-of', user_text: `within 6 months as of ${R}`, user_turn_text: `within 6 months as of ${R}` };
     const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', reference_date: R, rationale: 'The user stated this deadline.' });
     expect(offered).toMatchObject({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)?' });
@@ -268,6 +298,18 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     expect(attestHorizon('Reach cash at month 9', { horizon_months: 9 })).toMatchObject({ status: 'unresolved', months: null, proposed_months: 9 });
     expect(attestHorizon('Reach cash in nine months', { horizon_months: 9 })).toMatchObject({ status: 'unresolved', months: null, proposed_months: 9 });
     const w = world(); expect((await w.deadline('month 9')).applied).toBe(true); expect(goal(w.read()).goal_horizon_months).toBe(9);
+  });
+  it.each([['£ revenue month', false], ['£ per month', true]] as const)('unit-connector guard: %s after deadline Yes offers stock=%s', async (unit, expectedOffer) => {
+    // Both are accepted as monthly money by the shared parser. Only the second explicitly connects a rate.
+    expect(readUnitParts(unit)).toEqual(readUnitParts('£ per month'));
+    expect(readUnitParts(unit)).toMatchObject({ kind: 'currency', code: 'GBP', period: 'month' });
+    const g = draft(); node(g, 'monthly_additions').observed_state.unit = unit;
+    const w = world(g); expect((await w.deadline()).applied).toBe(true);
+    expect(goal(w.read())).toMatchObject({ goal_horizon_months: 5, goal_horizon_reference_date: R });
+    expect(goalStockAccumulationOf(w.read()) !== null).toBe(expectedOffer);
+    const offered = await w.offer(); expect(offered.ok).toBe(expectedOffer);
+    if (expectedOffer) expect(offered.card.words).toContain('£2,000');
+    else expect(offered.card).toBeUndefined();
   });
   it.each(['olumi', 'second-flow', 'per-time-level', 'mismatched-unit', 'zero-inflow'])('no structural offer: %s; existing honest line', async why => {
     const g = draft();

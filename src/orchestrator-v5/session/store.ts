@@ -692,6 +692,8 @@ export interface SessionStore {
     readonly graph: unknown | null;
     readonly briefText: string | null;
     readonly analysisInvalidatedAt: string | null;
+    /** Server scenario creation timestamp, read beside graph and brief. */
+    readonly createdAt?: string | null;
     /** Same uncached SELECT as graph; not a revision-at-Run claim. */
     readonly revision?: number;
   } | null>;
