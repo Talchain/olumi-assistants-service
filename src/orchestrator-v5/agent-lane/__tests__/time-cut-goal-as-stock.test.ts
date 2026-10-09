@@ -303,7 +303,6 @@ describe('S4 time cut Q1 + Q2 through real admission and real Run', () => {
 
 const FACE = 'Worked out month by month to month 9';
 const WHY = "Starts from today's £120,000 a month and adds £2,000 each month (Olumi read that as the change after any losses), give or take about a quarter, up to month 9, the same for every option. Each option then changes ‘Price’ from there.";
-const NET = 'Olumi read ‘+£2,000 a month’ as the change after any losses.';
 
 /** Issue and press the existing card; its writer is the actual CAS/append commit door. */
 async function press(graph: Rec): Promise<Rec> {
