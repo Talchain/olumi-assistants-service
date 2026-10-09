@@ -672,6 +672,12 @@ export const NodeV3 = z.object({
         factor_ids: z.array(z.string().min(1)).min(2),
         stated_in_brief: z.literal(false),
       }).strict(),
+      // S4 Q1: graph-level validation below restricts this arm to a goal's accumulation carrier.
+      z.object({
+        operation: z.literal('sum'),
+        factor_ids: z.tuple([z.string().min(1)]),
+        stated_in_brief: z.boolean(),
+      }).strict(),
       // ⭐ `accumulation` (Science goals §(v); contract: programme-docs design/ACCUMULATION-CARRIER-CONTRACT-20261008.md):
       // a STOCK at the goal's horizon, worked out without time-stepping, S_T = S₀(1−c)^T + inflow·(1−(1−c)^T)/c, on a
       // DERIVED node (never the goal). `factor_ids` is POSITIONAL: [stock today, churn rate per month, inflow per month],
@@ -1089,7 +1095,17 @@ export type ValidationWarningV3T = z.infer<typeof ValidationWarningV3>;
  */
 export const GraphV3 = z.object({
   /** Graph nodes */
-  nodes: z.array(NodeV3),
+  nodes: z.array(NodeV3).transform((nodes): NodeV3T[] => nodes.map(node => {
+    const identity = node.nonlinear_identity;
+    if (identity?.operation !== 'sum' || identity.factor_ids.length !== 1) return node;
+    const operand = nodes.find(n => n.id === identity.factor_ids[0]);
+    const carrier = operand?.nonlinear_identity;
+    if (node.kind === 'goal' && operand?.kind === 'outcome' && carrier?.operation === 'accumulation'
+      && carrier.horizon_months === node.goal_horizon_months && typeof operand.scale_frame === 'number'
+      && operand.scale_frame > 0) return node;
+    const { nonlinear_identity: _invalid, ...withoutIdentity } = node;
+    return withoutIdentity;
+  })),
   /** Graph edges */
   edges: z.array(EdgeV3),
   /**

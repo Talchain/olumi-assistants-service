@@ -30,8 +30,8 @@ export const CONFIRM_IDENTITY_OP = 'confirm_identity' as const;
 export function identityReadingOf(proposal: StructuredProposal): IdentityProposal | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === CONFIRM_IDENTITY_OP ? proposal.operations[0]! : undefined;
   const v = (op?.value ?? {}) as { outcome_id?: unknown; operation?: unknown; factor_ids?: unknown; words?: unknown; part_levels?: unknown };
-  if (op === undefined || typeof v.outcome_id !== 'string' || v.outcome_id !== op.path || v.operation !== 'product'
-    || !Array.isArray(v.factor_ids) || v.factor_ids.length !== 2 || !v.factor_ids.every((f) => typeof f === 'string' && f !== '')
+  if (op === undefined || typeof v.outcome_id !== 'string' || v.outcome_id !== op.path || (v.operation !== 'product' && v.operation !== 'sum')
+    || !Array.isArray(v.factor_ids) || v.factor_ids.length !== (v.operation === 'sum' ? 1 : 2) || !v.factor_ids.every((f) => typeof f === 'string' && f !== '')
     || typeof v.words !== 'string' || v.words.trim() === '') return undefined;
   const levels = v.part_levels;
   if (levels !== undefined && !Array.isArray(levels)) return undefined;
@@ -44,7 +44,8 @@ export function identityReadingOf(proposal: StructuredProposal): IdentityProposa
       || typeof part.unit !== 'string' || part.unit.trim() === '') return undefined;
     parts.push({ part_id: part.part_id, raw_value: part.raw_value, unit: part.unit });
   }
-  return { outcome_id: v.outcome_id, operation: 'product', factor_ids: [v.factor_ids[0] as string, v.factor_ids[1] as string], words: v.words,
+  return { outcome_id: v.outcome_id, ...(v.operation === 'sum' ? { operation: 'sum' as const, factor_ids: [v.factor_ids[0] as string] as const }
+      : { operation: 'product' as const, factor_ids: [v.factor_ids[0] as string, v.factor_ids[1] as string] as const }), words: v.words,
     ...(levels !== undefined ? { part_levels: parts } : {}) };
 }
 

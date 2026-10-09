@@ -37,7 +37,7 @@ function accumulationTestedAtGoalHorizon(graph: unknown, envelope?: unknown): bo
   const month = heldGoalHorizonMonths(goal);
   if (month === undefined) return false;
   const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
-  if (product?.operation !== 'product') return false;
+  if (product?.operation !== 'product' && !(product?.operation === 'sum' && product.factor_ids.length === 1)) return false;
   const env = recordOf(envelope);
   const evaluations = env?.identity_evaluations;
   const evaluated = env === undefined ? undefined : evaluatedIdentityCarriers(nodes,

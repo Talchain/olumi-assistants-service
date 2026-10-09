@@ -2498,7 +2498,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...widenedRunWordsOf(state.graph, replayChanceCells),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
-          ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}) });
+          ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}),
+          analysisResult: state.analysisResult });
       const parityReplayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       // Ordinary replay is the durable answer, including its canonical presentation grammar. No cache is needed.
@@ -5076,6 +5077,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (typeof question === 'string' && controlsOnReply.some((action) => action.id === pending.chip_id)) typedControlQuestions.push(question);
       }
       const composedReply = composeReplyShape({
+        analysisResult,
         text: reply,
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
