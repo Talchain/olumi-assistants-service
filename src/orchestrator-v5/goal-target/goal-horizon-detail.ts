@@ -5,6 +5,8 @@ import { readGoalRecord } from './goal-record.js';
 import { accumulationOptionScopes } from '../agent-lane/accumulation-identity.js';
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { sayDate } from './deadline-date.js';
+import { isPercentScaledUnit } from '../../cee/draft/records/projector.js';
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 
 type Rec = Record<string, unknown>;
 const rec = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
@@ -86,7 +88,7 @@ export function goalStockAccumulationOf(graph: unknown) {
   const [stock, rate, inflow] = inputs as [Rec, Rec, Rec];
   const zeroState = rec(rate.observed_state);
   const netZero = rate.id === `${carrier.id}_net_zero_rate` && zeroState?.raw_value === 0
-    && zeroState.value === 0 && zeroState.unit === '%' ? rate : null;
+    && zeroState.value === 0 && typeof zeroState.unit === 'string' && isPercentScaledUnit(zeroState.unit) ? rate : null;
   return { goal, carrier, stock, rate, inflow, netZero, month, nodes, identity, accumulation };
 }
 
@@ -96,10 +98,25 @@ const spokenFigure = (node: Rec): string | null => {
   return sayFigureAsWritten(os.raw_value, os.unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
 };
 
+/** Only a positive monthly addition is said; a negative or zero one is refused at admission and never worded here. */
+const positiveInflow = (node: Rec): boolean => {
+  const raw = rec(node.observed_state)?.raw_value;
+  return finite(raw) && raw > 0;
+};
+
+/**
+ * Science §(ai) Q4 spread words, from the inflow's own §(ab) spread (accumulation-rate-spread.ts): σ 0.136 for a
+ * user-stated or confirmed amount ("about a quarter" at 90%), σ 0.246 for Olumi's estimate ("about half").
+ */
+const inflowSpreadWords = (node: Rec): string => {
+  const source = classifyValueSource(rec(node.observed_state)?.source);
+  return source === 'user_stated' || source === 'user_ratified' ? 'about a quarter' : 'about half';
+};
+
 /** Net versus gross is the drafter's reading, disclosed on the existing correction card. */
 export function goalStockNetReadingLine(graph: unknown): string | null {
   const held = goalStockAccumulationOf(graph);
-  const amount = held === null ? null : spokenFigure(held.inflow);
+  const amount = held === null || !positiveInflow(held.inflow) ? null : spokenFigure(held.inflow);
   return held?.netZero && amount !== null
     ? `Olumi read ‘+${amount}’ as the change after any losses.` : null;
 }
@@ -112,7 +129,7 @@ export function goalStockMethodFaceLine(graph: unknown): string | null {
 /** Call only after the Run's computed_at_h verdict, using its stored submitted options. */
 export function goalStockMethodWhyLine(graph: unknown, options: readonly { interventions?: unknown }[]): string | null {
   const held = goalStockAccumulationOf(graph);
-  if (held === null) return null;
+  if (held === null || !positiveInflow(held.inflow)) return null;
   const start = spokenFigure(held.stock);
   const addition = spokenFigure(held.inflow)?.replace(/ a month$/, '');
   if (start === null || addition === undefined) return null;
@@ -123,7 +140,7 @@ export function goalStockMethodWhyLine(graph: unknown, options: readonly { inter
   const same = options.length > 0 && scopes.find(scope => scope.carrier_id === held.carrier.id)?.sameForEveryOption === true;
   const factors = [...new Set(options.flatMap(o => rec(o.interventions) ? Object.keys(o.interventions as Rec) : []))];
   const factor = factors.length === 1 ? held.nodes.find(n => n.id === factors[0]) : undefined;
-  return `Starts from today's ${start} and adds ${addition} each month${held.netZero ? ' (Olumi read that as the change after any losses)' : ''}, give or take about a quarter, up to month ${held.month}${same ? ', the same for every option' : ''}.`
+  return `Starts from today's ${start} and adds ${addition} each month${held.netZero ? ' (Olumi read that as the change after any losses)' : ''}, give or take ${inflowSpreadWords(held.inflow)}, up to month ${held.month}${same ? ', the same for every option' : ''}.`
     + (typeof factor?.label === 'string' && factor.label.trim() !== '' ? ` Each option then changes ‘${factor.label.trim()}’ from there.` : '');
 }
 

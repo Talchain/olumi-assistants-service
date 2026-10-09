@@ -420,6 +420,34 @@ it('C the net parenthesis is absent without the slice-A net-zero node', async ()
     .toBe(WHY.replace(' (Olumi read that as the change after any losses)', ''));
 });
 
+// Science 93 pre-check of #2927 (item 1): the spread words follow the inflow's own §(ab) spread, σ 0.136 for a user's
+// amount ("about a quarter"), σ 0.246 for Olumi's estimate ("about half").
+it('C spread words: a user-stated monthly change says "about a quarter"; an Olumi-estimated one says "about half"', async () => {
+  const graph = ratify((await build('net')).graph);
+  const { goalStockMethodWhyLine } = await import('../../goal-target/goal-horizon-detail.js');
+  const price = graph.nodes.find((n: Rec) => n.label === 'Price');
+  const why = () => goalStockMethodWhyLine(graph, [{ interventions: { [price.id]: 59 } }]);
+  expect(why()).toBe(WHY);
+  const inflow = graph.nodes.find((n: Rec) => n.id === carrierOf(graph).nonlinear_identity.factor_ids[2]);
+  inflow.observed_state.source = 'cee_inference';
+  expect(why()).toBe(WHY.replace('give or take about a quarter', 'give or take about half'));
+  expect(why()).not.toContain('about a quarter');
+});
+
+// Science 93 pre-check (item 2): a negative net change is on the DL's unsupported list; it is refused at admission and no
+// method words are built for it (never "+−£2,000").
+it('a negative net change is refused at admission, said, and no method or net-reading words are built', async () => {
+  const { graph, result } = await build('net', true, -2000);
+  const { goalStockMethodWhyLine, goalStockNetReadingLine, goalStockMethodFaceLine } = await import('../../goal-target/goal-horizon-detail.js');
+  expect(goalOf(graph).nonlinear_identity).toBeUndefined();
+  expect(graph.nodes.some((n: Rec) => String(n.id).endsWith('_net_zero_rate'))).toBe(false);
+  expect(JSON.stringify(result)).toMatch(/MRR/);
+  expect(goalStockMethodFaceLine(graph)).toBeNull();
+  expect(goalStockNetReadingLine(graph)).toBeNull();
+  expect(goalStockMethodWhyLine(graph, [])).toBeNull();
+  expect(JSON.stringify(graph)).not.toContain('+−');
+});
+
 it('B2 the identity door postimage itself licenses the real Run only after its zero source is written', async () => {
   const graph = (await build('net', false)).graph;
   const card = proposeProductIdentity(graph)!;

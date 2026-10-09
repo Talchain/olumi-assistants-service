@@ -2493,12 +2493,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? null : whatChangesFaceLine(state.analysisResult, state.graph);
       const replayComposeText = withCellHorizon(withoutProposalIds(replayText), state.graph, replayChanceCells);
       const composedCandidate = replayObligations === undefined ? null
-        : composeReplyShape({ analysisResult: state.analysisResult, text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
+        : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
           ...widenedRunWordsOf(state.graph, replayChanceCells),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
-          ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}) });
+          ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}),
+          analysisResult: state.analysisResult });
       const parityReplayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       // Ordinary replay is the durable answer, including its canonical presentation grammar. No cache is needed.
