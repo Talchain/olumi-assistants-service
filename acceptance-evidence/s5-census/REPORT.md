@@ -89,3 +89,9 @@ Regenerate a shrinking baseline with `node scripts/ci/goal-record-census.mjs --w
   - A: a second `goal_threshold_raw` in goal-chance-licence.ts → RED (`--check` rc 1, guard 2 failed). Restored with `git checkout HEAD --`.
   - B: an untracked `src/generated/mutantB.ts` → GREEN (rc 0, 5/5).
 - **Guard:** 5/5 under `vitest.required.config.ts` (1.39 s).
+
+## r2: pre-push wiring removed (CI shard 1, guard-liveness @b413a905)
+
+- `tests/meta/guard-liveness.test.ts` failed: the orphan set grew from 24 to 25.
+- Cause: `scripts/ci/goal-record-census.mjs` was reachable only from the pre-push hook, and the liveness closure does not follow vitest imports.
+- Fix: the hook call is removed. The ratchet is enforced solely by `tests/contract/goal-record-census.guard.test.ts` in Required, which is the one required check. No new acknowledgement entry.
