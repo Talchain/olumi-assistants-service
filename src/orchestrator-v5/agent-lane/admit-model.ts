@@ -1,3 +1,4 @@
+export { reencodedSiblingDiff } from './level-batch-frame.js';
 // Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
 export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
 import { statedEffectQuoteMatches, statedSwitchEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';

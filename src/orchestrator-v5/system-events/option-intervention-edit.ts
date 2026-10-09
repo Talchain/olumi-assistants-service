@@ -118,6 +118,8 @@ export interface OptionInterventionEditInput {
    * stamp. Never from a wire field: `executeOptionInterventionEdit` derives it server-side.
    */
   readonly source?: typeof APPROVED_LEVEL_ADOPTION_SOURCE;
+  /** Canvas edits may derive display coordinates; explicit approval batches may not. */
+  readonly inferFactorFigure?: boolean;
   /**
    * ⭐ THE USER'S FIGURE, KEPT ON THE CELL (AI Conversation #70 5848429576): the level as they gave it and the range it
    * was normalised on. Without it a level on a factor with no range of its own (a NEW, value-less factor) is stored as a
@@ -290,7 +292,7 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
   const linkOps: { readonly operation: Record<string, unknown>; readonly target: OptionLevelTarget }[] = [];
   for (let i = 0; i < input.targets.length; i += 1) {
     const target = input.targets[i]!;
-    const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph,
+    const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph, inferFactorFigure: input.inferFactorFigure,
       optionId: target.optionId, factorId: target.factorId, modelValue: target.modelValue,
       expectedGraphHash: input.expectedGraphHash, ...(target.source !== undefined ? { source: target.source } : {}),
       ...(target.figure !== undefined ? { figure: target.figure } : {}) });
@@ -921,6 +923,19 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
+  // Decide value-only no-ops on the original graph, before attaching any range.
+  // These selected cells are siblings too: their old engine quantity must survive.
+  const unchangedTargets = new Set(targets.filter(t => t.figure?.raw_value === undefined
+    && prepareOptionInterventionEdit({ ...t, persistedGraph: before, expectedGraphHash: input.expectedGraphHash,
+      inferFactorFigure: false }).kind === 'unchanged').map(t => `${t.optionId}::${t.factorId}`));
+  // Validate the submitted native coordinate before converting to the final frame.
+  // Re-encoding must never repair a contradictory approval.
+  if (targets.some(t => t.figure?.raw_value !== undefined && (t.figure.cap === undefined
+    ? t.figure.raw_value !== t.modelValue
+    : !Number.isFinite(t.figure.cap) || t.figure.cap <= 0
+      || Math.abs(t.figure.raw_value / t.figure.cap - t.modelValue) > 1e-9))) {
+    return { kind: 'refused', reason: 'level_frame_mismatch' };
+  }
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
     linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, teamTime: _callerTeamTime,
     lastRunIdentityUse: _callerRunUse, ...common } = input;
@@ -1009,9 +1024,16 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // The approval's frame attachment also owns preserving unselected engine
   // quantities, on both the observed-state and no-baseline scale_frame paths.
   // This stays inside the same in-memory plan and ONE append below.
-  const siblingBase = preserveSiblingQuantities(before, levelBase, targets);
+  const siblingBase = preserveSiblingQuantities(before, levelBase,
+    targets.filter(t => !unchangedTargets.has(`${t.optionId}::${t.factorId}`)));
   if (siblingBase.kind === 'refused') return { kind: 'refused', reason: siblingBase.reason };
   levelBase = siblingBase.graph;
+  // A preserved no-op now has a different coordinate; do not overwrite it with
+  // the old submitted value or change its original authorship.
+  const preservedPairs = new Set(siblingBase.reencoded.map(c => `${c.option_id}::${c.factor_id}`));
+  targets = targets.map(t => unchangedTargets.has(`${t.optionId}::${t.factorId}`)
+    && preservedPairs.has(`${t.optionId}::${t.factorId}`)
+    ? { ...t, modelValue: readCommittedOptionEffect(levelBase, t.optionId, t.factorId)! } : t);
   if (siblingBase.reencoded.length > 0 && isEditableGraph(levelBase)) {
     levelBaseHash = computeAnalysisAffectingGraphHash(levelBase)!;
   }
@@ -1288,7 +1310,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       || targets.some(t => {
         if (readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue) return true;
         const cell = (reloaded as EditableGraph).nodes.find(n => n.id === t.optionId)?.interventions?.[t.factorId] as Record<string, unknown> | undefined;
-        return t.figure?.raw_value !== undefined && (cell?.raw_value !== t.figure.raw_value || cell?.cap !== t.figure.cap
+        return plan.targetsWritten.some(w => w.optionId === t.optionId && w.factorId === t.factorId)
+          && t.figure?.raw_value !== undefined && (cell?.raw_value !== t.figure.raw_value || cell?.cap !== t.figure.cap
           || (t.figure.unit !== undefined && cell?.unit !== t.figure.unit.trim()));
       })) {
       return { kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true };
@@ -1512,10 +1535,20 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
       && !(storedRange?.low === figure.likely_range.low && storedRange?.high === figure.likely_range.high
         && storedRange?.meaning === 'likely_range' && storedRange?.source === 'user_specified');
     const finalFigure = figure?.raw_value !== undefined ? figure : undefined;
+    const cell = existing as Record<string, unknown>;
+    const factorCap = (factor.observed_state as { cap?: number } | undefined)?.cap
+      ?? (factor as { scale_frame?: number }).scale_frame;
+    const sameFigure = finalFigure !== undefined && cell.raw_value === finalFigure.raw_value
+      && cell.cap === finalFigure.cap
+      && (finalFigure.unit === undefined || cell.unit === finalFigure.unit.trim());
+    // Missing display metadata on a legacy cell already on this factor's
+    // range alone must not turn a repeat into a new authored measurement.
+    const sameNativePoint = finalFigure !== undefined && cell.raw_value === undefined
+      && factorCap !== undefined && factorCap === finalFigure.cap
+      && Math.abs(entry.data.value * factorCap - finalFigure.raw_value!) <= 1e-9
+      && (cell.unit === undefined || finalFigure.unit === undefined || cell.unit === finalFigure.unit.trim());
     const sameCoordinate = entry.data.value === input.modelValue
-      && (finalFigure === undefined || ((existing as Record<string, unknown>).raw_value === finalFigure.raw_value
-        && (existing as Record<string, unknown>).cap === finalFigure.cap
-        && (finalFigure.unit === undefined || (existing as Record<string, unknown>).unit === finalFigure.unit.trim())));
+      && (finalFigure === undefined || sameFigure || sameNativePoint);
     if (sameCoordinate && !likelyMoves) return { kind: 'unchanged' };
   }
   const built = buildOptionEffectRawOperation({
@@ -1527,7 +1560,7 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   // bare, the £57 left the model and the reply said "an effect value of 0.285". That same reading is kept on the cell.
   const levelFigure = figure !== undefined && typeof figure.raw_value === 'number'
     ? { raw_value: figure.raw_value, ...(figure.cap !== undefined ? { cap: figure.cap } : {}), ...(figure.unit !== undefined ? { unit: figure.unit } : {}) }
-    : figureOnFactorRange(graph, factor, existing, input.modelValue);
+    : input.inferFactorFigure === false ? undefined : figureOnFactorRange(graph, factor, existing, input.modelValue);
   // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell
   // (`cap` only when it reproduces the level, which the check above has already required).
   // TEMPORAL: the user's likely range, only from THIS approval's figure (never read back from another cell), recorded as

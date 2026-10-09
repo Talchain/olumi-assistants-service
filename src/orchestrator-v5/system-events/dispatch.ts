@@ -3091,9 +3091,9 @@ export async function dispatchOptionLevelsBatch(
     && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
-    ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
+    ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: false, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
       getSessionStore())
-    : await executeOptionInterventionBatch({ ...common, targets: batch.targets,
+    : await executeOptionInterventionBatch({ ...common, inferFactorFigure: false, targets: batch.targets,
       ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}),
       ...(batch.optionGaps !== undefined ? { optionGaps: batch.optionGaps } : {}),
       ...(batch.values !== undefined && batch.values.length > 0 ? { values: batch.values } : {}),

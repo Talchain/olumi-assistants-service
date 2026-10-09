@@ -7,7 +7,7 @@
  * `what_changed` as a model-history diff.
  */
 
-import { reencodedSiblingDiff } from '../agent-lane/level-batch-frame.js';
+import { reencodedSiblingDiff } from '../agent-lane/admit-model.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { computeAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';

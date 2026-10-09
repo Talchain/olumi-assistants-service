@@ -14,6 +14,7 @@ import { executeOptionInterventionBatch, type OptionLevelTarget } from '../optio
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { preserveSiblingQuantities, SIBLING_LEVEL_UNRESOLVABLE_SENTENCE, siblingReencodeDisclosure } from '../../agent-lane/level-batch-frame.js';
+import { narrateWriteOutcome, withoutAgentDirections, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning } from '../../agent-lane/write-outcome.js';
 import { compareVersionRecords } from '../../model-management/compare.js';
 import type { ModelVersionRecord } from '../../model-management/types.js';
 
@@ -312,5 +313,82 @@ describe('SFR fix2b: native quantities, atomic refusal and visible sibling write
     expect((result.graph.nodes[1]!.data!.interventions.duration)).toMatchObject({ value: 0.0002, raw_value: 0.2, cap: 1000, source: 'cee_hypothesis' });
     expect(result.graph.options[0]!.interventions.duration).toEqual({ value: 0.0004, raw_value: 0.4, cap: 1000 });
     expect(before.nodes[1]!.data!.interventions.duration).toEqual({ value: 0.2, source: 'cee_hypothesis' });
+  });
+});
+
+// Same status/follow_up composition used by agent-v1-turn's one-click path.
+function oneClickText(result: Awaited<ReturnType<ReturnType<typeof createAgentCapabilities>['authoriseChange']>>) {
+  return [narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status ?? '',
+    withoutAgentDirections(typeof result.follow_up === 'string' ? result.follow_up : '').text.trim()]
+    .filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
+}
+
+describe('SFR fix3 reviewer rows', () => {
+  it.each([true, false])('selected figure-less no-op is preserved before attachment (baseline %s)', async baseline => {
+    const p = product(withSibling(graph(undefined, baseline)));
+    const before = engine(p.read());
+    const result = await batch(p, [{ optionId: 'full', factorId: 'duration', modelValue: 0.2 }, target('trial', 150, 1000)]);
+    expect(result).toMatchObject({ kind: 'committed', reencodedSiblings: [{ option: 'Full', factor: 'Duration' }] });
+    expect(p.writes).toHaveLength(1);
+    expect(engine(p.read())).toBe(before);
+    expect(cell(p, 'full')).toEqual({ value: 0.0002, raw_value: 0.2, cap: 1000, source: 'cee_hypothesis' });
+    if (result.kind !== 'committed') throw new Error('Expected commit');
+    expect(result.response.assistant_text).toContain(siblingReencodeDisclosure('Full', 'Duration'));
+  });
+
+  it.each([false, true])('one-click approval appends exact sibling disclosure to existing save text (compound %s)', async compound => {
+    const p = product(withOther(withSibling()));
+    const { store, proposal } = approved(p, compound, true);
+    const caps = createAgentCapabilities(p.dispatch, store, undefined, 'full', undefined, {
+      commitOptionLevels: async input => {
+        const result = await commitOptionLevelsInProcess(input, 'sfr');
+        return result.status === 'committed' ? { ...result, receipt: { version: 9, version_id: 'levels-version', mutation_id: 'levels-mutation', source_turn_id: input.turn_id } } : result;
+      },
+    });
+    const result = await caps.authoriseChange(ctx, { proposal_id: proposal.proposal_id });
+    expect(result.applied).toBe(true);
+    const text = oneClickText(result);
+    const saved = compound ? 'Saved 1 of 1 starting values. Saved 1 of 1 option levels.' : 'Saved as versions 8–9.';
+    expect(text).toBe(saved + ' ' + siblingReencodeDisclosure('Full', 'Duration'));
+    expect(result.follow_up).toBe(siblingReencodeDisclosure('Full', 'Duration'));
+  });
+
+  it.each([false, true])('one-click refusal includes exact approved refusal sentence (compound %s)', async compound => {
+    const p = product(withOther(withSibling(graph(), { raw_value: 0.2, source: 'cee_hypothesis' })));
+    const { store, proposal } = approved(p, compound, true);
+    const before = p.read();
+    const caps = createAgentCapabilities(p.dispatch, store, undefined, 'full', undefined, { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'sfr') });
+    const result = await caps.authoriseChange(ctx, { proposal_id: proposal.proposal_id });
+    expect(oneClickText(result)).toContain(SIBLING_LEVEL_UNRESOLVABLE_SENTENCE);
+    expect(result.follow_up).toBe(SIBLING_LEVEL_UNRESOLVABLE_SENTENCE);
+    expect(p.writes).toHaveLength(0);
+    expect(p.registers).toHaveLength(0);
+    expect(p.read()).toEqual(before);
+  });
+
+  it.each(['refused', 'unconfirmed', 'throws'] as const)('range-only partial warning precedes disclosure when level port %s', async outcome => {
+    const p = product(withSibling());
+    const { store, proposal } = approved(p, false, true);
+    const caps = createAgentCapabilities(p.dispatch, store, undefined, 'full', undefined, {
+      commitOptionLevels: async () => {
+        if (outcome === 'throws') throw new Error('port unavailable');
+        return outcome === 'refused' ? { status: 'refused', reason: 'level_frame_mismatch' } : { status: 'unconfirmed' };
+      },
+    });
+    const result = await caps.authoriseChange(ctx, { proposal_id: proposal.proposal_id });
+    expect(result).toMatchObject({ mutated: true, applied: false });
+    expect(p.registers).toHaveLength(1);
+    expect(p.writes).toHaveLength(0);
+    expect(engine(p.read())).toBe(0.2);
+    const warning = outcome === 'refused' ? partialRangeLevelsWarning([{ factor: 'Duration', range: 1000 }])
+      : PARTIAL_WRITE_MESSAGES.range_saved_levels_unconfirmed;
+    const expected = warning + ' ' + siblingReencodeDisclosure('Full', 'Duration');
+    expect(result.follow_up).toBe(expected);
+    const visible = withoutAgentDirections(expected).text;
+    expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status).toBe(visible);
+    expect(oneClickText(result)).toBe(visible);
+    // The narrator must retain the warning even for a sibling-only follow_up.
+    expect(narrateWriteOutcome('', [{ name: 'authorise_change' }],
+      [{ ...result, follow_up: siblingReencodeDisclosure('Full', 'Duration') }]).status).toBe(visible);
   });
 });
