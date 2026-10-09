@@ -1,0 +1,19 @@
+[
+  {
+    "label": "tsc-full",
+    "gate_exit": 0,
+    "gate_output": "{\"load\":5.30810546875,\"threshold\":25}",
+    "command": "NODE_OPTIONS=--max-old-space-size=8192 node_modules/.bin/tsc --noEmit < /dev/null",
+    "exit_code": 2,
+    "diagnostic_count": 290,
+    "changed_file_diagnostics": []
+  },
+  {
+    "label": "eslint-changed",
+    "gate_exit": 0,
+    "gate_output": "{\"load\":13.14794921875,\"threshold\":25}",
+    "command": "node_modules/.bin/eslint src/orchestrator-v5/goal-target/goal-chance-licence.ts src/orchestrator-v5/goal-target/goal-chance-range-agent.ts src/orchestrator-v5/goal-target/zero-spread-horizon-line.ts src/routes/canonical-analysis-view.ts src/routes/__tests__/b2-zero-spread.test.ts < /dev/null",
+    "exit_code": 0,
+    "output": ""
+  }
+]
