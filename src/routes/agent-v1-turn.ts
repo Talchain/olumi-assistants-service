@@ -2940,6 +2940,32 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * calls, no implicit analysis. Words alone never take this path.
      */
     let fastPath: 'approve' | 'run' | 'explain' | 'research' | 'strengthen' | 'method' | undefined;
+    let guidanceHistory: Awaited<ReturnType<NonNullable<typeof store.readGuidanceHistory>>> | null = null;
+    let guidanceHistoryRead = false;
+    const readTurnGuidanceHistory = async (): Promise<void> => {
+      if (guidanceHistoryRead) return;
+      guidanceHistoryRead = true;
+      if (typeof store.readGuidanceHistory === 'function') {
+        try { guidanceHistory = await store.readGuidanceHistory(scenarioId); }
+        catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
+      }
+    };
+    let preReplySelection: { wire: GuidanceWire | undefined } | undefined;
+    let eligibleIntervention: EligibleIntervention | undefined;
+    // Converse and Explain carry the same selection from the same canonical read.
+    const interventionForModel = async (read: Awaited<ReturnType<typeof readBackState>>, request: ReturnType<typeof guidanceRequestOf>) => {
+      await readTurnGuidanceHistory();
+      preReplySelection = { wire: selectTurnGuidance({
+        request,
+        offeredSpecific: executableWaitingProposalIds(scenarioId, userId, read.graphHash, read.graph).map(id => ({ id: approvalChipIdFor(id) })),
+        licence: leaderLicenceFromState(read.analysisState, read.analysisReady), guidance: guidanceHistory,
+        runKey: runExplanationChip(scenarioId, read)?.id.slice(RUN_EXPLANATION_PREFIX.length),
+        state: read,
+      }) };
+      eligibleIntervention = eligibleInterventionFor(preReplySelection.wire);
+      return eligibleIntervention === undefined ? {} : { eligible_intervention: eligibleIntervention };
+    };
+
     let handledGuidancePress: HandledGuidancePress | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
@@ -3139,7 +3165,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
       ];
       // The same completed canonical assembly the ordinary Agent reads: no stored result/enrichment packet.
-      const canonicalAfterRun = await capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' });
+      const canonicalAfterRun: Awaited<ReturnType<typeof capabilities.getCanonicalState>> = { ...await capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' }),
+        ...await interventionForModel(st, 'narration') };
       // A refused canonical read follows the same early refusal as an unmatched Explain control.
       if (canonicalAfterRun.ok !== true) matches = false;
       const selectedRun = canonicalAfterRun.analysis as Record<string, unknown> | undefined;
@@ -3197,7 +3224,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -3653,13 +3680,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     /** RT-1: set only on the path that runs the Agent with the selection; absent ⇒ no `_grounded_selection`. */
     let selectionContext: AgentSelectionContext | null | undefined;
-    let guidanceHistory: Awaited<ReturnType<NonNullable<typeof store.readGuidanceHistory>>> | null = null;
-    if (typeof store.readGuidanceHistory === 'function') {
-      try { guidanceHistory = await store.readGuidanceHistory(scenarioId); }
-      catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
-    }
-    let preReplySelection: { wire: GuidanceWire | undefined } | undefined;
-    let eligibleIntervention: EligibleIntervention | undefined;
+    await readTurnGuidanceHistory();
     if (result === undefined) try {
       /**
        * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
@@ -3694,17 +3715,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const subject = { scenario_id: scenarioId, authenticated_user_id: userId ?? '', graph_revision: packetRevision };
           // The existing epoch cache supplies the same raw inputs as the post-reply wire, without another read.
           const read = await readBackState(readingDispatch, scenarioId);
-          preReplySelection = { wire: selectTurnGuidance({
-            request: guidanceRequestOf(fastPath, explanationId, METHOD_PRESS_IDS),
-            offeredSpecific: executableWaitingProposalIds(scenarioId, userId, read.graphHash, read.graph).map(id => ({ id: approvalChipIdFor(id) })),
-            licence: leaderLicenceFromState(read.analysisState, read.analysisReady), guidance: guidanceHistory,
-            runKey: runExplanationChip(scenarioId, read)?.id.slice(RUN_EXPLANATION_PREFIX.length),
-            state: read,
-          }) };
-          eligibleIntervention = eligibleInterventionFor(preReplySelection.wire);
+          const intervention = await interventionForModel(read, guidanceRequestOf(fastPath, explanationId, METHOD_PRESS_IDS));
           canonicalContext = {
-            packet: issueContextPacket({ ...subject, captured_at_turn: 0, state: { ...st,
-              ...(eligibleIntervention === undefined ? {} : { eligible_intervention: eligibleIntervention }) } }, secret),
+            packet: issueContextPacket({ ...subject, captured_at_turn: 0, state: { ...st, ...intervention } }, secret),
             expectation: { ...subject, current_turn: 0, binding_secret: secret },
           };
         }
@@ -3790,7 +3803,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             message,
             instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
               : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
-              : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}` : `${AGENT_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`,
+              : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}`
+              : eligibleIntervention === undefined ? AGENT_INSTRUCTIONS : `${AGENT_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`,
             maxOutputTokens: budget.max_output_tokens,
             mode,
             // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
@@ -5093,7 +5107,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const composedReply = composeReplyShape({
         analysisResult,
         text: reply,
-        ...(eligibleIntervention === undefined ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label }),
+        // A host-only answer did not consume the carrier and keeps its existing bytes.
+        ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label }),
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
         ...(widenReceipt === null ? {} : { widenedLine: widenReceipt }),
