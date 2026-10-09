@@ -116,6 +116,8 @@ export interface ProposalOperation {
      * door's `goal_horizon` member (`commitOptionLevels`), alone, as `NodeV3.goal_horizon.deadline`.
      */
     | 'set_goal_deadline'
+    /** The user's card-only temporal judgement for the held month; `value` is `{months}`. */
+    | 'attest_goal_steady'
     | 'set_team_time';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
@@ -273,7 +275,7 @@ export const MAX_PROPOSALS = 200;
 
 /** B3's card-only approval authority also covers a level's temporal reading. */
 export function hasCardOnlyOperations(operations: readonly ProposalOperation[]): boolean {
-  return operations.some(op => op.op === 'set_option_intervention'
+  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'set_option_intervention'
     && op.value !== null && typeof op.value === 'object'
     && (Object.hasOwn(op.value, 'unmodelled_mechanisms') || Object.hasOwn(op.value, 'likely_range')));
 }

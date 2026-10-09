@@ -643,4 +643,36 @@ describe('ONE reply contract through the build route', () => {
     expect(count(shown, '?') + currentLevelControl.length, 'one resolving ask or current-level control').toBe(1);
     expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape!));
   });
+
+  it('R3b mixed withhold (held month + missing current level): "Set current level" stays; no steady-state card (DL 58e392 #2903 P1)', async () => {
+    currentRead = structuredClone(FX.read);
+    saved = structuredClone(currentRead.graph);
+    const goal = saved.nodes.find(n => n.id === 'mrr')!;
+    delete goal.nonlinear_identity;
+    expect(goal.goal_horizon_months).toBe(12);
+    currentRead.graph = saved;
+    currentRead.graph_hash = computeAnalysisAffectingGraphHash(saved as never)!.slice(0, 16);
+    currentRead.analysis_result.computed_against_hash = currentRead.graph_hash;
+    (currentRead.current_read as Rec).computed_against_hash = currentRead.graph_hash;
+    (currentRead.current_read as Rec).current_analysis_hash = currentRead.graph_hash;
+    const enrichment = currentRead.analysis_result.enrichment as Rec;
+    enrichment.inference_warnings = (enrichment.inference_warnings as Rec[])
+      .filter(w => w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE');
+    // The producer's own order (run-analysis.ts): the missing-level withhold, then the §(ad) horizon withhold.
+    const { withholdGoalFiguresForMissingCurrentLevel } = await import('../../tools/handlers/run-analysis.js');
+    const { withholdGoalFiguresForUntestedHorizon } = await import('../../goal-target/goal-horizon-verdict.js');
+    currentRead.analysis_result.enrichment = withholdGoalFiguresForUntestedHorizon(
+      withholdGoalFiguresForMissingCurrentLevel(enrichment, saved), saved);
+    const codes = ((currentRead.analysis_result.enrichment as Rec).inference_warnings as Rec[]).map(w => w.code);
+    expect(codes).toEqual(expect.arrayContaining(['GOAL_FIGURES_MISSING_CURRENT_LEVEL', 'GOAL_FIGURES_HORIZON_NOT_TESTED']));
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'Run analysis.',
+      chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
+    } });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    const body = response.json() as Body;
+    expect(body.suggested_actions.map(a => a.label)).not.toContain('It stays about the same unless we act');
+    const currentLevelControl = body.action_bar?.priority.filter(a => a.action_id === 'set_current_level' && a.enabled === true) ?? [];
+    expect(count(face(body._answer_shape!), '?') + currentLevelControl.length, 'one resolving ask or current-level control').toBe(1);
+  });
 });
