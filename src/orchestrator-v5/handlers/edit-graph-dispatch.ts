@@ -1,3 +1,4 @@
+import { prepareHorizonBasisForWrite } from '../goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { hasReliesOnRiskWrite } from '../graph-management/field-safety.js';
 import { hasReliesOnRiskStampChange } from '../routing/relies-on-risk.js';
@@ -2298,7 +2299,7 @@ export async function dispatchEditGraph(
   params: DispatchEditGraphParams,
 ): Promise<DispatchEditGraphResult> {
   const { payload, requestId, analysisState } = params;
-  let graphState = params.graphState;
+  let graphState = params.graphState == null ? params.graphState : structuredClone(params.graphState);
   const startedAt = Date.now();
   // ROADMAP 2.684 — the deadline baseline. `routeStartedAt` when the route
   // threaded it (the live path); the dispatcher's own start otherwise, which
@@ -2514,6 +2515,14 @@ export async function dispatchEditGraph(
     }
   };
 
+  // Early/unchanged candidates have no stored base at this point. Drop only
+  // submitted basis bytes without adding a read or suppressing graph hashes.
+  const preparedIngressForHash = (): GraphStateIngress | null | undefined => {
+    const candidate = graphState == null ? graphState : structuredClone(graphState);
+    prepareHorizonBasisForWrite(candidate, undefined, payload.scenario_id);
+    return candidate;
+  };
+
   try {
     // V5 A4 — deterministic clarification intercept. Pre-LLM classifier
     // catches high-confidence bare "add X as a risk" patterns, but the
@@ -2628,9 +2637,10 @@ export async function dispatchEditGraph(
         // buildHeldPending's "no readable frame → no safe pending" posture)
         // rather than persisting one that can only ever dispatch
         // recovery_graph_changed.
+        const addRiskHashGraph = preparedIngressForHash();
         const addRiskEmitGraphHash = ((): string | null => {
           try {
-            return computeAnalysisAffectingGraphHash(graphState);
+            return computeAnalysisAffectingGraphHash(addRiskHashGraph);
           } catch {
             return null;
           }
@@ -2707,10 +2717,11 @@ export async function dispatchEditGraph(
       // typed rejection reason. The wall-clock TTL mirrors the
       // `isExpired` semantics used by tryClarificationResume /
       // tryShortConfirmResume so all three resumers agree.
+      const earlyHashGraph = preparedIngressForHash();
       let earlyCurrentGraphHash: string | null = null;
       try {
         earlyCurrentGraphHash = computeAnalysisAffectingGraphHash(
-          graphState as GraphStateIngress | null | undefined,
+          earlyHashGraph as GraphStateIngress | null | undefined,
         );
       } catch {
         earlyCurrentGraphHash = null;
@@ -3254,7 +3265,7 @@ export async function dispatchEditGraph(
   //     also fails fast — it avoids buildTurnContext's extra read against the
   //     already-degraded store — while the outer assembly `finally` still
   //     emits the single edit turn event.
-  let persistedPostEditGraph: unknown = graphState;
+  let persistedPostEditGraph: unknown = successfulAppliedMutation ? graphState : preparedIngressForHash();
   // A3 graph CAS observe-mode: expected-base hashes for this dispatch's
   // graph-bearing commit. Derived ONLY from the strict SERVER-SIDE persisted
   // read below (`loadPersistedGraphStrict`) — the same trusted base the merge
@@ -3270,7 +3281,10 @@ export async function dispatchEditGraph(
   // Graph Management (lane 8): frame-authority PRE-edit base for the referee
   // gate — the strict persisted read when available, else the ingress echo
   // (the same fallback rule the persistence merge applies).
-  let gmFrameBase: unknown = graphState;
+  let gmFrameBase: unknown = persistedPostEditGraph;
+  // Structural checks may fall back to ingress on an empty scenario. Basis
+  // provenance may only come from the actual server read, including its null.
+  let storedGraphForHorizonBasis: unknown;
   if (successfulAppliedMutation) {
     let strictBase: unknown;
     try {
@@ -3310,6 +3324,8 @@ export async function dispatchEditGraph(
     if (config.features.graphCas.requiresExpectedHash) {
       expectedGraphCasHashes = computeExpectedGraphCasHashes(strictBase ?? null);
     }
+    storedGraphForHorizonBasis = strictBase ?? null;
+    prepareHorizonBasisForWrite(graphState, storedGraphForHorizonBasis, payload.scenario_id);
     gmFrameBase = strictBase ?? graphState;
     // Design §3.2 — PROJECT INTO THE PERSISTED FORM HERE, before anything in
     // this dispatch derives a hash from it. `commitDirectAnswer` applies the
@@ -3352,6 +3368,7 @@ export async function dispatchEditGraph(
       clearInheritedInterventionSourceQuotes(strictBase, persistedPostEditGraph),
       { scenarioId: payload.scenario_id, turnId: payload.turn_id, turnClass: payload.turn_class, source: 'edit_graph' },
     );
+    prepareHorizonBasisForWrite(persistedPostEditGraph, storedGraphForHorizonBasis, payload.scenario_id);
   }
 
   let freshness: FreshnessDerivation;
@@ -5697,6 +5714,7 @@ export async function dispatchEditGraph(
         turnClass: 'direct_answer',
       });
       if (projected && typeof projected === 'object' && 'nodes' in projected) {
+        prepareHorizonBasisForWrite(projected, storedGraphForHorizonBasis, payload.scenario_id);
         const askedGraphHash = computeAnalysisAffectingGraphHash(projected as GraphStateIngress);
         const asked = askedGraphHash === null ? null : buildReadinessEffectPending({
           analysisReady, nodes: (projected as GraphStateIngress).nodes,
@@ -5789,7 +5807,7 @@ export async function dispatchEditGraph(
       // editable (`edit-graph.ts:2750-2755`). Omitted on a non-writing turn,
       // where there is nothing to check.
       ...(graphForCommit !== undefined
-        ? { baseGraphForInvariants: gmFrameBase }
+        ? { baseGraphForInvariants: gmFrameBase, storedGraphForHorizonBasis }
         : {}),
       // A3 graph CAS: expected-base hashes from the strict server read above
       // (undefined when no applied mutation / mode off — the CAS hook only

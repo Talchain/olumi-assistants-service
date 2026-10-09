@@ -10,6 +10,7 @@ interface WriteCallerContext {
   verified: boolean;
   refusal?: WriteRefusal;
   successfulDoorEntries: number;
+  effects: number;
   parent?: WriteCallerContext;
 }
 const writeCallerStorage = new AsyncLocalStorage<WriteCallerContext>();
@@ -34,9 +35,31 @@ export function readSuccessfulDoorEntries(request?: object): number {
   return writeContext(request)?.successfulDoorEntries ?? 0;
 }
 
+/** Count durable saves outside the door too, through the same parent chain. */
+export function recordSuccessfulSave(): void {
+  for (let entry = writeCallerStorage.getStore(); entry !== undefined; entry = entry.parent) entry.successfulDoorEntries += 1;
+}
+
+/** Discount only this turn's successfully appended claim after its matching row was released. */
+export function recordReleasedTurnClaim(): void {
+  for (let entry = writeCallerStorage.getStore(); entry !== undefined; entry = entry.parent) entry.successfulDoorEntries -= 1;
+}
+
+export function readUnsavableEffects(request?: object): number {
+  return writeContext(request)?.effects ?? 0;
+}
+
+/**
+ * The turn was published to in-memory session history. That is not a durable save,
+ * but it means "Nothing was saved" would be false; aggregate separately from saves.
+ */
+export function recordUnsavableEffect(): void {
+  for (let entry = writeCallerStorage.getStore(); entry !== undefined; entry = entry.parent) entry.effects += 1;
+}
+
 /** Bind the admitted caller to the request's awaited writers, without signature threading. */
 export function bindWriteCaller<T>(caller: { userId: string | null; verified: boolean }, done: () => T, request?: object): T {
-  const context: WriteCallerContext = { ...caller, successfulDoorEntries: 0, parent: writeCallerStorage.getStore() };
+  const context: WriteCallerContext = { ...caller, successfulDoorEntries: 0, effects: 0, parent: writeCallerStorage.getStore() };
   if (request !== undefined) requestContexts.set(request, context);
   return writeCallerStorage.run(context, done);
 }
@@ -56,11 +79,7 @@ type OwnerReader = { getScenarioOwner?(scenarioId: string): Promise<string | nul
 export async function assertDoorOwnership(store: OwnerReader, scenarioId: string, site?: string): Promise<void> {
   // Stores without this port model no ownership; production's port is pinned by a test.
   const context = writeCallerStorage.getStore();
-  const succeed = () => {
-    // Effects aggregate through a composition; refusal latches stay local.
-    for (let entry = context; entry !== undefined; entry = entry.parent) entry.successfulDoorEntries += 1;
-  };
-  if (typeof store.getScenarioOwner !== 'function') { succeed(); return; }
+  if (typeof store.getScenarioOwner !== 'function') { recordSuccessfulSave(); return; }
   const caller = context ?? { userId: null, verified: false };
   const refuse = (reason: ModelWriteOwnershipRefused['reason']): never => {
     const slot = currentTurnFenceSlot();
@@ -85,5 +104,5 @@ export async function assertDoorOwnership(store: OwnerReader, scenarioId: string
   } catch { return refuse('owner_unreadable'); }
   finally { clearTimeout(timer); }
   if (scenarioAccessDecision(owner, caller.verified ? caller.userId : null) !== 'allow') refuse('not_owner');
-  succeed();
+  recordSuccessfulSave();
 }

@@ -317,6 +317,45 @@ describe('single-snapshot authority rule', () => {
     ).filter((site) => site.argText === 'contextGraphForReasoning');
   }
 
+  it('S5 2b binds only a cloned, prepared request carrier and pins the saved-graph reassignments', () => {
+    const { structural } = tokenise(source);
+    const assignments = [...structural.matchAll(/\bgraphStateForTurn(?:\s*:\s*[^=;]+)?\s*=(?!=)/g)];
+    expect(assignments, 'no new carrier assignment may bypass preparation').toHaveLength(3);
+    expect(assignments.map((match) => normaliseArg(
+      structural.slice(match.index! + match[0].length, structural.indexOf(';', match.index!)),
+    ))).toEqual([
+      'options.graphState == null ? null : structuredClone(options.graphState)',
+      'parsed.data',
+      'canonicalReadinessGraphForRun as GraphStateIngress',
+    ]);
+    const initialIdx = assignments[0]!.index!;
+    expect(structural.slice(0, initialIdx)).toMatch(/\blet\s*$/);
+    const initEnd = structural.indexOf(';', initialIdx);
+    // Exactly one declaration may intervene; preparation must precede every carrier use/reassignment.
+    const prepIdx = structural.indexOf('prepareHorizonBasisForWrite(', initEnd);
+    expect(prepIdx, 'request clone must be prepared').toBeGreaterThan(initEnd);
+    expect(structural.slice(initEnd + 1, prepIdx)).toMatch(
+      /^\s*const\s+storedBasisReadAvailable\s*=\s*context\.persistedGraphRead\?\.status\s*===\s*\|\|\s*context\.persistedGraphRead\?\.status\s*===\s*;\s*$/,
+    );
+    const prepCall = captureBalanced(structural, prepIdx, '(', ')');
+    expect(prepCall, 'preparation call did not balance').not.toBeNull();
+    expect(structural.slice(prepCall!.start, prepCall!.end + 1)).toMatch(
+      /^\(\s*graphStateForTurn\s*,\s*storedBasisReadAvailable\s*\?\s*context\.persistedGraph\s*:\s*undefined\s*,\s*payload\.scenario_id\s*\)$/,
+    );
+    // Both later assignments already existed on staging: parsed saved graph fallback, then canonical constraint lookup.
+    expect(structural).toMatch(
+      /if\s*\(\s*!graphStateForTurn\s*\)\s*\{\s*const\s+persistedGraph\s*=\s*context\.persistedGraph\s*;\s*if\s*\(\s*persistedGraph\s*\)\s*\{\s*const\s+parsed\s*=\s*GraphStateIngressSchema\.safeParse\(persistedGraph\)\s*;\s*if\s*\(\s*parsed\.success\s*\)\s*\{\s*graphStateForTurn\s*=\s*parsed\.data\s*;/,
+    );
+    expect(assignments[1]!.index!).toBeGreaterThan(prepCall!.end);
+    expect(assignments[2]!.index!).toBeGreaterThan(structural.indexOf('const contextGraphSelection ='));
+    const constraintIdx = structural.indexOf('const constraintLookup = buildGraphLookup(');
+    const constraintBlock = captureBalanced(structural, structural.indexOf('if (constraintLookup.kind', constraintIdx), '{', '}');
+    expect(constraintBlock, 'canonical constraint lookup block did not balance').not.toBeNull();
+    expect(structural.slice(constraintBlock!.start, constraintBlock!.end + 1)).toMatch(
+      /^\{\s*graphLookupForValidate\s*=\s*constraintLookup\.lookup\s*;\s*graphLookupBuildReason\s*=\s*constraintLookup\.kind\s*;\s*graphLookupStatsForLog\s*=\s*constraintLookup\.stats\s*;\s*graphStateForTurn\s*=\s*canonicalReadinessGraphForRun\s+as\s+GraphStateIngress\s*;\s*\}$/,
+    );
+  });
+
   it('binds the selector once and derives freshness/readiness from its graph', () => {
     const { structural } = tokenise(source);
     const selectorIdx = structural.indexOf('const contextGraphSelection = selectContextGraphSnapshot(');
@@ -325,7 +364,7 @@ describe('single-snapshot authority rule', () => {
     expect(selectorCall, 'selector call did not balance').not.toBeNull();
     const selectorText = structural.slice(selectorCall!.start, selectorCall!.end + 1);
     expect(selectorText).toMatch(
-      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*options\.graphState\s*,?\s*\}\s*\)$/,
+      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*graphStateForTurn\s*,?\s*\}\s*\)$/,
     );
     expect(
       selectorText,
@@ -392,7 +431,7 @@ describe('single-snapshot authority rule', () => {
 
     expect(forbiddenFallback).toContain('??');
     expect(forbiddenFallback).not.toMatch(
-      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*options\.graphState\s*,?\s*\}\s*\)$/,
+      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*graphStateForTurn\s*,?\s*\}\s*\)$/,
     );
   });
 
