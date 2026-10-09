@@ -5343,9 +5343,6 @@ export function createAgentCapabilities(
           const parsed = parseUnmodelledMechanisms(level?.unmodelled_mechanisms, level != null && Object.hasOwn(level, 'unmodelled_mechanisms'));
           const option = resolveNamed(optionNodes, String(level?.option_label ?? ''), () => true);
           const factor = resolveNamed(factorNodes, String(level?.factor_label ?? ''), () => true);
-          const operands = option.kind === 'one' ? optionGapOperands(read.raw, option.node.id) : null;
-          if (parsed.kind === 'valid' && parsed.mechanisms.length === 0
-            && operands !== null && optionGapOperandsAreEmpty(operands)) return [];
           return parsed.kind === 'valid' && option.kind === 'one' && factor.kind === 'one'
             ? [{ op: 'set_option_intervention', path: `${option.node.id}::${factor.node.id}`, value: { unmodelled_mechanisms: parsed.mechanisms } }] : [];
         });
