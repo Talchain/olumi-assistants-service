@@ -60,6 +60,7 @@ import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/proven
 import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
+import { markPlaceholder } from '../../cee/magnitude/link-sizing.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames, hasBasis } from './convention-frame.js';
 import { sayFigure } from './say-figure.js';
@@ -4396,10 +4397,7 @@ function admitOnce(
       ? framed : sizeLink(statement, source, unframed));
   }
 
-  const linkResult = admitCandidateLinks(resolvable, sizing);
-  for (const e of linkResult.edges) {
-    if (basisDroppedBySign.has(`${e.from}::${e.to}`)) delete (e.provenance as { basis?: string }).basis;
-  }
+  const linkResult = admitCandidateLinks(resolvable, sizing, basisDroppedBySign);
   // Reviewed Fi writer: carry the very sentence C2/W3/C1/SIGN-1 validated, through
   // the existing stored statement field. User edits retain their own provenance.
   for (const [link, sentence] of boundByLink) {
@@ -4973,7 +4971,7 @@ function admitOnce(
     for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id) && !directionDeclined.has(n.id)
       && !wideningRiskIds.has(n.id))) {
       const lostToLoop = loopWithheld.filter((w) => w.from === r.id).map((w) => `"${labelById.get(w.to) ?? w.to}"`);
-      riskRepairs.push({
+      riskRepairs.push(markPlaceholder({
         from: r.id,
         to: goalForReach.id,
         effect_direction: 'negative',
@@ -4981,9 +4979,8 @@ function admitOnce(
         exists_probability: DEFAULT_EXISTS_PROBABILITY,
         // The same structured provenance every other machine-authored edge
         // carries — a repaired link is a hypothesis, and must read as one.
-        provenance: { source: 'cee_hypothesis', mean_projected: true, magnitude: 'olumi_placeholder' },
-        defaulted: true,
-      } as AdmittedEdge);
+        provenance: { source: 'cee_hypothesis' },
+      } as AdmittedEdge));
       loss.push({
         field_path: `edges[${r.id}->${goalForReach.id}]`,
         before: null,

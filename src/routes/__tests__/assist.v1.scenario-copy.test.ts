@@ -29,6 +29,11 @@ vi.mock('../../utils/telemetry.js', () => ({
   TelemetryEvents: {},
 }));
 
+const getScenarioOwner = vi.fn();
+vi.mock('../../orchestrator-v5/session/index.js', () => ({
+  getSessionStore: () => ({ getScenarioOwner }),
+}));
+
 const copyRoute = (await import('../assist.v1.scenario-copy.js')).default;
 const { SupabaseGuestCopyStore, GuestCopyStoreError } = await import('../../orchestrator-v5/guest-copy/index.js');
 type Port = import('../../orchestrator-v5/guest-copy/index.js').GuestCopyStorePort;
@@ -63,6 +68,8 @@ async function buildApp(store: Port): Promise<FastifyInstance> {
 }
 
 beforeEach(async () => {
+  getScenarioOwner.mockReset();
+  getScenarioOwner.mockRejectedValue(new Error('guest copy must not enter the ownership door'));
   projectKey = await makeEs256Key('kid-1');
   jwks = await startJwksFixture([projectKey.jwk]);
   mockConfig.auth.supabaseJwksUrl = undefined;
@@ -80,6 +87,17 @@ describe('the owner is the VERIFIED token sub, and only that', () => {
     expect(res.json()).toEqual({ scenario_id: COPY, created: true });
     // A body naming another user is ignored: the pair is (route id, sub).
     expect(copyGuestScenario.mock.calls).toEqual([[GUEST, ME]]);
+  });
+  it('guest copy does not read getScenarioOwner at the write door', async () => {
+    const { store, copyGuestScenario } = portReturning({ kind: 'copied', scenarioId: COPY, created: true });
+    const app = await buildApp(store);
+    try {
+      const res = await app.inject({ method: 'POST', url: url(GUEST), headers: { authorization: `Bearer ${await userToken()}` } });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toBe(`{"scenario_id":"${COPY}","created":true}`);
+      expect(copyGuestScenario.mock.calls).toEqual([[GUEST, ME]]);
+      expect(getScenarioOwner).not.toHaveBeenCalled();
+    } finally { await app.close(); }
   });
   it('a replay answers the same copy with created=false', async () => {
     const { store } = portReturning({ kind: 'copied', scenarioId: COPY, created: false });

@@ -47,6 +47,7 @@ import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../tools/registry.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { preserveSiblingQuantities } from '../agent-lane/level-batch-frame.js';
 import { recordFactorReview, SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../tools/handlers/set-factor-value.js';
 import { canonicaliseUnitForDisplay } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { checkPairCoherence, resolveScaleFrame } from '../tools/handlers/d1-shared/scale-frame.js';
@@ -863,12 +864,25 @@ export async function applyFactorValueEdit(
   // chokepoint does. The handler mutates the graph it was handed; this restores
   // any canonical top-level state (goal_node_id, options[]) that a projection
   // could have dropped. Skipping it is how a mutation silently strips the model.
-  const mergedGraph = mergeMutatedGraphForPersistence({
+  const mergedCandidate = mergeMutatedGraphForPersistence({
     mutatedGraph: outcome.mutated_graph as Record<string, unknown>,
     persistedBase: persistedGraph,
     requestId,
     scenarioId: payload.scenario_id,
   });
+
+  // Preserve on the full final candidate: GraphV3 drops options[] before the
+  // handler, and the D1 merge restores those cells from the trusted base.
+  // The shared owner must see them after that merge, before commit projection.
+  const preserved = preserveSiblingQuantities(persistedGraph, mergedCandidate, []);
+  if (preserved.kind === 'refused') {
+    const composed = composeRecoverableHandlerResponse(new HandlerInvocationFailedError(preserved.reason, {
+      cause_kind: 'graph_invariant_violated', retryable: false,
+      details: { handler_id: 'set_factor_value', reason: preserved.reason },
+    }), { ...(lookup !== undefined ? { graph: lookup } : {}), handlerRegistry: HANDLER_VALIDATION_REGISTRY }, payload.stage);
+    return { kind: 'refused', reason: preserved.reason, response: composed.response, pendingActions: [] };
+  }
+  const mergedGraph = preserved.graph;
 
   const mergedParse = GraphV3.safeParse(mergedGraph);
   if (!mergedParse.success) {
