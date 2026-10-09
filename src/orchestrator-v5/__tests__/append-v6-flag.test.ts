@@ -12,8 +12,8 @@ afterEach(() => {
 });
 
 it('shares one flag cell between the store test seam and production flag reader', () => {
-  expect(USE_APPEND_V6).toBe(false);
-  expect(useAppendV6()).toBe(false);
+  expect(USE_APPEND_V6).toBe(true);
+  expect(useAppendV6()).toBe(true);
   expect(useAppendV6FromStore).toBe(useAppendV6);
 
   __setUseAppendV6ForTest(true);

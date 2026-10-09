@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest } from '../../../src/orchestrator-v5/append-v6-flag.js';
 /**
  * #1740 (N3, mutant R5) — the producer's `extractionType` stays withdrawn in
  * the graph HANDED TO `store.append`, after the edit path's persistence merge.
@@ -21,7 +22,7 @@
  * Rule: a user-authored value withdraws the producer's extraction marker
  * (23 Sep witness; #1740).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 
 // ── the store: the persisted base the merge reads, and the write it receives ──
@@ -39,7 +40,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     readFactsFor: async () => [],
     readMostRecentPendingActions: async () => [],
     loadGraph: loadGraphMock,
-    loadGraphAndBriefText: async () => ({
+    loadGraphAndBriefText: async () => ({ revision: 7,
       graph: JSON.parse(JSON.stringify(persistedRef.current)),
       briefText: null,
     }),
@@ -192,7 +193,10 @@ describe('#1740 R5 — the graph handed to store.append, after the edit-path per
       graphState: echo as GraphStateIngress, analysisState: null });
   };
 
+
   it.each(['off', 'shadow', 'live'].flatMap(mode => ['added', 'changed', 'stale', 'first-write'].map(echo => ({ mode, echo }))))('an unrelated edit cannot approve the request echo: $mode/$echo', async ({ mode, echo: kind }) => {
+    // A2: retains the legacy client-echo/final-reread gate; CAS ON uses the server snapshot.
+    __setUseAppendV6ForTest(false);
     const oldMode = config.features.graphManagementMode;
     config.features.graphManagementMode = mode as typeof oldMode;
     try {
@@ -222,6 +226,8 @@ describe('#1740 R5 — the graph handed to store.append, after the edit-path per
   });
 
   it.each(['off', 'shadow'])('the final stored-base read refuses a range changed between tool and commit: %s', async mode => {
+    // A2: retains the legacy client-echo/final-reread gate; CAS ON uses the server snapshot.
+    __setUseAppendV6ForTest(false);
     const oldMode = config.features.graphManagementMode;
     config.features.graphManagementMode = mode as typeof oldMode;
     try {
@@ -238,6 +244,8 @@ describe('#1740 R5 — the graph handed to store.append, after the edit-path per
   });
 
   it.each(['off', 'shadow', 'live'])('an omitted echo never erases the stored range: %s', async mode => {
+    // A2: retains the legacy client-echo/final-reread gate; CAS ON uses the server snapshot.
+    __setUseAppendV6ForTest(false);
     const oldMode = config.features.graphManagementMode;
     config.features.graphManagementMode = mode as typeof oldMode;
     try {
@@ -303,3 +311,5 @@ describe('#1740 R5 — the graph handed to store.append, after the edit-path per
     expect(sibling.source).toBe('cee_inference');
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

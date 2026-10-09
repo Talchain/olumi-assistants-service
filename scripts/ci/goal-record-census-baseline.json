@@ -1,5 +1,5 @@
 {
-  "source_sha": "a42b8338792067c4c654280d5f2c5406c92fce01",
+  "source_sha": "ae3ed2049079438c40e61eb49c1b9a4fc912c2df",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -27,6 +27,7 @@
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 3,
       "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 3,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 3,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 1,
       "src/orchestrator-v5/goal-target/share-by-date-run.ts": 2,
       "src/orchestrator-v5/goal-target/team-share-write.ts": 2,
       "src/orchestrator-v5/system-events/option-intervention-edit.ts": 2,
@@ -44,6 +45,7 @@
     },
     "goalUnitOf": {
       "src/orchestrator-v5/goal-target/goal-kind.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 2,
       "src/orchestrator-v5/goal-target/index-goal-weights-note.ts": 2
     },
     "goal_constraints": {
@@ -162,6 +164,7 @@
     },
     "goal_deadline_as_stated": {
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 2,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 5,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/schemas/cee-v3.ts": 1
     },
@@ -181,8 +184,9 @@
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 2,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-direction.ts": 7,
+      "src/orchestrator-v5/goal-target/goal-direction.ts": 6,
       "src/orchestrator-v5/goal-target/goal-level-reading.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 5,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 3,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/orchestrator-v5/signals/coaching-signals.ts": 1,
@@ -210,6 +214,7 @@
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 1,
       "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 5,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 4,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 6,
       "src/orchestrator-v5/system-events/dispatch.ts": 11,
       "src/orchestrator-v5/system-events/option-intervention-edit.ts": 2,
       "src/schemas/cee-v3.ts": 1
@@ -223,6 +228,7 @@
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 1,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 9,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-analysis.ts": 3,
       "src/schemas/cee-v3.ts": 3,
@@ -273,6 +279,7 @@
       "src/orchestrator-v5/goal-target/decide-goal-target-ask.ts": 6,
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 6,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 1,
       "src/orchestrator-v5/handlers/chip-click-dispatch.ts": 1,
       "src/orchestrator-v5/handlers/edit-graph-dispatch.ts": 6,
       "src/orchestrator-v5/handlers/structural-challenge-dispatch.ts": 2,
@@ -506,6 +513,7 @@
       "src/orchestrator-v5/goal-target/goal-direction.ts": 6,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 3,
       "src/orchestrator-v5/goal-target/goal-level-reading.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 2,
       "src/orchestrator-v5/goal-target/share-by-date-run.ts": 1,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 2,
       "src/orchestrator-v5/handlers/structural-challenge-dispatch.ts": 1,
@@ -569,6 +577,7 @@
       "src/orchestrator-v5/goal-target/goal-direction.ts": 4,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 4,
       "src/orchestrator-v5/goal-target/goal-level-reading.ts": 2,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 2,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 5,
       "src/orchestrator-v5/handlers/edit-graph-dispatch.ts": 2,
       "src/orchestrator-v5/handlers/structural-challenge-dispatch.ts": 3,
@@ -640,6 +649,7 @@
       "src/orchestrator-v5/goal-target/goal-chance-range.ts": 1,
       "src/orchestrator-v5/goal-target/goal-direction.ts": 3,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 3,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 4,
       "src/orchestrator-v5/goal-target/share-by-date-run.ts": 2,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 2,
       "src/orchestrator-v5/goal-target/team-share-write.ts": 4,
@@ -682,7 +692,8 @@
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 2,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 3,
-      "src/orchestrator-v5/goal-target/goal-direction.ts": 7
+      "src/orchestrator-v5/goal-target/goal-direction.ts": 7,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 1
     },
     "resolveGoalDirection": {
       "src/orchestrator-v5/agent-lane/admit-model.ts": 2,
@@ -727,6 +738,7 @@
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 3,
       "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 2,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 2,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 4,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 1
     },
     "success_threshold": {
@@ -745,6 +757,7 @@
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 3,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 5,
       "src/orchestrator-v5/graph-management/field-safety.ts": 4,
       "src/orchestrator-v5/tools/handlers/add-constraint.ts": 4,
       "src/orchestrator-v5/tools/handlers/run-analysis.ts": 1,
@@ -776,16 +789,16 @@
     "extractPersistedGoalTarget": 14,
     "findSoleGoalNode": 3,
     "goalChanceTargetCause": 7,
-    "goalDeadlineOf": 34,
+    "goalDeadlineOf": 35,
     "goalKindOf": 19,
-    "goalUnitOf": 3,
+    "goalUnitOf": 5,
     "goal_constraints": 435,
-    "goal_deadline_as_stated": 4,
-    "goal_direction": 91,
-    "goal_horizon": 50,
-    "goal_horizon_months": 25,
+    "goal_deadline_as_stated": 9,
+    "goal_direction": 95,
+    "goal_horizon": 56,
+    "goal_horizon_months": 34,
     "goal_level_reading": 18,
-    "goal_node_id": 279,
+    "goal_node_id": 280,
     "goal_period": 3,
     "goal_scope": 48,
     "goal_sense_reading": 15,
@@ -793,22 +806,22 @@
     "goal_threshold": 247,
     "goal_threshold_cap": 157,
     "goal_threshold_cap_provenance": 36,
-    "goal_threshold_frame": 133,
-    "goal_threshold_raw": 236,
-    "goal_threshold_unit": 210,
+    "goal_threshold_frame": 135,
+    "goal_threshold_raw": 238,
+    "goal_threshold_unit": 214,
     "pickGoalThresholdTrio": 18,
     "quantity_frame": 12,
-    "readHeldGoalComparator": 19,
+    "readHeldGoalComparator": 20,
     "resolveGoalDirection": 29,
     "resolveGoalThresholdStrict": 13,
     "scoredGoalIdOf": 8,
     "soleGoalOf": 15,
-    "statedGoalTargetOf": 25,
+    "statedGoalTargetOf": 29,
     "success_threshold": 18,
-    "threshold_source": 28,
+    "threshold_source": 33,
     "unit_reading": 79
   },
-  "total_references": 2334,
+  "total_references": 2380,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

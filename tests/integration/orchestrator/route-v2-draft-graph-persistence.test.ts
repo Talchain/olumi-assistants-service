@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../utils/revision-store-double.js';
 /**
  * Integration tests — V5 draft_graph graph persistence contract.
  *
@@ -43,7 +44,7 @@ const mockStore = {
 };
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => mockStore,
+  getSessionStore: () => withScenarioRevision(mockStore),
   resetSessionStoreForTests: vi.fn(),
   SessionReadError: class SessionReadError extends Error {},
 }));

@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../utils/revision-store-double.js';
 /**
  * Golden-path end-to-end: brief → draft → edit → run_analysis chip.
  *
@@ -43,14 +44,14 @@ vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', () => ({
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
+  getSessionStore: () => withScenarioRevision(({
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
+  })),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
 }));

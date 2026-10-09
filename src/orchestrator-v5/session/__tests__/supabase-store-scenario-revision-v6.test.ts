@@ -1,12 +1,12 @@
 /**
  * RED-first specification for Shared Data Phase 2(c).
  * Round 2 refusal rows run RED before the fix, then GREEN in this file only.
- * The shipping switch stays false. Exercise the dormant seam directly rather
+ * The shipping switch is ON. Retained legacy rows explicitly force it OFF,
  * than introducing a runtime configuration escape hatch.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SupabaseSessionStore, USE_APPEND_V6 } from '../supabase-store.js';
+import { SupabaseSessionStore, USE_APPEND_V6, __setUseAppendV6ForTest } from '../supabase-store.js';
 import {
   GraphStaleWriteError,
   SessionReadError,
@@ -81,6 +81,8 @@ function write(overrides: Partial<SessionTurnWrite> = {}): SessionTurnWrite {
 }
 
 beforeEach(() => {
+  // These retained legacy read/dispatch rows pin flag-OFF; public v6 rows live in the addendum.
+  __setUseAppendV6ForTest(false);
   vi.clearAllMocks();
   selectCalls.length = 0;
   scenarioRow = { graph: GRAPH, brief_text: 'Synthetic brief', revision: 7 };
@@ -90,9 +92,10 @@ beforeEach(() => {
   });
 });
 
-describe('scenario revision — dormant append_turn_atomic_v6 path', () => {
-  it('ships disabled, keeps the public append on v5, and sends no revision argument to v5', async () => {
-    expect(USE_APPEND_V6).toBe(false);
+describe('scenario revision — direct append_turn_atomic_v6 seam', () => {
+  it('ships enabled, keeps the explicitly flag-OFF append on v5, and sends no revision argument to v5', async () => {
+    __setUseAppendV6ForTest(false);
+    expect(USE_APPEND_V6).toBe(true);
     await expect(store().append(write())).resolves.toEqual({ id: 'turn-row' });
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc.mock.calls[0]![0]).toBe('append_turn_atomic_v5');
@@ -205,7 +208,7 @@ describe('scenario revision — dormant append_turn_atomic_v6 path', () => {
 });
 
 describe('scenario revision — turn-start scenario read', () => {
-  it('preserves legacy columns and result shape while the shipping switch is false', async () => {
+  it('preserves legacy columns and result shape with the seam explicitly OFF', async () => {
     await expect(store().loadGraphAndBriefText(SCENARIO)).resolves.toEqual({
       graph: GRAPH, briefText: 'Synthetic brief',
     });

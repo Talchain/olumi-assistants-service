@@ -5,6 +5,8 @@
  * commit, floor, route reload/finaliser and the public store are real.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runWithTurnFence } from '../session/turn-fence.js';
+import type { SessionTurnWrite } from '../session/store.js';
 import Fastify, { type FastifyRequest } from 'fastify';
 import type { DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
@@ -89,7 +91,7 @@ function baseGraph() {
  * exactly, table filters are honoured, and the append persists turn + graph +
  * facts atomically. No store method, commit or persisted-graph read is mocked.
  */
-function harness(options: { failGraphReadAt?: number } = {}) {
+function harness(options: { failGraphReadAt?: number; missingV4?: boolean } = {}) {
   ports.edit.mockClear();
   ports.draft.mockClear();
   const tables: Record<string, Row[]> = {
@@ -107,6 +109,8 @@ function harness(options: { failGraphReadAt?: number } = {}) {
       rpcCalls.push({ name, args: structuredClone(args) });
       if (name === 'ensure_scenario_exists') return { data: null, error: null };
       if (name === 'v5_claim_turn_fence') return { data: 1, error: null };
+      if (name === 'v5_evaluate_turn_fence') return { data: { claimed: true, stopped: false, generation: 3, max_generation: 3 }, error: null };
+      if (options.missingV4 && name === 'append_turn_atomic_v4') return { data: null, error: { code: 'PGRST202' } };
       if (!name.startsWith('append_turn_atomic_')) throw new Error(`Unexpected RPC: ${name}`);
       tables.v5_conversation_turns!.push({
         id: ROW, scenario_id: args.p_scenario_id, user_id: null, turn_id: args.p_turn_id,
@@ -194,7 +198,7 @@ function harness(options: { failGraphReadAt?: number } = {}) {
     },
   });
   ports.store.mockReturnValue(store);
-  return { store, methodCounts: () => ({ ...methods }), selects, rpcCalls, tables, get graphReadFailures() { return graphReadFailures; },
+  return { client, store, methodCounts: () => ({ ...methods }), selects, rpcCalls, tables, get graphReadFailures() { return graphReadFailures; },
  };
 }
 
@@ -249,9 +253,18 @@ vi.mock('../../config/index.js', async importOriginal => {
 const FLAG_OFF_FORBIDDEN_STATE_READERS = ['loadGraphAndBriefText'] as const;
 const FLAG_OFF_FORBIDDEN_RPCS = ['append_turn_atomic_v6', 'append_turn_atomic_v4r'] as const;
 
+let versionsEnabledForRow = true;
+function expectLegacyAppend(h: ReturnType<typeof harness>, door = 'rollback') {
+  const appends = h.rpcCalls.filter(call => call.name.startsWith('append_turn_atomic_') && call.args.p_graph != null);
+  expect(appends.length, door).toBeGreaterThan(0);
+  for (const call of appends) expect(versionsEnabledForRow ? ['append_turn_atomic_v5']
+    : ['append_turn_atomic_v4', 'append_turn_atomic_v3', 'append_turn_atomic_v2'], door).toContain(call.name);
+}
+
 type Harness = ReturnType<typeof harness>;
 function assertFlagOff(h: Harness, door: string, forbidStateReaders: boolean): void {
   expect(storeModule.useAppendV6(), door).toBe(false);
+  if (h.rpcCalls.some(call => call.name.startsWith('append_turn_atomic_') && call.args.p_graph != null)) expectLegacyAppend(h, door);
   expect(Object.keys(h.methodCounts()).length, `${door}: consumer recorder reached`).toBeGreaterThan(0);
   expect(h.rpcCalls.filter(call => FLAG_OFF_FORBIDDEN_RPCS.some(name => name === call.name)).map(call => call.name), `${door}: forbidden revision RPC`).toEqual([]);
   expect(h.rpcCalls.filter(call => Object.hasOwn(call.args, 'p_expected_revision')), `${door}: revision argument`).toEqual([]);
@@ -267,7 +280,12 @@ function assertFlagOff(h: Harness, door: string, forbidStateReaders: boolean): v
   }
 }
 
-describe('versioned graph writer flag-OFF contract', () => {
+describe.each([true, false])('graph writer rollback flag-OFF contract (model versions=%s)', versionsEnabled => {
+  beforeEach(() => {
+    versionsEnabledForRow = versionsEnabled;
+    vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', String(versionsEnabled));
+    _resetConfigCache();
+  });
   it('keeps the PR-owned revision calls absent across every door family', async () => {
     // draft
     await (async () => {
@@ -279,7 +297,7 @@ describe('versioned graph writer flag-OFF contract', () => {
     const result = await dispatchDraftGraph({ payload: message('Compare raising the price to £59 with holding £49.'),
       requestId: 'flag-off-draft', request: { headers: {} } as FastifyRequest });
     expect(result.commitPerformed).toBe(true);
-    expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
+    expectLegacyAppend(h);
     assertFlagOff(h, 'draft', false);
     })();
     // edit — mismatched ingress
@@ -302,7 +320,7 @@ describe('versioned graph writer flag-OFF contract', () => {
       request: { headers: {} } as FastifyRequest, graphState: client, analysisState: null });
     expect(result.commitPerformed).toBe(true);
     expect(ports.edit).toHaveBeenCalledTimes(1);
-    expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
+    expectLegacyAppend(h);
     assertFlagOff(h, 'edit — mismatched ingress', false);
     })();
     // edit — brief read recovery
@@ -322,7 +340,7 @@ describe('versioned graph writer flag-OFF contract', () => {
     expect(h.graphReadFailures).toBe(1);
     expect(result.commitPerformed).toBe(true);
     expect(ports.edit).toHaveBeenCalledTimes(1);
-    expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
+    expectLegacyAppend(h);
     assertFlagOff(h, 'edit — brief read recovery', false);
     })();
     // system event — factor value
@@ -333,7 +351,7 @@ describe('versioned graph writer flag-OFF contract', () => {
     } as SystemEventTurnPayload;
     const result = await dispatchSystemEvent({ payload, requestId: 'flag-off-system' });
     expect(result.commitPerformed).toBe(true);
-    expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
+    expectLegacyAppend(h);
     assertFlagOff(h, 'system event — factor value', true);
     })();
     // register
@@ -348,7 +366,7 @@ describe('versioned graph writer flag-OFF contract', () => {
         url: `/assist/v1/scenarios/${SCENARIO}/graph/register`,
         payload: { graph: imported, operation_id: TURN } });
       expect(result.statusCode, result.body).toBe(200);
-      expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
+      expectLegacyAppend(h);
       assertFlagOff(h, 'register', true);
     } finally { ports.routeDispatch.mockReset(); await app.close(); }
     })();
@@ -364,7 +382,7 @@ describe('versioned graph writer flag-OFF contract', () => {
           rationale: 'The user confirmed the price intervention.' }] } }],
     });
     expect(result.ok, JSON.stringify(result)).toBe(true);
-    expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
+    expectLegacyAppend(h);
     assertFlagOff(h, 'replacement apply', true);
     })();
 
@@ -392,7 +410,7 @@ describe('versioned graph writer flag-OFF contract', () => {
         turn_id: TURN, stage: 'analyse', event } as SystemEventTurnPayload, requestId: `flag-off-${event.kind}` });
       assertFlagOff(h, `system event — ${event.kind}`, true);
       expect(result.commitPerformed, `${event.kind}: successful append`).toBe(true);
-      expect(h.rpcCalls.some(call => call.name === 'append_turn_atomic_v5'), event.kind).toBe(true);
+      expectLegacyAppend(h, event.kind);
     }
     vi.stubEnv('CEE_V5_GRAPH_CAS_MODE', 'off');
     vi.stubEnv('CEE_V5_GRAPH_CAS_RPC', 'off');
@@ -508,9 +526,9 @@ describe('versioned graph writer flag-OFF contract', () => {
         await h.store.append({ scenario_id: SCENARIO, turn_id: TURN, turn_class: 'direct_answer',
           handler_id: null, request_hash: 'route-reload-closed-set', response_emitted: true, llm_calls_used: 0, duration_ms: 1, handler_facts: [],
           graph: args.graphState, expectedGraphIdentityHash: null, expectedGraphAnalysisHash: null,
-          modelVersion: { mutation_id: TURN, graph_identity_hash: 'a'.repeat(64), analysis_affecting_hash: 'b'.repeat(64),
+          ...(versionsEnabled ? { modelVersion: { mutation_id: TURN, graph_identity_hash: 'a'.repeat(64), analysis_affecting_hash: 'b'.repeat(64),
             hash_algorithm: 'sha256', identity_projection_version: 'identity.v1', identity_normaliser_version: '1', graph_schema_version: 'graph_v3',
-            actor_kind: 'unknown', authored_by: null, creation_kind: 'committed_mutation', source_turn_id: TURN },
+            actor_kind: 'unknown', authored_by: null, creation_kind: 'committed_mutation', source_turn_id: TURN } } : {}),
         });
         return { response: { response_version: 2, assistant_text: 'Applied edit.', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'analyse' }, commitPerformed: true };
       });
@@ -529,9 +547,35 @@ describe('versioned graph writer flag-OFF contract', () => {
         expect(result.statusCode, result.body).toBe(200);
         expect(ports.routeDispatch).toHaveBeenCalledTimes(failRead ? 0 : 1);
         if (failRead) expect(h.graphReadFailures).toBe(1);
-        else expect(h.rpcCalls.some(call => call.name === 'append_turn_atomic_v5')).toBe(true);
+        else expectLegacyAppend(h);
         assertFlagOff(h, `route-v2 reload — ${failRead ? 'read failure' : 'success'}`, false);
       } finally { ports.routeDispatch.mockReset(); await app.close(); }
     }
   }, 120_000);
+});
+
+
+describe('flag-OFF legacy unversioned RPC reachability', () => {
+  it.each([
+    { mode: 'off' as const, fenced: false, missingV4: false, rpcs: ['append_turn_atomic_v2'] },
+    { mode: 'enforce' as const, fenced: false, missingV4: false, rpcs: ['append_turn_atomic_v3'] },
+    { mode: 'enforce' as const, fenced: true, missingV4: false, rpcs: ['append_turn_atomic_v4'] },
+    { mode: 'enforce' as const, fenced: true, missingV4: true, rpcs: ['append_turn_atomic_v4', 'append_turn_atomic_v3'] },
+  ])('keeps $rpcs reachable without revision CAS', async ({ mode, fenced, missingV4, rpcs }) => {
+    const h = harness({ missingV4 });
+    const store = new storeModule.SupabaseSessionStore(h.client as never,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 20 }),
+      { defaultReadLimit: 20, graphCasMode: 'off', graphCasRpc: mode });
+    const write: SessionTurnWrite = { scenario_id: SCENARIO, turn_id: TURN, turn_class: 'direct_answer',
+      handler_id: null, request_hash: 'rollback', response_emitted: true, llm_calls_used: 0,
+      duration_ms: 1, handler_facts: [], graph: baseGraph() };
+    const append = () => store.append(write);
+    const result = fenced
+      ? await runWithTurnFence({ scenarioId: SCENARIO, turnId: TURN, generation: 3 }, append)
+      : await append();
+    expect(result).toMatchObject({ id: ROW });
+    expect(h.rpcCalls.filter(call => call.name.startsWith('append_turn_atomic_')).map(call => call.name)).toEqual(rpcs);
+    expect(h.rpcCalls.every(call => !Object.hasOwn(call.args, 'p_expected_revision'))).toBe(true);
+    expect(h.tables.v5_conversation_turns).toHaveLength(1);
+  });
 });

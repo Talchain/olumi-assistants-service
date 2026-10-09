@@ -1,3 +1,9 @@
+import { beforeEach as beforeEachRevisionScope } from 'vitest';
+import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
+
+// Pin the retained legacy RPC contract; CAS-ON equivalents live in the v6/door suites.
+beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
+
 import { RUN_ANALYSIS_PROJECTION_KEY, stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { deriveAnalysisFreshness } from '../../context/freshness.js';
 import { loadScenarioAnalysisFactsForRead } from '../../build-turn-context.js';

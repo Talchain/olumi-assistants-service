@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../utils/revision-store-double.js';
 import { installOwnershipHarness } from '../../utils/ownership-route-harness.js';
 /**
  * Structural invariant: every dispatch branch in route-v2.ts runs the
@@ -40,7 +41,7 @@ const getScenarioOwnerSpy = vi.fn(async () => null);
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
+  getSessionStore: () => withScenarioRevision(({
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: async () => [],
@@ -49,7 +50,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     scenarioExists: async () => true,
     getScenarioOwner: getScenarioOwnerSpy,
     ensureScenarioExists: ensureScenarioExistsSpy,
-  }),
+  })),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
 }));
@@ -204,7 +205,11 @@ describe('route-v2 pre-flight invariant — read-only ownership admission runs o
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    // One admission read, then the door's ONE owner read for this real append.
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(2);
+    expect(getScenarioOwnerSpy).toHaveBeenNthCalledWith(1, SCENARIO_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenNthCalledWith(2, SCENARIO_ID);
+    expect(appendMock).toHaveBeenCalledTimes(1);
     expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
     expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
     expect(res.headers["x-ownership-caller"]).toBe(USER_ID);
@@ -323,7 +328,11 @@ describe('route-v2 pre-flight invariant — read-only ownership admission runs o
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    // One admission read, then the door's ONE owner read for this real append.
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(2);
+    expect(getScenarioOwnerSpy).toHaveBeenNthCalledWith(1, SCENARIO_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenNthCalledWith(2, SCENARIO_ID);
+    expect(appendMock).toHaveBeenCalledTimes(1);
     expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
     expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
     expect(res.headers["x-ownership-caller"]).toBe(USER_ID);

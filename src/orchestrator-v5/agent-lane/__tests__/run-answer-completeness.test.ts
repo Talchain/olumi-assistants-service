@@ -163,9 +163,16 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
       if (entry === 'free_text_run') {
         expect(seen.ran).toBe(true);
         expect(seen.what_is_missing).toBe(WHY);
-      } else expect(JSON.stringify(seen.result)).toContain(WHY);
-      expect(JSON.stringify(seen.result)).toContain('same-canonical-result');
-      expect(seen.claim_permissions).toBeDefined();
+        expect(JSON.stringify(seen.result)).toContain('same-canonical-result');
+        expect(seen.claim_permissions).toBeDefined();
+      } else {
+        expect(seen).not.toHaveProperty('result');
+        expect(JSON.stringify(seen)).not.toContain('same-canonical-result');
+        expect((seen.canonical_state as Body).analysis).toMatchObject({
+          claim_permissions: { leader_may_be_named: false, withheld_reason: 'constraint_verdict_withheld' },
+          earlier_analysis: 'complete_current', run_state: STATE.run_state,
+        });
+      }
       expect(body.assistant_text).toContain('Capacity');
       expect(body.assistant_text).toContain(WHY);
       expect(body.assistant_text).not.toBe(fallback);

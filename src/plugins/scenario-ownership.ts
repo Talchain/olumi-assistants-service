@@ -1,9 +1,10 @@
 /** One HTTP scenario admission authority. Registered after service/HMAC authentication. */
 import fp from 'fastify-plugin';
+import { bindWriteCaller, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readWriteRefusal, readSuccessfulDoorEntries } from '../orchestrator-v5/ownership/door-ownership.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest, RouteOptions } from 'fastify';
 import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
+import { markDraftGraphWriteFailed, preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { resolveOwnershipAuthority, OWNERSHIP_CLAIM_CARVE_OUTS } from '../orchestrator/ownership-authority.js';
 import { buildSignInRequiredError, type UserIdentityResolution } from '../orchestrator/user-identity.js';
@@ -31,6 +32,7 @@ export interface ScenarioAccessContext {
   scenarioId: string;
   ownerUserId: string | null;
   callerUserId: string | null;
+  caller: { userId: string | null; verified: boolean };
   memberRead: boolean;
   snapshot?: ScenarioSnapshot;
   scenarioMissing?: true;
@@ -162,10 +164,11 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
     const hmacScope = OWNERSHIP_CLAIM_CARVE_OUTS.some(c => c.scope.includes(path));
     const authority = resolveOwnershipAuthority(req, hmacScope ? claimed : null, identity);
     const callerUserId = authority.userId;
+    const caller = { userId: callerUserId, verified: authority.basis === 'verified_user_jwt' || authority.basis === 'verified_hmac_service' };
     if (claimed !== null && identity.mode === 'verified' && claimed !== callerUserId && hmacScope) {
       emit(TelemetryEvents.UserJwtIdentityMismatch, { request_id: requestId, claimed_user_id_prefix: claimed.slice(0, 8), verified_user_id_prefix: callerUserId?.slice(0, 8) });
     }
-    req.scenarioAccess = { scenarioId: '', ownerUserId: null, callerUserId, memberRead: false };
+    req.scenarioAccess = { scenarioId: '', ownerUserId: null, callerUserId, caller, memberRead: false };
     // Stop's bounds precede every scenario read, as in the original helper.
     if (path.endsWith('/stop')) {
       const stop = readIngressTurnIdentity(req.body);
@@ -190,7 +193,7 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
         if (memberRead) { access = 'allow'; log.info({ event: 'v5.scenario_graph.member_read', request_id: requestId, scenario_id: checkedId }, 'Scenario graph read by a viewer member'); }
       }
       if (access !== 'allow') { refuse(req, reply, checkedId, callerUserId === null ? 'scenario_requires_authenticated_owner' : 'scenario_owned_by_other_user'); return false; }
-      req.scenarioAccess = { scenarioId: checkedId, ownerUserId: owner, callerUserId, memberRead, snapshot: admittedSnapshot };
+      req.scenarioAccess = { scenarioId: checkedId, ownerUserId: owner, callerUserId, caller, memberRead, snapshot: admittedSnapshot };
       return true;
     };
     try {
@@ -275,4 +278,32 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
     if (ownerUserId === undefined) return refuse(req, reply, scenarioId ?? '', 'scenario_not_found');
     await admitOwner(ownerUserId, snapshot);
   });
+  // Complete untouched responses synchronously. An unconditional async hook
+  // delays reply.sent on admission refusals and can let the handler continue.
+  app.addHook('onSend', (req, reply, payload, done) => {
+    const refusal = readWriteRefusal(req);
+    if (!refusal) { done(null, payload); return; }
+    if (readSuccessfulDoorEntries(req) > 0) {
+      log.warn({ event: 'model_write.ownership_refused_after_commit', reason: refusal.reason,
+        request_id: getOrGenerateRequestId(req), route_family: family(req) },
+      'Model write ownership refused after an earlier successful door entry');
+      done(null, payload);
+      return;
+    }
+    const body = JSON.stringify(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[refusal.reason]);
+    // Already mapped paths retain their bytes and their existing terminal mark.
+    if (reply.statusCode === 403 && payload === body) { done(null, payload); return; }
+    const replace = () => {
+      reply.code(403).type('application/json; charset=utf-8');
+      reply.removeHeader('content-length');
+      done(null, body);
+    };
+    const fence = refusal.fence;
+    if (fence) {
+      void markDraftGraphWriteFailed(fence.scenarioId, fence.turnId,
+        'model_write_ownership_refused', getOrGenerateRequestId(req), 'turn_dead_only').then(replace, replace);
+    } else replace();
+  });
+  app.addHook('preHandler', (req, _reply, done) =>
+    bindWriteCaller(req.scenarioAccess?.caller ?? { userId: null, verified: false }, done, req));
 }, { name: 'scenario-ownership' });

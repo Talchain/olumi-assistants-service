@@ -90,11 +90,11 @@ describe('the two-request Run reads the licensed run on both requests (live rout
     const seen = JSON.stringify(ctx);
     expect(seen).not.toContain(LEAK);
     expect(seen).not.toContain('leading option');
-    expect(seen).not.toMatch(/"message":/);
+    expect(JSON.stringify((ctx as { canonical_state: { run_explanation: unknown } }).canonical_state.run_explanation)).not.toMatch(/"message":/);
     expect(seen).toContain('CONSTRAINT_LEVEL_DRAWS_OUT_OF_DOMAIN');
-    expect((ctx as { claim_permissions: { leader_may_be_named: boolean } }).claim_permissions.leader_may_be_named).toBe(false);
-    expect((ctx as { canonical_state: { run_delta: unknown } }).canonical_state.run_delta)
-      .toEqual({ leader: { current_leading_option_id: null, prior_leading_option_id: null }, rows: [] });
+    expect((ctx as { canonical_state: { run_explanation: { claim_permissions: { leader_may_be_named: boolean } } } }).canonical_state.run_explanation.claim_permissions.leader_may_be_named).toBe(false);
+    expect((ctx as { canonical_state: { analysis: Record<string, unknown> } }).canonical_state.analysis).not.toHaveProperty('run_delta');
+    expect(seen).not.toContain('current_leading_option_id');
   });
 
   it('GUARD (CR item 2 withdrawn): request 1\'s run reaches the next Agent turn only as the history time marker', async () => {
@@ -118,9 +118,12 @@ describe('the two-request Run reads the licensed run on both requests (live rout
     state = PERMITTED;
     const second = await explain((await run()).json() as First);
     expect(second.statusCode, second.body).toBe(200);
-    const ctx = explanationContext(modelBodies[0]!.input) as { claim_permissions: { leader_may_be_named: boolean }; canonical_state: { run_delta: unknown } };
-    expect(ctx.claim_permissions.leader_may_be_named).toBe(true);
-    expect(JSON.stringify(ctx)).toContain(LEAK);
-    expect(ctx.canonical_state.run_delta).toEqual(DELTA);
+    const ctx = explanationContext(modelBodies[0]!.input) as { canonical_state: { run_explanation: { claim_permissions: { leader_may_be_named: boolean }; leading_option_id?: string | null }; analysis: Record<string, unknown>; run_delta: unknown } };
+    expect(ctx.canonical_state.run_explanation.claim_permissions.leader_may_be_named).toBe(true);
+    expect(ctx.canonical_state.run_explanation.leading_option_id).toBe(SERVED.block.leading_option_id);
+    expect(JSON.stringify(ctx)).not.toContain(LEAK);
+    expect(ctx.canonical_state.analysis.selected_run_reference).toMatch(/^agent-explain-run:/);
+    expect(ctx.canonical_state.analysis).not.toHaveProperty('run_delta');
+    expect(ctx.canonical_state.analysis.saved_run_options).toEqual(expect.arrayContaining([expect.objectContaining({ option_id: 'ai_reporting_sprint', option_label: 'AI Reporting Sprint' })]));
   });
 });

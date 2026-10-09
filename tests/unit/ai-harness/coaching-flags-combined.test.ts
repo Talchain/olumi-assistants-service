@@ -77,8 +77,8 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     loadGraph: async (scenarioId: string) => (scenarioId === SCENARIO_ID ? mockState.persistedGraph : null),
     loadGraphAndBriefText: async (scenarioId: string) =>
       scenarioId === SCENARIO_ID
-        ? { graph: mockState.persistedGraph, briefText: null }
-        : { graph: null, briefText: null },
+        ? { revision: 7, graph: mockState.persistedGraph, briefText: null }
+        : { revision: 7, graph: null, briefText: null },
     ensureScenarioExists: async () => ({ user_id: null }),
     readMostRecentPendingActions: async () => [],
   }),

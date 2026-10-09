@@ -1,3 +1,6 @@
+import { ANALYSIS_REREAD_TIMEOUT_MS } from './session/analysis-read-deadline.js';
+import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
+import { readWriteRefusal, readSuccessfulDoorEntries } from './ownership/door-ownership.js';
 import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * Build a V5 TurnContext from an ingress payload.
@@ -80,6 +83,8 @@ import {
 } from './context/reconcile-recent-mutation-facts.js';
 import {
   SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+  SCENARIO_ANALYSIS_FACT_CAP,
+  isoInstantOrderKey,
   readScenarioAnalysisClaimSafetyFact,
   reconcileScenarioAnalysisFacts,
   type DurableScenarioAnalysisFactRead,
@@ -1840,6 +1845,9 @@ export async function loadDraftLossStands(
  * disclosure by accident — which is exactly how the false claim shipped: one
  * catch block covering every failure class, marking them all identically.
  */
+// One existing session-read budget for the best-effort UPDATE, capped by response headroom.
+export const GRAPH_FAILURE_MARK_TIMEOUT_MS = Math.min(ANALYSIS_REREAD_TIMEOUT_MS, TURN_RESPONSE_HEADROOM_MS);
+
 export async function markDraftGraphWriteFailed(
   scenarioId: string,
   turnId: string,
@@ -1847,10 +1855,32 @@ export async function markDraftGraphWriteFailed(
   requestId: string,
   disclosure: GraphWriteFailureDisclosure,
 ): Promise<void> {
+  // Failure marks are write-once. Classify a latched refusal before any broad
+  // draft catch can mark it as a lost draft; onSend reuses this same helper.
+  const refusal = readWriteRefusal();
+  if (refusal?.fence?.scenarioId === scenarioId && refusal.fence.turnId === turnId
+    && readSuccessfulDoorEntries() === 0) {
+    reason = 'model_write_ownership_refused';
+    disclosure = 'turn_dead_only';
+  }
   const store = tryGetSessionStore(requestId, scenarioId);
   if (!store?.markGraphWriteFailed) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure);
+    // Only an ownership refusal's mark is bounded (it gates the refusal response). Every other
+    // mark stays awaited to completion: a late draft_loss mark could otherwise land after a
+    // later successful graph commit has resolved losses, and stand unresolved.
+    if (reason !== 'model_write_ownership_refused') {
+      await store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure);
+      return;
+    }
+    // A late completion/rejection can settle only the losing promise, never the response callback again.
+    await Promise.race([
+      store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Graph failure mark deadline exceeded')), GRAPH_FAILURE_MARK_TIMEOUT_MS);
+      }),
+    ]);
   } catch (e) {
     log.warn(
       {
@@ -1860,7 +1890,7 @@ export async function markDraftGraphWriteFailed(
       },
       'V5 build-turn-context — markGraphWriteFailed threw; the 500 is unchanged but the loss trace is missing',
     );
-  }
+  } finally { clearTimeout(timer); }
 }
 
 async function fetchPersistedScenarioState(
@@ -2720,6 +2750,53 @@ export async function loadScenarioAnalysisFactsForRead(
       durableRead,
     }),
   };
+}
+
+interface ScenarioAnalysisAnchorFactsRead {
+  readonly facts: readonly HandlerFact[];
+  readonly total_count: number;
+  readonly malformed_row_count: number;
+  readonly capped: boolean;
+}
+
+/** Anchor-only loader returns a validated subset, never a reconciled reasoning carrier. */
+export async function loadScenarioAnalysisAnchorFactsForRead(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<ScenarioAnalysisAnchorFactsRead> {
+  const store = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
+  if (!store?.readScenarioRunAnalysisFactsFor) throw new Error('Analysis anchor store unavailable');
+  const page = await store.readScenarioRunAnalysisFactsFor(scenarioId, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT, { malformedRows: 'isolate-for-anchor' });
+  const isolated = page.isolated_malformed_rows;
+  const readCount = isolated?.read_count ?? page.facts.length;
+  const ids = [...(isolated?.ids ?? [])];
+  if (!Number.isSafeInteger(page.total_count) || page.total_count < 0
+    || readCount !== Math.min(page.total_count, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT)
+    || page.facts.length + ids.length !== readCount) {
+    throw new Error('Analysis anchor page contract invalid');
+  }
+  const facts: HandlerFact[] = [];
+  for (const entry of page.facts) {
+    const fact = entry.fact;
+    // An otherwise schema-valid row may still lack a recorded anchor or carry
+    // invalid time/identity metadata. It must not hide a valid older success.
+    if (fact.fact_type !== 'run_analysis' || fact.result.scenario_id !== scenarioId
+      || isoInstantOrderKey(entry.fact_created_at) === null
+      || typeof fact.result.graph_hash_at_run !== 'string' || fact.result.graph_hash_at_run.trim() === ''
+      || (fact.result.computed_at !== undefined && isoInstantOrderKey(fact.result.computed_at) === null)) {
+      ids.push(entry.fact_row_id);
+      continue;
+    }
+    facts.push(fact);
+  }
+  if (ids.length > 0) {
+    log.warn({ event: 'v5.decision_record.anchor_rows_isolated', request_id: requestId,
+      scenario_id: scenarioId, malformed_row_count: ids.length, malformed_row_ids: ids },
+    'Decision record anchor: malformed rows isolated');
+  }
+  return { facts, total_count: page.total_count, malformed_row_count: ids.length,
+    capped: page.total_count > SCENARIO_ANALYSIS_FACT_CAP };
 }
 
 export async function loadPriorFactsQuietly(

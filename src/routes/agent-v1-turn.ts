@@ -33,7 +33,6 @@ import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, r
 import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
-import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
 const fenceRefused = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
@@ -53,9 +52,10 @@ import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runt
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
-import { isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
+import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
+import { ModelWriteOwnershipRefused } from '../orchestrator-v5/ownership/door-ownership.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
@@ -71,9 +71,7 @@ import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import { createAgentCapabilities, withNonlinearIdentity, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
-import { goalCertaintyForAgent } from '../orchestrator-v5/agent-lane/goal-certainty-for-agent.js';
-import { savedRunContextFacts } from '../orchestrator-v5/agent-lane/saved-run-context-facts.js';
+import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { withAnalysisReadDeadline } from '../orchestrator-v5/session/analysis-read-deadline.js';
@@ -135,7 +133,7 @@ import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, shapeFromDeriv
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
-import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
+import { runToolOutputLicensesLeader } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
 import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
@@ -2617,6 +2615,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         });
         owner = await store.readCommittedTurn(scenarioId, claimTurnId);
       } catch (err) {
+        if (err instanceof ModelWriteOwnershipRefused) return reply.code(403).send({ error: err.code });
         log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claim failed — refusing rather than running unclaimed');
         return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not reserve this turn. Nothing was run — please try again.' });
       }
@@ -3063,7 +3062,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
-        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
+        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
           // The reply the user reads is composed from this text plus Olumi's status line.
@@ -3095,42 +3094,43 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       explanationBriefText = typeof selectedRead.json.brief_text === 'string' ? selectedRead.json.brief_text : null;
       const currentRead = selectedRead.status === 200
         ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
-      const matches = message === RUN_EXPLANATION_MESSAGE && !typedRunOf(body)
+      let matches = message === RUN_EXPLANATION_MESSAGE && !typedRunOf(body)
         && runExplanationMatches(explanationId, scenarioId, st);
       const priorAndRun = [
         ...(history ?? []),
         { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
       ];
-      // Only the current reader's selected result, never an earlier tool output from history.
-      const canonicalAfterRun = {
-        analysis_state: st.analysisState,
-        analysis_ready: st.analysisReady,
-        ...(currentRead?.run_delta !== undefined ? { run_delta: currentRead.run_delta } : {}),
-        option_display_names: [...optionNameAliases(st.graph).values()].map((a) => a.display),
-      };
-      // The interpreter reads the LICENSED run (`licensed-run-view.ts`, PR-L1), exactly as the Agent loop's model does.
-      const permissionsNow = claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true });
-      const selectedPermissions = st.analysisResult !== undefined && permissionsNow.leader_may_be_named !== true && st.graph !== undefined
-        ? withNonlinearIdentity(permissionsNow, st.graph, st.identityEvaluated) : permissionsNow;
-      const factsNow = savedRunContextFacts(scenarioId, {
-        graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
-        option_participation: st.optionParticipation, run_option_set: st.runOptionSet,
-        identity_evaluated: st.identityEvaluated, limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
-      }, selectedPermissions);
-      // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
-      const goalChanceRead = goalChanceWithheldForAgent(st.analysisResult, st.graph);
+      // The same completed canonical assembly the ordinary Agent reads: no stored result/enrichment packet.
+      const canonicalAfterRun = await capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' });
+      // A refused canonical read follows the same early refusal as an unmatched Explain control.
+      if (canonicalAfterRun.ok !== true) matches = false;
+      const selectedRun = canonicalAfterRun.analysis as Record<string, unknown> | undefined;
+      // ⭐ NEVER RE-ASK (G1b d4): retain the Explain path's asked-once handling on the canonical finding.
+      const goalChanceRead = selectedRun?.goal_chance as { say: string } | undefined;
       const goalChanceAskedOnce = goalChanceRead === undefined ? ''
         : withoutAskedQuestion(goalChanceRead.say, await repliesToCheckAsks([goalChanceRead.say], historyReader, scenarioId, undefined));
       const goalChanceNow = goalChanceRead === undefined || goalChanceAskedOnce === '' ? goalChanceRead : { ...goalChanceRead, say: goalChanceAskedOnce };
-      const goalCertaintyNow = goalCertaintyForAgent(st.analysisResult, { scenario_id: scenarioId, analysis_state: st.analysisState },
-        { raw: st.graph, analysis_state: st.analysisState, analysis_result: st.analysisResult,
-          ...(st.goalCertainty !== undefined ? { goal_certainty: st.goalCertainty } : {}) });
-      const selectedRun = { result: analysisResultForAgent(st.analysisResult, undefined, true, st.graph), claim_permissions: selectedPermissions, ...factsNow,
-        ...(goalChanceNow !== undefined ? { goal_chance: goalChanceNow } : {}),
-        ...(goalCertaintyNow !== undefined ? { goal_certainty: goalCertaintyNow } : {}) };
-      const runForInterpreter = runToolOutputLicensesLeader(selectedRun)
-        ? { ...selectedRun, canonical_state: canonicalAfterRun }
-        : { ...modelFacingToolResult('run_analysis', selectedRun), canonical_state: withoutLeaderDesignations(canonicalAfterRun) };
+      // ⭐ NEVER RE-ASK: the scoped section's question-bearing text is asked once too; its finding stays.
+      const section = canonicalAfterRun.run_explanation as Record<string, unknown> | undefined;
+      const target = section?.target_testability as Record<string, unknown> | undefined;
+      const sensitivity = section?.decision_sensitivity as Record<string, unknown> | undefined;
+      const sectionReplies = await repliesToCheckAsks([target?.say, sensitivity?.say]
+        .filter((l): l is string => typeof l === 'string'), historyReader, scenarioId, undefined);
+      const askedOnce = (carrier: Record<string, unknown>, key: string): Record<string, unknown> => {
+        const kept = withoutAskedQuestion(carrier[key] as string, sectionReplies);
+        const { [key]: _asked, ...rest } = carrier;
+        return kept.trim() === '' ? rest : { ...carrier, [key]: kept };
+      };
+      const sectionNow = section === undefined || sectionReplies.length === 0 ? section : {
+        ...section,
+        ...(typeof target?.say === 'string' ? { target_testability: askedOnce(target, 'say') } : {}),
+        ...(typeof sensitivity?.say === 'string' ? { decision_sensitivity: askedOnce(sensitivity, 'say') } : {}),
+      };
+      const runForInterpreter = { canonical_state: {
+        ...canonicalAfterRun,
+        ...(goalChanceNow === undefined ? {} : { analysis: { ...selectedRun, goal_chance: goalChanceNow } }),
+        ...(sectionNow === undefined ? {} : { run_explanation: sectionNow }),
+      } };
       const explanationInput = [...recentRunExplanationConversation(history ?? []), { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
         request: RUN_EXPLANATION_MESSAGE, ...runForInterpreter,
       }) }] }];
@@ -3787,6 +3787,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // No possible writes remain: release the claim, so a retry of the SAME
       // turn_id can run. Earlier writes or unknown outcomes keep the claim.
       const released = await releaseUnwrittenTurnClaim();
+      if (err instanceof ModelReadFailedError) {
+        const refusal = { error: toErrorV1(err, req) };
+        return reply.code(503).send(refusal.error);
+      }
       if (isRevisionConflict(err)) {
         const refusal = { error: {
           ...toErrorV1(err, req),
@@ -4473,7 +4477,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? { text, status: null as string | null, stripped: [] as string[] }
       : fastPath === 'approve'
         ? (editsRefusedThisTurn ? { text, status: null as string | null, stripped: [] as string[] }
-          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }), text })
+          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }),
+              // A specific partial follow-up is already the narrator's authoritative status.
+              text: result.tool_results.some(r => r.mutated === true && r.applied === false
+                && typeof r.outcome === 'string' && r.follow_up === text) ? '' : text })
         : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
@@ -5199,6 +5206,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Only a row that was written moves the slot: the next answer row carries what THIS one did.
         carriedProposals.persisted(approveKey, approvalCarrier);
       } catch (err) {
+        if (err instanceof ModelWriteOwnershipRefused) {
+          await releaseUnwrittenTurnClaim();
+          return reply.code(403).send({ error: err.code });
+        }
         // The answer is real and the writes already happened; hiding it would be
         // worse. It is returned, flagged as not durable, and logged loudly.
         log.error({ err: String(err), scenario_id: scenarioId, turn_id: rowTurnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');

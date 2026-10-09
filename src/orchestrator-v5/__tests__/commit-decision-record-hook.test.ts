@@ -49,7 +49,12 @@ vi.mock('../decision-records/index.js', () => ({
   }),
 }));
 
-import { commitDirectAnswer } from '../commit.js';
+import { commitDirectAnswer as commitWithoutCaller } from '../commit.js';
+import { bindWriteCaller } from '../ownership/door-ownership.js';
+
+// These direct commits model the owner acting, as the production hook would bind it.
+const commitDirectAnswer = (...args: Parameters<typeof commitWithoutCaller>) =>
+  bindWriteCaller({ userId: 'owner-user-id', verified: true }, () => commitWithoutCaller(...args));
 import { composeDirectAnswerResponse } from '../compose.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { _resetConfigCache } from '../../config/index.js';
