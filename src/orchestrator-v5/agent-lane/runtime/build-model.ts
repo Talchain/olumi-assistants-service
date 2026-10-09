@@ -63,7 +63,7 @@ import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js'
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
 import { withRateCountProducts } from '../rate-count-product.js';
-import { admitAccumulationIdentities, withAdmittedAccumulations } from '../accumulation-identity.js';
+import { admitAccumulationIdentities, withAdmittedAccumulations, admitStructuralGoalAccumulation } from '../accumulation-identity.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -506,6 +506,7 @@ export function constructionOperationId(scenarioId: string, brief: string): stri
 export interface ConstructionVersion {
   readonly version_id: string;
   readonly version_number: number;
+  readonly created_at?: string;
   readonly mutation_id: string | null;
   readonly creation_kind: string;
   readonly source_turn_id: string;
@@ -549,6 +550,7 @@ export async function findConstructionVersion(
       return {
         version_id: String(hit.version_id),
         version_number: Number(hit.sequence),
+        ...(typeof hit.created_at === 'string' ? { created_at: hit.created_at } : {}),
         mutation_id: typeof creation.mutation_id === 'string' ? creation.mutation_id : null,
         creation_kind: String(creation.kind),
         // The id the ROW carries, not the one we searched for: equal under a
@@ -2123,7 +2125,8 @@ export async function buildModelFromBrief(
     if (accumulation.loss.length > 0) {
       admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
     }
-    const accumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
+    const declaredAccumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
+    const accumulated = admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges);
     const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).

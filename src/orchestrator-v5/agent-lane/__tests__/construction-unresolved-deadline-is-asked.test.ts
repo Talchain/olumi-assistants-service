@@ -60,7 +60,7 @@ function assertRealSchemaWouldAccept(payload: Rec): void {
 }
 
 async function build(brief: string, c: CandidateModel): Promise<{ result: Rec; goal: Rec; questions: string[] }> {
-  assertRealSchemaWouldAccept(c as unknown as Rec);
+  assertRealSchemaWouldAccept(c as Rec);
   let stored: string | undefined;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
@@ -147,4 +147,10 @@ describe('CONTRAST: every other deadline shape reads exactly as before', () => {
     expect(questions[0]).toBe('Does "ship the new platform" get there within 6 months? The model holds no deadline yet, so no result answers that.');
     expect(questions.some((q) => q.startsWith('Which date does'))).toBe(false);
   });
+});
+
+it.each(['month 9', 'within nine months'])('construction retains %s as unresolved words, not a month count', async wording => {
+  const { goal } = await build(BRIEF.replace('by Q3', wording), candidate(9));
+  expect(goal.goal_horizon_months).toBeUndefined();
+  expect(goal.goal_deadline_as_stated).toBe(wording === 'month 9' ? wording : 'nine months');
 });

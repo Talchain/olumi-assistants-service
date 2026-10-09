@@ -50,7 +50,7 @@ function candidate(horizon: number | null): CandidateModel {
     risks: [], outcomes: [],
     links: [{ from: 'Pro plan price', to: 'MRR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null }],
     identities: [], unknowns: [], decision_question: null,
-  } as unknown as CandidateModel;
+  } as CandidateModel;
 }
 
 /** The goal node a fresh GraphV3 parse of the registered bytes holds. */
@@ -116,8 +116,8 @@ describe('attestHorizon: the brief confirms the drafter\'s month count, or it is
     expect(attestHorizon(BRIEF, { horizon_months: 18 })).toEqual({ months: null, wording: 'within 12 months', status: 'unresolved' });
   });
 
-  it('CONTRAST: a deadline in number words is under-claimed (unchanged from G1: "eighteen months" is never held)', () => {
-    expect(attestHorizon(withDeadline('within twelve months'), { horizon_months: 12 }).status).toBe('absent');
+  it.each([['within twelve months', 12], ['at month 9', 9]])('CONTRAST: %s is proposed, never silently held', (words, months) => {
+    expect(attestHorizon(withDeadline(words), { horizon_months: months })).toMatchObject({ months: null, proposed_months: months, status: 'unresolved' });
   });
 
   it('absence-tolerant: no brief, no goal, or an older candidate with no horizon', () => {

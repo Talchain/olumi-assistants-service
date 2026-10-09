@@ -1,5 +1,6 @@
+import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
-import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
@@ -953,6 +954,12 @@ import { noSuchLinkUserWords } from '../no-direct-link.js';
 import { goalScopeCheck, scopeIssueBlocks, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
 import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
+
+const deadlineRefusalDetail = {
+  reference_missing: `${ZERO_SPREAD_NEEDS_MONTHLY_CHANGES}. The recorded reference date is missing.`,
+  reference_not_stated: `${ZERO_SPREAD_NEEDS_MONTHLY_CHANGES}. State the reference date as “as of” and confirm it on the deadline card.`,
+  horizon_not_modelled: `${ZERO_SPREAD_NEEDS_MONTHLY_CHANGES}. No full month completes between the reference date and deadline.`,
+} as const;
 
 interface GraphRead {
   readonly graph_hash: string;
@@ -3075,6 +3082,7 @@ export function createAgentCapabilities(
       base_graph_identity_hash: graphHash,
       operations: [{ op: CONFIRM_IDENTITY_OP, path: card.outcome_id,
         value: { outcome_id: card.outcome_id, operation: card.operation, factor_ids: [...card.factor_ids], words: card.words,
+          ...(card.one_off_words !== undefined ? { one_off_words: card.one_off_words } : {}),
           ...(card.part_levels !== undefined ? { part_levels: card.part_levels } : {}) } }],
       provenance: { authored_by: 'user_stated', basis: card.words },
       validation: { admitted: true, loss_count: 0, refusals: [] },
@@ -3138,16 +3146,17 @@ export function createAgentCapabilities(
     if (opts.commitOptionLevels === undefined) {
       return notApplied('identity_writer_unavailable', 'This reading could not be recorded here, so nothing was recorded.');
     }
+    const choice = typeof ctx.typed_approval_words === 'string' && ctx.typed_approval_words.startsWith('No — ') ? 'one_off' as const : undefined;
     const res = await opts.commitOptionLevels({
       scenario_id: ctx.scenario_id,
       base_graph_hash: parent.base_graph_identity_hash,
-      turn_id: authorisationTurnId(`${parent.proposal_id}#identity`),
+      turn_id: authorisationTurnId(`${parent.proposal_id}#identity${choice === undefined ? '' : '-one-off'}`),
       links: [],
       levels: [],
       // Canonical 5888513620: the token of the words the pressed card SHOWED (checked above), recomputed from the stored proposal.
       identity_confirm: { outcome_id: reading.outcome_id, factor_ids: [...reading.factor_ids], words: reading.words,
         ...(reading.part_levels !== undefined ? { part_levels: reading.part_levels } : {}),
-        reading_token: identityConfirmReadingToken(reading) },
+        choice, reading_token: identityConfirmReadingToken({ ...reading, choice }) },
     });
     if (res.status === 'unconfirmed') {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
@@ -3165,6 +3174,13 @@ export function createAgentCapabilities(
     const check = await readGraph(ctx.scenario_id);
     const held = (check?.raw as { nodes?: Array<{ id?: unknown; nonlinear_identity?: unknown }> } | undefined)?.nodes
       ?.find((n) => n.id === reading.outcome_id)?.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
+    const oneOff = (check?.raw as { nodes?: Array<{ id?: unknown; goal_stock_reading?: unknown; nonlinear_identity?: unknown }> } | undefined)?.nodes
+      ?.find(n => n.id === reading.outcome_id);
+    if (choice === 'one_off') {
+      if (oneOff?.goal_stock_reading !== 'one_off' || oneOff.nonlinear_identity != null || goalStockAccumulationOf(check?.raw) !== null) return { ok: false, mutated: true, applied: false, refusal: 'not_verified' };
+      proposals.markApplied(parent.proposal_id, receipts);
+      return { ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts, follow_up: 'Recorded the one-off reading. Run the analysis again.' };
+    }
     const holds = held?.operation === reading.operation && held.stated_in_brief === true && Array.isArray(held.factor_ids)
       && held.factor_ids.length === reading.factor_ids.length && reading.factor_ids.every((id) => (held.factor_ids as unknown[]).includes(id));
     const holdsFigure = (reading.part_levels ?? []).every(part => {
@@ -3296,12 +3312,13 @@ export function createAgentCapabilities(
       links: [],
       levels: [],
       goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
-        ...(draftedTeamPartOf(approvedRead.raw) !== null ? { reference_date: (op.value as { reference?: string }).reference } : {}) },
+        reference_date: (op.value as { reference?: string }).reference,
+        stated_months: (op.value as { stated_months?: number }).stated_months },
     });
     // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
-    if ((res.status === 'committed' || res.status === 'unconfirmed') && draftedTeamPartOf(approvedRead.raw) !== null) {
+    if ((res.status === 'committed' || res.status === 'unconfirmed') ) {
       const expected = applyGoalHorizonEdit(approvedRead.raw, { goal_id: op.path, deadline: v.deadline,
-        expected_deadline: v.expected_deadline as string | null, reference_date: (op.value as { reference?: string }).reference });
+        expected_deadline: v.expected_deadline as string | null, reference_date: (op.value as { reference?: string }).reference, stated_months: (op.value as { stated_months?: number }).stated_months });
       const postimage = expected.kind === 'mutated' ? expected.mutatedGraph : expected.kind === 'unchanged' ? approvedRead.raw : undefined;
       if (postimage !== undefined) proposals.markPartial(parent.proposal_id, {
         revision: computeAnalysisAffectingGraphHash(postimage as never)!, landed: [op.path], receipts: [], expected_postimage: postimage,
@@ -3310,7 +3327,7 @@ export function createAgentCapabilities(
     if (res.status === 'unconfirmed') {
       const reread = await readGraph(ctx.scenario_id);
       if (reread !== null && goalDeadlineFromRecord(reread.raw, op.path) === v.deadline
-        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference)) {
+        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference, (op.value as { stated_months?: number }).stated_months)) {
         proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], ...(draftedTeamPartOf(approvedRead.raw) !== null ? { expected_postimage: reread.raw } : {}) });
       }
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
@@ -3320,11 +3337,17 @@ export function createAgentCapabilities(
       return notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
     }
     if (res.status === 'refused') {
-      return notApplied(`deadline_${String(res.reason ?? 'refused').replace(/^deadline_/, '')}`, 'The deadline was not recorded, and nothing on the model changed. Tell the user plainly.');
+      const code = String(res.reason ?? 'refused').replace(/^deadline_/, '');
+      return notApplied(`deadline_${code}`, code === 'reference_missing' || code === 'horizon_not_modelled'
+        ? deadlineRefusalDetail[code]
+        : 'The deadline was not recorded, and nothing on the model changed. Tell the user plainly.');
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
-    const holds = goalDeadlineFromRecord(check?.raw, op.path) === v.deadline;
+    const expected = applyGoalHorizonEdit(approvedRead.raw, { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
+      reference_date: (op.value as { reference?: string }).reference, stated_months: (op.value as { stated_months?: number }).stated_months });
+    const expectedGraph = expected.kind === 'mutated' ? expected.mutatedGraph : expected.kind === 'unchanged' ? approvedRead.raw : null;
+    const holds = expectedGraph !== null && check !== null && isDeepStrictEqual(check.raw, expectedGraph);
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         detail: 'This deadline was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
@@ -4175,9 +4198,10 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        card: { words: card.words },
+        card: { words: card.words, ...(card.one_off_words !== undefined ? { one_off_words: card.one_off_words } : {}) },
         note: 'Nothing has changed yet. Ask the user `card.words` exactly as written, and tell them to confirm on the button. '
-          + 'If they say no, nothing is recorded: carry on without it. Never run the analysis again yourself.',
+          + (card.one_off_words !== undefined ? 'The second button records the one-off reading shown on this card. ' : 'If they say no, nothing is recorded: carry on without it. ')
+          + 'Never run the analysis again yourself.',
       };
     },
 
@@ -4740,15 +4764,24 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'deadline_not_stated',
           detail: `"${words}" is not something the user wrote in this message, so nothing was prepared: it would be recorded as their deadline. Ask them for the date, in their own words.` };
       }
-      const today = todayInLondon((opts.now ?? (() => new Date()))());
-      const stated = readStatedDeadline(words, today);
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
+      const timestamp = draft?.created_at;
+      if (typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp))) return { ok: false, mutated: false, refusal: 'reference_missing',
+        detail: deadlineRefusalDetail.reference_missing };
+      const draftReference = todayInLondon(new Date(timestamp));
+      const asOf = args.reference_date;
+      if (asOf !== undefined && (typeof asOf !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)
+        || !wordsTheUserWrote(asOf, ctx.user_turn_text) || !new RegExp(`as of\\s+${asOf}`, 'i').test(ctx.user_turn_text ?? ''))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
+          detail: deadlineRefusalDetail.reference_not_stated };
+      const reference = typeof asOf === 'string' ? asOf : draftReference;
+      const stated = readStatedDeadline(words, reference);
       if (stated === null) {
         return { ok: false, mutated: false, refusal: 'deadline_not_placed',
           detail: `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
             + 'Ask the user which date they mean, and never offer a date of your own.' };
       }
-      const g = await readGraph(ctx.scenario_id);
-      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const goals = g.nodes.filter((n) => n.kind === 'goal');
       if (goals.length !== 1) {
         return { ok: false, mutated: false, refusal: 'goal_not_resolved',
@@ -4763,7 +4796,12 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'already_held',
           detail: `The goal "${goal.label}" already holds ${date} as its deadline, so nothing was prepared. Tell the user it is already recorded.` };
       }
-      const fromToday = sayDeadlineFromToday(stated);
+      const approved = { goal_id: goal.id, deadline: stated.date, expected_deadline: held ?? null, reference_date: reference,
+        ...(stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) };
+      const dry = applyGoalHorizonEdit(g.raw, approved);
+      if (dry.kind === 'refused') return { ok: false, mutated: false, refusal: dry.reason,
+        detail: deadlineRefusalDetail.horizon_not_modelled };
+      const fromToday = sayDeadlineFromToday(stated).replace('from today', `from ${sayDate(reference)}`);
       const question = `Is your deadline ${date} (${fromToday})?`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
       const proposal = createProposal({
@@ -4771,7 +4809,8 @@ export function createAgentCapabilities(
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_goal_deadline', path: goal.id,
-          value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words, reference: stated.reference } }],
+          value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words, reference: stated.reference,
+            ...(stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `${question}${replaces}`,
@@ -5826,7 +5865,10 @@ export function createAgentCapabilities(
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const recovery = proposals.partialProgressOf(args.proposal_id);
-      if (recovery?.expected_postimage !== undefined && !isDeepStrictEqual(recovery.expected_postimage, before.raw)) {
+      const recoveryDeadline = proposals.get(args.proposal_id)?.operations.find(op => op.op === 'set_goal_deadline');
+      if (recovery?.expected_postimage !== undefined && !(recoveryDeadline !== undefined
+        ? goalHorizonLandedWriteIsScoped(recovery.expected_postimage, before.raw, recoveryDeadline.path)
+        : isDeepStrictEqual(recovery.expected_postimage, before.raw))) {
         return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: args.proposal_id };
       }
       const decision = proposals.authorise({
