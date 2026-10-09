@@ -213,6 +213,11 @@ export function untypedScopeDisclosure(goalLabel: string, components: readonly s
   return `I’ve read your goal, ‘${goalLabel}’, as the total across every tier, including ${list}. If you meant only part of it, say which.`;
 }
 
+/** Material identity scope (DL #2914 r3): the model measures the declared part, so name it and ask; never claim the total. */
+export function materialScopeQuestion(goalLabel: string, modelled: string, alternative: string): string {
+  return `I’ve modelled your goal, ‘${goalLabel}’, as ‘${modelled}’, not ‘${alternative}’. Is your target for ‘${modelled}’ or for ‘${alternative}’?`;
+}
+
 /** Refresh operands after a canvas write; retain the original user claims, never promote the derived count. */
 export function refreshScopePending(pa: PendingAction, graph: unknown): PendingAction | undefined {
   if (pa.action.kind !== 'reconcile_goal_scope') return pa;

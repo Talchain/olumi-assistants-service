@@ -99,12 +99,14 @@ it('material identity keeps one question when the old disclosure would also fire
   expect(questions.filter(q => q === QUESTION)).toEqual([QUESTION]);
   expect(questions.filter(q => q.startsWith('I’ve read your goal'))).toEqual([]);
 });
-it('material scope with NO drafter restatement falls back to the d5 disclosure naming the alternative (DL 87114)', async () => {
+it('material scope with NO drafter restatement falls back to a question naming the modelled part (DL #2914 r3)', async () => {
   const row = synthetic(c => { (c as unknown as { unknowns: string[] }).unknowns = ((c as unknown as { unknowns: string[] }).unknowns ?? []).filter(q => q !== QUESTION); });
-  const { questions } = await replay(row);
+  const { questions, result } = await replay(row);
   expect(questions).not.toContain(QUESTION);
-  const disclosure = 'I’ve read your goal, ‘MRR’, as the total across every tier, including ‘all plans together’. If you meant only part of it, say which.';
+  const disclosure = 'I’ve modelled your goal, ‘MRR’, as ‘the Pro plan only’, not ‘all plans together’. Is your target for ‘the Pro plan only’ or for ‘all plans together’?';
   expect(questions.filter(q => q === disclosure)).toHaveLength(1);
+  expect(questions.some(q => q.includes('total across every tier'))).toBe(false);
+  expect((result.pending_action as { action: { question: string } }).action.question).toBe(disclosure);
 });
 it('typed materiality requires the declared scope and admitted operand ids', async () => {
   const { graph, candidate } = await replay(rowFor('R2/B1-B'));
@@ -135,10 +137,12 @@ it('served census: 116 corpus + all 8 R2 cells', async () => {
     // drafter bytes per id, rather than introducing a second population-word classifier.
     const pinned = scopeQuestions[row.id];
     if (material) expect(pinned, row.id + ': missing reviewed scope question pin').toBeDefined();
-    const reached = questions.some(q => q === pinned || q.startsWith('I’ve read your goal'));
+    const reached = questions.some(q => q === pinned || q.startsWith('I’ve read your goal') || q.startsWith('I’ve modelled your goal'));
     rows.push({ id: row.id, material: Boolean(material), missing: Boolean(material && !reached), questions, goal, graph_sha256: createHash('sha256').update(JSON.stringify(graph)).digest('hex') });
   }
   const missing = rows.filter(r => r.missing).map(r => r.id);
+  const totalClaimViolators = rows.filter(r => r.material && r.questions.some(q => q.includes('total across every tier'))).map(r => r.id);
+  expect(totalClaimViolators).toEqual([]);
   console.log('S7 A2 CENSUS', JSON.stringify({ count: missing.length, missing }));
   if (!baseline) expect(missing).toEqual([]);
 }, 120_000);

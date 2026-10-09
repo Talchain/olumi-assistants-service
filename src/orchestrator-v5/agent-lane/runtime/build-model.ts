@@ -1,6 +1,6 @@
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
-import { goalIdentityScopeIsMaterial, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
+import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
  *
@@ -2218,8 +2218,8 @@ export async function buildModelFromBrief(
         }
       }
     }
-    // DL 87114 on #2914: material scope with no drafter restatement to keep falls back to the existing d5 disclosure,
-    // naming the declared alternative, so the class is never silent. No new words.
+    // DL #2914 r3 CHANGES_REQUIRED: material scope with no drafter restatement falls back to a question
+    // naming the modelled part and asking which scope the target uses; it never says "total".
     // Not when the drafter already asks it in other words (its question names the declared modelled scope and the goal,
     // as a question): that only gates the fallback, it never removes a question (R2 B1-A asks "…cover the Pro plan only or all plans?").
     const scopeAlreadyAsked = candidate.goal.scope !== undefined && candidate.goal.scope !== null
@@ -2228,8 +2228,8 @@ export async function buildModelFromBrief(
         return m !== '' && g !== '' && t.includes(m) && t.includes(g) && /\b(or|whether|which)\b/.test(t);
       });
     const materialFallback = identityScopeMaterial && retainedScopeQuestion === null && !scopeAlreadyAsked && candidate.goal.scope
-      && candidate.goal.scope.alternative.trim() !== ''
-      ? untypedScopeDisclosure(candidate.goal.metric, [candidate.goal.scope.alternative]) : null;
+      && candidate.goal.scope.modelled.trim() !== '' && candidate.goal.scope.alternative.trim() !== ''
+      ? materialScopeQuestion(candidate.goal.metric, candidate.goal.scope.modelled.trim(), candidate.goal.scope.alternative.trim()) : null;
     const untypedScopeWords = retainedScopeQuestion ?? materialFallback ?? (scopeAsked !== null ? scopeAsked.question
       : readsAsTotal && !identityScopeMaterial && scopeGoal !== undefined
         ? (() => {
