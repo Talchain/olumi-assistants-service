@@ -80,6 +80,8 @@ import {
 } from './context/reconcile-recent-mutation-facts.js';
 import {
   SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+  SCENARIO_ANALYSIS_FACT_CAP,
+  isoInstantOrderKey,
   readScenarioAnalysisClaimSafetyFact,
   reconcileScenarioAnalysisFacts,
   type DurableScenarioAnalysisFactRead,
@@ -2720,6 +2722,53 @@ export async function loadScenarioAnalysisFactsForRead(
       durableRead,
     }),
   };
+}
+
+interface ScenarioAnalysisAnchorFactsRead {
+  readonly facts: readonly HandlerFact[];
+  readonly total_count: number;
+  readonly malformed_row_count: number;
+  readonly capped: boolean;
+}
+
+/** Anchor-only loader returns a validated subset, never a reconciled reasoning carrier. */
+export async function loadScenarioAnalysisAnchorFactsForRead(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<ScenarioAnalysisAnchorFactsRead> {
+  const store = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
+  if (!store?.readScenarioRunAnalysisFactsFor) throw new Error('Analysis anchor store unavailable');
+  const page = await store.readScenarioRunAnalysisFactsFor(scenarioId, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT, { malformedRows: 'isolate-for-anchor' });
+  const isolated = page.isolated_malformed_rows;
+  const readCount = isolated?.read_count ?? page.facts.length;
+  const ids = [...(isolated?.ids ?? [])];
+  if (!Number.isSafeInteger(page.total_count) || page.total_count < 0
+    || readCount !== Math.min(page.total_count, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT)
+    || page.facts.length + ids.length !== readCount) {
+    throw new Error('Analysis anchor page contract invalid');
+  }
+  const facts: HandlerFact[] = [];
+  for (const entry of page.facts) {
+    const fact = entry.fact;
+    // An otherwise schema-valid row may still lack a recorded anchor or carry
+    // invalid time/identity metadata. It must not hide a valid older success.
+    if (fact.fact_type !== 'run_analysis' || fact.result.scenario_id !== scenarioId
+      || isoInstantOrderKey(entry.fact_created_at) === null
+      || typeof fact.result.graph_hash_at_run !== 'string' || fact.result.graph_hash_at_run.trim() === ''
+      || (fact.result.computed_at !== undefined && isoInstantOrderKey(fact.result.computed_at) === null)) {
+      ids.push(entry.fact_row_id);
+      continue;
+    }
+    facts.push(fact);
+  }
+  if (ids.length > 0) {
+    log.warn({ event: 'v5.decision_record.anchor_rows_isolated', request_id: requestId,
+      scenario_id: scenarioId, malformed_row_count: ids.length, malformed_row_ids: ids },
+    'Decision record anchor: malformed rows isolated');
+  }
+  return { facts, total_count: page.total_count, malformed_row_count: ids.length,
+    capped: page.total_count > SCENARIO_ANALYSIS_FACT_CAP };
 }
 
 export async function loadPriorFactsQuietly(

@@ -479,7 +479,7 @@ export function selectClaimBearingRunAnalysisFact(
  * the same way as the freshness fact" is a property of one function rather
  * than an agreement between two.
  */
-function orderRunAnalysisFacts(
+export function orderRunAnalysisFacts(
   priorFacts: readonly HandlerFact[],
   opts: { readonly requireSuccessfulStatus: boolean; readonly skipRefusals?: boolean },
 ): RunAnalysisFactView[] {
