@@ -90,7 +90,8 @@ import type { GraphStateIngress } from './boundary/request-extensions.js';
 export type PersistedGraphInvariantCode =
   | 'EDGE_ENDPOINT_MISSING'
   | 'DUPLICATE_NODE_ID'
-  | 'DUPLICATE_OPTION_ID';
+  | 'DUPLICATE_OPTION_ID'
+  | 'untouched_level_rescaled';
 
 /**
  * Codes that are REPORTED but do NOT refuse. Kept separate on purpose: the
