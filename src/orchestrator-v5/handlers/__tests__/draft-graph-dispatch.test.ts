@@ -41,6 +41,12 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   };
 });
 
+// CAS/v6 reads use an explicit absent-base double; both off performs no read.
+vi.mock('../../build-turn-context.js', async original => ({
+  ...await original<typeof import('../../build-turn-context.js')>(),
+  loadPersistedScenarioStateStrict: vi.fn(async () => ({ graph: null, briefText: null })),
+}));
+
 // ── imports after mocks ───────────────────────────────────────────────────────
 
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';

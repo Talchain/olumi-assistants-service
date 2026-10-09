@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import * as graphHashes from '../../context/graph-hash.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { _resetConfigCache } from '../../../config/index.js';
@@ -403,7 +404,7 @@ describe('S5 r1 append-door provenance', () => {
     expect(goalOf(w.read())).not.toHaveProperty('horizon_basis');
     expect(goalOf(result.response.draft_graph as Rec)).not.toHaveProperty('horizon_basis');
   });
-  it('P1-2 forged graph_state correctly diverges in live mode without changing the stored answer', async () => {
+  it('P1-a forged live echo commits the rename using the stored answer', async () => {
     const g = attested(), w = world(g), client = clone(g); activeStore = w.store;
     goalOf(client).horizon_basis.metric = 'f'.repeat(32);
     const boundary = parseRequestExtensions({ graph_state: client }, 'r1-forged-echo');
@@ -414,13 +415,14 @@ describe('S5 r1 append-door provenance', () => {
       appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
     const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
       requestId: 'r1-forged-echo', request: {} as never, graphState: boundary.value.graphState!, analysisState: null });
-    expect(JSON.stringify(result)).toContain('BASE_HASH_DIVERGED');
-    expect(result.graph).toBeNull();
+    expect(JSON.stringify(result)).not.toContain('BASE_HASH_DIVERGED');
+    expect(result.commitPerformed).toBe(true);
     expect(w.writes).toHaveLength(1);
-    expect(w.writes[0]!.graph).toBeUndefined();
-    expect(w.read()).toEqual(g);
+    expect(w.writes[0]!.graph).toBeDefined();
+    expect(w.read().nodes.find((n: Rec) => n.id === 'factor').label).toBe('Coverage revised');
+    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
   });
-  it.each(['off', 'shadow'])('P1-2b omitted basis survives the real edit path in %s mode', async mode => {
+  it.each(['live', 'off', 'shadow'])('P1-2b P1-a omitted basis survives the real edit path in %s mode', async mode => {
     vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', mode); _resetConfigCache();
     const g = attested(), w = world(g), client = clone(g); activeStore = w.store;
     delete goalOf(client).horizon_basis;
@@ -430,6 +432,8 @@ describe('S5 r1 append-door provenance', () => {
       appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
     const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'), requestId: 'r1-omit',
       request: {} as never, graphState: client as never, analysisState: null });
+    expect(JSON.stringify(result)).not.toContain('BASE_HASH_DIVERGED');
+    expect(result.commitPerformed).toBe(true);
     expect(w.writes).toHaveLength(1);
     expect(goalOf(result.graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
     expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
@@ -582,4 +586,335 @@ describe('S5 r2 pure append-door assertion', () => {
     expect(base).toEqual(originalBase);
     expect(edit.horizonBasisWrite).toEqual(capability);
   });
+});
+
+
+describe('S5 r4 prepared candidate hashes and cold Run', () => {
+  it.each(['omitted', 'forged'])('D1b direct commit prepares the %s candidate before hashing and appending', async variant => {
+    const { commitDirectAnswer } = await import('../../commit.js');
+    const g = attested(), candidate = clone(g), w = world(g);
+    if (variant === 'omitted') delete goalOf(candidate).horizon_basis;
+    else goalOf(candidate).horizon_basis.metric = 'f'.repeat(32);
+    const result = await commitDirectAnswer({ response_version: 2, assistant_text: 'Recorded.', blocks: [],
+      suggested_actions: [], insights: [], stage_indicator: 'analyse' }, {
+      scenario_id: SCENARIO, turn_id: TURN, request_hash: 'r4-direct', turn_class: 'direct_answer',
+      handler_id: null, llm_calls_used: 0, duration_ms: 0, handler_facts: [], graph: candidate,
+      baseGraphForInvariants: g, storedGraphForHorizonBasis: g,
+    }, w.store);
+    expect(result.performed).toBe(true);
+    expect(w.writes).toHaveLength(1);
+    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
+    expect(result.persistedAnalysisGraphHash).toBe(computeAnalysisAffectingGraphHash(w.read() as never));
+  });
+
+  it('P1-b redraft target question binds to the committed hash and 80% resumes through clarification-resume', async () => {
+    vi.stubEnv('CEE_V5_GRAPH_CAS_MODE', 'observe'); _resetConfigCache();
+    const { tryGoalTargetElicitationResume } = await import('../../routing/clarification-resume.js');
+    const g = attested(), w = world(g); activeStore = w.store;
+    expect(goalOf(g)).not.toHaveProperty('goal_threshold');
+    vi.mocked(handleDraftGraph).mockResolvedValue({ blocks: [], assistantText: 'Drafted the model.', latencyMs: 0,
+      strengthenItems: [], coachingSummary: null, coachingWideningLog: null, coachingBiasSignals: null,
+      draftWarnings: [], graphOutput: seed(), goalTargetCandidate: {
+        goal_node_id: 'goal', value_user_units: 80, unit: '%', label_span: 'Service quality', brief_span: '80%',
+        binding: 'governed', reason: 'governed',
+      } } as never);
+    const result = await dispatchDraftGraph({ payload: payload('Build the model again with 80% service quality'),
+      requestId: 'r4-redraft', request: {} as never });
+    expect(result.commitPerformed).toBe(true);
+    expect(w.writes).toHaveLength(1);
+    const stored = w.read(), hash = computeAnalysisAffectingGraphHash(stored as never)!;
+    const pendings = w.writes[0]!.pending_actions ?? [];
+    const question = pendings.find(p => p.action.kind === 'elicit_goal_target');
+    expect(question).toBeDefined();
+    expect(question!.preconditions.graph_hash).toBe(hash);
+    expect(JSON.stringify(goalOf(stored).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
+    expect(horizonSteadyAttested(stored, SCENARIO)).toBe(true);
+    const resumed = tryGoalTargetElicitationResume({ message: '80%', pendingActions: pendings,
+      nowMs: Date.now(), currentGraphHash: hash, graphNodes: stored.nodes });
+    expect(resumed).toMatchObject({ matched: true, goalNodeId: 'goal', value: 80, unit: '%' });
+  });
+
+  it('DL condition (1): cold stamped Run stays stale after real press and the proposed Run loads the stored attestation', async () => {
+    const { createRunAnalysisTool } = await import('../../replacement/run-analysis-tool.js');
+    const { projectTurnContext } = await import('../../replacement/turn-context-view.js');
+    const { reconcileScenarioAnalysisFacts } = await import('../../context/reconcile-scenario-analysis-facts.js');
+    const { RUN_ANALYSIS_PROJECTION_KEY, ANALYSIS_PROJECTION_VERSION } = await import('../../context/graph-identity.js');
+    const { createRunAnalysisHandler } = await import('../../tools/handlers/run-analysis.js');
+    const { loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
+    const { readFileSync } = await import('node:fs');
+    const g = projectGraphForPersistence(GraphV3.parse(buildReadyGraph())) as Rec;
+    goalOf(g, 'g-profit').goal_horizon_months = 9;
+    const hashBefore = computeAnalysisAffectingGraphHash(g as never)!;
+    const w = world(g);
+    const pressed = await executeOptionInterventionBatch(input(g, {
+      goalSteady: { goal_id: 'g-profit', months: 9 }, hasExistingAnalysis: true,
+    }), w.store);
+    expect(pressed.kind).toBe('committed');
+    expect(w.writes).toHaveLength(1);
+    const after = w.read(), hashAfter = computeAnalysisAffectingGraphHash(after as never)!;
+    expect(horizonSteadyAttested(after, SCENARIO)).toBe(true);
+    expect(computeGraphIdentityHash(after as never)?.value).not.toBe(computeGraphIdentityHash(g as never)?.value);
+    const run = { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+      scenario_id: SCENARIO, leading_option_id: 'o-a', summary: 'The analysis ran.',
+      graph_hash_at_run: hashBefore, computed_at: '2026-10-08T20:00:00.000Z',
+      enrichment: { analysis_status: 'computed', [RUN_ANALYSIS_PROJECTION_KEY]: ANALYSIS_PROJECTION_VERSION },
+    } };
+    // Exactly the r3 cold witness: empty recent-turn facts, the stamped Run retained in the durable scenario carrier.
+    const set = reconcileScenarioAnalysisFacts({ scenarioId: SCENARIO, hotWindowFacts: [],
+      hotWindowFactsWithIdentity: [], durableRead: { status: 'ok', scenario_id: SCENARIO,
+        query_limit: 21, total_count: 1, facts: [{ fact: run as never, fact_row_id: 'prior-run',
+          fact_created_at: '2026-10-08T20:00:00.000Z' }] } });
+    expect(set.status).toBe('complete');
+    const context = { session_id: SCENARIO, prior_turns: [], prior_facts: [], prior_facts_read_ok: true,
+      scenario_analysis_fact_set: set, prior_facts_with_turn: [] };
+    const cold = projectTurnContext(context as never, hashAfter, after as never);
+    const proposed = await createRunAnalysisTool({ getGraph: () => after as never,
+      getAnalysis: () => cold.snapshot }).execute({});
+    expect(proposed, JSON.stringify({ freshness: cold.freshness, runOutcome: proposed })).toMatchObject({ type: 'proposed' });
+    expect(cold.freshness).toMatchObject({ freshness: 'stale', reason: 'graph_hash_diverged' });
+    expect(hashAfter).not.toBe(hashBefore);
+    const runTransport = vi.fn(async () => JSON.parse(readFileSync(new URL(
+      '../../../../tests/fixtures/plot/v2-run-golden-happy.json', import.meta.url), 'utf8')));
+    const scenarioReader = vi.fn(async () => {
+      const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'r4-run-load', w.store);
+      expect(horizonSteadyAttested(snapshot.graph, SCENARIO)).toBe(true);
+      expect(JSON.stringify(goalOf(snapshot.graph as Rec, 'g-profit').horizon_basis))
+        .toBe(JSON.stringify(goalOf(after, 'g-profit').horizon_basis));
+      return snapshot;
+    });
+    const outcome = await createRunAnalysisHandler({ scenarioReader,
+      plotClient: { run: runTransport, validatePatch: vi.fn(async () => ({})) } as never,
+    })({ context: { ...context, stage: 'analyse', entity_registry: { option_ids: [], goal_id: null },
+      capabilities: {}, messages: [], request_id: 'r4-run', budgets: { turn_ms: 180000, llm_narrate_ms: 60000 },
+      scenarioBriefText: null, persistedGraph: null }, payload: payload('Run the analysis.'),
+      requestId: 'r4-run', signal: new AbortController().signal, orientationText: '',
+    } as never);
+    expect(scenarioReader).toHaveBeenCalledTimes(1);
+    expect(runTransport).toHaveBeenCalledTimes(1);
+    expect(outcome.handler_facts[0]).toMatchObject({ fact_type: 'run_analysis', noop: false,
+      result: { graph_hash_at_run: hashAfter } });
+  });
+
+  it('DL condition (2) existing read gate: a saved supported Run -> restore removes the answer -> reload withholds', async () => {
+    const { readScenarioAnalysis } = await import('../../../routes/scenario-graph-analysis-read.js');
+    const { RUN_ANALYSIS_PROJECTION_KEY, ANALYSIS_PROJECTION_VERSION } = await import('../../context/graph-identity.js');
+    const { readFileSync } = await import('node:fs');
+    const oldVersion = projectGraphForPersistence(GraphV3.parse(buildReadyGraph())) as Rec;
+    goalOf(oldVersion, 'g-profit').goal_horizon_months = 9;
+    const issued = applyGoalSteadyEdit(oldVersion, { goal_id: 'g-profit', months: 9 }, SCENARIO);
+    if (issued.kind !== 'mutated') throw new Error('not attested');
+    const supportedGraph = issued.mutatedGraph;
+    const enrichment = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/plot/v2-run-golden-happy.json', import.meta.url), 'utf8'));
+    enrichment[RUN_ANALYSIS_PROJECTION_KEY] = ANALYSIS_PROJECTION_VERSION;
+    const fact = { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+      scenario_id: SCENARIO, summary: 'The analysis ran.', leading_option_id: 'opt_a',
+      graph_hash_at_run: computeAnalysisAffectingGraphHash(supportedGraph as never),
+      computed_at: '2026-10-09T00:00:00.000Z', enrichment,
+    } };
+    activeStore = createMockSessionStore({ readScenarioRunAnalysisFactsFor: async () => ({ total_count: 1,
+      facts: [{ fact: fact as never, fact_row_id: 'supported-run', fact_created_at: '2026-10-09T00:00:00.000Z' }] }) });
+    const supported = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: supportedGraph, requestId: 'r4-supported' });
+    expect(supported.current_read.run_state).toMatchObject({ kind: 'complete_current' });
+    expect(supported.current_read.result).not.toBeNull();
+    // Restore returns that stored version's own answer/absence, without carrying today's answer.
+    const restored = clone(oldVersion);
+    expect(goalOf(restored, 'g-profit')).not.toHaveProperty('horizon_basis');
+    expect(horizonSteadyAttested(restored, SCENARIO)).toBe(false);
+    const reloaded = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: restored, requestId: 'r4-restored' });
+    expect(reloaded.current_read.run_state).toMatchObject({ kind: 'complete_stale' });
+    expect(reloaded.current_read.result).toBeNull();
+    expect(reloaded.current_read.figures).toEqual([]);
+  });
+
+  it.todo('DL condition (1) PENDING #2895/P45 rebase: Run loaded with horizonSteadyAttested=true licenses the goal chance for the attested months and removes the untested-horizon withhold');
+  it.todo('DL condition (2) PENDING #2895 rebase: supported attested Run -> restore pre-attestation version removes answer -> reload read-time goalHorizonVerdict withholds the former horizon chance');
+});
+
+
+// These snapshots are generated by the real entry functions at staging-source
+// HEAD 2197d207 (runner swaps ONLY the four r4 production files, then restores
+// their exact bytes in finally). R5 and mutants must match those same snapshots.
+describe('P0 staging parity without horizon_basis', () => {
+  const states = ['ok_present', 'ok_absent', 'failed'] as const;
+  const paths = ['route-request', 'executor-provisional-proposal', 'executor-post-handler',
+    'draft-post-draft', 'edit-candidate', 'edit-early-question'] as const;
+  it.each(paths.flatMap(path => states.map(state => ({ path, state }))))('$path / $state', async ({ path, state }) => {
+    vi.stubEnv('CEE_V5_GRAPH_CAS_MODE', 'off');
+    vi.stubEnv('CEE_V5_GRAPH_CAS_RPC', 'off');
+    vi.stubEnv('ENABLE_V5_ORCHESTRATOR', 'true');
+    vi.stubEnv('CEE_PIPELINE_V4_ENABLED', 'false');
+    vi.stubEnv('CEE_REPLACEMENT_COACH_ENABLED', 'false');
+    _resetConfigCache(); __setUseAppendV6ForTest(false);
+    const g = seed(), w = world(state === 'ok_present' ? g : null);
+    const reads: string[] = [];
+    const baseStore = w.store;
+    activeStore = new Proxy(baseStore, { get(target, key) {
+      const fn = Reflect.get(target, key);
+      if (typeof fn !== 'function') return fn;
+      return (...args: unknown[]) => {
+        if (/^(load|read|count|get|has)/.test(String(key)) || key === 'scenarioExists') reads.push(String(key));
+        if (key === 'loadGraph' || key === 'loadGraphAndBriefText') {
+          if (state === 'failed') return Promise.reject(new Error('P0 degraded stored read'));
+        }
+        return fn.apply(target, args);
+      };
+    } });
+    const traces: Rec[] = [];
+    const realHash = graphHashes.computeAnalysisAffectingGraphHash;
+    const spy = vi.spyOn(graphHashes, 'computeAnalysisAffectingGraphHash').mockImplementation(graph => {
+      const stack = new Error().stack ?? '';
+      const caller = stack.split('\n').find(line => /(?:route-v2|turn-executor|draft-graph-dispatch|edit-graph-dispatch)\.ts/.test(line));
+      const hash = realHash(graph);
+      if (caller) traces.push({ caller: caller.trim().replace(/:\d+:\d+/g, '').replaceAll(process.cwd(), '<root>'),
+        nonNull: graph != null, bytes: JSON.stringify(graph) ?? null, hash });
+      return hash;
+    });
+    vi.spyOn(Date, 'now').mockReturnValue(1791504000000);
+    const after = clone(g); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
+      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
+      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
+    vi.mocked(handleDraftGraph).mockResolvedValue({ blocks: [], assistantText: 'Drafted the model.', latencyMs: 0,
+      strengthenItems: [], coachingSummary: null, coachingWideningLog: null, coachingBiasSignals: null,
+      draftWarnings: [], graphOutput: g, goalTargetCandidate: {
+        goal_node_id: 'goal', value_user_units: 80, unit: '%', label_span: 'Service quality', brief_span: '80%',
+        binding: 'governed', reason: 'governed',
+      } } as never);
+    let outcome: Rec;
+    const summarise = (r: Rec) => ({ commit: r.commitPerformed ?? r.telemetry?.commit_performed ?? null,
+      graphNonNull: r.graph != null, assistant: r.response?.assistant_text ?? null,
+      blocks: r.response?.blocks?.map((b: Rec) => b.type) ?? [],
+      stage: r.response?.stage_indicator ?? null });
+    try {
+      if (path === 'route-request') {
+        const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
+        const app = Fastify(); await ceeOrchestratorRouteV2(app);
+        try {
+          const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn',
+            payload: { ...payload('Add a risk for supplier delays affecting the launch'), turn_class: 'decide', graph_state: g,
+              analysis_state: { analysis_status: 'completed', meta: { graph_hash_at_run: realHash(g as never) } } } });
+          const body = result.json();
+          outcome = { status: result.statusCode, ...summarise({ response: body }), error: body.error ?? null };
+        } finally { await app.close(); }
+      } else if (path.startsWith('executor')) {
+        const handler = vi.fn(async () => ({ assistant_text: 'Would you like me to add reliability as a factor?',
+          handler_facts: [], llm_calls_used: 0, mutated_graph: after }));
+        const routedInput = { intent_class: 'execute', action: { handler_id: 'explain_from_structure',
+          entity: { id: 'factor', kind: 'node', resolution_status: 'resolved', resolution_method: 'id_match' },
+          parameters: [], cited_context_fields: [] } };
+        const { OLUMI_ACTION_TOOL_NAME } = await import('../../routing/tool-schema.js');
+        const adapter = { chatWithTools: vi.fn(async () => ({
+          content: path === 'executor-post-handler'
+            ? [{ type: 'tool_use', id: 'p0-tool', name: OLUMI_ACTION_TOOL_NAME, input: routedInput }]
+            : [{ type: 'text', text: 'Would you like me to add reliability as a factor?' }],
+          stop_reason: path === 'executor-post-handler' ? 'tool_use' : 'end_turn',
+          usage: { input_tokens: 0, output_tokens: 0 }, model: 'test-double', latencyMs: 0,
+        })) };
+        const result = await runTurnExecutor(payload('Please improve the coverage assumption'), 'p0-executor', {
+          graphState: g as never, routingAdapter: adapter as never,
+          handlerRegistry: new Map([['explain_from_structure', handler]]) as never,
+          validationRegistry: { explain_from_structure: { handler_id: 'explain_from_structure', accepted_entity_kinds: ['node'],
+            preconditions: () => ({ ok: true }), confirmation_template: 'Value updated' } } as never,
+        });
+        outcome = { ...summarise(result), validationError: result.telemetry.validation_error_code, handlerCalls: handler.mock.calls.length, adapterCalls: adapter.chatWithTools.mock.calls.length };
+      } else if (path === 'draft-post-draft') {
+        const result = await dispatchDraftGraph({ payload: payload('Build the model with 80% service quality'),
+          requestId: 'p0-draft', request: {} as never });
+        outcome = summarise(result);
+      } else {
+        const result = await dispatchEditGraph({ payload: payload(path === 'edit-early-question' ? 'Add delays as a risk' : 'Rename Coverage to Coverage revised'),
+          requestId: 'p0-edit', request: {} as never, graphState: g as never, analysisState: null });
+        outcome = summarise(result);
+      }
+    } catch (error) {
+      outcome = { error: error instanceof Error ? error.message : String(error) };
+    } finally { spy.mockRestore(); vi.spyOn(Date, 'now').mockRestore(); }
+    expect(traces.length, 'real hash entry must be witnessed').toBeGreaterThan(0);
+    if (path === 'executor-post-handler') expect(outcome.handlerCalls, JSON.stringify(outcome)).toBe(1);
+    if (path === 'route-request') expect(traces.some(t => t.caller.includes('route-v2'))).toBe(true);
+    // Entire candidate bytes, non-nullness, hashes, read order/count, writes,
+    // refusal/error outcomes and pending question/proposal bindings are pinned.
+    expect({ traces, reads, outcome, writes: w.writes.map(write => ({ graph: write.graph ?? null,
+      pendingHashes: (write.pending_actions ?? []).map(p => p.preconditions.graph_hash ?? null),
+      assistant: write.assistantMessage ?? null })) }).toMatchSnapshot();
+  });
+});
+
+// Unavailable provenance affects basis bytes only; existing store failures
+// remain owned by staging's dispatch/commit logic.
+describe('R5 unavailable read drops basis without nulling hash candidates', () => {
+  it.each(['route-request', 'executor-proposal', 'edit-early-question'])('%s retains its graph and hashes after dropping submitted basis', async path => {
+    const g = attested(), w = world(null);
+    activeStore = new Proxy(w.store, { get(target, key) {
+      if (key === 'loadGraph' || key === 'loadGraphAndBriefText') {
+        return async () => { throw new Error('Unavailable stored provenance'); };
+      }
+      return Reflect.get(target, key);
+    } });
+    vi.stubEnv('ENABLE_V5_ORCHESTRATOR', 'true');
+    vi.stubEnv('CEE_PIPELINE_V4_ENABLED', 'false');
+    vi.stubEnv('CEE_REPLACEMENT_COACH_ENABLED', 'false');
+    _resetConfigCache();
+    const hashes: { graph: unknown; hash: string | null }[] = [];
+    const realHash = graphHashes.computeAnalysisAffectingGraphHash;
+    const spy = vi.spyOn(graphHashes, 'computeAnalysisAffectingGraphHash').mockImplementation(graph => {
+      const hash = realHash(graph);
+      hashes.push({ graph: graph == null ? null : clone(graph), hash });
+      return hash;
+    });
+    try {
+      if (path === 'route-request') {
+        const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
+        const app = Fastify(); await ceeOrchestratorRouteV2(app);
+        try {
+          await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+            ...payload('Add a risk for supplier delays affecting the launch'), turn_class: 'decide', graph_state: g,
+            analysis_state: { analysis_status: 'completed', meta: { graph_hash_at_run: realHash(seed() as never) } },
+          } });
+        } finally { await app.close(); }
+      } else if (path === 'executor-proposal') {
+        await runTurnExecutor(payload('Any thoughts?'), 'r5-drop', { graphState: g as never,
+          routingAdapter: { chatWithTools: vi.fn(async () => ({ content: [{ type: 'text', text: 'Would you like me to add reliability as a factor?' }],
+            stop_reason: 'end_turn', usage: { input_tokens: 0, output_tokens: 0 }, model: 'test-double', latencyMs: 0 })) } as never,
+        });
+      } else {
+        await dispatchEditGraph({ payload: payload('Add delays as a risk'), requestId: 'r5-drop',
+          request: {} as never, graphState: g as never, analysisState: null });
+      }
+      const candidates = hashes.filter(h => h.graph != null);
+      expect(candidates.length).toBeGreaterThan(0);
+      expect(candidates.some(h => h.hash === realHash(seed() as never))).toBe(true);
+      for (const candidate of candidates) expect(goalOf(candidate.graph as Rec)).not.toHaveProperty('horizon_basis');
+      expect(goalOf(g)).toHaveProperty('horizon_basis');
+    } finally { spy.mockRestore(); }
+  });
+});
+
+it('R5 residual edge: CAS off/v6 off redraft carries stored basis at the single commit read after the pending question hash', async () => {
+  vi.stubEnv('CEE_V5_GRAPH_CAS_MODE', 'off'); vi.stubEnv('CEE_V5_GRAPH_CAS_RPC', 'off');
+  _resetConfigCache(); __setUseAppendV6ForTest(false);
+  const g = attested(), w = world(g), reads: string[] = [];
+  activeStore = new Proxy(w.store, { get(target, key) {
+    const fn = Reflect.get(target, key);
+    if (typeof fn !== 'function') return fn;
+    return (...args: unknown[]) => {
+      if (key === 'loadGraph' || key === 'loadGraphAndBriefText') reads.push(String(key));
+      return fn.apply(target, args);
+    };
+  } });
+  vi.mocked(handleDraftGraph).mockResolvedValue({ blocks: [], assistantText: 'Drafted the model.', latencyMs: 0,
+    strengthenItems: [], coachingSummary: null, coachingWideningLog: null, coachingBiasSignals: null,
+    draftWarnings: [], graphOutput: seed(), goalTargetCandidate: {
+      goal_node_id: 'goal', value_user_units: 80, unit: '%', label_span: 'Service quality', brief_span: '80%',
+      binding: 'governed', reason: 'governed',
+    } } as never);
+  const result = await dispatchDraftGraph({ payload: payload('Build the model again with 80% service quality'),
+    requestId: 'r5-residual', request: {} as never });
+  expect(result.commitPerformed).toBe(true);
+  expect(reads).toEqual(['loadGraph']);
+  expect(goalOf(w.read()).horizon_basis).toEqual(goalOf(g).horizon_basis);
+  const question = w.writes[0]!.pending_actions!.find(p => p.action.kind === 'elicit_goal_target')!;
+  expect(question).toBeDefined();
+  expect(question.preconditions.graph_hash).toBe(computeAnalysisAffectingGraphHash(seed() as never));
+  expect(question.preconditions.graph_hash).not.toBe(computeAnalysisAffectingGraphHash(w.read() as never));
 });

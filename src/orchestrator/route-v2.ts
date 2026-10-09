@@ -1,3 +1,4 @@
+import { prepareHorizonBasisForWrite } from '../orchestrator-v5/goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 /**
  * POST /orchestrate/v2/turn — V5 orchestrator endpoint.
@@ -3060,6 +3061,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       ingress.kind === 'message' ? ingress : null,
       requestId,
     );
+    // Only a submitted basis needs this lazy context read before request hashes.
+    if (ingress.kind === 'message' && extensions.graphState?.nodes.some(
+      node => Object.prototype.hasOwnProperty.call(node, 'horizon_basis'),
+    )) {
+      const basisContext = await claimSafety.turnContext();
+      const storedBasisReadAvailable = basisContext?.persistedGraphRead?.status === 'ok_present'
+        || basisContext?.persistedGraphRead?.status === 'ok_absent';
+      extensions.graphState = structuredClone(extensions.graphState);
+      prepareHorizonBasisForWrite(extensions.graphState,
+        storedBasisReadAvailable ? basisContext?.persistedGraph : undefined, ingress.scenario_id);
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════
     // ⭐ REPLACEMENT CONVERSATION CONTROLLER — ONE CONTROLLER PER TURN

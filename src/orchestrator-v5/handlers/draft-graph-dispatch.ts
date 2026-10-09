@@ -1,3 +1,4 @@
+import { prepareHorizonBasisForWrite } from '../goal-target/horizon-basis-provenance.js';
 /**
  * V5 pre-Sonnet dispatch for draft_graph turns.
  *
@@ -939,6 +940,7 @@ export async function dispatchDraftGraph(
       turnId: payload.turn_id,
       turnClass: 'direct_answer',
     });
+    prepareHorizonBasisForWrite(draftGraphForCommit, draftBase?.graph, payload.scenario_id);
     const postDraftGraphHash = ((): string | null => {
       try {
         return computeAnalysisAffectingGraphHash(
@@ -1168,6 +1170,7 @@ export async function dispatchDraftGraph(
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
         // Only graph writes carry the base; null is known first-draft absence.
+        ...(draftBase !== undefined ? { storedGraphForHorizonBasis: draftBase.graph } : {}),
         ...(draftGraphForCommit != null && expectedGraphCasHashes !== undefined && draftBase !== undefined
           ? { ...expectedGraphCasHashes, baseGraphForInvariants: draftBase.graph }
           : {}),
