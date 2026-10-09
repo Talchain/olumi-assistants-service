@@ -26,7 +26,7 @@ const finisherSql = readFileSync(new URL('../../../../supabase/migrations/202610
   .match(/CREATE OR REPLACE FUNCTION public\.finish_analysis_run_sweep\([\s\S]*?\$\$;/)?.[0] ?? '';
 const unattributableTerminal = finisherSql.includes('OR EXISTS (SELECT 1 FROM public.analysis_run_unattributable u WHERE u.fact_id = h.id) AS terminal');
 function fixture(opts: { oldFinisher?: boolean } = {}) {
-  const pending = new Map(eligible.map(c => [c.fact_id, { fact_id: c.fact_id, scenario_id: c.scenario_id, payload: c.fact, noop: false, created_at: '2026-10-09T00:00:00Z' }]));
+  const pending = new Map<string, { fact_id: string; scenario_id: string; payload: unknown; noop: boolean; created_at: string; evaluated_scenario_revision?: unknown }>(eligible.map(c => [c.fact_id, { fact_id: c.fact_id, scenario_id: c.scenario_id, payload: c.fact, noop: false, created_at: '2026-10-09T00:00:00Z' }]));
   const watermark = { value: '', id: '' };
   let claimed: Array<(typeof pending extends Map<string, infer Row> ? Row : never)> = [];
   let reconciliation = false;
@@ -91,6 +91,29 @@ function turn(): SessionTurnWrite {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllEnvs(); });
 
 describe('typed Run drain outside the turn transaction', () => {
+  it.each(['sweep', 'reconcile'] as const)('passes claimed evaluated revision through mapper ctx in %s', async mode => {
+    const f = fixture();
+    const row = f.pending.get(eligible[0]!.fact_id)!;
+    row.evaluated_scenario_revision = 7;
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20, mode })).resolves.toMatchObject({ derived: 2 });
+    expect(f.rpc).toHaveBeenCalledWith('store_typed_analysis_run', expect.objectContaining({
+      p_fact_id: row.fact_id, p_run: expect.objectContaining({ scenario_revision: 7, revision_source: 'recorded' }),
+    }));
+    expect(f.rpc).toHaveBeenCalledWith('store_typed_analysis_run', expect.objectContaining({
+      p_fact_id: eligible[1]!.fact_id, p_run: expect.objectContaining({ scenario_revision: null, revision_source: 'legacy_unknown' }),
+    }));
+  });
+  it('quarantines an invalid claimed revision without storing that fact', async () => {
+    const f = fixture();
+    const row = f.pending.get(eligible[0]!.fact_id)!;
+    row.evaluated_scenario_revision = '7';
+    await expect(f.store.deriveAnalysisRuns()).resolves.toMatchObject({ derived: 1, quarantined: 1 });
+    expect(f.rpc).toHaveBeenCalledWith('quarantine_analysis_fact', {
+      p_fact_id: row.fact_id, p_reason: 'evaluated_scenario_revision_invalid', p_detail: null,
+    });
+    expect(f.stored.has(row.fact_id)).toBe(false);
+  });
+
   it('isolates a failing store call and stores the other fact; next sweep recovers the pending work', async () => {
     const f = fixture();
     f.failStore.add(eligible[0]!.fact_id);
