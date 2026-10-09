@@ -112,6 +112,7 @@ import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js'
 import { withUntestedHorizonWarning } from '../decision-input-ask.js';
 import { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalSteadyEdit } from '../../goal-target/goal-steady-write.js';
+import { toOutboundGraph } from '../../goal-target/outbound-graph.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput, type CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { agentProposals, executableProposalId } from '../held-approval-offers.js';
 
@@ -148,7 +149,8 @@ describe('steady horizon: one held card through the existing approved batch door
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async req => {
       const graph = graphOf.get((req.params as { id: string }).id);
-      return { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), analysis_ready: { status: 'ready', may_run: true },
+      // As the real read route serves it: the basis proof stripped (toOutboundGraph), the hash over the stored bytes.
+      return { graph: toOutboundGraph(graph), graph_hash: computeAnalysisAffectingGraphHash(graph as never), analysis_ready: { status: 'ready', may_run: true },
         ...(lastRun === undefined ? {} : { analysis_result: lastRun }) };
     });
     app.post('/orchestrate/v2/turn', async req => {

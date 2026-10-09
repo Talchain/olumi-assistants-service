@@ -144,19 +144,63 @@ function expectEventGraph(g: Rec) {
 describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () => {
   it('sealedR-d3 (flagged, drafted as an ordinary model) keeps its ordinary graph byte-identical to base, no event attempt', async () => {
     const info = vi.spyOn(log, 'info').mockImplementation(() => undefined);
+    const eventAdmission = vi.spyOn(EventModel, 'admitEventByDate');
     try {
       const admitted = flagged(sealed(), SEALED_BRIEF);
       expect(validateGraphStructure(GraphV3.parse(admitted), { leaveOutInertRisks: true }).valid).toBe(true);
-      expect(createHash('sha256').update(JSON.stringify(admitted)).digest('hex')).toBe('758a0f1140259bf4641f687ca33d145d8629c2a56d899c36ee9b9618ce345dbf');
+      expect(JSON.stringify(admitted)).toBe(JSON.stringify(admitCandidateModel(sealed(), {}, SEALED_BRIEF)));
+      // Admission precedes fitting. Only these two endpoint-bound transient candidates differ from the recorded base.
+      const pending = [
+        { from: 'existing_customers', to: 'monthly_recurring_revenue', label: 'Existing customers', mean: 3.2 },
+        { from: 'starter_subscribers', to: 'monthly_recurring_revenue', label: 'Starter subscribers', mean: 1.3066666666666664 },
+      ];
+      expect(admitted.edges.filter(e => e.provenance?.olumi_fit_candidate !== undefined).map(e => `${e.from}→${e.to}`))
+        .toEqual(pending.map(e => `${e.from}→${e.to}`));
+      const admissionBase = structuredClone(admitted);
+      for (const id of pending) {
+        const e = admissionBase.edges.find(e => e.from === id.from && e.to === id.to)!;
+        const drafted = sealed().links.find(l => l.from === id.label && l.to === 'monthly recurring revenue')!;
+        expect(e.provenance?.olumi_fit_candidate).toEqual({
+          strength_mean: id.mean, strength_std: id.mean / 2,
+          natural_effect: { amount: drafted.effect_amount, amount_unit: '£/month',
+            per_source_change: drafted.effect_per_source_change,
+            per_source_change_unit: id.from === 'existing_customers' ? 'customers' : 'subscribers',
+            strength_mean: id.mean, strength_mean_frame: 'edge_strength' },
+        });
+        delete e.provenance!.olumi_fit_candidate;
+      }
+      expect(createHash('sha256').update(JSON.stringify(admissionBase)).digest('hex')).toBe('758a0f1140259bf4641f687ca33d145d8629c2a56d899c36ee9b9618ce345dbf');
       expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
       expect(info.mock.calls.some(c => (c[0] as { event?: string } | undefined)?.event === 'cee.event_by_date.fallback_kept')).toBe(false);
       const { result, registrations } = await built(sealed(), SEALED_BRIEF);
       expect(result).toMatchObject({ ok: true, mutated: true });
       expect(registrations).toHaveLength(1);
-      expect(createHash('sha256').update(JSON.stringify(registrations[0])).digest('hex'))
+      // Verified against a replay without the Olumi fit: only this edge changes. Frames and all other bytes stay pinned.
+      const fittedIds = [{ from: 'starter_subscribers', to: 'monthly_recurring_revenue' }];
+      const registrationBase = structuredClone(registrations[0]);
+      for (const id of fittedIds) {
+        const index = registrationBase.edges.findIndex((e: Rec) => e.from === id.from && e.to === id.to);
+        expect(registrationBase.edges.filter((e: Rec) => e.from === id.from && e.to === id.to)).toHaveLength(1);
+        const e = registrationBase.edges[index];
+        const drafted = sealed().links.find(l => l.from === 'Starter subscribers' && l.to === 'monthly recurring revenue')!;
+        expect(e).toEqual({ ...id, strength: { mean: 0.24499999999999994, std: 0.12249999999999997 },
+          exists_probability: 0.8, effect_direction: 'positive', provenance: { source: 'brief_extraction',
+            magnitude: 'olumi_estimate', natural_effect: { amount: drafted.effect_amount, amount_unit: '£/month',
+              per_source_change: drafted.effect_per_source_change, per_source_change_unit: 'subscribers',
+              strength_mean: 0.24499999999999994, strength_mean_frame: 'edge_strength' } } });
+        // The original edge, including key order, keeps the original whole-graph digest meaningful.
+        registrationBase.edges[index] = { ...id, strength: { mean: 0.09375, std: 0.046875 },
+          exists_probability: 0.8, effect_direction: 'positive', provenance: { source: 'brief_extraction',
+            magnitude: 'olumi_placeholder', natural_effect: { amount: 9375, amount_unit: '£/month',
+              per_source_change: 500, per_source_change_unit: 'subscribers', strength_mean: 0.09375,
+              strength_mean_frame: 'edge_strength' } }, defaulted: true };
+      }
+      expect(JSON.stringify(registrations[0])).not.toContain('olumi_fit_candidate');
+      expect(createHash('sha256').update(JSON.stringify(registrationBase)).digest('hex'))
         .toBe('6b2f1c91002476b918f9322d2a0053d6f1d08cf73c43b7894d7ad2be464010e9');
       expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
-    } finally { info.mockRestore(); }
+      expect(eventAdmission).not.toHaveBeenCalled();
+    } finally { info.mockRestore(); eventAdmission.mockRestore(); }
   });
 
   it('an event-slice draft whose event admission fails keeps its reachable ordinary model and logs the missing piece', () => {
