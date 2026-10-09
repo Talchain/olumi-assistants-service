@@ -414,7 +414,7 @@ export const GoalConstraintSchema = z.object({
    *
    * ⛔ NOT A WIDER `operator` ENUM: `GraphV3.safeParse` fails the WHOLE graph on an unknown operator (Canonical
    * 5860723311), and PLoT's preflight refuses anything but `>=`/`<=`. The engine still gets `operator` only; the
-   * PLoT wire copy withholds this field (`run-analysis.ts`, `withholdStatedOperator`).
+   * PLoT wire copy withholds this field (`engine-constraint.ts`, `engineConstraint`).
    *
    * ⚠ DECLARED, NOT LEFT TO PASSTHROUGH: this is a plain `z.object`, so an undeclared stamp is deleted at the first
    * `GraphV3` parse hop — every later D1 edit (`apply-graph-mutation.ts`) writes the parsed rows. An older reader

@@ -206,8 +206,7 @@ function invocation(): HandlerInvocation {
   } as HandlerInvocation;
 }
 /** The PLoT request `run_analysis` sends, through the real handler; the stored rows must come back untouched. */
-async function plotLimit(rows: Rec[], pinChurnAt?: number): Promise<Rec> {
-  const graph = runGraph(pinChurnAt);
+async function plotLimit(rows: Rec[], pinChurnAt?: number, constraintId = STRICT_ID, graph = runGraph(pinChurnAt)): Promise<Rec> {
   const goal_constraints = rows.map((r) => JSON.parse(JSON.stringify(r)) as Rec);
   const before = JSON.stringify(goal_constraints);
   const snapshot: RunAnalysisScenarioSnapshot = {
@@ -224,7 +223,7 @@ async function plotLimit(rows: Rec[], pinChurnAt?: number): Promise<Rec> {
   await createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient, scenarioReader })(invocation());
   expect(run).toHaveBeenCalledOnce();
   expect(JSON.stringify(goal_constraints), 'the stored rows are never touched').toBe(before);
-  const limit = (captured!.goal_constraints as Rec[]).find((c) => c.constraint_id === STRICT_ID);
+  const limit = (captured!.goal_constraints as Rec[]).find((c) => c.constraint_id === constraintId);
   expect(limit, 'the churn limit reaches PLoT (found by its id)').toBeDefined();
   return limit!;
 }
@@ -245,7 +244,7 @@ describe('R4 — CEE\'s own read-back keeps the field; the PLoT-bound request ca
   it('R4 (disclosed, not modelled): an option that PINS churn at exactly 4% still meets "<= 4" on the engine — the one case where "<" and "<=" differ', async () => {
     // Over continuous draws P(X < 4) = P(X <= 4). A level pinned exactly at the threshold is the exception: the engine
     // (PLoT/ISL, untouched) still receives "<=" and counts exactly 4% as meeting the limit. This row pins that the wire
-    // is unchanged for that case; the difference is disclosed here and at `withholdStatedOperator`, not modelled.
+    // is unchanged for that case; the difference is disclosed here and at `engineConstraint` (engine-constraint.ts), not modelled.
     const limit = await plotLimit([strictRow], 0.04);
     expect(limit).toMatchObject({ operator: '<=', value: 4 });
     expect(limit).not.toHaveProperty('operator_as_stated');
@@ -315,5 +314,48 @@ describe('R6 — an older reader (a schema without the field) strips it and the 
   it('PIN: the store\'s comparator enum is NOT widened (a "<" operator still fails GraphV3 — Canonical 5860723311)', () => {
     expect([...GoalConstraintSchema.shape.operator.options]).toEqual(['>=', '<=']);
     expect(GoalConstraintSchema.safeParse({ ...strictRow, operator: '<' }).success).toBe(false);
+  });
+});
+
+
+describe('S7 A1(i) — typed count boundaries in the real PLoT payload', () => {
+  const cases = [
+    { name: 'fewer than 5 hires', node: 'fac_hires', label: 'Hires', unit: 'hires', stated: '<', value: 5, wire: 4, words: 'less than 5 hires' },
+    { name: 'more than 3 launches', node: 'fac_launches', label: 'Launches', unit: 'launches', stated: '>', value: 3, wire: 4, words: 'more than 3 launches' },
+    { name: 'below 4% (R4 continuous control)', node: 'fac_churn', label: 'Monthly churn', unit: '%', stated: '<', value: 4, wire: 4, words: 'less than 4%' },
+    { name: 'at most 5 hires (inclusive control)', node: 'fac_hires', label: 'Hires', unit: 'hires', stated: '<=', value: 5, wire: 5, words: 'at most 5 hires' },
+    { name: 'non-integer count <4.5', node: 'fac_hires', label: 'Hires', unit: 'hires', stated: '<', value: 4.5, wire: 4, words: 'less than 4.5 hires' },
+    { name: 'non-integer count >4.5', node: 'fac_launches', label: 'Launches', unit: 'launches', stated: '>', value: 4.5, wire: 5, words: 'more than 4.5 launches' },
+    { name: 'at least 3 launches (inclusive floor)', node: 'fac_launches', label: 'Launches', unit: 'launches', stated: '>=', value: 3, wire: 3, words: 'at least 3 launches' },
+    { name: 'count words in label with continuous unit', node: 'fac_churn', label: 'Hires launches churn', unit: '%', stated: '<', value: 4, wire: 4, words: 'less than 4%' },
+    { name: 'continuous words in label with count unit', node: 'fac_hires', label: 'Monthly churn percent', unit: 'hires', stated: '<', value: 5, wire: 4, words: 'less than 5 hires' },
+  ] as const;
+  it.each(cases)('$name', async (c) => {
+    const admission = admitCandidateConstraints([
+      { metric: c.label, operator: c.stated, value: c.value, unit: c.unit, provenance: 'explicit', frame: 'level' },
+    ], (metric) => metric === c.label ? c.node : undefined);
+    expect(admission.constraints).toHaveLength(1);
+    const stored = GoalConstraintSchema.parse(admission.constraints[0]) as Rec;
+    const held = c.stated.startsWith('>') ? '>=' : '<=';
+    const id = `agent-lane:${c.node}:${held}`;
+    expect(stored).toMatchObject({ constraint_id: id, node_id: c.node, operator: held, value: c.value, unit: c.unit });
+    if (c.stated === '<' || c.stated === '>') expect(stored.operator_as_stated).toBe(c.stated);
+    else expect(stored).not.toHaveProperty('operator_as_stated');
+    const base = runGraph();
+    const graph = GraphV3.parse({ ...base, nodes: [
+      ...base.nodes.filter((n) => n.id !== 'fac_churn'),
+      { id: c.node, kind: 'factor', label: c.label, scale_frame: c.unit === '%' ? 100 : 10,
+        observed_state: { value: c.unit === '%' ? 0.03 : 0.2, raw_value: c.unit === '%' ? 3 : 2,
+          unit: c.unit, source: 'cee_inference', extractionType: 'inferred' } },
+    ], edges: base.edges.map((e) => ({ ...e, from: e.from === 'fac_churn' ? c.node : e.from, to: e.to === 'fac_churn' ? c.node : e.to })) });
+    const before = JSON.stringify(stored);
+    const surface = (await agentLimits({ ...graph, goal_constraints: [stored] })).find((l) => l.on === c.label);
+    expect(surface).toMatchObject({ operator: held, value: c.value, in_words: c.words });
+    if (c.stated === '<' || c.stated === '>') expect(surface?.operator_as_stated).toBe(c.stated);
+    const wire = await plotLimit([stored], undefined, id, graph);
+    const { operator_as_stated: _stated, ...expectedWire } = stored;
+    expect(wire).toEqual({ ...expectedWire, operator: held, value: c.wire });
+    expect(wire).not.toHaveProperty('operator_as_stated');
+    expect(JSON.stringify(stored)).toBe(before);
   });
 });
