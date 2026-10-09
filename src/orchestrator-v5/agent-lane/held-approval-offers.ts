@@ -1,5 +1,6 @@
 /** Shared Agent approval authority for turns and the opt-in scenario graph read. */
 import type { SuggestedAction } from '../compose/types.js';
+import { heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
 import { ProposalStore } from './proposal.js';
 import { AMEND_CHIP, typedApprovalOf } from './approval-chips.js';
 import { offeredApproveChipOnRow, rehydrateProposals } from './durable-proposal.js';
@@ -22,7 +23,7 @@ export function identityProposalOfferable(proposal: StructuredProposal | undefin
     const nodes = (graph as { nodes?: unknown }).nodes;
     const goal = Array.isArray(nodes) ? nodes.find(n => n?.kind === 'goal' && n.id === steady.path) : undefined;
     const months = (steady.value as { months?: unknown } | undefined)?.months;
-    if (typeof months !== 'number' || !Number.isInteger(months) || months <= 0 || goal?.goal_horizon_months !== months) return false;
+    if (typeof months !== 'number' || !Number.isInteger(months) || months <= 0 || heldGoalHorizonMonths(goal) !== months) return false;
   }
   const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
   if (graph === undefined || reading === undefined) return true;

@@ -1,4 +1,4 @@
-import { horizonSteadyAttested } from '../../goal-target/horizon-basis.js';
+import { goalHorizonVerdict, heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
@@ -991,7 +991,6 @@ interface GraphRead {
     /** RC3: persisted server-authored option precondition. Inclusion is resolved over the whole graph. */
     relies_on?: unknown;
     goal_scope?: unknown;
-    goal_horizon_months?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -3203,14 +3202,14 @@ export function createAgentCapabilities(
       ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
   };
 
-  /** Consume the exact held card through the approved batch, then read back through the attestation predicate. */
+  /** Consume the exact held card through the approved batch, then read back through the one horizon verdict. */
   const applyGoalSteady = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
   ): Promise<ToolResult> => {
     const op = parent.operations[0]!;
     const months = (op.value as { months?: unknown } | undefined)?.months;
     if (ctx.typed_approval_of !== parent.proposal_id || typeof months !== 'number' || !Number.isInteger(months)
-      || months <= 0 || before.nodes.find(n => n.id === op.path && n.kind === 'goal')?.goal_horizon_months !== months
+      || months <= 0 || heldGoalHorizonMonths(before.nodes.find(n => n.id === op.path && n.kind === 'goal')) !== months
       || opts.commitOptionLevels === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied' };
     }
@@ -3224,8 +3223,8 @@ export function createAgentCapabilities(
         detail: 'Your answer was sent but could not be confirmed in the saved model.' };
     }
     const check = await readGraph(ctx.scenario_id);
-    if (check === null || !horizonSteadyAttested(check.raw)
-      || check.nodes.find(n => n.id === op.path && n.kind === 'goal')?.goal_horizon_months !== months) {
+    if (check === null || goalHorizonVerdict(check.raw) !== 'steady_attested'
+      || heldGoalHorizonMonths(check.nodes.find(n => n.id === op.path && n.kind === 'goal')) !== months) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed',
         detail: 'Your answer was sent but could not be confirmed in the saved model.' };
     }

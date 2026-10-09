@@ -1,28 +1,43 @@
-import { horizonSteadyAttested } from '../goal-target/horizon-basis.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../orchestrator/context/option-result-source.js';
+import { goalHorizonVerdict, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
 import { approvalChipIdFor } from './approval-chips.js';
 import { createProposal, type StructuredProposal } from './proposal.js';
 
 export const STEADY_HORIZON_ANSWER = 'It stays about the same unless we act';
 
-/** Offer only on a Run reply; the route also excludes any other held approval. No goal is changed here. */
+const recordOf = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+
+/** True only when this Run withheld its goal chance because the goal's month is untested (§(ad)), not for any other cause. */
+function runWithheldForUntestedHorizon(result: unknown): boolean {
+  const block = recordOf(result);
+  return [block?.inference_warnings, recordOf(block?.enrichment)?.inference_warnings]
+    .flatMap(value => Array.isArray(value) ? value : [])
+    .some(warning => recordOf(warning)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
+}
+
+/**
+ * Offer only on a Run reply whose Run withheld the goal chance for an untested month; the route also excludes any other
+ * held approval. A Run withheld for another cause (e.g. a missing current level) keeps that cause's own next step.
+ * No goal is changed here.
+ */
 export function steadyHorizonCard(input: {
   graph: unknown; graphHash: string | undefined; scenarioId: string; userId: string | null;
-  runReply: boolean; approvalHeld: boolean;
+  runReply: boolean; runResult: unknown; approvalHeld: boolean;
 }): { proposal: StructuredProposal; chip: { id: string; label: string; message: string; detail: string } } | null {
-  if (!input.runReply || input.approvalHeld || !input.graphHash
+  if (!input.runReply || input.approvalHeld || !input.graphHash || !runWithheldForUntestedHorizon(input.runResult)
     || input.graph === null || typeof input.graph !== 'object' || Array.isArray(input.graph)) return null;
-  const graph = input.graph as { nodes?: unknown; goal_node_id?: unknown };
+  const graph = input.graph as { nodes?: unknown };
   if (!Array.isArray(graph.nodes)) return null;
   const goals = graph.nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object'
     && !Array.isArray(n) && n.kind === 'goal');
   if (goals.length !== 1) return null;
   const goal = goals[0]!;
-  const months = goal.goal_horizon_months;
-  if (typeof goal.id !== 'string' || typeof goal.label !== 'string'
-    || typeof months !== 'number' || !Number.isInteger(months) || months <= 0
-    || horizonSteadyAttested(input.graph)) return null;
+  const months = heldGoalHorizonMonths(goal);
+  if (typeof goal.id !== 'string' || typeof goal.label !== 'string' || months === undefined
+    || goalHorizonVerdict(input.graph) === 'steady_attested') return null;
   // Never beside an accumulation carrier, confirmed or not: there the month is worked out, so confirming that reading is
-  // the path (B1 before its Yes). Keying the offer on the Run's own horizon withhold follows a1's §(ad) withhold code.
+  // the path (B1 before its Yes).
   if (graph.nodes.some((n) => n !== null && typeof n === 'object'
     && (n as { nonlinear_identity?: { operation?: unknown } }).nonlinear_identity?.operation === 'accumulation')) return null;
   const detail = `Does ‘${goal.label}’ stay about the same over ${months} months unless you act? If yes, Olumi records that as your judgement and the chance is worked out for month ${months}; then run the analysis again.`;

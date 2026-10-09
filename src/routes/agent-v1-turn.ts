@@ -4229,6 +4229,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? startingAssumptionsChips(readbackGraph, analysisReady) : [];
     const steadyCard = steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId,
       runReply: resultFirstRunCompleted || result.tool_calls.some((c, i) => c.name === 'run_analysis' && result.tool_results[i]?.ran === true),
+      runResult: analysisResult,
       approvalHeld: approvals.length + carriedApproval.length + liveHolds.length + proposals.outstanding(scenarioId, userId).length > 0 });
     if (steadyCard !== null) proposals.put(steadyCard.proposal);
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were

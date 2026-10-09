@@ -110,6 +110,7 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { withUntestedHorizonWarning } from '../decision-input-ask.js';
+import { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalSteadyEdit } from '../../goal-target/goal-steady-write.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput, type CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { agentProposals, executableProposalId } from '../held-approval-offers.js';
@@ -123,10 +124,14 @@ const seed = (): Rec => {
   return assignEntityRefs(projectGraphForPersistence(graph), null).graph as Rec;
 };
 const goalOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.kind === 'goal');
+// The Run this reply reports withheld its goal chance for the untested month (§(ad)); only then is the card offered.
+const HORIZON_WITHHELD_RUN = { enrichment: { inference_warnings: [{ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', severity: 'warning' }] } };
 const offered = (graph: Rec, over = {}) => steadyHorizonCard({ graph, graphHash: computeAnalysisAffectingGraphHash(graph as never) ?? undefined,
-  scenarioId: SCENARIO, userId: null, runReply: true, approvalHeld: false, ...over });
+  scenarioId: SCENARIO, userId: null, runReply: true, runResult: HORIZON_WITHHELD_RUN, approvalHeld: false, ...over });
 const jsonbGraph = (): Rec => graphOf.get(SCENARIO) as Rec;
 let runs = 0;
+/** The last Run's stored result, served on the graph read as the real route serves it. */
+let lastRun: unknown;
 let modelTool: Record<string, unknown> | undefined;
 
 describe('steady horizon: one held card through the existing approved batch door', () => {
@@ -143,15 +148,18 @@ describe('steady horizon: one held card through the existing approved batch door
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async req => {
       const graph = graphOf.get((req.params as { id: string }).id);
-      return { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), analysis_ready: { status: 'ready', may_run: true } };
+      return { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), analysis_ready: { status: 'ready', may_run: true },
+        ...(lastRun === undefined ? {} : { analysis_result: lastRun }) };
     });
     app.post('/orchestrate/v2/turn', async req => {
       const body = req.body as { chip?: { action_type?: string } };
       if (body.chip?.action_type !== 'run_analysis') throw new Error('Only Run reaches the orchestrator; steady writes use the batch port');
       runs += 1;
       const graph = jsonbGraph();
-      const env = withUntestedHorizonWarning(withGoalChanceLicence({ option_comparison: [
-        { option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, graph, goalOf(graph).id), graph);
+      // The producer's own §(ad) step: an unattested month withholds the chance (GOAL_FIGURES_HORIZON_NOT_TESTED).
+      const env = withholdGoalFiguresForUntestedHorizon(withUntestedHorizonWarning(withGoalChanceLicence({ option_comparison: [
+        { option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, graph, goalOf(graph).id), graph), graph);
+      lastRun = env;
       return { assistant_text: 'Analysis complete.', blocks: [{ type: 'analysis_result', data: env }],
         analysis_ready: { status: 'ready', may_run: true }, tool_results: [{ name: 'run_analysis', ran: true }], ...env };
     });
@@ -159,7 +167,7 @@ describe('steady horizon: one held card through the existing approved batch door
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); graphOf.set(SCENARIO, seed()); runs = 0; modelTool = undefined; commitMode = 'real'; vi.mocked(commitOptionLevelsInProcess).mockClear(); });
+  beforeEach(() => { nextScenario(); graphOf.set(SCENARIO, seed()); runs = 0; lastRun = undefined; modelTool = undefined; commitMode = 'real'; vi.mocked(commitOptionLevelsInProcess).mockClear(); });
   const turn = async (payload: Rec): Promise<Rec> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
     expect(r.statusCode, r.body.slice(0, 500)).toBe(200);
@@ -240,6 +248,10 @@ describe('steady horizon: one held card through the existing approved batch door
     const graph = seed();
     expect(offered(graph)).not.toBeNull();
     expect(offered(graph, { runReply: false })).toBeNull();
+    // A Run withheld for another cause keeps that cause's own next step (R3: missing current level), so no card.
+    expect(offered(graph, { runResult: { enrichment: { inference_warnings: [{ code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL' }] } } })).toBeNull();
+    expect(offered(graph, { runResult: undefined })).toBeNull();
+    expect(offered(graph, { runResult: { inference_warnings: [{ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED' }] } })).not.toBeNull();
     expect(offered(graph, { approvalHeld: true })).toBeNull();
     goalOf(graph).goal_horizon_months = 0;
     expect(offered(graph)).toBeNull();
