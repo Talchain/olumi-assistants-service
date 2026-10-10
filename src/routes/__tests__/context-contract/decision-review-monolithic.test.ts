@@ -104,6 +104,18 @@ describe('decision review monolithic: serialized provider contract', () => {
     expect.soft(object(negative.sections.winner)).not.toHaveProperty('id');
     expect.soft(valueAt(negative.calls[0]!.payloads, 'win_probability')).toEqual([]);
   }, 60_000);
+  it('EDIT AFTER RUN: grounded on the Run\'s own graph with the edited graph current, no stale tipping/driver/leader finding reaches the model', async () => {
+    const edited = await reviewCapture('stale', false, true, true);
+    expect(edited.sections.BRIEF).toBe(REVIEW_BRIEF);
+    expect(array(edited.sections.FLIP_THRESHOLD_DATA)).toEqual([]);
+    expect(object(edited.sections.winner)).not.toHaveProperty('win_probability');
+    expect(object(edited.sections.winner)).not.toHaveProperty('id');
+    expect(array(object(edited.sections.ISL_RESULTS).factor_sensitivity)).toEqual([]);
+    // Contrast on the SAME wiring: nothing edited (current graph is the Run's own), the licensed findings are present.
+    const unedited = await reviewCapture('current', false, true, true);
+    expect(array(unedited.sections.FLIP_THRESHOLD_DATA)).toHaveLength(1);
+    expect(object(unedited.sections.winner)).toMatchObject({ id: 'raise_price_to_59', win_probability: 1 });
+  }, 60_000);
   it('R3 raw analysis/enrichment maps absent (normalised tagged slices only)', async () => {
     const w = await run('raw-probe'), keys = keysDeep(provider(w).payloads);
     for (const key of ['analysis_result', 'enrichment', 'pct_by_option', 'driver_by_option', 'flip_thresholds', 'warnings', 'inference_warnings']) {

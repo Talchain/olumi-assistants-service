@@ -54,10 +54,15 @@ export function buildLicensedRunFacts(
 ): LicensedRunFacts {
   const result = fact.result;
   const raw = result.enrichment ?? {};
-  const currencyHash = currentGraphHash !== undefined ? currentGraphHash
+  const runHash = typeof result.graph_hash_at_run === 'string' && result.graph_hash_at_run !== ''
+    ? result.graph_hash_at_run : null;
+  const suppliedHash = currentGraphHash !== undefined ? currentGraphHash
     : hashOf(currentGraph === undefined ? groundingGraph : currentGraph);
+  // No hash to compare against is not evidence of staleness: the review fires in the same request as its own Run, whose
+  // snapshot is the freshest read there is. Only a KNOWN, differing current hash makes the Run non-current.
+  const currencyHash = suppliedHash ?? runHash;
   const canonical = selectCanonicalAnalysisState({ handlerFacts: [fact], currentGraphHash: currencyHash });
-  const current = canonical.freshness === 'fresh';
+  const current = canonical.freshness === 'fresh' || currencyHash === null;
   const mayNameLeader = current && readMayNameLeadingOptionFromResult(result);
   const state = composeAnalysisStateV1({ canonical, mayNameLeadingOption: mayNameLeader,
     rawRobustness: current ? readRawRobustnessFromResponseBody({ blocks: [{ enrichment: raw }] }) : null });

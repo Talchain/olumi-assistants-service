@@ -20,7 +20,12 @@ vi.mock('undici', async original => ({
 export const REVIEW_BRIEF = 'S8_REVIEW_POSITIVE: Our goal is £20,000 MRR within 12 months. Keep £49 price or raise price to £59. Paul assumes renewal churn stays at 3%; Maya disagrees. May we retain the assumption that monthly churn stays at 3%?';
 export const REVIEW_PRODUCER_PROSE = 'SYNTHETIC_REVIEW_PRODUCER: Raise price to £59 wins with share 1; churn could flip at 4.2%.';
 export interface ReviewWitness { calls: Captured[]; sections: Record<string, unknown>; seed: ReturnType<typeof fixture>; slices: Record<string, unknown>[] }
-export async function reviewCapture(variant: Variant, decomposed = false, supplyCurrentGraph = true): Promise<ReviewWitness> {
+/**
+ * `runIsOwnGraph`: ground the review on the graph the Run actually analysed (the unedited 'current' capture) and supply the
+ * variant's graph as the CURRENT one: the production shape of "edited after the Run". Default false keeps every earlier row's
+ * wiring (the variant's graph is both grounding and current).
+ */
+export async function reviewCapture(variant: Variant, decomposed = false, supplyCurrentGraph = true, runIsOwnGraph = false): Promise<ReviewWitness> {
   vi.resetModules();
   const { config } = await import('../../../config/index.js');
   config.llm.openaiApiKey = 'offline-context-contract';
@@ -80,7 +85,7 @@ export async function reviewCapture(variant: Variant, decomposed = false, supply
   try {
     const { enrichRunAnalysisWithDecisionReview } = await import('../../../orchestrator-v5/coaching/decision-review-enricher.js');
     await enrichRunAnalysisWithDecisionReview({ handlerFacts: [fact], scenarioId: seed.scenario_id,
-      requestId: 's8-review-contract', brief: REVIEW_BRIEF, runGraph: s.graph, ...(supplyCurrentGraph ? { currentGraph: s.graph } : {}), signal: new AbortController().signal });
+      requestId: 's8-review-contract', brief: REVIEW_BRIEF, runGraph: runIsOwnGraph ? fixture('current').snapshot.graph : s.graph, ...(supplyCurrentGraph ? { currentGraph: s.graph } : {}), signal: new AbortController().signal });
     expect(calls, 'REAL review provider dispatch count').toHaveLength(variant === 'run1' ? 0 : decomposed ? 4 : 1);
     if (variant === 'run1') return { calls, sections: {}, seed, slices: [] };
     const slices: Record<string, unknown>[] = [];

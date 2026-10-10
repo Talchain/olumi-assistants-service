@@ -207,6 +207,10 @@ describe('decision review licensed raw-read and argument-flow guard', () => {
     expect(() => checkFlow(mutated(invokeFile, 'buildDecisionReviewUserMessage(input, margin, options.licensedFacts)',
       'buildDecisionReviewUserMessage(input, margin)'))).toThrow('Licensed argument flow missing');
   });
+  it('m-d feeding the review\'s grounding graph as the CURRENT graph fails (edit-after-Run would never be seen)', () => {
+    expect(() => checkFlow(mutated(enricher, 'buildLicensedRunFacts(fact, input.scenarioId, input.runGraph, input.currentGraph)',
+      'buildLicensedRunFacts(fact, input.scenarioId, input.runGraph, input.runGraph)'))).toThrow('Licensed argument flow missing');
+  });
   it('m-c replacing the consumed licensed enrichment with raw enrichment fails', () => {
     expect(() => checkFlow(mutated(enricher, 'const enrichment = facts.enrichment;',
       'const enrichment = raw;'))).toThrow('Licensed argument flow missing');
