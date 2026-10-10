@@ -589,6 +589,7 @@ export interface ApprovedLinkEffect {
  * on is the batch's own base (`expectedGraphHash`).
  */
 export interface ApprovedIdentityConfirm {
+  readonly ceiling_stock?: import('../agent-lane/ceiling-stock.js').CeilingStockPending;
   readonly choice?: 'one_off';
   readonly outcome_id: string;
   readonly factor_ids: readonly string[];
@@ -904,11 +905,12 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     return { kind: 'refused', reason: 'option_gaps_not_alone_with_identity_or_links' };
   }
   let before: unknown;
+  let identityBrief: string | null | undefined;
   let expectedRevision: number | undefined;
   let pendings: Awaited<ReturnType<OptionInterventionStore['readMostRecentPendingActions']>>;
   try {
-    if (useAppendV6()) {
-      ({ graph: before, revision: expectedRevision } = await store.loadGraphAndBriefText(input.scenarioId));
+    if (useAppendV6() || input.identityConfirm?.ceiling_stock !== undefined) {
+      ({ graph: before, revision: expectedRevision, briefText: identityBrief } = await store.loadGraphAndBriefText(input.scenarioId));
     } else {
       before = await store.loadGraph(input.scenarioId);
     }
@@ -1146,11 +1148,11 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyIdentityConfirmEdit({ persistedGraph: before, outcome_id: identityConfirm.outcome_id,
       factor_ids: identityConfirm.factor_ids, words: identityConfirm.words, reading_token: identityConfirm.reading_token,
-      part_levels: identityConfirm.part_levels, choice: identityConfirm.choice,
+      part_levels: identityConfirm.part_levels, choice: identityConfirm.choice, ceiling_stock: identityConfirm.ceiling_stock, brief_text: identityBrief,
       expected_graph_hash: input.expectedGraphHash });
     if (written.kind === 'refused') return { kind: 'refused', reason: `identity_${written.reason}` };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !identityConfirmPostimageIsScoped(before, graph, identityConfirm.outcome_id, identityConfirm.part_levels)) {
+    if (!isEditableGraph(graph) || !identityConfirmPostimageIsScoped(before, graph, identityConfirm.outcome_id, identityConfirm.part_levels, identityConfirm.ceiling_stock, identityBrief)) {
       return { kind: 'refused', reason: 'identity_scope_mismatch' };
     }
     const appliedHash = computeAnalysisAffectingGraphHash(graph);

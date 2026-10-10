@@ -41,6 +41,8 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { identityConflictsWithScope } from '../agent-lane/goal-scope.js';
 import type { GoalScope } from '../../schemas/goal-scope.js';
+import { ceilingStockPostimage, ceilingStockWords, type CeilingStockPending } from '../agent-lane/ceiling-stock.js';
+import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 
 export interface IdentityWithdrawalReading {
   outcome_id: string;
@@ -69,6 +71,7 @@ const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !
 
 /** The reading the approval card SHOWED: which quantity is the product of which, in the card's own words. */
 export interface IdentityConfirmReading {
+  readonly ceiling_stock?: CeilingStockPending;
   readonly outcome_id: string;
   /** In the order the card named them. */
   readonly factor_ids: readonly string[];
@@ -80,6 +83,7 @@ export interface IdentityConfirmReading {
 }
 
 export interface ApplyIdentityConfirmEditParams extends IdentityConfirmReading {
+  readonly brief_text?: string | null;
   /** The STORED graph (strict server-side read) — never a client copy. */
   readonly persistedGraph: unknown;
   /** The wire analysis hash (`computeAnalysisAffectingGraphHash`) the card was issued against; moved ⇒ `superseded`. */
@@ -121,6 +125,7 @@ const WORDS_MAX = 400;
  */
 export function identityConfirmReadingToken(reading: IdentityConfirmReading): string {
   const bound = { outcome_id: reading.outcome_id, operation: 'product', factor_ids: [...reading.factor_ids], words: reading.words,
+    ...(reading.ceiling_stock !== undefined ? { ceiling_stock: reading.ceiling_stock } : {}),
     ...(reading.part_levels !== undefined ? { part_levels: reading.part_levels } : {}),
     ...(reading.choice !== undefined ? { choice: reading.choice } : {}) };
   return `identity:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
@@ -272,7 +277,7 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   const { outcome_id, factor_ids, words, part_levels } = params;
   if (typeof words !== 'string' || words.trim() === '' || words.length > WORDS_MAX) return refuse('words_invalid');
   if (typeof params.reading_token !== 'string'
-    || params.reading_token !== identityConfirmReadingToken({ outcome_id, factor_ids, words, part_levels, choice: params.choice })) {
+    || params.reading_token !== identityConfirmReadingToken({ outcome_id, factor_ids, words, part_levels, choice: params.choice, ceiling_stock: params.ceiling_stock })) {
     return refuse('reading_not_confirmed');
   }
   if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
@@ -281,6 +286,22 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   // ── REVISION-SAFE: the analysis revision is the one the card was issued against ──────────────────────────────────
   const hashBefore = computeAnalysisAffectingGraphHash(params.persistedGraph as never);
   if (hashBefore !== params.expected_graph_hash) return refuse('superseded');
+  if (params.ceiling_stock !== undefined) {
+    const p = params.ceiling_stock;
+    const next = ceilingStockPostimage(params.persistedGraph, p, params.brief_text);
+    if (next === null || p.goal_id !== outcome_id || factor_ids.length !== 1 || factor_ids[0] !== p.transformation.carrier_id
+      || words !== ceilingStockWords(params.persistedGraph, p) || params.part_levels !== undefined || params.choice !== undefined) return refuse('reading_not_confirmed');
+    const parsed = GraphV3.safeParse(next);
+    if (!parsed.success || !isDeepStrictEqual(parsed.data.nodes.find(n => n.id === outcome_id)?.nonlinear_identity,
+      next.nodes.find((n: Rec) => n.id === outcome_id)?.nonlinear_identity)) return refuse('invalid_graph');
+    const label = String(next.nodes.find((n: Rec) => n.id === outcome_id)?.label);
+    const fact = EditGraphHandlerFactSchema.parse({ fact_type: 'edit_graph', fact_version: 1, noop: false, result: {
+      edit_kind: 'structural', status: 'applied', operations_count: 1, affected_entities: [{ kind: 'goal', label: label.slice(0, 120) }],
+      graph_hash_before: hashBefore, graph_hash_after: computeAnalysisAffectingGraphHash(next as never),
+      safe_summary: 'Confirmed how this quantity is calculated', impact: 'high', rerun_recommended: true,
+    } });
+    return { kind: 'mutated', mutatedGraph: next, graph: parsed.data, handlerFacts: [fact as HandlerFact] };
+  }
 
   const graph = structuredClone(params.persistedGraph) as Rec & { nodes: unknown[]; edges: unknown[] };
   const outcome = graph.nodes.find((n): n is Rec => isRec(n) && n.id === outcome_id);
@@ -389,7 +410,11 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
  * ⛔ ONLY THE ONE CARRIER MAY CHANGE: no other node, no other member of this node, no edge, no top-level field — and,
  * on a confirmed part read at today's level, exactly the range and today level it lacked (`todaysWrite`).
  */
-export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: unknown, outcomeId: string, partLevels?: readonly IdentityPartLevel[]): boolean {
+export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: unknown, outcomeId: string, partLevels?: readonly IdentityPartLevel[], ceilingStock?: CeilingStockPending, brief?: string | null): boolean {
+  if (ceilingStock !== undefined) {
+    const expected = ceilingStockPostimage(storedBefore, ceilingStock, brief);
+    return ceilingStock.goal_id === outcomeId && partLevels === undefined && expected !== null && isDeepStrictEqual(projectGraphForPersistence(expected), after);
+  }
   const before = normaliseAbsenceOnly(storedBefore);
   if (!isRec(before) || !isRec(after) || !Array.isArray(before.nodes) || !Array.isArray(after.nodes)) return false;
   const afterGoal = (after.nodes as Rec[]).find(n => n.id === outcomeId);
