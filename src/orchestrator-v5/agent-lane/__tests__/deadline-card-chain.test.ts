@@ -25,7 +25,7 @@ import { proposalRecord } from '../proposal-object/record.js';
 import { approvalChipsFor, approvalChipIdFor, DEADLINE_CHANGE_CHIP } from '../approval-chips.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { deadlineCardToIssue, firstAgentTurnAfterDraft, type DeadlineIssueInput } from '../deadline-card.js';
+import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, type DeadlineIssueInput } from '../deadline-card.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
 type Rec = Record<string, any>;
@@ -43,7 +43,8 @@ function world(fixture: { graph: Rec; brief: string } = d2) {
     loadGraph: async () => read(), loadGraphAndBriefText: async () => ({ graph: read(), briefText: brief }),
     ensureScenarioExists: async () => ({ user_id: null }),
     readCommittedTurn: async (_sid, id) => { const r = rows.find(r => r.turn_id === id); return r ? { id: r.id, request_hash: r.request_hash,
-      user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used } : null; },
+      user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used,
+      pending_actions: (r as Rec).pending_actions ?? [] } : null; },
     readMostRecentPendingActions: async (_sid, opts) => { if (broken) throw new Error('unreadable carrier'); if (snapshotBroken && opts?.onLatestRowId) { snapshotBroken = false; throw new Error('snapshot read failed'); } opts?.onLatestRowId?.(latest()?.id ?? null); return (latest() as Rec)?.pending_actions ?? []; },
     readRecent: async () => rows.filter(r => !r.turn_id.endsWith(':claim')),
     readFactsWithTurnFor: async ids => rows.flatMap(r => ids.includes(r.id) ? (writes.find(w => w.turn_id === r.turn_id)?.handler_facts ?? [])
@@ -372,36 +373,77 @@ describe('R6 the draft was built inside an Agent turn', () => {
     expect(firstAgentTurnAfterDraft({ rowId: resent.id, rows: [resent, built, construction] }, sid, brief)).toBe(false);
     expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [{ ...built, user_message: 'Which one?' }, construction] }, sid, brief)).toBe(false);
   });
-  it('whitespace around the typed message still matches the trimmed stored brief; an answer that asks the card question is an offer, not the build', () => {
+  const rowsOf = () => {
     const sid = randomUUID(), brief = d2.brief;
     const row = (request_hash: string, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: randomUUID(), request_hash,
       turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, ...over });
     const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false });
+    return { sid, brief, row, construction };
+  };
+  it('whitespace around the typed message still matches the trimmed stored brief; nothing the answer SAYS decides whether it was the build answer', () => {
+    const { sid, brief, row, construction } = rowsOf();
     const spaced = row('agent_turn:build', { user_message: ` ${brief}\n`, assistant_message: 'Here is the model.' });
     expect(firstAgentTurnAfterDraft({ rowId: spaced.id, rows: [spaced, construction] }, sid, brief)).toBe(true);
-    // The answer content must be readable: null/blank cannot show it was not the offer, so it fails closed (buddy r2 P2). Prose that
-    // merely says "is your deadline" is not the card question and still counts as the build answer (buddy r2 P3).
-    const unreadable = row('agent_turn:build', { user_message: brief, assistant_message: null });
-    expect(firstAgentTurnAfterDraft({ rowId: unreadable.id, rows: [unreadable, construction] }, sid, brief)).toBe(false);
-    // Any question that names the deadline is an offer, in any case or wording (buddy r3 P2); a question that does not (the served
-    // build answer asks "What calendar date marks the end of …?") is not.
-    for (const asked of ['is your deadline 10 August 2027 (10 months from 10 October 2026)?', 'Here is the model.\nWould you like to set 10 August 2027 as the deadline?',
-      'Is your deadline 10 Aug. 2027?', 'Is your deadline\n10 August 2027?', '**Is your deadline 10 August 2027?**',
-      'The deadline is 10 August 2027. Does that work for you?', 'Your deadline is 10 August 2027.\n\nIs that correct?',
-      'The deadline is August 10th, 2027. Does that work for you?', 'Your deadline is 10/08/2027.\n\nIs that correct?', 'The deadline is 2027-08-10. Right?',
-      'Your deadline is:\n\n10 August 2027.\n\nDoes that work for you?', 'Does this work?\n\nDeadline\n\n- 10 August 2027',
-      'Would you like to use 10 August 2027 as your due date?', 'Shall I set the target date to August 10th, 2027?',
-      'Is your deadline 10 August 2027? **You can change the date.**', '> Is your deadline 10 August 2027?\n\n1. Yes\n2. No, let me know.']) {
-      const offer = row('agent_turn:resent', { user_message: brief, assistant_message: asked });
-      expect(firstAgentTurnAfterDraft({ rowId: offer.id, rows: [offer, construction] }, sid, brief), asked).toBe(false);
+    // DL github-6d (#2948 r6-r9): no reply prose decides it. Null content, a question about the deadline, a stated date in any wording,
+    // and a year in passing all leave the build answer a build answer; only the committed offer (below) can close the card.
+    for (const said of [null, '', 'Here is the model.', 'Is your deadline 10 August 2027 (10 months from 10 October 2026)?', 'The deadline is August 10th, 2027. Does that work?',
+      'Your deadline is:\n\n10 August 2027.\n\nDoes that work for you?', 'Would you like to use 10 August 2027 as your due date?', 'Launch by 31 December 2027.']) {
+      const built = row('agent_turn:build', { user_message: brief, assistant_message: said });
+      expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [built, construction] }, sid, brief), String(said)).toBe(true);
     }
-    const askedDate = row('agent_turn:build', { user_message: brief, assistant_message: 'Here is the model. The model holds no deadline yet, so no result answers that.\n\nWhat calendar date marks the end of the next ten months?' });
-    expect(firstAgentTurnAfterDraft({ rowId: askedDate.id, rows: [askedDate, construction] }, sid, brief)).toBe(true);
-    const prose = row('agent_turn:build', { user_message: brief, assistant_message: 'Here is the model. The main constraint is your deadline of ten months.' });
-    expect(firstAgentTurnAfterDraft({ rowId: prose.id, rows: [prose, construction] }, sid, brief)).toBe(true);
-    // Construction committed, build answer never recorded; the user re-sent the brief, was offered the card, declined next turn.
-    const offer = row('agent_turn:resent', { user_message: brief, assistant_message: 'Is your deadline 10 August 2027 (10 months from 10 October 2026)?' });
-    expect(firstAgentTurnAfterDraft({ rowId: offer.id, rows: [offer, construction] }, sid, brief)).toBe(false);
+  });
+  describe('R8 the build turn already OFFERED a deadline: a committed proposal, never the prose (DL github-6d)', () => {
+    const proposal = (over: Rec = {}) => ({ id: randomUUID(), scenario_id: 'x', chip_id: 'chip', action: { kind: 'apply_proposed_change', proposal_ref: 'chip',
+      inline_patch: { agent_proposal: { operations: [{ op: 'set_goal_deadline', path: 'g', value: {} }] } } }, ...over });
+    const startOf = (committedPending: ((id: string) => Promise<readonly unknown[] | null | undefined>) | undefined) => {
+      const { sid, brief, row, construction } = rowsOf(), built = row('agent_turn:build', { user_message: brief, assistant_message: 'Here is the model.' });
+      return { sid, brief, built, start: { rowId: built.id, rows: [built, construction], ...(committedPending ? { committedPending } : {}) } };
+    };
+    it('a committed set_goal_deadline proposal on the build row means it was offered; any other committed action does not', async () => {
+      const offered = startOf(async () => [proposal()]);
+      expect(await buildTurnAlreadyOfferedDeadline(offered.start, offered.sid, offered.brief)).toBe(true);
+      for (const committed of [[], [proposal({ action: { kind: 'run_analysis' } })], [proposal({ action: { kind: 'apply_proposed_change', proposal_ref: 'c',
+        inline_patch: { agent_proposal: { operations: [{ op: 'set_factor_value', path: 'f', value: 1 }] } } } })]]) {
+        const other = startOf(async () => committed);
+        expect(await buildTurnAlreadyOfferedDeadline(other.start, other.sid, other.brief), JSON.stringify(committed)).toBe(false);
+      }
+    });
+    it('an unreadable carrier is UNKNOWN and fails closed: no reader, a throw, a missing row, a non-array, an entry that is not a record', async () => {
+      for (const reader of [undefined, async () => { throw new Error('unreadable'); }, async () => null, async () => undefined,
+        async () => 'nope' as unknown as unknown[], async () => [null], async () => ['junk']]) {
+        const w = startOf(reader as never);
+        expect(await buildTurnAlreadyOfferedDeadline(w.start, w.sid, w.brief)).toBe(true);
+      }
+    });
+    it('no Agent build answer means nothing was offered; a second answer is closed by the answer count, not by this', async () => {
+      const { sid, brief, construction } = rowsOf();
+      expect(await buildTurnAlreadyOfferedDeadline({ rowId: construction.id, rows: [construction] }, sid, brief)).toBe(false);
+      const { sid: s2, brief: b2, row, construction: c2 } = rowsOf(), a = row('agent_turn:build', { user_message: b2 }), b = row('agent_turn:chat', { user_message: 'Why?' });
+      expect(await buildTurnAlreadyOfferedDeadline({ rowId: b.id, rows: [b, a, c2], committedPending: async () => [] }, s2, b2)).toBe(true);
+    });
+    // The route, end to end: the real carrier a first turn commits is lifted onto a build row, and a LATER system row (the user's
+    // decline, say) is the newest, so nothing is live and only the committed proposal can say the date was already offered.
+    const offeredEarlier = async () => { const w = world(), turn = await route(w); await turn(); return (w.rows[0] as Rec).pending_actions as Rec[]; };
+    const declined = (w: ReturnType<typeof world>) => makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_id: randomUUID(), request_hash: 'system_event:decline',
+      turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, assistant_message: null });
+    const proposals = (b: Rec) => b._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline');
+    it('the build turn committed the deadline proposal, the user declined, the next turn is NOT offered the card again', async () => {
+      const carried = await offeredEarlier(); expect(carried.length).toBeGreaterThan(0);
+      const w = world(); w.rows.unshift(buildAnswer(w, { pending_actions: carried }), declined(w));
+      expect(proposals(await (await route(w))())).toEqual([]);
+    });
+    it('CONTRAST: the same build row with nothing committed is offered the card', async () => {
+      const w = world(); w.rows.unshift(buildAnswer(w, { pending_actions: [] }), declined(w));
+      card(await (await route(w))());
+    });
+    it('a build answer whose prose asks about the deadline and mentions years, with no committed proposal, is still offered the card', async () => {
+      const w = world(); w.rows.unshift(buildAnswer(w, { assistant_message: 'Is your deadline 10 August 2027? Launch is planned for 31 December 2027. What is the deadline?' }));
+      card(await (await route(w))());
+    });
+    it('a goal that already holds a deadline is never offered one', () => {
+      const g = structuredClone(d2.graph); Object.assign(goal(g), { goal_horizon: { deadline: '2027-08-10' } });
+      expect(deadlineCardToIssue(issueInput(g))).toBeUndefined();
+    });
   });
 });
 

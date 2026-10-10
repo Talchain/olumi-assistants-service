@@ -5,26 +5,14 @@ import type { SessionTurnWithContent } from '../session/conversation-content.js'
 import { constructionOperationId } from './runtime/build-model.js';
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
 
-// An offered date always carries its year, in any format ("10 August 2027", "August 10th, 2027", "10/08/2027", "2027-08-10").
-const CALENDAR_DATE = /\b(?:19|20)\d{2}\b/;
-/**
- * Whether an answer ASKS a question that names the deadline, in any wording or case. Sentences end at . ! ? followed by a
- * capital (so "Is your deadline 10 Aug. 2027?" stays one sentence) or at a blank line; a single newline stays inside one
- * (buddy r4 P2: "Aug." and a newline inside the question both slipped past a [^.!?\n] matcher).
- */
-export function asksAboutTheDeadline(text: string): boolean {
-  // An answer is an offer of the card's date when it carries a calendar year ANYWHERE (the product's own card always says the date WITH
-  // its year, and the answer may call it a deadline, due date, target date or end date, in one sentence, line or paragraph: buddy
-  // r6-r9 P2s such as "The deadline is 10 August 2027. Does that work for you?", "Your deadline is:\n\n10 August 2027.\n\nDoes that work
-  // for you?" and "Would you like to use 10 August 2027 as your due date?"), or when one sentence names the deadline and asks.
-  // The served build answer ("The model holds no deadline yet … What calendar date marks the end of …?") carries no year and stays the
-  // build answer. This only ever CLOSES the offer (silent, e.g. an answer that merely mentions a year), never opens a wrong one.
-  return CALENDAR_DATE.test(text)
-    || text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence) && sentence.includes('?'));
-}
 export interface DeadlineTurnStart {
   readonly rowId: string | null;
   readonly rows: readonly SessionTurnWithContent[];
+  /**
+   * The pending actions COMMITTED with one answer row (`readCommittedTurn`, the same path a replay uses: `readRecent` deliberately
+   * omits them). Absent, or a throw / missing row, means the build turn's offers are UNKNOWN, and unknown fails closed.
+   */
+  readonly committedPending?: (turnId: string) => Promise<readonly unknown[] | null | undefined>;
 }
 /**
  * The strict pending read and the content read must identify the SAME newest non-claim row, and no Agent answer is newer
@@ -35,28 +23,53 @@ export interface DeadlineTurnStart {
  * offered twice (buddy r1 P2). A second Agent answer of any kind closes the offer.
  */
 export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): boolean {
-  if (!start || !start.rowId || brief.trim() === '') return false;
+  return buildAnswersSinceDraft(start, scenarioId, brief) !== undefined;
+}
+/**
+ * The Agent answers since the draft, when they are at most the ONE answer to the turn that built it; otherwise undefined (closed).
+ * The build turn is identified by its user message being the stored brief (the typed message keeps its whitespace, the stored brief
+ * is trimmed), never by anything the answer SAYS: no reply prose decides this (DL github-6d, #2948 r6-r9).
+ */
+function buildAnswersSinceDraft(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): readonly SessionTurnWithContent[] | undefined {
+  if (!start || !start.rowId || brief.trim() === '') return undefined;
   const rows = start.rows;
-  if (rows[0]?.id !== start.rowId) return false;
+  if (rows[0]?.id !== start.rowId) return undefined;
   const draftTurnId = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
   const at = rows.findIndex(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string'
     && (r.turn_id === draftTurnId && r.request_hash.startsWith('graph_registration:')
       || r.turn_class === 'direct_answer' && r.handler_id === null && r.response_emitted === true && r.user_message === brief
         && !r.request_hash.startsWith('agent_turn:')));
-  if (at < 0) return false;
+  if (at < 0) return undefined;
   const newer = rows.slice(0, at);
-  if (!newer.every(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string')) return false;
+  if (!newer.every(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string')) return undefined;
   const answers = newer.filter(r => r.request_hash.startsWith('agent_turn:'));
-  // The stored brief is trimmed, the answer row keeps the message as typed (buddy r1 P2: " "+brief+"\n" never matched). An
-  // answer that itself ASKS the deadline question is an offer, not the build answer (buddy r1 P2: a resent brief whose answer
-  // carried the card, declined next turn, would otherwise look like the build answer and re-offer).
-  // The answer content must be READ to be judged: a null/blank/malformed assistant message cannot show it was not the offer, so
-  // it fails closed (buddy r2 P2). The marker is any QUESTION that names the deadline (one sentence, ends in "?", any case or
-  // wording: the card's own "Is your deadline <date> (<n> months from …)?" and a model's own "Is your deadline …?"), not prose that
-  // merely says "is your deadline of ten months." (buddy r2 P3, r3 P2).
-  const builtTheDraft = (r: SessionTurnWithContent): boolean => typeof r.user_message === 'string' && r.user_message.trim() === brief.trim()
-    && typeof r.assistant_message === 'string' && r.assistant_message.trim() !== '' && !asksAboutTheDeadline(r.assistant_message);
-  return answers.length === 0 || (answers.length === 1 && builtTheDraft(answers[0]!));
+  const builtTheDraft = (r: SessionTurnWithContent): boolean => typeof r.user_message === 'string' && r.user_message.trim() === brief.trim();
+  return answers.length === 0 || (answers.length === 1 && builtTheDraft(answers[0]!)) ? answers : undefined;
+}
+/** One committed pending action that carries a proposal to set the goal's deadline (the `propose_goal_deadline` card's own operation). */
+const carriesDeadlineProposal = (entry: unknown): boolean => {
+  if (!record(entry) || !record(entry.action) || !record(entry.action.inline_patch) || !record(entry.action.inline_patch.agent_proposal)) return false;
+  const ops = entry.action.inline_patch.agent_proposal.operations;
+  return Array.isArray(ops) && ops.some(o => record(o) && o.op === 'set_goal_deadline');
+};
+/**
+ * ⭐ THE STRUCTURAL SIGNAL (DL github-6d, #2948 r6-r9: the free-text "did the answer offer a date?" test was a symptom-chase).
+ * The turn that built the draft already OFFERED a deadline when the pending actions committed with its answer row carry a
+ * `set_goal_deadline` proposal. Only that makes the next turn's route-issued card a repeat. Nothing in the reply prose decides it, so
+ * an answer that merely mentions a year, or asks anything, leaves the offer alone. A row whose pending actions cannot be read, or an
+ * entry that is not a record, is UNKNOWN and fails closed (no offer). A model that already holds the goal's deadline is refused by
+ * `deadlineCardToIssue` itself. No Agent build answer at all means nothing was offered.
+ */
+export async function buildTurnAlreadyOfferedDeadline(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): Promise<boolean> {
+  const answers = buildAnswersSinceDraft(start, scenarioId, brief);
+  if (answers === undefined) return true;
+  if (answers.length === 0) return false;
+  const read = start?.committedPending;
+  if (read === undefined) return true;
+  try {
+    const pending = await read(answers[0]!.turn_id);
+    return !Array.isArray(pending) || pending.some(entry => !record(entry) || carriesDeadlineProposal(entry));
+  } catch { return true; }
 }
 /**
  * Cheap pre-read gate: more than ONE Agent answer newer than the newest construction registration is never a first
