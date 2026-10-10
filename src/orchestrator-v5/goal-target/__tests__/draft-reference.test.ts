@@ -48,8 +48,21 @@ describe('both deadline-card issuers call the one resolver', () => {
       expect(text).toContain('versionCreatedAt: draft?.created_at');
     }
   });
-  it('no other site in the file turns a stored stamp into a reference day (todayInLondon(new Date(...)) is gone)', () => {
-    const turned = calls('todayInLondon').filter(c => c.arguments.some(a => ts.isNewExpression(a) && a.expression.getText(file) === 'Date' && (a.arguments?.length ?? 0) > 0));
-    expect(turned.map(c => c.getText(file))).toEqual([]);
+  it('each resolver call is the initializer of the issuer\'s `reference` (its result is used, not discarded)', () => {
+    for (const c of calls('draftReferenceDate')) {
+      expect(ts.isVariableDeclaration(c.parent) && c.parent.name.getText(file), owner(c)).toBe('reference');
+    }
+  });
+  it('no other site in the file turns a stored stamp into a day: every todayInLondon call takes the injected clock, and no Date is built from a stamp', () => {
+    expect(calls('todayInLondon').length).toBeGreaterThan(0);
+    for (const c of calls('todayInLondon')) expect(c.arguments.map(a => a.getText(file)).join(' '), c.getText(file)).toContain('opts.now');
+    const stamped: string[] = [];
+    const visit = (n: ts.Node): void => {
+      if (ts.isNewExpression(n) && n.expression.getText(file) === 'Date' && (n.arguments?.length ?? 0) > 0
+        && /created_at|scenario_created_at|stamp|timestamp/i.test(n.arguments!.map(a => a.getText(file)).join(' '))) stamped.push(n.getText(file));
+      ts.forEachChild(n, visit);
+    };
+    visit(file);
+    expect(stamped).toEqual([]);
   });
 });

@@ -2916,6 +2916,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             try {
               const pending = (await store.readCommittedTurn(scenarioId, turnId))?.pending_actions;
               if (!Array.isArray(pending)) closed('committed_row_missing_or_malformed');
+              else if (pending.some(entry => entry === null || typeof entry !== 'object' || Array.isArray(entry))) closed('committed_entry_malformed');
               return pending;
             } catch (err) { closed('committed_read_failed', err); throw err; }
           } };

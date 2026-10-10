@@ -35,7 +35,7 @@ const goal = (g: Rec): Rec => g.nodes.find((n: Rec) => n.kind === 'goal');
 function world(fixture: { graph: Rec; brief: string } = d2) {
   const sid = randomUUID(); let bytes = JSON.stringify(fixture.graph), brief = fixture.brief;
   let draftStamp: string | null = STAMP, scenarioStamp: string | null = '2026-09-01T10:00:00Z', broken = false, snapshotBroken = false;
-  let committedMode: 'ok' | 'throw' | 'missing' = 'ok', committedTurn = '';
+  let committedMode: 'ok' | 'throw' | 'missing' | 'malformed' = 'ok', committedTurn = '';
   const read = (): Rec => JSON.parse(bytes);
   const rows: SessionTurnWithContent[] = [makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)),
     request_hash: 'graph_registration:draft', turn_class: 'direct_answer', handler_id: null, response_emitted: false, created_at: STAMP })];
@@ -45,7 +45,7 @@ function world(fixture: { graph: Rec; brief: string } = d2) {
     ensureScenarioExists: async () => ({ user_id: null }),
     readCommittedTurn: async (_sid, id) => { const target = id === committedTurn; if (target && committedMode === 'throw') throw new Error('committed read failed'); const r = target && committedMode === 'missing' ? undefined : rows.find(r => r.turn_id === id); return r ? { id: r.id, request_hash: r.request_hash,
       user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used,
-      pending_actions: (r as Rec).pending_actions ?? [] } : null; },
+      pending_actions: target && committedMode === 'malformed' ? [null, 'junk'] : (r as Rec).pending_actions ?? [] } : null; },
     readMostRecentPendingActions: async (_sid, opts) => { if (broken) throw new Error('unreadable carrier'); if (snapshotBroken && opts?.onLatestRowId) { snapshotBroken = false; throw new Error('snapshot read failed'); } opts?.onLatestRowId?.(latest()?.id ?? null); return (latest() as Rec)?.pending_actions ?? []; },
     readRecent: async () => rows.filter(r => !r.turn_id.endsWith(':claim')),
     readFactsWithTurnFor: async ids => rows.flatMap(r => ids.includes(r.id) ? (writes.find(w => w.turn_id === r.turn_id)?.handler_facts ?? [])
@@ -74,7 +74,7 @@ function world(fixture: { graph: Rec; brief: string } = d2) {
   const ctx = (text: string) => ({ scenario_id: sid, authenticated_user_id: null, request_id: 'deadline-replay', user_text: text, user_turn_text: text });
   return { sid, store, rows, writes, read, caps, ctx, proposals, graphWire, versions,
     replace: (g: Rec) => { bytes = JSON.stringify(g); }, setBrief: (text: string) => { brief = text; },
-    reference: (draft: string | null, scenario: string | null) => { draftStamp = draft; scenarioStamp = scenario; }, failRead: () => { broken = true; }, failSnapshot: () => { snapshotBroken = true; }, failCommitted: (mode: 'throw' | 'missing', turnId: string) => { committedMode = mode; committedTurn = turnId; } };
+    reference: (draft: string | null, scenario: string | null) => { draftStamp = draft; scenarioStamp = scenario; }, failRead: () => { broken = true; }, failSnapshot: () => { snapshotBroken = true; }, failCommitted: (mode: 'throw' | 'missing' | 'malformed', turnId: string) => { committedMode = mode; committedTurn = turnId; } };
 }
 const apps: FastifyInstance[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
@@ -467,7 +467,7 @@ describe('R6 the draft was built inside an Agent turn', () => {
     });
     it('an UNKNOWN carrier read closes the offer AND says why on the existing logger (a silent closed offer is observable)', async () => {
       const { log } = await import('../../../utils/telemetry.js');
-      for (const [mode, reason] of [['throw', 'committed_read_failed'], ['missing', 'committed_row_missing_or_malformed']] as const) {
+      for (const [mode, reason] of [['throw', 'committed_read_failed'], ['missing', 'committed_row_missing_or_malformed'], ['malformed', 'committed_entry_malformed']] as const) {
         const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
         try {
           const w = world(), build = buildAnswer(w); w.rows.unshift(build); w.failCommitted(mode, build.turn_id);
