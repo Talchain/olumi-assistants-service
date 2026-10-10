@@ -196,11 +196,32 @@ const RESTAMPED_BY_2355: Record<string, readonly (readonly [string, string])[]> 
   'f-20260926T020217Z': [['59_with_ai_release', 'ai_feature_availability']],
   'f-20260926T001627Z': [['raise_to_59_with_release', 'ai_feature_release_availability']],
 };
-const after2355 = <G extends SGraph>(g: G, key: string, beforeMagnitudeSubtraction: SGraph): G => asProjectedMeanCapture({
-  ...g,
-  edges: g.edges.map((e) => ((RESTAMPED_BY_2355[key] ?? []).some(([f, t]) => e.from === f && e.to === t)
-    ? { ...e, provenance: { ...e.provenance, source: 'cee_hypothesis' } } : e)),
-}, beforeMagnitudeSubtraction);
+/**
+ * S7 (AIE quantity contract): a factor level the verifier credited from the brief now carries the EXISTING
+ * `extractionType: 'explicit'` beside `source: 'brief_extraction'`, written last (`framedObservedState`). The served
+ * captures pre-date it; it is the ONE field that differs, and the strict comparisons below still fail on any other
+ * drift — or on a node that carries it without being credited, or lacks it while credited.
+ */
+const withCreditedType = (n: SNode): SNode => {
+  const os = n.observed_state;
+  if (n.kind !== 'factor' || os?.source !== 'brief_extraction' || typeof os.value !== 'number') return n;
+  // The registered schema orders the key after `cap` and before `declared_scale` (JSON.stringify compares below).
+  const typed: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(os)) {
+    if (k === 'declared_scale') typed.extractionType = 'explicit';
+    typed[k] = v;
+  }
+  if (typed.extractionType === undefined) typed.extractionType = 'explicit';
+  return { ...n, observed_state: typed } as SNode;
+};
+const after2355 = <G extends SGraph>(g: G, key: string, beforeMagnitudeSubtraction: SGraph): G => {
+  const projected = asProjectedMeanCapture({
+    ...g,
+    edges: g.edges.map((e) => ((RESTAMPED_BY_2355[key] ?? []).some(([f, t]) => e.from === f && e.to === t)
+      ? { ...e, provenance: { ...e.provenance, source: 'cee_hypothesis' } } : e)),
+  }, beforeMagnitudeSubtraction);
+  return { ...projected, nodes: projected.nodes.map(withCreditedType) } as G;
+};
 /**
  * Base (cb1778b) predates the limit frame (#1919): admission now stamps each limit's `value_frame` right
  * after `provenance` (`admit-constraint.ts`). Every served limit here is a level, so what registers is
@@ -213,7 +234,7 @@ const unsized = (g: SGraph): SGraph => ({ ...g, edges: subtractMagnitudeDelta(g.
  * last, as `framedObservedState` writes it); "100 % of today" keeps no author. The captures pre-date it, so it is
  * their one known node delta.
  */
-const olumisKnownLevels = (nodes: SNode[]): SNode[] => nodes.map((n) => {
+const olumisKnownLevels = (nodes: SNode[]): SNode[] => nodes.map(withCreditedType).map((n) => {
   const os = n.observed_state;
   if (n.kind !== 'factor' || n.provenance !== 'ai_inferred' || os === undefined || os.source !== undefined) return n;
   if (os.unit === '% of today' && (os.raw_value ?? os.value) === 100) return n;

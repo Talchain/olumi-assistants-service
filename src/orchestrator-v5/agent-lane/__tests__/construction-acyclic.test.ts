@@ -195,8 +195,18 @@ function reaches(g: Graph, from: string, to: string): boolean {
  * GOAL is compared with exactly these three added, by value; every other node stays byte for byte.
  */
 const G1_HELD = { threshold_source: 'brief_extraction', goal_direction: '>=', goal_horizon_months: 12 } as const;
-const asServedNow = (n: unknown): unknown =>
-  (n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal' ? { ...n, ...G1_HELD } : n);
+/**
+ * S7 (AIE quantity contract): a factor level the verifier credited from the brief carries the EXISTING
+ * `extractionType: 'explicit'` beside `source: 'brief_extraction'`; the served bytes predate it. The comparison is by
+ * content (`canon`), so a node that carried it without being credited — or lacked it while credited — still fails.
+ */
+const withCreditedType = (n: unknown): unknown => {
+  const x = n as { kind?: unknown; observed_state?: { source?: unknown; value?: unknown } } | null;
+  return x !== null && typeof x === 'object' && x.kind === 'factor' && x.observed_state?.source === 'brief_extraction'
+    && typeof x.observed_state.value === 'number' ? { ...x, observed_state: { ...x.observed_state, extractionType: 'explicit' } } : n;
+};
+const asServedNow = (n: unknown): unknown => withCreditedType(
+  n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal' ? { ...n, ...G1_HELD } : n);
 
 /** Sorted-key JSON, so the served bytes and ours compare by content, not key order. */
 const canon = (v: unknown): string => JSON.stringify(v, (_k, x) =>

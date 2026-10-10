@@ -119,6 +119,7 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
     const n = byId(admitted(candidate()), 'stated_headcount');
     expect(n.observed_state).toStrictEqual({
       value: 49 / 200, raw_value: 49, cap: 200, declared_scale: 'unit_interval', unit: 'GBP', source: 'brief_extraction',
+      extractionType: 'explicit', // S7: the verifier-credited quantity carries the existing explicit type; figures unchanged
     });
     expect(n).not.toHaveProperty('scale_frame');
   });
