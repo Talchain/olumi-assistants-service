@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 /**
  * THE INFERRED-VALUE DISCLOSURE — the analysis says whose numbers it ran on.
  *
@@ -198,7 +199,7 @@ export function deriveInferredValues(graph: unknown): InferredValueRecord[] {
     const data = raw.data as Record<string, unknown> | undefined;
     const hasValue =
       typeof observed?.value === 'number' || typeof data?.value === 'number';
-    if (!hasValue) continue;
+    if (!hasValue || isUnverifiedUserMaterial(observed)) continue;
     const source = typeof observed?.source === 'string' ? observed.source : undefined;
     const extraction = typeof data?.extractionType === 'string' ? data.extractionType : undefined;
     const isOurs =

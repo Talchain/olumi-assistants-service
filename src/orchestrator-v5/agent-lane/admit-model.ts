@@ -76,6 +76,8 @@ import {
 } from './admit-constraint.js';
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
+import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
+import { verifiedFactorLevel } from './verified-option-setting.js';
 
 const MAX_ID = 100;
 
@@ -207,7 +209,7 @@ export interface CandidateModel {
      */
     is_status_quo?: boolean | null;
   }[];
-  readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
+  readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; baseline_evidence?: { readonly quote: string } | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
   /**
    * ⭐ A QUANTITY OUTCOME OR A RISK'S EXPOSURE CARRIES THE FRAME A FACTOR DOES (DL #75 5916155976 (a); R3 5916156932 (b)):
    * `unit` + `plausible_max`, nullable. Without them no size into or out of the node can be read (`resolveMagnitudeFrame`
@@ -483,7 +485,7 @@ export interface AdmittedNode {
    * type was the reason three test files failed the typecheck ratchet while
    * `tsconfig.build.json` — which excludes tests — reported clean.
    */
-  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string; baseline?: number };
+  observed_state?: { value: number; unit?: string; source?: string; extractionType?: 'explicit' | 'inferred' | 'range' | 'observed'; user_material_unverified?: true; raw_value?: number; cap?: number; declared_scale?: string; baseline?: number };
   /**
    * `cee-v3.ts` `scale_frame`: the divisor this factor's levels are stated
    * on, for a factor with no baseline. The declared carrier; see the write site.
@@ -516,7 +518,7 @@ export interface AdmittedNode {
    * `structural-add-edge.ts:233` treats as CORRUPTION — so every write to the
    * scenario returned 500 until this was fixed.
    */
-  provenance?: 'from_brief' | 'ai_inferred' | 'user_set';
+  provenance?: ProvenanceDisplay;
   draft_widening?: DraftWideningT;
   proposed_by?: 'olumi';
   analysis_participation?: 'included' | 'retained_excluded';
@@ -781,17 +783,27 @@ function framedByRange(x: { plausible_max?: number | null }): { node?: { scale_f
 
 export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
-}): Record<string, unknown> {
+}, verifiedCurrentLevel?: boolean, userMaterialUnverified = false): Record<string, unknown> {
   const raw = f.baseline_value as number;
   // ⛔ A KNOWN BASELINE THE BUILDER INFERRED IS OLUMI'S, NOT NOBODY'S (AIQ #70 5852160429). Source-less, served
   // eng-hiring (`2d0df14`) left salary spend and both headcounts unauthored: "I supplied N values" skipped them and
   // the magnitude reader (`knownBaseline`) took the unauthored 0 as today's known level. Same author as
   // `estimatedObservedState` and `withdrawUnstatedBaselineStamps` (#2076). "Today is 100 % of today" is a definition,
-  // not an estimate, so a restated change keeps no author (review 5835754404 row 4a; MG 5852168578).
-  const definitional = f.unit === TODAY_UNIT && raw === TODAY_LEVEL;
-  const base = {
+  // not evidence for a user's measured level; construction attribution requires the verified receipt.
+  // Construction always passes a receipt verdict. The two typed human doors use this
+  // formatter after verifying the figure themselves; preserve their trusted carrier shape.
+  const base = verifiedCurrentLevel === undefined ? {
     ...(f.unit ? { unit: f.unit } : {}),
-    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' } : definitional ? {} : { source: 'cee_inference' }),
+    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' }
+      : f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {} : { source: 'cee_inference' }),
+  } : {
+    ...(f.unit ? { unit: f.unit } : {}),
+    // ⭐ The native quantity read needs the EXISTING extraction type: it is written ONLY after the public verifier (or the
+    // trusted affine conversion of a verified receipt) proved this exact quantity. Everything else keeps its staging bytes.
+    ...(verifiedCurrentLevel ? { source: 'brief_extraction', extractionType: 'explicit' }
+      : !userMaterialUnverified && f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {}
+        : { source: 'cee_inference', ...(userMaterialUnverified || f.provenance === 'ai_proposed' || f.provenance === 'inferred' ? { extractionType: 'inferred' } : {}) }),
+    ...(userMaterialUnverified ? { user_material_unverified: true as const } : {}),
   };
   const cap = f.plausible_max;
   // Already a proportion, or no usable range: leave it exactly as it was. A
@@ -3467,6 +3479,18 @@ function admitOnce(
   const goalScope = unstatedGoalScope(model.goal);
 
   // Fixed traversal order => deterministic ids.
+  /**
+   * The drafter cites a brief sentence that WRITES this figure (`findStatedAmounts`, the same amount reader the verifier
+   * starts from): a claim about what the user wrote, verified or not. A quote that does not carry the figure is context
+   * ("Staffing is fixed…"), never the user's claim, so an estimate that cites it stays Olumi's.
+   */
+  const quotesBrief = (f: { baseline_value?: number | null; baseline_evidence?: { quote?: string } | null }): boolean => {
+    const quote = f.baseline_evidence?.quote;
+    const value = f.baseline_value;
+    return typeof quote === 'string' && typeof value === 'number' && Number.isFinite(value)
+      && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value));
+  };
+  const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
       label: model.goal.metric,
@@ -3624,7 +3648,7 @@ function admitOnce(
       provenance: f.provenance,
       node: {
         category: f.role,
-        // A baseline is written ONLY when the candidate says one is known.
+        // A baseline's author comes from the receipt, independently of the drafter's entity provenance.
         //
         // ⭐ `observed_state.source` IS A DIFFERENT CLAIM FROM `provenance.source`,
         // and both are required. `provenance.source` says who put this ENTITY in
@@ -3632,13 +3656,16 @@ function admitOnce(
         // it is the latter that `src/cee/provenance/money-invariant.ts:211` reads
         // to decide whether to audit the figure against the brief. Correcting only
         // the entity stamp left the figure unaudited; measured, not assumed.
-        ...(f.baseline_known && typeof f.baseline_value === 'number'
-          ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }) }
+        // A factor the drafter tagged an estimate BUT quoted the brief for is a user CLAIM the receipt gate could not verify
+        // (e.g. no first-person owner): it stays visible as the user's unverified claim, never Olumi's estimate.
+        ...((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number'
+          ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
+            !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))) }
           : {}),
         // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
         // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
         ...((): Record<string, unknown> => {
-          const os = estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
+          const os = verifiedLevels.has(f) || quotesBrief(f) ? null : estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
           return os === null ? {} : { observed_state: os };
         })(),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
@@ -3677,7 +3704,7 @@ function admitOnce(
         ...((): Record<string, number> => {
           const c = capFor(f.label) ?? f.plausible_max;
           if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
-          if (f.baseline_known && typeof f.baseline_value === 'number') {
+          if ((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number') {
             const os = framedObservedState({ ...f, plausible_max: c }) as { cap?: unknown };
             // Already framed inside `observed_state` — a second carrier could
             // disagree with it, so do not write one.
@@ -3782,7 +3809,8 @@ function admitOnce(
       kind: e.kind,
       label,
       ...(label !== e.label ? { description: e.label } : {}),
-      provenance: displayProvenanceFor(e.provenance),
+      provenance: isUnverifiedUserMaterial(e.node?.observed_state)
+        ? nodeProvenanceDisplay(undefined, e.node?.observed_state) : displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
     });
   }

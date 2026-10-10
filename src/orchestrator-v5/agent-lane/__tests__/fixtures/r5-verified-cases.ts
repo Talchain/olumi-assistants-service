@@ -4,12 +4,13 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { Ajv } from 'ajv';
 import type { CandidateModel, StatedOptionEvidence } from '../../admit-model.js';
-import { admitCandidateModel } from '../../admit-model.js';
+import { admitCandidateModel, slugId } from '../../admit-model.js';
+import { valueAuthorshipOf } from '../../turn-context/guidance-signals.js';
+import { nodeProvenanceDisplay } from '../../../../cee/transforms/provenance-display.js';
 import { keepOptionsAndQuantitiesApart } from '../../keep-options-apart.js';
 import { perOneLinksForConstantProducts } from '../../per-one-product.js';
 import { findStatedAmounts } from '../../../../cee/provenance/stated-amounts.js';
 import { verifiedOptionSetting } from '../../verified-option-setting.js';
-import { creditStatedFactorLevels } from '../../stated-by-user.js';
 import { buildCandidateSchema, buildModelFromBrief, carryFindingsAcrossRetry, prepareProvisionalCandidate, strictForTheDrafter, withCountInterventionRanges } from '../../runtime/build-model.js';
 import type { InternalDispatch } from '../../runtime/agent-capabilities.js';
 import { beforeDoorTag } from '../licence-test-graphs.js';
@@ -25,8 +26,8 @@ export interface Probe { id: string; description: string; model: CandidateModel;
 export const probes: Probe[] = json('r5-verified-probes.json');
 export type Row = { name: string; run: () => void | Promise<void> };
 export const level = (m: CandidateModel, option: string, factor: string) => m.options.find(o => o.label === option)!.interventions!.find(i => i.factor_label === factor)!;
-export const preflight = (m: CandidateModel, brief: string): CandidateModel => creditStatedFactorLevels(keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(m)).model, brief);
-export const prepare = (m: CandidateModel, brief: string) => prepareProvisionalCandidate(preflight(m, brief), brief);
+export const preflight = (m: CandidateModel): CandidateModel => keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(m)).model;
+export const prepare = (m: CandidateModel, brief: string) => prepareProvisionalCandidate(preflight(m), brief);
 export const admitted = (m: CandidateModel, brief: string) => admitCandidateModel(withCountInterventionRanges(m, brief), {}, brief);
 export function censusInput(index: number): { model: CandidateModel; brief: string } {
   const c = census[index]!;
@@ -42,7 +43,7 @@ export function assertCell(m: CandidateModel, brief: string, option: string, fac
   assert.equal(iv.provenance, expected);
   // The verifier neither replaces figures nor promotes an estimated baseline.
   assert.equal(iv.value, level(m, option, factor).value);
-  assert.deepEqual(p.candidate.factors, preflight({ ...m, factors: before }, brief).factors);
+  assert.deepEqual(p.candidate.factors, preflight({ ...m, factors: before }).factors);
   const a = admitted(p.candidate, brief);
   const f = a.nodes.find(n => n.label === factor)!; const o = a.nodes.find(n => n.label === option)!;
   const cell = o.interventions?.[f.id];
@@ -50,7 +51,8 @@ export function assertCell(m: CandidateModel, brief: string, option: string, fac
   assert.equal(cell.source, expected === 'explicit' ? 'brief_extraction' : 'cee_hypothesis');
   assert.ok(!JSON.stringify(cell).includes('stated_evidence'));
 }
-const supportedProbes = new Set(['N0', 'N1a', 'N3', 'N5', 'N10c', 'B-N0']);
+// N1a formerly borrowed a text-search baseline upgrade; without a current-level receipt it conservatively refuses.
+const supportedProbes = new Set(['N0', 'N3', 'N5', 'N10c', 'B-N0']);
 export const censusRows: Row[] = census.map((c, index) => {
   const underCredit = (c.sc === 'ca2cc3ca' && c.factor === 'Starter tier monthly price')
     || (c.sc === 'b7398aad' && c.factor === 'Starter-tier price');
@@ -147,6 +149,32 @@ for (const value of [80, 250]) seamRows.push({ name: `P: range endpoint ${value}
   Object.assign(iv, { value, stated_evidence: { ...e, amount_start: at } });
   assertCell(i.model, i.brief, c.option, c.factor, 'ai_proposed');
 } });
+// Each list comes from the named ORIGINAL raw candidate's known inferred levels, not admitted output.
+const AI_LEVELS_BY_RAW: Record<string, readonly string[]> = {
+  'a4d58afe.first.json': ['additional_staffing_cost'], // known 0 £/month, inferred
+  'a4d58afe.json': ['additional_staffing_cost'], // known 0 £/month, inferred
+  'fff05472.json': ['additional_weekday_opening_hours', 'additional_weekday_nurse_hours'], // known 0 hours/week; 0 nurse hours/month
+  'b7398aad.json': ['price_rise', 'price_rise_customer_losses'], // known 0%; 0 customers, inferred
+  'f440be4a.json': ['customers_lost_from_price_rise'], // known 0 customers, inferred
+  '549f6ab8.json': ['additional_evening_opening_hours', 'annual_incremental_operating_cost'], // known 0 hours/week; 0 £/year
+};
+function beforeAiLevelType(a: ReturnType<typeof admitted>, raw: CandidateModel, file: string): ReturnType<typeof admitted> {
+  const ids = AI_LEVELS_BY_RAW[file] ?? [];
+  for (const id of ids) {
+    const f = raw.factors.find(f => slugId(f.label) === id)!;
+    assert.equal(f.baseline_known, true, id); assert.equal(f.provenance, 'inferred', id);
+    const os = a.nodes.find(n => n.id === id)!.observed_state!;
+    assert.equal(os.source, 'cee_inference', id); assert.equal(os.extractionType, 'inferred', id);
+    assert.equal(valueAuthorshipOf(os), 'olumi_estimate', id);
+    assert.equal(nodeProvenanceDisplay(os.extractionType, os), 'ai_inferred', id);
+  }
+  return { ...a, nodes: a.nodes.map(n => {
+    if (!ids.includes(n.id)) return n;
+    const { extractionType: _type, ...observed_state } = n.observed_state!;
+    assert.equal(valueAuthorshipOf(observed_state), 'unknown', n.id);
+    return { ...n, observed_state };
+  }) };
+}
 export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
   name: `raw no-evidence ${c.file} ${c.sha256}`,
   run: () => {
@@ -164,7 +192,7 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     assert.equal(sentIntervention({ ...oldCell, stated_evidence: null }), true);
     const p = prepare(raw, brief); const a = admitted(p.candidate, brief);
     const baseline: Record<string, string> = json('r5-no-evidence-baseline.json');
-    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(a) })), baseline[c.file]);
+    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(a, raw, c.file)) })), baseline[c.file]);
   },
 })));
 export const registrationRows: Row[] = probes.filter(p => p.id.startsWith('B-')).map(p => ({

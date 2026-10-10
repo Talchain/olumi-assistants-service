@@ -25,7 +25,9 @@ import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CandidateModel } from '../admit-model.js';
+import { slugId, type CandidateModel } from '../admit-model.js';
+import { valueAuthorshipOf } from '../turn-context/guidance-signals.js';
+import { nodeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -132,6 +134,11 @@ interface Built { out: Record<string, unknown>; body: Graph; graph: Graph; calls
 
 /** The REAL construction, with the drafter faked: `drafts[i]` answers call i (the last repeats). */
 async function build(...drafts: CandidateModel[]): Promise<Built> {
+  const quote = 'Our Pro price is £49 a month.';
+  drafts = drafts.map((m) => ({ ...m, factors: m.factors.map((f) =>
+    f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 49
+      ? { ...f, baseline_evidence: { quote } } : f) }));
+  const brief = `${quote}\n\n${SERVED.brief}`;
   let body: unknown = null;
   const inputs: string[] = [];
   const call = (async (req: { input: string }) => {
@@ -145,7 +152,7 @@ async function build(...drafts: CandidateModel[]): Promise<Built> {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', SERVED.brief, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
   return { out, body: body as Graph, graph: GraphV3.parse(body) as unknown as Graph, calls: inputs.length, inputs };
 }
@@ -215,6 +222,49 @@ function addedGoalKeys(built: ReadonlyArray<{ kind?: string }>, served: Readonly
   return Object.keys(b).filter((k) => !(k in v)).sort();
 }
 
+/**
+ * S7 (AIE quantity contract): a factor level the verifier credited carries the EXISTING `extractionType: 'explicit'`
+ * beside `source: 'brief_extraction'`. The served capture and the base digest pre-date it; it is the one field that
+ * differs. `typedLevels` keeps the strictness: exactly the brief-sourced numeric factors carry it, and the digest below
+ * is still the base digest of every OTHER byte.
+ */
+const isBriefLevel = (n: Record<string, any>): boolean => n.kind === 'factor' && n.observed_state?.source === 'brief_extraction'
+  && typeof n.observed_state.value === 'number';
+const typedLevels = (nodes: Record<string, any>[]): Record<string, any>[] => nodes.map((n) => isBriefLevel(n)
+  ? { ...n, observed_state: { ...n.observed_state, extractionType: 'explicit' } } : n);
+const withoutTypedLevels = (nodes: Record<string, any>[]): Record<string, any>[] => nodes.map((n) => {
+  if (!isBriefLevel(n)) { expect(n.observed_state?.extractionType, `${n.id} is not a verified level`).not.toBe('explicit'); return n; }
+  expect(n.observed_state.extractionType, `${n.id} is a verified level`).toBe('explicit');
+  const { extractionType: _t, ...os } = n.observed_state;
+  return { ...n, observed_state: os };
+});
+
+// Fixed from servedCandidate's original known, inferred zero levels; never from the registered graph.
+const AI_LEVELS_BY_CASE = {
+  served: ['feature_investment', 'six_month_incremental_spend'],
+  acyclic: ['feature_investment', 'six_month_incremental_spend', 'advertising_spend'],
+} as const;
+function beforeAiLevelTypes(nodes: Record<string, any>[], candidate: CandidateModel, key: keyof typeof AI_LEVELS_BY_CASE): Record<string, any>[] {
+  const ids: readonly string[] = AI_LEVELS_BY_CASE[key];
+  for (const id of ids) {
+    const factor = candidate.factors.find(f => slugId(f.label) === id)!;
+    expect(factor.baseline_known, id).toBe(true);
+    expect(factor.provenance, id).toBe('inferred');
+    const os = nodes.find(n => n.id === id)!.observed_state;
+    expect(os.source, id).toBe('cee_inference');
+    expect(os.extractionType, id).toBe('inferred');
+    expect(valueAuthorshipOf(os), id).toBe('olumi_estimate');
+    expect(nodeProvenanceDisplay(os.extractionType, os), id).toBe('ai_inferred');
+  }
+  return nodes.map(n => {
+    if (!ids.includes(n.id)) return n;
+    const { extractionType: _type, ...os } = n.observed_state;
+    // The same old stored numeric bytes, without the new marker, still have UNKNOWN authorship.
+    expect(valueAuthorshipOf(os), n.id).toBe('unknown');
+    return { ...n, observed_state: os };
+  });
+}
+
 describe('the fixture IS the served model (fidelity, not a self-authored stand-in)', () => {
   it('served: the option pointed at itself, the self-link was the only loop, and Run was refused on it', async () => {
     expect(SERVED.analysis_ready).toMatchObject({ status: 'blocked', blocked_reason: 'CYCLE_DETECTED', may_run: false });
@@ -233,13 +283,15 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
   });
 
   it('the reconstructed candidate registers the served nodes, edges and limits — less ONLY the withheld self-link and the level it carried', async () => {
-    const { out, body } = await build(servedCandidate());
+    const candidate = servedCandidate();
+    const { out, body } = await build(candidate);
+    const comparisonBody = { ...body, nodes: beforeAiLevelTypes(body.nodes as Record<string, any>[], candidate, 'served') } as Graph;
     const withheld = new Set(loopWithheld(out));
-    const servedNodes = SERVED.draft_graph.nodes.map((n) => {
+    const servedNodes = typedLevels(SERVED.draft_graph.nodes.map((n) => {
       if (n.id !== ADVERTISING || !withheld.has(SELF)) return n;
       const { [ADVERTISING]: _self, ...rest } = n.interventions!;
       return { ...n, interventions: rest };
-    });
+    }) as Record<string, any>[]) as typeof SERVED.draft_graph.nodes;
     // G1 (#2140, landed after this capture) stamps the goal's held attributes. They are NAMED here and subtracted, never
     // hidden: the rest of every node must still equal the served model byte for byte.
     // 0.67.0's goal `unit_reading` also postdates this capture: read back in the served form first (`one-form-levels.ts`).
@@ -248,7 +300,7 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     expect(added.every((k) => (G1_GOAL_FIELDS as readonly string[]).includes(k)), added.join(',')).toBe(true);
     // P2 A5 (#2139), landed after this capture too: option levels are read back in the served short form, on the SERVED
     // factors' own frames and units (`one-form-levels.ts`); anything else they carry still fails this compare.
-    expect(asServedBeforeOneForm(body, SERVED.draft_graph).nodes.map((n) => canon(withoutG1(n)))).toEqual(servedNodes.map(canon));
+    expect(asServedBeforeOneForm(comparisonBody, SERVED.draft_graph).nodes.map((n) => canon(withoutG1(n)))).toEqual(servedNodes.map(canon));
     expect(beforeDoorTag(body).edges.map(canon)).toEqual(asProjectedMeanCapture(SERVED.draft_graph, body).edges.filter((e) => !withheld.has(`${e.from}->${e.to}`)).map(canon));
     expect(canon(body.goal_constraints)).toEqual(canon(SERVED.draft_graph.goal_constraints));
   });
@@ -324,7 +376,8 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
   const ACYCLIC_BODY_SHA256_AT_BASE = '2a2b04a4b4cce87995a9c42b96a95c478a617045d4aea6d626f548b40d909c58';
 
   it('an acyclic draft registers byte-identical, with no loop said or asked', async () => {
-    const { out, body, calls } = await build(servedCandidate({ advertisingFactorLabel: 'Advertising spend' }));
+    const candidate = servedCandidate({ advertisingFactorLabel: 'Advertising spend' });
+    const { out, body, calls } = await build(candidate);
     expect(cycleFree(body)).toBe(true);
     expect(loopWithheld(out)).toEqual([]);
     expect(loopLines(out)).toEqual([]);
@@ -336,7 +389,9 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     // 0.67.0's goal `unit_reading` postdates the digest too: the stand-in "served" graph is the body without it, so the
     // helper removes it only in the writer's closed shape; every frame is still read off the same factor nodes.
     const readBack = asServedBeforeProjectedMeans(asServedBeforeOneForm(body, { ...body, nodes: (body.nodes as Record<string, unknown>[]).map(({ unit_reading: _r, ...n }) => n) }));
-    expect(createHash('sha256').update(canon({ ...readBack, nodes: readBack.nodes.map(withoutG1) })).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
+    const untyped = withoutTypedLevels(beforeAiLevelTypes(readBack.nodes as Record<string, any>[], candidate, 'acyclic'));
+    expect(untyped.length).toBe(readBack.nodes.length);
+    expect(createHash('sha256').update(canon({ ...readBack, nodes: untyped.map(withoutG1) })).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
   });
 
   // Re-recorded (CEE #2355; AIQ 5909754019 (2), P0 PARTNER CR 5909944908): a drafted `explicit` self-link with no

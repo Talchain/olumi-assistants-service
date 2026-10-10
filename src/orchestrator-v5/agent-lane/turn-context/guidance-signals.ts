@@ -115,7 +115,7 @@ export function valueAuthorshipOf(observed: unknown): ValueAuthorship {
   if (os === undefined) return 'unknown';
   if (isAcceptedOlumiEstimate(os)) return 'olumi_accepted';
   const auth = observedValueAuthorship(os);
-  if (auth !== undefined) return auth.provenance === 'ai_inferred' ? 'olumi_estimate' : 'yours';
+  if (auth !== undefined) return auth.provenance === 'unverified_brief' ? 'unknown' : auth.provenance === 'ai_inferred' ? 'olumi_estimate' : 'yours';
   // `brief_extraction` / `cee_inference` / `explicit` / `inferred` DEFER to the extraction type (provenance-display.ts).
   const et = os.extractionType;
   if (et === 'explicit' || et === 'observed') return 'yours';

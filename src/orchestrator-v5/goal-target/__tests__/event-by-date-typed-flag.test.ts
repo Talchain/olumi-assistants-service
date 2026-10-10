@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { log } from '../../../utils/telemetry.js';
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: vi.fn(async () => undefined) }));
-import { admitCandidateModel, type CandidateModel } from '../../agent-lane/admit-model.js';
+import { admitCandidateModel, slugId, type CandidateModel } from '../../agent-lane/admit-model.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../../agent-lane/runtime/build-model.js';
 import type { ToolResult } from '../../agent-lane/runtime/agent-tools.js';
 import { firstAnalysisSentence } from '../../agent-lane/first-analysis.js';
@@ -15,6 +15,8 @@ import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-pa
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import * as EventModel from '../event-by-date-model.js';
+import { valueAuthorshipOf } from '../../agent-lane/turn-context/guidance-signals.js';
+import { nodeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = '086e4624-3c4f-4c6f-8706-655fa6b9b388';
@@ -123,6 +125,34 @@ async function built(c: CandidateModel, brief = BRIEF) {
   }, call) as ToolResult & Rec;
   return { result, registrations, instructions };
 }
+// Fixed IDs from each ORIGINAL candidate's known inferred levels, not the registered graph.
+const AI_LEVELS_BY_CASE: Record<string, readonly string[]> = {
+  'sealedR-d3': ['starter_subscribers'], // sealed(): known 0 subscribers, inferred, cap 5000.
+  'B3-d2': ['senior_engineers_hired', 'junior_engineers_hired'], // Recorded: known 0 engineers, inferred, caps 20/30.
+};
+function beforeAiLevelTypes(g: Rec, candidate: CandidateModel, key: string): Rec {
+  const ids = AI_LEVELS_BY_CASE[key];
+  expect(ids, key).toBeDefined();
+  for (const id of ids) {
+    const f = candidate.factors.find(f => slugId(f.label) === id)!;
+    expect(f.baseline_known, id).toBe(true);
+    expect(f.provenance, id).toBe('inferred');
+    const os = g.nodes.find((n: Rec) => n.id === id)!.observed_state;
+    expect(os.source, id).toBe('cee_inference');
+    expect(os.extractionType, id).toBe('inferred');
+    expect(os.user_material_unverified, id).toBeUndefined();
+    expect(valueAuthorshipOf(os), id).toBe('olumi_estimate');
+    expect(nodeProvenanceDisplay(os.extractionType, os), id).toBe('ai_inferred');
+  }
+  return { ...g, nodes: g.nodes.map((n: Rec) => {
+    if (!ids.includes(n.id)) return n;
+    const { extractionType: _type, ...legacy } = n.observed_state;
+    // The frozen old stored numeric carrier keeps UNKNOWN authorship; do not migrate it.
+    expect(valueAuthorshipOf(legacy), n.id).toBe('unknown');
+    expect(nodeProvenanceDisplay(legacy.extractionType, legacy), n.id).toBe('ai_inferred');
+    return { ...n, observed_state: legacy };
+  }) };
+}
 function expectEventGraph(g: Rec) {
   expect(g.edges.find((e: Rec) => e.from === 'event_team' && e.to === 'event_goal')).toMatchObject({
     provenance: { share_by_date: { role: 'team', deliverable: 'the new platform', goal_id: 'event_goal', team_id: 'event_team' } },
@@ -169,7 +199,9 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
         });
         delete e.provenance!.olumi_fit_candidate;
       }
-      expect(createHash('sha256').update(JSON.stringify(admissionBase)).digest('hex')).toBe('758a0f1140259bf4641f687ca33d145d8629c2a56d899c36ee9b9618ce345dbf');
+      // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
+      // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
+      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(admissionBase, sealed(), 'sealedR-d3'))).digest('hex')).toBe('4822ddd3cd04fdbbd132bb88c1e83b7143875147c063e4fce170f282beb5014e');
       expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
       expect(info.mock.calls.some(c => (c[0] as { event?: string } | undefined)?.event === 'cee.event_by_date.fallback_kept')).toBe(false);
       const { result, registrations } = await built(sealed(), SEALED_BRIEF);
@@ -196,8 +228,10 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
               strength_mean_frame: 'edge_strength' } }, defaulted: true };
       }
       expect(JSON.stringify(registrations[0])).not.toContain('olumi_fit_candidate');
-      expect(createHash('sha256').update(JSON.stringify(registrationBase)).digest('hex'))
-        .toBe('6b2f1c91002476b918f9322d2a0053d6f1d08cf73c43b7894d7ad2be464010e9');
+      // S7 PR-B re-record (field-by-field vs staging cbf36b7a): only nodes 5, 6, 9 (drafter-declared explicit, no verbatim brief quote) gain
+      // extractionType inferred + user_material_unverified, provenance from_brief->unverified_brief (and source brief_extraction->cee_inference where it was set).
+      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrationBase, sealed(), 'sealedR-d3'))).digest('hex'))
+        .toBe('e6e213467888242aaf6e74c98deccdea5415774ea85bae69540b5992aa9dccf7');
       expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
       expect(eventAdmission).not.toHaveBeenCalled();
     } finally { info.mockRestore(); eventAdmission.mockRestore(); }
@@ -222,7 +256,7 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(result).toMatchObject({ ok: true, mutated: true });
     expect(registrations).toHaveLength(1);
     // Base staging 94b2554d registered this exact graph (census r3, graph_sha prefix).
-    expect(createHash('sha256').update(JSON.stringify(registrations[0])).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
+    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrations[0], JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
     expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
   });
 
@@ -360,6 +394,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     const explicitFalse = admitCandidateModel(normal(), {}, brief, undefined, undefined, undefined, undefined, undefined,
       { event_by_date_prompted: false });
     expect(JSON.stringify(explicitFalse)).toBe(JSON.stringify(a));
-    expect(createHash('sha256').update(JSON.stringify(a)).digest('hex')).toBe('71f5dbb733c3844ea76c431d12823d32b972cc71369648e7817c5622c6524c6e');
+    // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
+    // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
+    expect(createHash('sha256').update(JSON.stringify(a)).digest('hex')).toBe('28e2aee7fbe6e85c468c897e27c181016d1efa53a7ab3d8888a01b9caa5056e0');
   });
 });

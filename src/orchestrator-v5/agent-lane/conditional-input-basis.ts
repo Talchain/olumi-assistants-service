@@ -1,6 +1,6 @@
 /** Disclosure only. The caller owns current-run binding and leader permission. */
 import { structureProvenance } from '../../cee/graph-readiness/obligation-provenance.js';
-import { isAcceptedOlumiEstimate } from '../../cee/transforms/provenance-display.js';
+import { isAcceptedOlumiEstimate, isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 import { winnerOptionResultSource, isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
 import { asAnalysed } from '../../orchestrator/context/placeholder-parts.js';
 import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
@@ -60,7 +60,7 @@ function factorStartingValueBasis(input: ConditionalInputBasis): string | null {
   const nodes = rawNodes.map(rec).filter((n): n is Rec => n !== undefined);
   const options = input.analysedOptionIds.map((id) => nodes.find((n) => n.kind === 'option' && n.id === id));
   if (options.length === 0 || options.some((n) => n === undefined)) return UNAVAILABLE;
-  const estimates: string[] = []; const unrecorded: string[] = [];
+  const estimates: string[] = []; const unrecorded: string[] = []; const unverified: string[] = [];
   for (const id of new Set(raw as string[])) {
     const node = nodes.find((n) => n.id === id);
     if (node?.kind !== 'factor' || typeof node.label !== 'string' || node.label.trim() === '') return UNAVAILABLE;
@@ -73,11 +73,13 @@ function factorStartingValueBasis(input: ConditionalInputBasis): string | null {
     if (state === undefined || (!finite(state.raw_value) && !finite(state.value))) return UNAVAILABLE;
     const origin = structureProvenance(node);
     const name = `"${node.label.trim()}"`;
-    if (state.source === 'user_confirmed' || isAcceptedOlumiEstimate(state) || origin === 'ai_drafted' || origin === 'system_repaired') estimates.push(name);
+    if (isUnverifiedUserMaterial(state)) unverified.push(name);
+    else if (state.source === 'user_confirmed' || isAcceptedOlumiEstimate(state) || origin === 'ai_drafted' || origin === 'system_repaired') estimates.push(name);
     else if (origin === 'unattributed') unrecorded.push(name);
   }
   const lines = [
     ...(estimates.length > 0 ? [`This comparison uses Olumi’s estimates for ${estimates.join(', ')}.`] : []),
+    ...unverified.map((name) => `${name}: Not confirmed from your brief`),
     ...unrecorded.map((name) => `${name}: source unrecorded.`),
   ];
   return lines.length === 0 ? null : `${lines.join(' ')} ${COVERAGE}`;

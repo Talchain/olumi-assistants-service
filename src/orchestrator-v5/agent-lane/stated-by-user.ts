@@ -34,15 +34,13 @@ import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, ty
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
-import type { CandidateModel } from './admit-model.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { labelHeadUnit } from './label-head-unit.js';
-import { readUnitParts, sameUnit } from './same-unit.js';
+import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
-import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { readCount } from './same-unit.js';
@@ -323,47 +321,6 @@ export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unkno
   });
 }
 
-/**
- * ⛔ A LEVEL THE BRIEF STATES FOR A FACTOR IS THE USER'S, WHATEVER THE DRAFTER TAGGED IT (R3 #72 5896630173 (2); DL
- * 5896669522). Served `03b720e0` on `a20cfd6`: "We have 1,500 paying subscribers" was drafted as an ESTIMATE of "Pro plan
- * paying subscribers" (`baseline_known: false`, 1,500), so it was saved as Olumi's (`cee_inference`). The MRR goal's
- * product then had no two user-stated parts, so no card was offered and nothing was withheld, and the Run showed 6 goal
- * chances on a product-shaped goal.
- *
- * The mirror of `withdrawUnstatedBaselineStamps`, applied to the CANDIDATE before admission so every later reader (the
- * product mint, the card, the disclosure) sees one author. A factor's level is credited to the user (`baseline_known:
- * true`, `explicit`) only when the brief writes that figure FOR THAT FACTOR (`figureTheUserWroteFor`, the per-entity door
- * #2284/#2275 and the Olumi option mark trust). A figure the brief gives as a limit, the goal's target or a proposed
- * (non-status-quo) option's level is never today's level of anything, so it is never credited; the status quo's level
- * is today's. Anything unclear stays Olumi's.
- */
-export function creditStatedFactorLevels(candidate: CandidateModel, brief: string): CandidateModel {
-  const labels = [
-    candidate.goal?.metric, ...(candidate.factors ?? []).map((f) => f.label),
-    ...(candidate.outcomes ?? []).map((o) => o.label), ...(candidate.risks ?? []).map((r) => r.label),
-  ].filter((l): l is string => typeof l === 'string' && l.trim() !== '');
-  const notToday = [
-    ...(candidate.constraints ?? []).map((c) => c.value),
-    candidate.goal?.value,
-    // ⛔ PR Review CR on #2311 @ ff5e7480: a STATUS QUO sets today's level by definition ("keep it at £49" beside "from
-    // £49"), so only another option's level is a proposed one, never today's. Recognised as the Olumi mark does.
-    ...(candidate.options ?? [])
-      .filter((o) => o.is_status_quo !== true && !labelMatchesBaseline(o.label ?? ''))
-      .flatMap((o) => (o.interventions ?? []).map((i) => i.value)),
-  ].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
-  let credited = false;
-  const factors = (candidate.factors ?? []).map((f) => {
-    if (f.baseline_known === true && f.provenance === 'explicit') return f;
-    const v = f.baseline_value;
-    if (typeof v !== 'number' || !Number.isFinite(v) || notToday.some((w) => same(w, v))) return f;
-    const others = labels.filter((l) => canonicalLabel(l) !== canonicalLabel(f.label));
-    if (!figureTheUserWroteFor(v, f.unit, brief, { target: [f.label], others })) return f;
-    credited = true;
-    return { ...f, baseline_known: true, provenance: 'explicit' };
-  });
-  return credited ? { ...candidate, factors } : candidate;
-}
-
 /** What `holdStatedGoalAttributes` held on the goal node; each `false` is unattested and left absent. */
 export interface HeldGoalAttributes {
   readonly target: boolean;
@@ -523,6 +480,8 @@ export interface EntityScope {
   readonly strict?: true;
   /** A short answer may use a live question elsewhere; this door requires the figure's entity in this clause. */
   readonly requireNamed?: true;
+  /** Typed, located amounts supplied only by the current-level quote validator. Other doors retain their scanner. */
+  readonly writtenAmounts?: readonly (StatedAmount | ReturnType<typeof countsInWords>[number])[];
   /**
    * ⭐ A4 (CODEX CEE BUDDY 5919834707, AIQ 5919953251): read ONLY the written amount that starts at this index — one span,
    * never "the same figure anywhere". Opt-in, passed only by `writtenRangeFor`; every other door reads as before.
@@ -652,6 +611,19 @@ export function sentenceNamesOtherQuantity(sentence: string, _unit: unknown, sco
   });
 }
 
+/** Locate a complete declared unit frame through the shared reader, never through entity-label words. */
+function boundUnitEnd(text: string, amount: { index: number; matchedText: string; kind: string }, unit: unknown): number | null {
+  const declared = readUnitParts(unit);
+  if (declared === null || JSON.stringify(statedTailParts(text, amount)) !== JSON.stringify(declared)) return null;
+  const start = amount.index + amount.matchedText.length;
+  if (JSON.stringify(statedTailParts(text.slice(0, start), amount)) === JSON.stringify(declared)) return start;
+  for (const word of text.slice(start).matchAll(/[\p{L}\p{N}]+/gu)) {
+    const end = start + word.index! + word[0].length;
+    if (JSON.stringify(statedTailParts(text.slice(0, end), amount)) === JSON.stringify(declared)) return end;
+  }
+  return null;
+}
+
 export function figureTheUserWroteForSpan(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): { start: number; end: number } | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
   const family = unitPhraseFamily(unit);
@@ -669,7 +641,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
   const mentionOf = (w: string, decisiveTarget: readonly string[]): 'target' | 'other' | null =>
     quantityMentionOf(w, unitWords, decisiveTarget, decisiveOther);
   const strict = scope.strict === true;
-  const written = [...findStatedAmounts(userText), ...countsInWords(userText)];
+  const written = scope.writtenAmounts ?? [...findStatedAmounts(userText), ...countsInWords(userText)];
   const severalFigures = written.length >= 2;
   const matched = written.find((a) => {
     if (scope.at !== undefined && a.index !== scope.at) return false;
@@ -684,10 +656,15 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const clauseEnd = endAt < 0 ? userText.length : amountEnd + endAt;
     const left: string[] = [];
     const right: string[] = [];
+    const frameEnd = strict ? boundUnitEnd(userText, a, unit) : null;
+    let frameWords = 0;
     for (const m of userText.slice(clauseStart, clauseEnd).matchAll(/[\p{L}\p{N}]+/gu)) {
       const at = clauseStart + (m.index ?? 0);
       if (at + m[0].length <= a.index) left.push(m[0].toLowerCase());
-      else if (at >= amountEnd) right.push(m[0].toLowerCase());
+      else if (at >= amountEnd) {
+        right.push(m[0].toLowerCase());
+        if (frameEnd !== null && at + m[0].length <= frameEnd) frameWords += 1;
+      }
     }
     /**
      * ⭐ STRICT: A RIVAL CLAIMS A SHARED WORD ONLY BY ITS OWN QUALIFIER (R3 #75 5924350620; MG A4u 5924448020). A word the
@@ -699,7 +676,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
      * firms that do deals"); when neither's own is written, the more GENERAL label holds it (the one with no own words:
      * "secured £0" is the goal's, never "Angel funding secured"'s). Anything else stays nobody's: under-claim.
      */
-    const clauseWords = [...left, ...right];
+    const clauseWords = [...left, ...right.slice(frameWords)];
     const inClause = (ws: readonly string[]): boolean => ws.some((w) => w.length >= 3 && clauseWords.some((c) => sameWord(c, w)));
     const labelWords = (labels: readonly string[]): string[][] => labels.map((l) => [...new Set(wordsOf(l))]);
     const targetLabelWords = labelWords(scope.target);
@@ -739,7 +716,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const skipped = rate ?? purpose;
     const skippedWords = skipped === null ? 0 : [...skipped[0].matchAll(/[\p{L}\p{N}]+/gu)].length;
     // STRICT: a rate names its OWNER — only the rate's own word is passed over ("per senior engineer" is about seniors).
-    const afterRate = right.slice(strict && rate !== null ? skippedWords - 1 : skippedWords);
+    const afterRate = right.slice(frameWords > 0 ? frameWords : strict && rate !== null ? skippedWords - 1 : skippedWords);
     // ⛔ STRICT: a figure followed straight away by a conjunction has ended its own phrase: what follows "and" is the NEXT
     // item, never what this figure was written about (PJ-E-FIG, DL CR on #2235: "Seniors are £120k and juniors £65k" read
     // £120k as the juniors'). Rule 1 then finds nothing and the nearest word before it decides; the words after the

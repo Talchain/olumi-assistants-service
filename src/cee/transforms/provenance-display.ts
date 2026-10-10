@@ -12,7 +12,13 @@
  */
 import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
 
-export type ProvenanceDisplay = "from_brief" | "ai_inferred" | "user_set";
+export type ProvenanceDisplay = "from_brief" | "ai_inferred" | "user_set" | "unverified_brief";
+
+/** User-material claim withheld by the current-level receipt validator. */
+export function isUnverifiedUserMaterial(observed: unknown): boolean {
+  return typeof observed === "object" && observed !== null
+    && (observed as { user_material_unverified?: unknown }).user_material_unverified === true;
+}
 
 /**
  * Map a node's `extractionType` to UI display vocabulary.
@@ -22,7 +28,8 @@ export type ProvenanceDisplay = "from_brief" | "ai_inferred" | "user_set";
  * - any other / absent      → `ai_inferred` (safe default — anything we did
  *   not directly take from the brief is, by elimination, an AI estimate)
  */
-export function nodeProvenanceDisplay(extractionType: unknown): ProvenanceDisplay {
+export function nodeProvenanceDisplay(extractionType: unknown, observed?: unknown): ProvenanceDisplay {
+  if (isUnverifiedUserMaterial(observed)) return "unverified_brief";
   if (typeof extractionType !== "string") return "ai_inferred";
   if (extractionType === "explicit" || extractionType === "observed") return "from_brief";
   if (extractionType === "inferred" || extractionType === "range") return "ai_inferred";
@@ -36,7 +43,7 @@ export function nodeProvenanceDisplay(extractionType: unknown): ProvenanceDispla
  * - `user_specified`   → `user_set`
  * - `cee_hypothesis` / `domain_knowledge` / absent / unknown → `ai_inferred`
  */
-export function edgeProvenanceDisplay(source: unknown): ProvenanceDisplay {
+export function edgeProvenanceDisplay(source: unknown): Exclude<ProvenanceDisplay, "unverified_brief"> {
   if (source === "brief_extraction") return "from_brief";
   if (source === "user_specified") return "user_set";
   return "ai_inferred";
@@ -431,6 +438,7 @@ export function isAcceptedOlumiEstimate(observed: unknown): boolean {
  * Olumi estimate projects Olumi's pair (`assumption` / `ai_inferred`); everything else is the literal's own row.
  */
 export function observedValueAuthorship(observed: unknown): ValueAuthorshipDisplay | undefined {
+  if (isUnverifiedUserMaterial(observed)) return { source: "system", provenance: "unverified_brief" };
   if (isAcceptedOlumiEstimate(observed)) return ACCEPTED_OLUMI_ESTIMATE;
   return valueSourceAuthorship(
     typeof observed === "object" && observed !== null ? (observed as { source?: unknown }).source : undefined,

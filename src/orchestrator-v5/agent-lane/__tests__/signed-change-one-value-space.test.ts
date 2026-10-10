@@ -396,9 +396,12 @@ describe('B1 (review 5835754404): restated only when today is KNOWN to be zero',
     expect((await runAnalysis(graph)).refusal).toBeNull();
   });
 
-  it('CONTROL row 4b: a KNOWN zero today the user stated IS restated, and stays brief_extraction ("no change today")', async () => {
+  it('CONTROL row 4b (S7 disposition `unverified_human_claim`): a KNOWN zero today the drafter labelled the user\'s IS restated, and is kept visible as the user\'s UNVERIFIED claim — no quote, so never brief_extraction and never Olumi\'s estimate', async () => {
+    // "No change today" is a restatement the drafter makes (a change from today is 0 today by definition); the brief carries no
+    // owned sentence naming that level and the candidate has no `baseline_evidence.quote`, so the receipt gate does not credit it.
     const os = await restated('explicit');
-    expect(os.source).toBe('brief_extraction');
+    expect(os).toMatchObject({ source: 'cee_inference', user_material_unverified: true });
+    expect(os.source).not.toBe('brief_extraction');
   });
 });
 

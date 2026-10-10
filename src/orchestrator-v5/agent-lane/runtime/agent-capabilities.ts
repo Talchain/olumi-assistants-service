@@ -873,7 +873,7 @@ function heldFigureOwner(node: { observed_state?: unknown; extractionType?: unkn
   if (os === undefined || os === null) return undefined;
   if (isAcceptedOlumiEstimate(os)) return 'olumi_accepted';
   const display = observedValueAuthorship(os)?.provenance ?? nodeProvenanceDisplay(os.extractionType ?? node?.extractionType);
-  return display === 'user_set' ? 'yours' : display === 'from_brief' ? 'brief' : 'olumi';
+  return display === 'unverified_brief' ? 'unverified_brief' : display === 'user_set' ? 'yours' : display === 'from_brief' ? 'brief' : 'olumi';
 }
 
 function valuesNotSaved(
@@ -5047,7 +5047,7 @@ export function createAgentCapabilities(
       const directionConflict: { label: string }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; asPercent?: true; kept?: true }[] = [];
-      const notKeepable: { label: string; why: 'no_figure' | 'not_exact' | 'yours' | 'brief' | 'already_accepted' }[] = [];
+      const notKeepable: { label: string; why: 'no_figure' | 'not_exact' | 'yours' | 'brief' | 'unverified_brief' | 'already_accepted' }[] = [];
 
       for (const given of input) {
         let a = given;
