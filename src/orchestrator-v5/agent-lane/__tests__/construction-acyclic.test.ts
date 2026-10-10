@@ -144,6 +144,11 @@ interface Built { out: Record<string, unknown>; body: Graph; graph: Graph; calls
 
 /** The REAL construction, with the drafter faked: `drafts[i]` answers call i (the last repeats). */
 async function build(...drafts: CandidateModel[]): Promise<Built> {
+  const quote = 'Our Pro price is £49 a month.';
+  drafts = drafts.map((m) => ({ ...m, factors: m.factors.map((f) =>
+    f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 49
+      ? { ...f, baseline_evidence: { quote } } : f) }));
+  const brief = `${quote}\n\n${SERVED.brief}`;
   let body: unknown = null;
   const inputs: string[] = [];
   const instructions: string[] = [];
@@ -159,7 +164,7 @@ async function build(...drafts: CandidateModel[]): Promise<Built> {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', SERVED.brief, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
   return { out, body: body as Graph, graph: GraphV3.parse(body) as unknown as Graph, calls: inputs.length, inputs, instructions };
 }

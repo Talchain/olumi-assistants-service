@@ -408,6 +408,21 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
   };
 
   it.each([
+    ['third-party', 'Our supplier claims senior engineers cost £120k a year each and juniors £65k a year each.'],
+    ['target', 'We aim for senior engineer salaries of £120k a year each and junior salaries of £65k a year each.'],
+    ['limit', 'Senior engineer salaries must stay under £120k a year each and junior salaries under £65k a year each.'],
+  ])('S7 human control: typed %s figures acquire no credit before approval', async (_role, message) => {
+    graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(factorArgs(), message, (o) => { out = o; });
+    await expectConfirmCard(t1, out, [['Senior engineer salary', 120000], ['Junior engineer salary', 65000]], before);
+    await turn({ message: 'No, those are not our current salaries.' });
+    expect(bytes()).toBe(before);
+    expect(newFactors()).toEqual([]);
+  }, 120_000);
+
+  it.each([
     ['the seeded model', FIG_MSG, 'seed'],
     ['journey E\'s served graph', FIG_MSG, 'e07'],
     ['journey E\'s served graph, "…a year and juniors…"', CONJOINED, 'e07'],

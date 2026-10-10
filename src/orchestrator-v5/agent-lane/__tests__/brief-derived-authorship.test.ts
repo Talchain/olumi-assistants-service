@@ -26,11 +26,15 @@ import { admitCandidateLinks } from '../admit-candidate.js';
 
 const d = new URL('./fixtures/', import.meta.url);
 const faithful = JSON.parse(readFileSync(new URL('faithful.json', d), 'utf8')) as CandidateModel;
+const priceReceipt = 'Our Pro price is £49.';
+const receipted = { ...faithful, factors: faithful.factors.map((f) =>
+  f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit'
+    ? { ...f, baseline_evidence: { quote: priceReceipt } } : f) };
 const widened = JSON.parse(readFileSync(new URL('widened.json', d), 'utf8'));
 
 describe('brief-derived authorship', () => {
   it('a node whose figure came from the brief is stamped brief_extraction', () => {
-    const m = admitCandidateModel(faithful, widened);
+    const m = admitCandidateModel(receipted, widened, priceReceipt);
     const price = m.nodes.find((n) => (n.description ?? n.label) === 'Pro plan price');
     expect(price, 'the capture carries a stated price').toBeDefined();
     // ⭐ The user's own number is `raw_value`; `value` is that number read
@@ -46,7 +50,7 @@ describe('brief-derived authorship', () => {
   });
 
   it('no admitted entity claims a direct user edit from a brief-derived candidate', () => {
-    const m = admitCandidateModel(faithful, widened);
+    const m = admitCandidateModel(receipted, widened, priceReceipt);
     const overstated = m.nodes.filter((n) => n.provenance === 'user_set');
     expect(
       overstated.map((n) => n.label),

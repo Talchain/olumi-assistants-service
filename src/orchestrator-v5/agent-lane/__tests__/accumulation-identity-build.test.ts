@@ -18,7 +18,8 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 
 type Rec = Record<string, unknown>;
 const SCENARIO = '62626262-6262-4626-8626-626262626262';
-const BRIEF = 'Given our goal of reaching £20k Pro MRR within 12 months, should we raise the Pro plan price from £49 to £59? '
+const BRIEF = 'Our Pro price is £49. We have 250 Pro subscribers. Our monthly churn is 3%. We have 20 new Pro subscribers a month.\n\n'
+  + 'Given our goal of reaching £20k Pro MRR within 12 months, should we raise the Pro plan price from £49 to £59? '
   + 'We have 250 Pro subscribers, lose 3% a month and add about 20 new Pro subscribers a month.';
 const SUBS12 = 'Pro subscribers at month 12';
 
@@ -36,10 +37,11 @@ function candidate(identities: unknown[]): CandidateModel {
         interventions: [{ factor_label: 'Pro plan price', value: 49, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ],
     factors: [
-      { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 100 },
-      { label: 'Pro subscribers', role: 'external', baseline_known: true, baseline_value: 250, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000 },
-      { label: 'Monthly churn', role: 'external', baseline_known: true, baseline_value: 3, unit: '%', provenance: 'explicit', plausible_max: 100 },
-      { label: 'New Pro subscribers per month', role: 'external', baseline_known: true, baseline_value: 20, unit: 'subscribers/month', provenance: 'explicit', plausible_max: 200 },
+      { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 100, baseline_evidence: { quote: 'Our Pro price is £49.' } },
+      { label: 'Pro subscribers', role: 'external', baseline_known: true, baseline_value: 250, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000,
+        baseline_evidence: { quote: 'We have 250 Pro subscribers.' } },
+      { label: 'Monthly churn', role: 'external', baseline_known: true, baseline_value: 3, unit: '%', provenance: 'explicit', plausible_max: 100, baseline_evidence: { quote: 'Our monthly churn is 3%.' } },
+      { label: 'New Pro subscribers per month', role: 'external', baseline_known: true, baseline_value: 20, unit: 'subscribers/month', provenance: 'explicit', plausible_max: 200, baseline_evidence: { quote: 'We have 20 new Pro subscribers a month.' } },
     ],
     risks: [],
     outcomes: [{ label: SUBS12, provenance: 'inferred' }],

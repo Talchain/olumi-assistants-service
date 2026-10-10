@@ -19,6 +19,7 @@ import { statusQuoOptionId, type GraphEdgeLike, type StatusQuoNodeLike } from '.
 import { detectSameLeverOptions } from '../../../cee/structure/index.js';
 import { linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
+import { extractionTypeForSource } from '../../../cee/decision-review/value-source-extraction-type.js';
 import { placeholderGoalPaths } from '../goal-certainty.js';
 import { decisionSensitivityOf, tippingPointOf, type TippingPoint } from '../decision-sensitivity.js';
 import { readStoredOptionParticipation } from '../../tools/handlers/option-participation.js';
@@ -117,7 +118,8 @@ export function valueAuthorshipOf(observed: unknown): ValueAuthorship {
   const auth = observedValueAuthorship(os);
   if (auth !== undefined) return auth.provenance === 'unverified_brief' ? 'unknown' : auth.provenance === 'ai_inferred' ? 'olumi_estimate' : 'yours';
   // `brief_extraction` / `cee_inference` / `explicit` / `inferred` DEFER to the extraction type (provenance-display.ts).
-  const et = os.extractionType;
+  const et = os.extractionType ?? (typeof os.value === 'number' && Number.isFinite(os.value)
+    && (os.source === 'brief_extraction' || os.source === 'cee_inference') ? extractionTypeForSource(os.source) : undefined);
   if (et === 'explicit' || et === 'observed') return 'yours';
   if (et === 'inferred' || et === 'range') return 'olumi_estimate';
   return 'unknown';

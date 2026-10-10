@@ -148,6 +148,12 @@ function factorDraft() {
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 async function register(wire: Record<string, unknown>): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+  for (const f of wire.factors as Record<string, unknown>[]) {
+    if (f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit') {
+      f.baseline_evidence = { quote: 'Our Pro price is £49 a month.' };
+    }
+  }
+  const brief = `Our Pro price is £49 a month.\n\n${BRIEF}`;
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let body: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -158,7 +164,7 @@ async function register(wire: Record<string, unknown>): Promise<{ graph: Graph; 
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('88888888-8888-4888-8888-888888888888', BRIEF, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('88888888-8888-4888-8888-888888888888', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return { graph: GraphV3.parse(body) as unknown as Graph, out };
 }

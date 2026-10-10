@@ -44,7 +44,7 @@ import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minima
 type Rec = Record<string, any>;
 const SID = '550e8400-e29b-41d4-a716-4466554400c9';
 const R = '2026-10-09';
-const BRIEF = 'Current cash is £12,000. Monthly additions are £2,000 a month. Our goal is cash of £30,000 by 31 March 2027. Compare a bonus or no bonus.';
+const BRIEF = 'Our current cash is £12,000. Our monthly additions are £2,000 a month. Our goal is cash of £30,000 by 31 March 2027. Compare a bonus or no bonus.';
 const hash = (graph: Rec): string => computeAnalysisAffectingGraphHash(graph as never)!;
 const goal = (graph: Rec): Rec => graph.nodes.find((n: Rec) => n.kind === 'goal')!;
 const node = (graph: Rec, id: string): Rec => graph.nodes.find((n: Rec) => n.id === id)!;
@@ -53,8 +53,8 @@ function draft(): Rec {
     goal: { metric: 'Cash', operator: '>=', target_stated: true, value: 30000, unit: 'GBP', frame: 'level', horizon_months: 9,
       provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: undefined },
     factors: [
-      { label: 'Current cash', role: 'external', baseline_known: true, baseline_value: 12000, unit: 'GBP', provenance: 'explicit', plausible_max: 50000 },
-      { label: 'Monthly additions', role: 'external', baseline_known: true, baseline_value: 2000, unit: 'GBP/month', provenance: 'explicit', plausible_max: 10000 },
+      { label: 'Current cash', role: 'external', baseline_known: true, baseline_value: 12000, unit: 'GBP', provenance: 'explicit', plausible_max: 50000, baseline_evidence: { quote: 'Our current cash is £12,000.' } },
+      { label: 'Monthly additions', role: 'external', baseline_known: true, baseline_value: 2000, unit: 'GBP/month', provenance: 'explicit', plausible_max: 10000, baseline_evidence: { quote: 'Our monthly additions are £2,000 a month.' } },
       { label: 'Bonus', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'GBP', provenance: 'inferred', plausible_max: 10000 },
     ],
     options: [
@@ -66,7 +66,7 @@ function draft(): Rec {
       { from: 'Bonus', to: 'Cash', direction: 'positive', provenance: 'explicit', effect_amount: 1000, effect_per_source_change: 1000, effect_provenance: 'explicit' },
     ], constraints: [], risks: [], outcomes: [],
   };
-  const admitted = admitCandidateModel(c, {});
+  const admitted = admitCandidateModel(c, {}, BRIEF);
   const held = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, BRIEF), c.goal, BRIEF);
   const graph = GraphV3.parse(projectGraphForPersistence({ nodes: held.nodes, edges: admitted.edges, goal_constraints: admitted.goal_constraints })) as Rec;
   expect(figureTheUserWroteFor(12000, 'GBP', BRIEF, { target: ['Current cash'], others: ['Monthly additions', 'Cash'], strict: true })).toBe(true);

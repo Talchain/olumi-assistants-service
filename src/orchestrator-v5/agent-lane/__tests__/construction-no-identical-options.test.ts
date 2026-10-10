@@ -143,6 +143,10 @@ const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 const BRIEF = SHAPE_1.brief.message;
 
 async function build(...drafts: (CandidateModel & { unknowns: string[] })[]) {
+  const brief = `Our Pro price is £49 a month.\n\n${BRIEF}`;
+  for (const d of drafts) for (const f of d.factors) {
+    if (f.baseline_known && f.provenance === 'explicit') f.baseline_evidence = { quote: 'Our Pro price is £49 a month.' };
+  }
   for (const d of drafts) expect(strict(d), JSON.stringify(strict.errors)).toBe(true);
   let body: { graph: unknown } | null = null;
   let calls = 0;
@@ -151,7 +155,7 @@ async function build(...drafts: (CandidateModel & { unknowns: string[] })[]) {
     if (path.endsWith('/graph/register')) { body = structuredClone(b as { graph: unknown }); return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('55555555-5555-4555-8555-555555555555', BRIEF, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('55555555-5555-4555-8555-555555555555', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   const graph = GraphV3.parse((body as unknown as { graph: unknown }).graph) as unknown as SGraph;
   return { out, graph, calls };

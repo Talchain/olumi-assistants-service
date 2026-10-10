@@ -38,7 +38,7 @@ import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { labelHeadUnit } from './label-head-unit.js';
-import { readUnitParts, sameUnit } from './same-unit.js';
+import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
@@ -611,6 +611,19 @@ export function sentenceNamesOtherQuantity(sentence: string, _unit: unknown, sco
   });
 }
 
+/** Locate a complete declared unit frame through the shared reader, never through entity-label words. */
+function boundUnitEnd(text: string, amount: { index: number; matchedText: string; kind: string }, unit: unknown): number | null {
+  const declared = readUnitParts(unit);
+  if (declared === null || JSON.stringify(statedTailParts(text, amount)) !== JSON.stringify(declared)) return null;
+  const start = amount.index + amount.matchedText.length;
+  if (JSON.stringify(statedTailParts(text.slice(0, start), amount)) === JSON.stringify(declared)) return start;
+  for (const word of text.slice(start).matchAll(/[\p{L}\p{N}]+/gu)) {
+    const end = start + word.index! + word[0].length;
+    if (JSON.stringify(statedTailParts(text.slice(0, end), amount)) === JSON.stringify(declared)) return end;
+  }
+  return null;
+}
+
 export function figureTheUserWroteForSpan(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): { start: number; end: number } | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
   const family = unitPhraseFamily(unit);
@@ -643,10 +656,15 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const clauseEnd = endAt < 0 ? userText.length : amountEnd + endAt;
     const left: string[] = [];
     const right: string[] = [];
+    const frameEnd = strict ? boundUnitEnd(userText, a, unit) : null;
+    let frameWords = 0;
     for (const m of userText.slice(clauseStart, clauseEnd).matchAll(/[\p{L}\p{N}]+/gu)) {
       const at = clauseStart + (m.index ?? 0);
       if (at + m[0].length <= a.index) left.push(m[0].toLowerCase());
-      else if (at >= amountEnd) right.push(m[0].toLowerCase());
+      else if (at >= amountEnd) {
+        right.push(m[0].toLowerCase());
+        if (frameEnd !== null && at + m[0].length <= frameEnd) frameWords += 1;
+      }
     }
     /**
      * ⭐ STRICT: A RIVAL CLAIMS A SHARED WORD ONLY BY ITS OWN QUALIFIER (R3 #75 5924350620; MG A4u 5924448020). A word the
@@ -658,7 +676,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
      * firms that do deals"); when neither's own is written, the more GENERAL label holds it (the one with no own words:
      * "secured £0" is the goal's, never "Angel funding secured"'s). Anything else stays nobody's: under-claim.
      */
-    const clauseWords = [...left, ...right];
+    const clauseWords = [...left, ...right.slice(frameWords)];
     const inClause = (ws: readonly string[]): boolean => ws.some((w) => w.length >= 3 && clauseWords.some((c) => sameWord(c, w)));
     const labelWords = (labels: readonly string[]): string[][] => labels.map((l) => [...new Set(wordsOf(l))]);
     const targetLabelWords = labelWords(scope.target);
@@ -698,7 +716,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const skipped = rate ?? purpose;
     const skippedWords = skipped === null ? 0 : [...skipped[0].matchAll(/[\p{L}\p{N}]+/gu)].length;
     // STRICT: a rate names its OWNER — only the rate's own word is passed over ("per senior engineer" is about seniors).
-    const afterRate = right.slice(strict && rate !== null ? skippedWords - 1 : skippedWords);
+    const afterRate = right.slice(frameWords > 0 ? frameWords : strict && rate !== null ? skippedWords - 1 : skippedWords);
     // ⛔ STRICT: a figure followed straight away by a conjunction has ended its own phrase: what follows "and" is the NEXT
     // item, never what this figure was written about (PJ-E-FIG, DL CR on #2235: "Seniors are £120k and juniors £65k" read
     // £120k as the juniors'). Rule 1 then finds nothing and the nearest word before it decides; the words after the

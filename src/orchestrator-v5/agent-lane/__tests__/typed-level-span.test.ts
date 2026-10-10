@@ -41,7 +41,7 @@ describe('typed current-level sentence authority', () => {
       const m = model(); const label = m.factors[0]!.label;
       const claimed = provenance === 'explicit' || provenance === 'from_brief';
       m.factors[0]!.provenance = provenance; m.factors[0]!.baseline_evidence = null;
-      m.factors[0]!.baseline_known = provenance === 'explicit';
+      m.factors[0]!.baseline_known = provenance === 'explicit' || provenance === 'from_brief';
       m.options = m.options.map(o => ({ ...o, changes: [], interventions: [] }));
       m.constraints = [{ metric: label, operator: '>=', value: 900, unit: 'appointments/month', provenance: 'explicit' }];
       let graph: any;
@@ -98,7 +98,7 @@ describe('typed current-level sentence authority', () => {
   });
   it('valid receipt carries user credit, display and authorship with no unverified marker', () => {
     const m = model(); const n = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
-    expect(n.observed_state).toMatchObject({ source: 'brief_extraction', extractionType: 'explicit' });
+    expect(n.observed_state).toMatchObject({ source: 'brief_extraction' });
     expect(n.observed_state?.user_material_unverified).toBeUndefined();
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('from_brief');
     expect(valueAuthorshipOf(n.observed_state)).toBe('yours');
@@ -375,5 +375,50 @@ describe('B4 same-clause first-person ownership', () => {
     ['Bikes in service', 340, 'bikes', 'Our city bike-hire scheme has at most three hundred and forty bikes in service.'],
   ] as const) it(`withholds scoped word/sign control: ${quote}`, () => {
     expect(verify(current(label, value, unit, quote), quote)).toBe(false);
+  });
+});
+
+
+describe('RUN8 independently bound current claims', () => {
+  const contractor = { label: 'Contractor spend change', value: 0, unit: 'GBP', quote: 'Our contractor spend change is £0.', third: '' };
+  it('the quantity noun spend does not replace its governing is predicate', () => {
+    const m = model(contractor);
+    expect(verify(m, contractor.quote)).toBe(true);
+  });
+  for (const quote of ['Our supplier claims contractor spend change is £0.', 'Our contractor spend change target is £0.', 'Our contractor spend change forecast is £0.', 'Our contractor spend change is at most £0.']) {
+    it(`keeps the contractor role or ownership refusal: ${quote}`, () => {
+      const m = model({ ...contractor, quote });
+      expect(verify(m, quote)).toBe(false);
+    });
+  }
+  const subscribers = { label: 'Paying subscribers', value: 1500, unit: 'subscribers', quote: 'We have 1,500 paying subscribers.', third: '' };
+  const revenue = { label: 'Other MRR', value: 1500, unit: 'GBP/month', quote: 'Our other MRR is £1,500 a month.', third: '' };
+  function pair(second = revenue.quote, unit = revenue.unit) {
+    const m = model(subscribers);
+    m.factors.push({ ...m.factors[0]!, label: revenue.label, unit, baseline_evidence: { quote: second } });
+    return m;
+  }
+  it('count and monthly money claims do not collide on magnitude in either direction', () => {
+    const m = pair(); const brief = `${subscribers.quote} ${revenue.quote}`;
+    expect(verifiedFactorLevel(m, m.factors[0]!, brief)).toBe(true);
+    expect(verifiedFactorLevel(m, m.factors[1]!, brief)).toBe(true);
+  });
+  for (const tail of ['Ignore 1,500.', 'We do not have 1,500 paying subscribers.', 'We have 1,500 paying subscribers.', 'Our supplier claims £1,500 a month.', 'Our other MRR target is £1,500 a month.', 'Our other MRR forecast is £1,500 a month.', 'Our other MRR is at most £1,500 a month.', 'At most.', 'We can add roughly 1,500 paying subscribers.', 'Our other MRR is £1,500 a year.']) {
+    it(`keeps a correction, duplicate, unbound or non-current neighbour refused: ${tail}`, () => {
+      const m = pair(tail);
+      expect(verify(m, `${subscribers.quote} ${tail}`)).toBe(false);
+    });
+  }
+  it('two same-frame quantities retain the duplicate magnitude refusal', () => {
+    const tail = 'We have 1,500 other subscribers.';
+    const m = pair(tail, 'subscribers'); m.factors[1]!.label = 'Other subscribers';
+    expect(verify(m, `${subscribers.quote} ${tail}`)).toBe(false);
+  });
+  it('a verified brief source projects its existing display without redundant extraction metadata', () => {
+    expect(nodeProvenanceDisplay(undefined, { source: 'brief_extraction', value: 0 })).toBe('from_brief');
+    expect(nodeProvenanceDisplay(undefined, { source: 'brief_extraction' })).toBe('ai_inferred');
+    expect(nodeProvenanceDisplay('inferred', { source: 'brief_extraction', value: 0 })).toBe('ai_inferred');
+    expect(nodeProvenanceDisplay(undefined, { source: 'cee_inference', value: 0 })).toBe('ai_inferred');
+    expect(nodeProvenanceDisplay(undefined, { source: 'cee_inference', value: 0, user_material_unverified: true })).toBe('unverified_brief');
   });
 });
