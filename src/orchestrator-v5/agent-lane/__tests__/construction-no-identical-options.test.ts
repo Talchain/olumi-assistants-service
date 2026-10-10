@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, BUILD_INSTRUCTIONS, prepareProvisionalCandidate, type CallStructuredModel } from '../runtime/build-model.js';
 import { admitCandidateModel, slugId, type CandidateModel } from '../admit-model.js';
+import { verifiedFactorLevel } from '../verified-option-setting.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import { assessConstructionSize, COMPACT_LIMITS } from '../construction-size-gate.js';
@@ -1296,3 +1297,38 @@ describe('the construction contract names the shape (one sentence)', () => {
 //     writeFileSync(BASE_FIXTURE, `${JSON.stringify({ head: process.env.GEN_NO_DUP_BASE_HEAD, graphs }, null, 1)}\n`);
 //   });
 // });
+
+
+describe('RUN38 a bound receipt owns its abbreviated quantity, without conflicting qualifiers', () => {
+  function received(quote: string, label = 'Pro plan price', value = 49, unit = '£ per month') {
+    const model = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed' });
+    const factor = model.factors.find(f => f.label === 'Pro plan price')!;
+    Object.assign(factor, { label, baseline_value: value, unit, baseline_evidence: { quote } });
+    return verifiedFactorLevel(model, factor, quote);
+  }
+  it('credits the existing full-candidate £49/month receipt for Our Pro price', () => {
+    expect(received('Our Pro price is £49 a month.')).toBe(true);
+  });
+  it('an explicitly matching channel is owned', () => {
+    expect(received('Our taproom sales share is 70%.', 'Taproom sales share', 70, '%')).toBe(true);
+  });
+  it('a conflicting same-head channel does not own another channel', () => {
+    expect(received('Our pub sales share is 70%.', 'Taproom sales share', 70, '%')).toBe(false);
+  });
+  for (const quote of [
+    'Our supplier claims the Pro price is £49 a month.',
+    'Our competitor has a Pro price of £49 a month.',
+    'Our Pro price target is £49 a month.',
+    'Our Pro price forecast is £49 a month.',
+    'Pro price is £49 a month.',
+  ]) {
+    it(`withholds the adverse receipt: ${quote}`, () => { expect(received(quote)).toBe(false); });
+  }
+  it('a conflicting period stays uncredited', () => {
+    expect(received('Our Pro price is £49 a month.', 'Pro plan price', 49, 'GBP/year')).toBe(false);
+  });
+  it('no receipt remains uncredited', () => {
+    const model = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed' });
+    expect(verifiedFactorLevel(model, model.factors.find(f => f.label === 'Pro plan price')!, SHAPE_1.brief.message)).toBe(false);
+  });
+});
