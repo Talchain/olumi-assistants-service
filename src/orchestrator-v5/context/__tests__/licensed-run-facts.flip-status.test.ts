@@ -114,6 +114,28 @@ describe('flip admission follows the producer\'s own status word', () => {
     const available = JSON.stringify(facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'computed', ...critiques }).enrichment);
     expect(available).toContain('could flip at 4.2%');
   });
+  describe('a supplied current graph that cannot be read fails CLOSED; no graph at all does not', () => {
+    const readable = { nodes: [
+      { id: 'goal', kind: 'goal', label: 'MRR' }, { id: 'keep', kind: 'option', label: 'Keep price' },
+      { id: 'raise', kind: 'option', label: 'Raise price' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }], edges: [] };
+    const enrichment = { flip_thresholds: [PAIR], flip_thresholds_status: 'computed' };
+    it('CONTRAST: no graph supplied anywhere keeps the Run current (the review fires in its own request)', () => {
+      const out = buildLicensedRunFacts(factWith(enrichment), SCENARIO, undefined);
+      expect(out.current).toBe(true);
+      expect(ids(out.flipRows)).toEqual(['churn']);
+    });
+    it('a supplied but unreadable current graph withholds the staleness-sensitive findings', () => {
+      const out = buildLicensedRunFacts(factWith(enrichment), SCENARIO, readable, { nodes: 'garbage', edges: 7 });
+      expect(out.current).toBe(false);
+      expect(out.mayNameLeader).toBe(false);
+      expect(out.flipRows).toEqual([]);
+    });
+    it('an unreadable GROUNDING graph used as the current graph fails closed the same way', () => {
+      const out = buildLicensedRunFacts(factWith(enrichment), SCENARIO, { nodes: 'garbage' });
+      expect(out.current).toBe(false);
+      expect(out.flipRows).toEqual([]);
+    });
+  });
   it('a Run the graph has moved past withholds the same rows (computed status does not rescue it)', () => {
     const out = facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'computed' }, OTHER_HASH);
     expect(out.current).toBe(false);
