@@ -128,6 +128,8 @@ export interface StatedOptionEvidence {
  * metric's decision framing, "Decision: <metric>", `ai_inferred`: nobody stated it.
  */
 
+export type InterventionValueKind = 'absolute' | 'additional';
+
 export interface CandidateModel {
   readonly goal: {
     metric: string; operator: string; unit: string; horizon_months: number | null; provenance: string;
@@ -182,7 +184,7 @@ export interface CandidateModel {
       factor_label: string;
       value: number;
       /** Existing absolute/additional discriminator; absent legacy and unknown kinds remain guarded by construction. */
-      value_kind?: string;
+      value_kind?: InterventionValueKind;
       unit?: string;
       provenance: string;
       estimate?: true;

@@ -4,7 +4,7 @@
 import { metricNamesLabel, type CandidateModel } from './admit-model.js';
 import { findStatedAmounts, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { parseCardinalAmount } from '../../utils/cardinal-words.js';
-import { labelHead } from './label-head-unit.js';
+import { labelHead, LABEL_HEAD_BOUNDARY } from './label-head-unit.js';
 import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } from './same-unit.js';
 import { findLinkEffectAmounts } from './link-effect-figures.js';
 import { figureTheUserWroteForSpan, isChangeWord } from './stated-by-user.js';
@@ -300,7 +300,13 @@ function ownsFactorLevel(before: string, factor: Factor): boolean {
   // A verb-shaped noun inside the independently named quantity is not its predicate.
   const verb = said.findIndex((w, i) => STATE_VERBS.has(w)
     && !(namedAt >= 0 && i >= namedAt && i < namedAt + quantity.length));
-  return verb > 1 && said.slice(1, verb).every(w => grammar(w) || OWN_ORGANISATION.has(w) || names(w))
+  const subject = said.slice(1, verb);
+  // One possessive noun phrase owns its state predicate without an organisation-name vocabulary.
+  // Reuse the existing verb/clause grammar: modals, another subject or another predicate cannot be noun words.
+  const nounPhrase = subject.every(w => grammar(w) || OWN_ORGANISATION.has(w) || names(w))
+    || subject.every(w => names(w) || grammar(w)
+      || (!STATE_VERBS.has(w) && !ACTIONS.has(w) && !ARMS.has(w) && !LABEL_HEAD_BOUNDARY.test(w)));
+  return verb > 1 && !before.includes(',') && nounPhrase
     && said.slice(verb + 1).every(w => grammar(w) || names(w));
 }
 

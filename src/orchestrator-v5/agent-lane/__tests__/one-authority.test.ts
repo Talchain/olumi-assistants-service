@@ -137,6 +137,59 @@ function storedCells(graph: unknown) {
 }
 
 describe('RUN25 producer receipts and source defaults', () => {
+  it('RUN27 first, event and retry provider assemblies retain the identical goal receipt contract without a provider', async () => {
+    type Request = Parameters<CallStructuredModel>[0];
+    const dispatch: InternalDispatch = async () => ({ status: 200, json: { graph: { nodes: [], edges: [] } } });
+    async function capture(brief: string, firstAnswer?: CandidateModel): Promise<Request[]> {
+      const requests: Request[] = [];
+      const call: CallStructuredModel = async req => {
+        requests.push(req);
+        return { text: requests.length === 1 && firstAnswer ? JSON.stringify(firstAnswer) : '' };
+      };
+      await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, dispatch, call);
+      return requests;
+    }
+    const first = await capture(CURRENT);
+    const event = await capture('We need to launch our platform by June 2027.');
+    const repair: CandidateModel = { ...candidate(),
+      factors: [{ label: 'Engineers', role: 'controllable', baseline_known: false, baseline_value: null, unit: 'engineers', provenance: 'ai_proposed' }],
+      options: [{ label: 'Improve', provenance: 'ai_proposed', changes: ['Engineers'], interventions: [] }] };
+    const retried = await capture(CURRENT, repair);
+    expect(first).toHaveLength(1);
+    expect(event).toHaveLength(1);
+    expect(retried).toHaveLength(2);
+    expect(event[0]!.instructions).toContain('The deterministic reader attests an event by a date.');
+    expect(retried[1]!.instructions).toContain('Repair only the listed construction issues.');
+    const assemblies = { first: first[0]!, event: event[0]!, retry: retried[1]! };
+    const sha = (bytes: string) => createHash('sha256').update(bytes, 'utf8').digest('hex');
+    console.info('RUN27_ASSEMBLY_HASHES', JSON.stringify(Object.fromEntries(Object.entries(assemblies).map(([name, req]) => [name, {
+      instructions_sha256: sha(req.instructions),
+      provider_schema_sha256: sha(JSON.stringify(strictForTheDrafter(req.schema))),
+      callback_schema_sha256: sha(JSON.stringify(req.schema)),
+    }]))));
+    function goalReceipt(schema: Record<string, unknown>) {
+      const properties = schema.properties;
+      if (!properties || typeof properties !== 'object' || !('goal' in properties)) throw new Error('Missing goal schema');
+      const goal = properties.goal;
+      if (!goal || typeof goal !== 'object' || !('properties' in goal) || !('required' in goal)) throw new Error('Missing goal properties');
+      const fields = goal.properties;
+      if (!fields || typeof fields !== 'object' || !('baseline_evidence' in fields)) throw new Error('Missing goal receipt');
+      return { receipt: fields.baseline_evidence, required: goal.required };
+    }
+    const expected = goalReceipt(strictForTheDrafter(buildCandidateSchema())).receipt;
+    expect(expected).toStrictEqual({ anyOf: [{ type: 'null' }, {
+      type: 'object', additionalProperties: false, properties: { quote: { type: 'string' } }, required: ['quote'],
+    }], description: 'Complete verbatim brief sentence stating the goal’s current level; null otherwise.' });
+    for (const req of Object.values(assemblies)) {
+      const providerGoal = goalReceipt(strictForTheDrafter(req.schema));
+      expect(providerGoal.receipt).toStrictEqual(expected);
+      expect(providerGoal.required).toContain('baseline_evidence');
+      expect(goalReceipt(req.schema).required).not.toContain('baseline_evidence');
+    }
+    expect(strictForTheDrafter(event[0]!.schema)).toStrictEqual(strictForTheDrafter(first[0]!.schema));
+    expect(strictForTheDrafter(retried[0]!.schema)).toStrictEqual(strictForTheDrafter(first[0]!.schema));
+    expect(strictForTheDrafter(retried[1]!.schema)).toHaveProperty('properties.goal.properties.metric.enum', ['Backlog']);
+  });
   it('goal receipt mirrors the factor schema and is compulsory only at the provider boundary', () => {
     type Receipt = { anyOf: unknown[]; description: string };
     type Schema = { properties: { goal: { properties: { baseline_evidence: Receipt }; required: string[] }; factors: { items: { properties: { baseline_evidence: Receipt } } } } };

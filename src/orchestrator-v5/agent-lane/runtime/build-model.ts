@@ -600,6 +600,8 @@ export function retrySchemaPinningGoal(
     : { type: 'null' };
   const goalSchema = properties['goal'];
   if (goalSchema === undefined) return schema;
+  const currentGoalProperties = goalSchema['properties'];
+  if (!currentGoalProperties || typeof currentGoalProperties !== 'object' || !('baseline_evidence' in currentGoalProperties)) return schema;
   goalSchema['properties'] = {
     metric: { type: 'string', enum: [goal.metric] },
     operator: { type: 'string', enum: [goal.operator] },
@@ -623,6 +625,7 @@ export function retrySchemaPinningGoal(
       ? { type: 'number', enum: [goal.baseline_value] }
       : { type: 'null' },
     baseline_provenance: { type: 'string', enum: [goal.baseline_provenance ?? goal.provenance] },
+    baseline_evidence: currentGoalProperties.baseline_evidence,
     // C46: the scope is part of the goal, so a compaction cannot switch readings or drop the
     // question. An absent scope (a candidate from before the field) pins to "none" (null).
     scope: goal.scope === null || goal.scope === undefined || typeof goal.scope !== 'object'
