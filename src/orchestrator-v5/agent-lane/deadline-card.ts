@@ -34,10 +34,11 @@ export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, s
   // answer that itself ASKS the deadline question is an offer, not the build answer (buddy r1 P2: a resent brief whose answer
   // carried the card, declined next turn, would otherwise look like the build answer and re-offer).
   // The answer content must be READ to be judged: a null/blank/malformed assistant message cannot show it was not the offer, so
-  // it fails closed (buddy r2 P2). The marker is the card's own question ("Is your deadline <date> (<n> months from …)?"), not
-  // prose that merely says "is your deadline" (buddy r2 P3).
+  // it fails closed (buddy r2 P2). The marker is any QUESTION that names the deadline (one sentence, ends in "?", any case or
+  // wording: the card's own "Is your deadline <date> (<n> months from …)?" and a model's own "Is your deadline …?"), not prose that
+  // merely says "is your deadline of ten months." (buddy r2 P3, r3 P2).
   const builtTheDraft = (r: SessionTurnWithContent): boolean => typeof r.user_message === 'string' && r.user_message.trim() === brief.trim()
-    && typeof r.assistant_message === 'string' && r.assistant_message.trim() !== '' && !/\bIs your deadline [^?\n]*\?/.test(r.assistant_message);
+    && typeof r.assistant_message === 'string' && r.assistant_message.trim() !== '' && !/[^.!?\n]*\bdeadline\b[^.!?\n]*\?/i.test(r.assistant_message);
   return answers.length === 0 || (answers.length === 1 && builtTheDraft(answers[0]!));
 }
 /**
@@ -78,8 +79,17 @@ function goalOwnsDeadline(goal: RecordLike, words: string, source: string): bool
     if (/\b(?:not (?:a |the |our |my )?(?:deadline|target|goal)|duration|lasts?|as an? (?:training )?course)\b/.test(sentence)) return false;
     if (/\b(?:goal|target)\b/.test(sentence) && !ownsSubject(sentence)) return false;
     const before = sentence.slice(0, sentence.indexOf(plainOf(words)));
+    // A letterless-unit goal is a LEVEL stance (stay/keep/reach/grow …): "finish/complete/deliver" are task verbs, and a date whose own
+    // clause ("…, and finish our depot renovation in ten months") carries a verb but none of the label's words belongs to that clause.
+    const intent = unitHasLetters ? /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline|deliver|finish|complete)\b/
+      : /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline)\b/;
+    const ownClause = before.split(/[,;]|\band\b/).pop() ?? '';
+    if (!unitHasLetters && /\b(?:stay|keep|reach|achieve|grow|reduce|increase|finish|complete|deliver|launch|build|open)\b/.test(ownClause)
+      && !labelStems.some(stem => stemsOf(ownClause).includes(stem))) return false;
+    // …and a number in the date's own clause is that clause's quantity (a count target), never a goal that holds no number.
+    if (!unitHasLetters && /\d/.test(ownClause)) return false;
     if (!/\b(?:we|i|us|our|my)\b/.test(before)
-      || !/\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline|deliver|finish|complete)\b/.test(before)
+      || !intent.test(before)
       || !/\b(?:by|within|over|next|deadline|before|until|in)\b/.test(before)) return false;
     // A bare owned deadline refers to the sole goal. Otherwise its subject must occur in THIS goal-intent sentence: a
     // noun of the previous sentence never attributes a date to this goal (buddy r1 P1: "We have registered riders. We

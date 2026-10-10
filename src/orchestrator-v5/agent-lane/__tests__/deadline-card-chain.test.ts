@@ -383,6 +383,14 @@ describe('R6 the draft was built inside an Agent turn', () => {
     // merely says "is your deadline" is not the card question and still counts as the build answer (buddy r2 P3).
     const unreadable = row('agent_turn:build', { user_message: brief, assistant_message: null });
     expect(firstAgentTurnAfterDraft({ rowId: unreadable.id, rows: [unreadable, construction] }, sid, brief)).toBe(false);
+    // Any question that names the deadline is an offer, in any case or wording (buddy r3 P2); a question that does not (the served
+    // build answer asks "What calendar date marks the end of …?") is not.
+    for (const asked of ['is your deadline 10 August 2027 (10 months from 10 October 2026)?', 'Here is the model.\nWould you like to set 10 August 2027 as the deadline?']) {
+      const offer = row('agent_turn:resent', { user_message: brief, assistant_message: asked });
+      expect(firstAgentTurnAfterDraft({ rowId: offer.id, rows: [offer, construction] }, sid, brief), asked).toBe(false);
+    }
+    const askedDate = row('agent_turn:build', { user_message: brief, assistant_message: 'Here is the model. The model holds no deadline yet, so no result answers that.\n\nWhat calendar date marks the end of the next ten months?' });
+    expect(firstAgentTurnAfterDraft({ rowId: askedDate.id, rows: [askedDate, construction] }, sid, brief)).toBe(true);
     const prose = row('agent_turn:build', { user_message: brief, assistant_message: 'Here is the model. The main constraint is your deadline of ten months.' });
     expect(firstAgentTurnAfterDraft({ rowId: prose.id, rows: [prose, construction] }, sid, brief)).toBe(true);
     // Construction committed, build answer never recorded; the user re-sent the brief, was offered the card, declined next turn.
@@ -414,7 +422,12 @@ describe('R7 attribution on the served share-of-riders goal', () => {
   });
   it('one shared label word never attributes another quantity\'s date or a duration (buddy r2 P2)', () => {
     for (const text of ['We want to increase customers served to 500 in ten months.', 'We must finish the survey of riders in ten months.',
-      'We keep riders enrolled in the survey over ten months.']) expect(deadlineCardToIssue(input({ storedBrief: text })), text).toBeUndefined();
+      'We keep riders enrolled in the survey over ten months.', 'We must finish the survey of riders served in ten months.',
+      'We want to keep riders served without turning anyone away indefinitely, and finish our depot renovation in ten months.',
+      'We want to increase survey responses from riders served to 500 in ten months.'])
+      expect(deadlineCardToIssue(input({ storedBrief: text })), text).toBeUndefined();
+    // The served sentence (its date in a bare "over the next ten months" clause) and a comma-free level stance still qualify.
+    expect(deadlineCardToIssue(input())).toMatchObject({ date: '2027-08-10' });
   });
   it('the unit-with-letters path is unchanged: "under" is still a subject word there (buddy r2 P3)', () => {
     const goal = { id: 'under_65_population', kind: 'goal', label: 'Under-65 population', goal_threshold_unit: 'people under 65', goal_deadline_as_stated: 'ten months' };
