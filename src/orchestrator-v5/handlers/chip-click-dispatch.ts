@@ -803,6 +803,7 @@ function deriveChipClickFreshness(
     {
       ...chronology,
       currentGraph: cachedSnapshot?.rawPersistedGraph,
+      currentScenarioRevision: cachedSnapshot?.rawPersistedGraph != null ? cachedSnapshot.evaluatedScenarioRevision : undefined,
       analysisInvalidatedAt,
       ...(priorFactsReadOk === undefined ? {} : { priorFactsReadOk }),
     },

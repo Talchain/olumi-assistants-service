@@ -27,8 +27,7 @@ export function installContract(turn: Turn): void {
           const state = findState(call.payloads);
           expect(object(state.analysis).selected_run_reference).toBe(w.seed.captured_run_reference);
           expect(object(state.analysis).selected_run_id).toBeUndefined();
-          expect(state.scenario_revision).toBeUndefined();
-          expect(object(state.analysis).selected_run_revision).toBeUndefined();
+
         }
         identities.set(name, w);
       }
@@ -53,12 +52,17 @@ export function installContract(turn: Turn): void {
           expect(object(findState(call.payloads).analysis).selected_run_id).toBe(captured.seed.captured_execution_run_id);
         }
       }, 60000);
-      it.fails(`GAP: R1 ${name} numeric scenario revision carried with selected Run`, () => {
+      it(`R1 ${name} numeric scenario revision carried with selected Run`, () => {
         const captured = identities.get(name)!;
         for (const call of captured.calls) {
           const state = findState(call.payloads);
           expect(state.scenario_revision).toBe(expected.synthetic_scenario_revision);
           expect(object(state.analysis).selected_run_revision).toBe(expected.synthetic_run_revision);
+          expect(object(state.analysis).selected_run_revision_source).toBe('recorded');
+          expect(state).not.toHaveProperty('selected_run_revision');
+          expect(state).not.toHaveProperty('selected_run_revision_source');
+          expect(state).not.toHaveProperty('run_revision');
+          expect(state).not.toHaveProperty('run_revision_source');
         }
       }, 60000);
     }

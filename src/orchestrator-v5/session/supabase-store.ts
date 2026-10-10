@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 import { toTypedRunRows, type TypedRunRows, type TypedRunOptionRow } from '../runs/typed-run-rows.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
@@ -2013,7 +2014,7 @@ export class SupabaseSessionStore implements SessionStore {
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
     const { data, error } = await this.client
       .from('v5_conversation_turns')
-      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions')
+      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance')
       .eq('scenario_id', scenarioId)
       .eq('turn_id', turnId)
       .limit(1);
@@ -2022,7 +2023,10 @@ export class SupabaseSessionStore implements SessionStore {
     if (error) throw new Error(`readCommittedTurn failed: ${error.message ?? String(error)}`);
     const row = ((data as Array<Record<string, unknown>> | null) ?? [])[0];
     if (!row || typeof row.id !== 'string') return null;
+    const guidance = row.agent_guidance == null ? undefined : parseAnswerGuidance(row.agent_guidance);
+    if (guidance === null) throw new SessionReadError('Committed turn guidance malformed');
     return {
+      ...(guidance !== undefined ? { agent_guidance: guidance } : {}),
       id: row.id,
       request_hash: String(row.request_hash ?? ''),
       assistant_message: typeof row.assistant_message === 'string' ? row.assistant_message : null,
@@ -2395,7 +2399,7 @@ export class SupabaseSessionStore implements SessionStore {
     // for the current workload.
     let query = this.client
       .from('v5_handler_facts')
-      .select('id, payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at')
+      .select('id, payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at, evaluated_scenario_revision')
       .in('v5_conversation_turn_id', conversationTurnRowIds as string[])
       .order('created_at', { ascending: false })
       .order('id', { ascending: false });
@@ -2432,6 +2436,7 @@ export class SupabaseSessionStore implements SessionStore {
       noop?: unknown;
       v5_conversation_turn_id?: unknown;
       created_at?: unknown;
+      evaluated_scenario_revision?: unknown;
     }>) {
       const payloadObj =
         row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
@@ -2456,12 +2461,16 @@ export class SupabaseSessionStore implements SessionStore {
         : '';
       const factRowId = typeof row.id === 'string' ? row.id : '';
       const createdAt = typeof row.created_at === 'string' ? row.created_at : '';
-      out.push({
+      const entry: HandlerFactWithTurn = {
         fact: parsed.data,
         fact_row_id: factRowId,
         turn_id: turnId,
         fact_created_at: createdAt,
-      });
+        ...(parsed.data.fact_type === 'run_analysis'
+          ? { evaluated_scenario_revision: validatedScenarioRevision(row.evaluated_scenario_revision) } : {}),
+      };
+      bindRunAnalysisOccurrence(entry);
+      out.push(entry);
     }
     return out;
   }
@@ -2612,7 +2621,7 @@ export class SupabaseSessionStore implements SessionStore {
     const { data, error, count } = await abortableAnalysisRead(this.client
       .from('v5_handler_facts')
       .select(
-        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
+        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at, evaluated_scenario_revision',
         { count: 'exact' },
       )
       .eq('scenario_id', scenarioId)
@@ -2822,12 +2831,13 @@ export class SupabaseSessionStore implements SessionStore {
   async readExistingScenario(scenarioId: string) {
     const { data, error } = await abortableAnalysisRead(this.client
       .from('scenarios')
-      .select('id, user_id, graph, brief_text, analysis_invalidated_at, revision')
+      .select('id, user_id, graph, brief_text, analysis_invalidated_at, revision, created_at')
       .eq('id', scenarioId)
       .maybeSingle());
     if (error) throw new SessionReadError('Existing scenario read failed', { cause: error, code: errCode(error) });
     if (data === null) return null;
-    return { ...parseExistingScenarioRow(data, scenarioId), revision: isScenarioRevision(data.revision) ? data.revision : undefined };
+    return { ...parseExistingScenarioRow(data, scenarioId), revision: isScenarioRevision(data.revision) ? data.revision : undefined,
+      createdAt: typeof data.created_at === 'string' && Number.isFinite(Date.parse(data.created_at)) ? data.created_at : null };
   }
 
   /** Read actual capture rows; no process-local status and no capped history lookup. */
@@ -3222,6 +3232,7 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handl
     action_type?: unknown;
     noop?: unknown;
     created_at?: unknown;
+    evaluated_scenario_revision?: unknown;
   }>) {
     if (
       typeof row.id !== 'string' ||
@@ -3273,11 +3284,15 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handl
         { code: 'analysis_fact_corrupt' },
       );
     }
-    facts.push({
+    const entry: IdentifiedHandlerFact = {
       fact: parsed.data,
       fact_row_id: row.id,
       fact_created_at: row.created_at,
-    });
+      ...(parsed.data.fact_type === 'run_analysis'
+        ? { evaluated_scenario_revision: validatedScenarioRevision(row.evaluated_scenario_revision) } : {}),
+    };
+    bindRunAnalysisOccurrence(entry);
+    facts.push(entry);
   }
   return facts;
 }

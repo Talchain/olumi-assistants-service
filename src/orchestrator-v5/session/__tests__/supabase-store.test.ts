@@ -1285,6 +1285,7 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
         expect.objectContaining({
           fact_row_id: runAnalysisRow.id,
           fact_created_at: runAnalysisRow.created_at,
+          evaluated_scenario_revision: null,
           fact: expect.objectContaining({
             fact_type: 'run_analysis',
             noop: false,
@@ -1299,7 +1300,7 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
     expect(selectCalls[0]).toMatchObject({
       table: 'v5_handler_facts',
       cols:
-        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
+        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at, evaluated_scenario_revision',
       options: { count: 'exact' },
     });
     const filters = selectCalls[0]!.filters as Record<string, unknown>;
@@ -1865,15 +1866,20 @@ describe('SupabaseSessionStore.readMostRecentCoachingState — Stage 2B-1b null-
 
 
 describe('readonly existing-scenario snapshot', () => {
-  const row = () => ({ id: SCENARIO, user_id: USER, graph: { nodes: [], edges: [] }, brief_text: 'The brief', analysis_invalidated_at: null });
+  const row = () => ({ id: SCENARIO, user_id: USER, graph: { nodes: [], edges: [] }, brief_text: 'The brief', analysis_invalidated_at: null, created_at: '2026-10-09T10:00:00Z' });
   it('returns one stored row and its restore marker in one query, with no RPC', async () => {
     const value = { ...row(), analysis_invalidated_at: '2026-10-02T00:00:00.000Z', revision: 7 };
     const { client, selectCalls, rpcCalls } = makeClient({ selectResult: { data: value, error: null } });
     const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
-    expect(await store.readExistingScenario(SCENARIO)).toEqual({ userId: USER, graph: value.graph, briefText: value.brief_text, analysisInvalidatedAt: value.analysis_invalidated_at, revision: 7 });
+    expect(await store.readExistingScenario(SCENARIO)).toEqual({ userId: USER, graph: value.graph, briefText: value.brief_text, analysisInvalidatedAt: value.analysis_invalidated_at, revision: 7, createdAt: value.created_at });
     expect(selectCalls).toHaveLength(1);
-    expect(selectCalls[0]).toMatchObject({ table: 'scenarios', cols: 'id, user_id, graph, brief_text, analysis_invalidated_at, revision', filters: { ['eq:id']: SCENARIO } });
+    expect(selectCalls[0]).toMatchObject({ table: 'scenarios', cols: 'id, user_id, graph, brief_text, analysis_invalidated_at, revision, created_at', filters: { ['eq:id']: SCENARIO } });
     expect(rpcCalls).toHaveLength(0);
+  });
+  it.each([undefined, null, 'not-a-timestamp'])('missing or malformed creation date is unavailable, not a failed graph read: %s', async created_at => {
+    const { client } = makeClient({ selectResult: { data: { ...row(), created_at }, error: null } });
+    const snapshot = await new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 }).readExistingScenario(SCENARIO);
+    expect(snapshot).toMatchObject({ userId: USER, graph: row().graph, briefText: row().brief_text, createdAt: null });
   });
   it('distinguishes an absent row from a guest row', async () => {
     const absent = makeClient({ selectResult: { data: null, error: null } });

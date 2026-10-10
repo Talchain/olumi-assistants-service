@@ -988,9 +988,14 @@ const deadlineRefusalDetail = {
 } as const;
 
 interface GraphRead {
+  readonly scenario_revision?: number;
+  readonly run_revision?: number | null;
+  readonly run_revision_source?: 'recorded' | 'legacy_unknown';
   readonly graph_hash: string;
   /** Stored user brief from the SAME canonical graph read, never model arguments or conversation guesses. */
   readonly brief_text?: string | null;
+  /** Server creation timestamp from the same existing-scenario snapshot. */
+  readonly scenario_created_at?: string | null;
   /**
    * ⭐ THE IDENTITY-SPACE HASH OF THE SAME READ — "is this the same graph
    * object?" — kept so a write can assert the identity it actually read.
@@ -2233,6 +2238,8 @@ export function createAgentCapabilities(
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
+    const view = isPlainRecord(r.json.canonical_analysis_view) ? r.json.canonical_analysis_view : undefined;
+    const staleness = isPlainRecord(view?.staleness) ? view.staleness : undefined;
     const notModelled = notModelledOfRead(r.json.not_modelled);
     const identityEvaluated = readEvaluatedIdentityNodeIds(r.json.analysis_identity_evaluated_node_ids);
     const limitVerdicts = readLimitVerdicts(r.json.analysis_limit_verdicts);
@@ -2243,6 +2250,7 @@ export function createAgentCapabilities(
       identity_run_use: withdrawn === null ? null : { withdrawn: new Set(withdrawn) },
       graph_hash: String(r.json.graph_hash ?? ''),
       brief_text: typeof r.json.brief_text === 'string' ? r.json.brief_text : null,
+      scenario_created_at: typeof r.json.scenario_created_at === 'string' ? r.json.scenario_created_at : null,
       // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
       // producer's own return value — `computeGraphIdentityHash(graph)`, type
       // `GraphIdentityHash | null` = `{kind, value, algorithm, ...}` — so the
@@ -2258,6 +2266,20 @@ export function createAgentCapabilities(
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
+      ...(typeof staleness?.revision === 'number' && Number.isSafeInteger(staleness.revision) && staleness.revision >= 0
+        ? { scenario_revision: staleness.revision } : {}),
+      ...(() => {
+        if (staleness === undefined) return {};
+        const value = staleness.run_revision;
+        if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+          && staleness.run_revision_source === 'recorded') {
+          return { run_revision: value, run_revision_source: 'recorded' as const };
+        }
+        if (value === null && staleness.run_revision_source === 'legacy_unknown') {
+          return { run_revision: null, run_revision_source: 'legacy_unknown' as const };
+        }
+        return {};
+      })(),
       ...(section === 'run_explanation' ? { run_explanation_admission:
         (r.json.analysis_ready as { analysis_admission?: unknown } | undefined)?.analysis_admission } : {}),
       ...(() => {
@@ -3657,6 +3679,7 @@ export function createAgentCapabilities(
         ...(permissions.total_goal_claims_allowed === false ? { claim_permissions: permissions } : {}),
         ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
         graph_revision: g.graph_hash,
+        ...(g.scenario_revision === undefined ? {} : { scenario_revision: g.scenario_revision }),
         empty: g.nodes.length === 0,
         entities: g.nodes.map((n) => {
           // What each option already sets, as stored (RCA D1): quote these, never your own earlier arguments.
@@ -4796,11 +4819,14 @@ export function createAgentCapabilities(
       const timestamp = draft?.created_at;
       const draftReference = typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp))
         ? todayInLondon(new Date(timestamp)) : undefined;
-      const asOf = args.reference_date;
-      if (asOf !== undefined && (typeof asOf !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)
-        || !wordsTheUserWrote(asOf, ctx.user_turn_text) || !new RegExp(`as of\\s+${asOf}`, 'i').test(ctx.user_turn_text ?? ''))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
+      const typedAsOfDates = [...typed.matchAll(/(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu)].map(match => match[1]);
+      const asOf = typedAsOfDates.length === 0 ? undefined : args.reference_date;
+      if (asOf !== undefined && (typeof asOf !== 'string' || !typedAsOfDates.includes(asOf))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
           detail: deadlineRefusalDetail.reference_not_stated };
-      const reference = typeof asOf === 'string' ? asOf : draftReference;
+      const scenarioTimestamp = g.scenario_created_at;
+      const scenarioReference = typeof scenarioTimestamp === 'string' && Number.isFinite(Date.parse(scenarioTimestamp))
+        ? todayInLondon(new Date(scenarioTimestamp)) : undefined;
+      const reference = typeof asOf === 'string' ? asOf : draftReference ?? scenarioReference;
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const stated = readStatedDeadline(words, reference ?? todayInLondon((opts.now ?? (() => new Date()))()));
       if (stated === null) {

@@ -1,3 +1,4 @@
+import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
@@ -81,10 +82,12 @@ export interface CanonicalAnalysisView {
     /** Null means unknown/no Run, never an assertion that this Run is fresh. */
     readonly stale: boolean | null;
     readonly revision: number | null;
-    readonly run_revision: null;
-    readonly basis: 'analysis_graph_hash_interim';
+    readonly run_revision: number | null;
+    readonly run_revision_source?: 'recorded' | 'legacy_unknown';
+    readonly basis: 'analysis_graph_hash_interim' | 'recorded_run_revision';
     readonly reason: FreshnessDerivation['reason'] | null;
-    readonly limitation: 'Hash equality cannot detect brief, framing or stage changes.';
+    readonly limitation: 'Hash equality cannot detect brief, framing or stage changes.'
+      | 'No analysis hash was available; only the scenario revision was compared.';
   };
   readonly leader_licence: LeaderLicence;
   readonly options: readonly {
@@ -173,6 +176,12 @@ export function projectCanonicalAnalysisCells(
  */
 export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput): CanonicalAnalysisView {
   const fact = input.runFact != null && !isAnalysisRefusalFact(input.runFact as HandlerFact) ? input.runFact : null;
+  const occurrence = fact === null ? undefined : readRunAnalysisOccurrence(fact);
+  const recordedRevision = occurrence?.evaluated_scenario_revision ?? null;
+  const runRevision = recordedRevision !== null && occurrence?.fact_row_id === input.derivation?.selected_fact_row_id
+    && recordedRevision === input.derivation?.run_revision?.value
+    ? recordedRevision : null;
+  const revisionBasis = input.derivation?.basis === 'recorded_run_revision' && runRevision !== null;
   const freshness = fact === null ? undefined : input.derivation?.freshness;
   const current = fact !== null && input.analysisState?.run_state.kind === 'complete_current'
     && input.currentResult?.type === 'analysis_result';
@@ -193,9 +202,11 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
     staleness: {
       stale: freshness === 'stale' ? true : freshness === 'fresh' ? false : null,
       revision: typeof input.revision === 'number' && Number.isSafeInteger(input.revision) && input.revision >= 0 ? input.revision : null,
-      run_revision: null, basis: 'analysis_graph_hash_interim',
+      run_revision: runRevision, run_revision_source: runRevision === null ? 'legacy_unknown' : 'recorded',
+      basis: revisionBasis ? 'recorded_run_revision' : 'analysis_graph_hash_interim',
       reason: fact === null ? null : input.derivation?.reason ?? null,
-      limitation: 'Hash equality cannot detect brief, framing or stage changes.',
+      limitation: revisionBasis ? 'No analysis hash was available; only the scenario revision was compared.'
+        : 'Hash equality cannot detect brief, framing or stage changes.',
     },
     leader_licence: leaderLicenceFromState(input.analysisState, input.analysisReady),
     options: cells.map(({ option_id, cell }) => {

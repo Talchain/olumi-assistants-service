@@ -302,6 +302,7 @@ export interface SessionTurnWrite {
 
 /** What {@link SessionStore.readCommittedTurn} returns — the durable facts a replay is answered from. */
 export interface CommittedTurnRecord {
+  readonly agent_guidance?: AnswerGuidance;
   readonly id: string;
   readonly request_hash: string;
   readonly assistant_message: string | null;
@@ -692,6 +693,8 @@ export interface SessionStore {
     readonly graph: unknown | null;
     readonly briefText: string | null;
     readonly analysisInvalidatedAt: string | null;
+    /** Server scenario creation timestamp, read beside graph and brief. */
+    readonly createdAt?: string | null;
     /** Same uncached SELECT as graph; not a revision-at-Run claim. */
     readonly revision?: number;
   } | null>;

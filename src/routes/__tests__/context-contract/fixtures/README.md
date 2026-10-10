@@ -4,10 +4,15 @@ Their known execution Run IDs, computed_at and graph hashes are retained exactly
 expectations.json copies run2's provider-visible licensed chance and driver sentence.
 The selected goal id is mrr (both captured graphs; run2 licence goal_node_id).
 Numeric DB revision was not captured: 4402 is a SYNTHETIC contract revision, supplied
-at the read port with the known selected Run id and goal. It proves current dropping
-of read-port identity, not that captured runs were calculated at DB revision 4402.
+at the read port with the known selected Run id and goal. Revision probes now use
+canonical_analysis_view.v1.staleness (revision, run_revision, run_revision_source).
+They prove transport of the canonical read metadata, not that the captured runs
+were calculated at DB revision 4402. R1 numeric revision rows are now positive
+contract rows: state.scenario_revision is current; analysis.selected_run_revision
+and selected_run_revision_source describe the selected occurrence. Selected Run
+metadata appears once in the shared analysis carrier, including Explain.
 R1 it.fails rows must be migrated to authoritative identity carriers when a product
-fix establishes them. Neither of these unsupported port keys is product evidence.
+fix establishes them. The remaining unsupported selected execution-id probe is not product evidence.
 withheld: keep run2's raw option chance and driver, add an option-scoped placeholder
 withhold for raise_price_to_59 (licence percentages remain as adversarial input). The other option is a control.
 unlicensed-driver: keep run2's resolved raw drivers; remove its licence driver map.

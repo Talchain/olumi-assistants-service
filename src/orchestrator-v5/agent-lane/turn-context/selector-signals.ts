@@ -1,3 +1,4 @@
+import { isGuidanceVariant } from './guidance-history.js';
 /**
  * ⭐ THE ONE ADAPTER from #2465's guidance signals to RC's selector leaf (`agent-lane/guidance`). Built by SCIENCE/DSK in
  * T3 (`method-turn.ts` @eb921dc1, seam (1) agreed AI HARNESS 5938348370) and LIFTED here unchanged for the T2 wiring
@@ -40,6 +41,8 @@ function guidanceStateOf(entries: Readonly<Record<string, unknown>>): GuidanceSt
       status: r.status as GuidanceRecord['status'],
       ...(typeof r.state_key_hash === 'string' ? { state_key_hash: r.state_key_hash } : {}),
       ...(typeof r.turn_id === 'string' ? { turn_id: r.turn_id } : {}),
+      ...(isGuidanceVariant(key, r.variant_id) ? { variant_id: r.variant_id } : {}),
+      ...(typeof r.slot === 'number' && Number.isInteger(r.slot) && r.slot >= 1 && r.slot <= 3 ? { slot: r.slot } : {}),
     };
   }
   return out;
