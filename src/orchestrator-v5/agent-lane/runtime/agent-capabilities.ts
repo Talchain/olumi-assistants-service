@@ -251,6 +251,7 @@ import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participat
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
 import { goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
+import { draftReferenceDate } from '../../goal-target/draft-reference.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
@@ -4879,17 +4880,12 @@ export function createAgentCapabilities(
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
-      const timestamp = draft?.created_at;
-      const draftReference = typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp))
-        ? todayInLondon(new Date(timestamp)) : undefined;
       const typedAsOfDates = [...typed.matchAll(/(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu)].map(match => match[1]);
       const asOf = typedAsOfDates.length === 0 ? undefined : args.reference_date;
       if (asOf !== undefined && (typeof asOf !== 'string' || !typedAsOfDates.includes(asOf))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
           detail: deadlineRefusalDetail.reference_not_stated };
-      const scenarioTimestamp = g.scenario_created_at;
-      const scenarioReference = typeof scenarioTimestamp === 'string' && Number.isFinite(Date.parse(scenarioTimestamp))
-        ? todayInLondon(new Date(scenarioTimestamp)) : undefined;
-      const reference = typeof asOf === 'string' ? asOf : draftReference ?? scenarioReference;
+      // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
+      const reference = draftReferenceDate({ ...(typeof asOf === 'string' ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       return proposePlacedDeadline(ctx, args, g, words, reference);
     },
 
@@ -9573,11 +9569,9 @@ export function createAgentCapabilities(
         if (!g || !firstAgentTurnAfterDraft(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
         // The turn that built the draft already offered a deadline card (a committed set_goal_deadline proposal), or its offers are unknown.
         if (await buildTurnAlreadyOfferedDeadline(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
-        // The immutable reference is THIS draft's own creation time; without the construction version it stays silent
-        // (no scenario-time or clock fallback on the automatic path: buddy r1 P2).
         const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
-        const stamp = draft?.created_at;
-        const reference = typeof stamp === 'string' && Number.isFinite(Date.parse(stamp)) ? todayInLondon(new Date(stamp)) : undefined;
+        // The ONE resolver (`draft-reference.ts`), shared with the model-facing door: a guest has no version, so the scenario's server stamp.
+        const reference = draftReferenceDate({ versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
         if (reference === undefined) return undefined;
         const card = deadlineCardToIssue({ ...input, graph: g.raw, storedBrief: g.brief_text, reference, priorOffer: false });
         return card === undefined ? undefined : { words: card.words,

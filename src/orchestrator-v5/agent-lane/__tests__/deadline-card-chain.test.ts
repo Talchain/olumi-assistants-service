@@ -35,6 +35,7 @@ const goal = (g: Rec): Rec => g.nodes.find((n: Rec) => n.kind === 'goal');
 function world(fixture: { graph: Rec; brief: string } = d2) {
   const sid = randomUUID(); let bytes = JSON.stringify(fixture.graph), brief = fixture.brief;
   let draftStamp: string | null = STAMP, scenarioStamp: string | null = '2026-09-01T10:00:00Z', broken = false, snapshotBroken = false;
+  let committedMode: 'ok' | 'throw' | 'missing' | 'malformed' = 'ok', committedTurn = '';
   const read = (): Rec => JSON.parse(bytes);
   const rows: SessionTurnWithContent[] = [makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)),
     request_hash: 'graph_registration:draft', turn_class: 'direct_answer', handler_id: null, response_emitted: false, created_at: STAMP })];
@@ -42,9 +43,9 @@ function world(fixture: { graph: Rec; brief: string } = d2) {
   const store = createMockSessionStore({
     loadGraph: async () => read(), loadGraphAndBriefText: async () => ({ graph: read(), briefText: brief }),
     ensureScenarioExists: async () => ({ user_id: null }),
-    readCommittedTurn: async (_sid, id) => { const r = rows.find(r => r.turn_id === id); return r ? { id: r.id, request_hash: r.request_hash,
+    readCommittedTurn: async (_sid, id) => { const target = id === committedTurn; if (target && committedMode === 'throw') throw new Error('committed read failed'); const r = target && committedMode === 'missing' ? undefined : rows.find(r => r.turn_id === id); return r ? { id: r.id, request_hash: r.request_hash,
       user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used,
-      pending_actions: (r as Rec).pending_actions ?? [] } : null; },
+      pending_actions: target && committedMode === 'malformed' ? [null, 'junk'] : (r as Rec).pending_actions ?? [] } : null; },
     readMostRecentPendingActions: async (_sid, opts) => { if (broken) throw new Error('unreadable carrier'); if (snapshotBroken && opts?.onLatestRowId) { snapshotBroken = false; throw new Error('snapshot read failed'); } opts?.onLatestRowId?.(latest()?.id ?? null); return (latest() as Rec)?.pending_actions ?? []; },
     readRecent: async () => rows.filter(r => !r.turn_id.endsWith(':claim')),
     readFactsWithTurnFor: async ids => rows.flatMap(r => ids.includes(r.id) ? (writes.find(w => w.turn_id === r.turn_id)?.handler_facts ?? [])
@@ -73,7 +74,7 @@ function world(fixture: { graph: Rec; brief: string } = d2) {
   const ctx = (text: string) => ({ scenario_id: sid, authenticated_user_id: null, request_id: 'deadline-replay', user_text: text, user_turn_text: text });
   return { sid, store, rows, writes, read, caps, ctx, proposals, graphWire, versions,
     replace: (g: Rec) => { bytes = JSON.stringify(g); }, setBrief: (text: string) => { brief = text; },
-    reference: (draft: string | null, scenario: string | null) => { draftStamp = draft; scenarioStamp = scenario; }, failRead: () => { broken = true; }, failSnapshot: () => { snapshotBroken = true; } };
+    reference: (draft: string | null, scenario: string | null) => { draftStamp = draft; scenarioStamp = scenario; }, failRead: () => { broken = true; }, failSnapshot: () => { snapshotBroken = true; }, failCommitted: (mode: 'throw' | 'missing' | 'malformed', turnId: string) => { committedMode = mode; committedTurn = turnId; } };
 }
 const apps: FastifyInstance[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
@@ -312,13 +313,37 @@ describe('R4 durable first-Agent-turn gate', () => {
     const second = await turn({ agent_session_id: first._agent.session_id });
     expect(second._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
   });
-  it('without the construction version the automatic card is silent: no scenario-time and no clock fallback', async () => {
-    const w = world(); w.reference(null, '2026-10-09T10:00:00Z');
+  it('with no version AND no usable scenario stamp the automatic card is silent: the clock is never a fallback', async () => {
+    const w = world(); w.reference(null, null);
     const input = { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } };
     expect(await w.caps.deadlineCardFromDraft(w.ctx('Run'), input)).toBeUndefined();
-    w.reference(null, null); expect(await w.caps.deadlineCardFromDraft(w.ctx('Run'), input)).toBeUndefined();
-    // The model-facing door keeps its own (unchanged) fallback: a typed deadline still gets a card there.
+    w.reference(null, 'not-a-date'); expect(await w.caps.deadlineCardFromDraft(w.ctx('Run'), input)).toBeUndefined();
+    // The model-facing door keeps its own (unchanged) date-only card: a typed deadline still gets a card there.
     expect(await w.caps.proposeGoalDeadline!(w.ctx('My deadline is ten months'), { deadline_words: 'ten months', rationale: '' })).toMatchObject({ ok: true });
+  });
+  /**
+   * Served 10 Oct, staging 1bf67f90, guest 5d5122d1: a GUEST has no version history (`findConstructionVersion` is empty by design),
+   * and the automatic offer alone refused the scenario's server stamp (#2941), so it had no reference and stayed silent on every guest
+   * draft. DL github-6d: ONE resolver (`draftReferenceDate`) for the door and the automatic offer.
+   */
+  describe('R9 a guest draft has no version history: ONE reference resolver for the card and the offer', () => {
+    it('the automatic offer uses the scenario\'s server stamp, and the route offers the same bound card', async () => {
+      const w = world(); w.reference(null, '2026-10-10T08:00:00Z');
+      const issued = await w.caps.deadlineCardFromDraft(w.ctx('Run'), { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } });
+      expect(issued?.words).toBe('ten months');
+      const guest = world(); guest.reference(null, '2026-10-10T08:00:00Z');
+      card(await (await route(guest))());
+    });
+    it('CONTRAST: the door and the automatic offer give the SAME reference (the same label) on the same guest draft, and a version wins for both', async () => {
+      for (const [version, scenario] of [[null, '2026-10-09T10:00:00Z'], ['2026-10-10T10:00:00Z', '2026-10-09T10:00:00Z']] as const) {
+        const w = world(); w.reference(version, scenario);
+        const offer = await w.caps.deadlineCardFromDraft(w.ctx('Run'), { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } });
+        const viaOffer = await offer!.issue(w.ctx('Run'), { deadline_words: offer!.words, rationale: '' }) as Rec;
+        const viaDoor = await world(), door = (viaDoor.reference(version, scenario), await viaDoor.caps.proposeGoalDeadline!(viaDoor.ctx('My deadline is ten months'), { deadline_words: 'ten months', rationale: '' })) as Rec;
+        expect(viaOffer.public_label, String(version)).toBe(door.public_label);
+        expect(viaOffer.public_label).toContain(version === null ? '9 October 2026' : '10 October 2026');
+      }
+    });
   });
   it('Yes on the route-issued card writes byte-for-byte what Yes on the model-facing door\'s card writes', async () => {
     const viaRoute = world(), turn = await route(viaRoute), first = await turn(), { yes } = card(first);
@@ -439,6 +464,25 @@ describe('R6 the draft was built inside an Agent turn', () => {
     it('a build answer whose prose asks about the deadline and mentions years, with no committed proposal, is still offered the card', async () => {
       const w = world(); w.rows.unshift(buildAnswer(w, { assistant_message: 'Is your deadline 10 August 2027? Launch is planned for 31 December 2027. What is the deadline?' }));
       card(await (await route(w))());
+    });
+    it('an UNKNOWN carrier read closes the offer AND says why on the existing logger (a silent closed offer is observable)', async () => {
+      const { log } = await import('../../../utils/telemetry.js');
+      for (const [mode, reason] of [['throw', 'committed_read_failed'], ['missing', 'committed_row_missing_or_malformed'], ['malformed', 'committed_entry_malformed']] as const) {
+        const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+        try {
+          const w = world(), build = buildAnswer(w); w.rows.unshift(build); w.failCommitted(mode, build.turn_id);
+          expect(proposals(await (await route(w))())).toEqual([]);
+          expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'agent_lane.deadline_offer_closed_unknown', reason, scenario_id: w.sid }), expect.any(String));
+        } finally { warn.mockRestore(); }
+      }
+    });
+    it('CONTRAST: a readable carrier never logs the unknown event', async () => {
+      const { log } = await import('../../../utils/telemetry.js');
+      const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+      try {
+        const w = world(); w.rows.unshift(buildAnswer(w)); card(await (await route(w))());
+        expect(warn.mock.calls.some(([fields]) => (fields as Rec)?.event === 'agent_lane.deadline_offer_closed_unknown')).toBe(false);
+      } finally { warn.mockRestore(); }
     });
     it('a goal that already holds a deadline is never offered one', () => {
       const g = structuredClone(d2.graph); Object.assign(goal(g), { goal_horizon: { deadline: '2027-08-10' } });
