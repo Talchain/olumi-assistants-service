@@ -2,10 +2,11 @@
  * Quotes are located by CEE; model offsets and ownership assertions are never authority.
  */
 import { metricNamesLabel, type CandidateModel } from './admit-model.js';
-import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { labelHead } from './label-head-unit.js';
 import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } from './same-unit.js';
+import { findLinkEffectAmounts } from './link-effect-figures.js';
 import { figureTheUserWroteForSpan } from './stated-by-user.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { log } from '../../utils/telemetry.js';
@@ -139,8 +140,8 @@ function settingClause(a: Assertion, at: number): { text: string; start: number;
   }
   return found === null ? null : { ...found, others };
 }
-function sameFrame(text: string, span: { start: number; end: number }, unit: unknown): boolean {
-  const literal = findStatedAmounts(text).find(n => n.index === span.start);
+function sameFrame(text: string, span: { start: number; end: number }, unit: unknown, amount?: StatedAmount): boolean {
+  const literal = amount ?? findStatedAmounts(text).find(n => n.index === span.start);
   const written = literal ?? { index: span.start, matchedText: text.slice(span.start, span.end), kind: 'words' };
   const stated = statedTailParts(text, written); const expected = readUnitParts(unit);
   if (stated === null || expected === null || stated.kind !== expected.kind || stated.code !== expected.code
@@ -158,7 +159,7 @@ const ATTRIBUTION = /\bOlumi\b|\byou(?:r|rs|rself|rselves)?\b|\bassistant\b/iu;
  * Olumi named in either of the two paragraphs above refuses. Third-party attribution without any of these signals
  * is ACCEPTED RESIDUAL (DL 7 Oct).
  */
-function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], literal: string, value: number): boolean {
+function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], literal: string, value: number, compoundWords = false): boolean {
   const breaks = [...brief.matchAll(/\n[ \t]{0,4}\n/gu)].map(m => m.index!);
   const above = breaks.filter(n => n < a.start);
   const start = above.at(-1) ?? -1;
@@ -173,6 +174,7 @@ function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], lit
     if (s === next && words(s.text).some(w => BOUNDS.has(w))) return false;
     // The same figure in another spelling ("the 4" beside "four", "four" beside "4") is the same literal.
     if (words(s.text).some(w => figure(w) === value)) return false;
+    if (compoundWords && findLinkEffectAmounts(s.text).some(n => n.magnitude === Math.abs(value))) return false;
     const text = s.text.toLowerCase();
     let at = text.indexOf(token);
     while (at >= 0) {
@@ -234,6 +236,30 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
   return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), intervention.value);
 }
 
+/** Remove only a terminal current/date qualifier; the quantity's scope words remain. */
+function currentQuantityLabel(label: string): string {
+  return label.replace(/\s+(?:today|now|currently)$/iu, '').replace(/\s+at\s+([\p{L}]+)\s+[0-9]+$/iu,
+    (all, period: string) => periodNoun(period.toLowerCase()) === null ? all : '');
+}
+/** Whole quantity-name equality and full unit equality, never a shared token or a shared unit alone. */
+function sameCurrentQuantity(model: CandidateModel, factor: Factor): boolean {
+  const left = currentQuantityLabel(factor.label); const right = currentQuantityLabel(model.goal.metric);
+  const noun = labelHead(left);
+  const key = (label: string): string => words(label)
+    .filter(w => !['a', 'an', 'the', 'for', 'of', 'in', 'at', 'per'].includes(w))
+    .map(singular).sort().join(' ');
+  const unit = readUnitParts(factor.unit); const goalUnit = readUnitParts(model.goal.unit);
+  return noun !== undefined && sameName(noun, labelHead(right) ?? '') && key(left) === key(right)
+    && unit !== null && goalUnit !== null && JSON.stringify(unit) === JSON.stringify(goalUnit);
+}
+/** A net CHANGE may store a sign not written as a minus. Its local direction must govern this typed amount. */
+function signedCurrentFigure(factor: Factor, text: string, amount: StatedAmount): number | null {
+  if (!words(factor.label).includes('net') || labelHead(factor.label) !== 'change') return amount.magnitude;
+  const direction = /\b(work off|(?:have been )?losing|(?:have been )?gaining) a net $/iu.exec(text.slice(0, amount.index));
+  if (direction === null) return null;
+  return /gaining/iu.test(direction[1]!) ? amount.magnitude : -amount.magnitude;
+}
+
 /** Direct reporting, rather than hearing, guessing or planning somebody else's level. */
 const STATE_VERBS = new Set(['have', 'has', 'is', 'are', 'work', 'works', 'complete', 'completes', 'run', 'runs',
   'process', 'processes', 'handle', 'handles', 'employ', 'employs', 'pay', 'pays', 'spend', 'spends', 'earn', 'earns',
@@ -269,23 +295,38 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
     if (model.factors.filter(f => f.label === factor.label).length !== 1) return false;
     // The sentence holding the goal target cannot also attest a current level, even for a differently named factor.
-    if (typeof model.goal.value === 'number' && [...findStatedAmounts(a.text).map(n => n.magnitude),
+    if (typeof model.goal.value === 'number' && [...findLinkEffectAmounts(a.text).map(n => n.magnitude),
       ...words(a.text).flatMap(w => { const n = figure(w); return n === null ? [] : [n]; })].includes(model.goal.value)) return false;
     if (model.constraints.some(c => c.value === value && metricNamesLabel(c.metric, factor.label))) return false;
-    const others = [model.goal.metric, ...model.factors.filter(f => f !== factor).map(f => f.label),
+    const sameQuantity = sameCurrentQuantity(model, factor);
+    const others = [...(sameQuantity ? [] : [model.goal.metric]),
+      ...model.factors.filter(f => f !== factor).map(f => f.label),
       ...model.outcomes.map(o => o.label), ...model.risks.map(r => r.label)];
     const parts = readUnitParts(factor.unit);
-    // As on the option path, a primitive count noun may name the factor itself; retain named scoping.
     const unitNamesFactor = parts?.kind === 'count'
       && labelStandsForCountUnit(parts.noun?.join(' '), factor.label, factor.unit);
-    // "Extra assessors" names the model's additional-assessor count, rather than the whole assessor headcount.
-    const target = [factor.label, factor.label.replace(/\badditional\b/giu, 'extra')];
-    const span = figureTheUserWroteForSpan(value, unitNamesFactor ? null : factor.unit, a.text,
-      { target, others, strict: true, requireNamed: true });
-    if (span === null || !sameFrame(a.text, span, factor.unit)) return false;
+    const target = [sameQuantity ? currentQuantityLabel(factor.label) : factor.label, factor.label.replace(/\badditional\b/giu, 'extra')];
+    const amounts = findLinkEffectAmounts(a.text).filter(n => signedCurrentFigure(factor, a.text, n) === value);
+    // The stored sign stays intact. Only an explicitly directed, located amount supplies its magnitude.
+    const matches = amounts.flatMap(amount => {
+      // A qualified count in words must write the whole quantity label beside its amount, not just its head.
+      const name = words(currentQuantityLabel(factor.label)).map(singular);
+      const adjacent = words(a.text.slice(amount.index + amount.matchedText.length)).slice(0, name.length).map(singular);
+      const countNamesFactor = parts?.kind === 'count' && name.length > 0
+        && name.join(' ') === adjacent.join(' ') && parts.noun?.length === 1
+        && sameName(parts.noun[0]!, labelHead(currentQuantityLabel(factor.label)) ?? '');
+      const tail = statedTailParts(a.text, amount);
+      const written = amount.kind === 'plain' && !/[0-9]/u.test(amount.matchedText)
+        ? { ...amount, kind: tail?.kind === 'percent' ? 'percent' as const : 'words' as const } : amount;
+      const span = figureTheUserWroteForSpan(amount.magnitude, unitNamesFactor || countNamesFactor ? null : factor.unit, a.text,
+        { target, others, strict: true, requireNamed: true, at: amount.index, writtenAmounts: [written] });
+      return span === null || !sameFrame(a.text, span, factor.unit, amount) ? [] : [span];
+    });
+    if (matches.length !== 1) return false;
+    const span = matches[0]!;
     if (!ownsFactorLevel(a.text.slice(0, span.start), factor)
       || words(a.text).some(w => BOUNDS.has(w) || ['goal', 'target', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w))) return false;
-    return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value);
+    return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true);
   } catch (err) {
     log.warn({ event: 'agent_lane.stated_level_unverifiable', err: err instanceof Error ? err.message : String(err) },
       'agent-lane: a stated factor level could not be verified on a malformed draft; credit is withheld');

@@ -226,3 +226,88 @@ describe('typed current-level sentence authority', () => {
     }
   });
 });
+
+// Independent controls: no retained-response literals, provider calls or file writes.
+describe('run 3 bounded span corrections', () => {
+  function current(label: string, value: number, unit: string, quote: string) {
+    return model({ label, value, unit, quote, third: '' });
+  }
+  const loss = () => current('Net waiting-list change per month', -35, 'people/month', 'We work off a net 35 people a month.');
+  const bikes = () => current('Bikes in service', 340, 'bikes', 'We have three hundred and forty bikes in service.');
+  const share = () => current('Taproom sales share', 70, '%', 'We have a taproom sales share of seventy per cent.');
+  const stock = () => {
+    const m = current('Registered borrowers today', 19000, 'borrowers', 'We have nineteen thousand registered borrowers.');
+    m.goal.metric = 'Registered borrowers'; m.goal.unit = 'borrowers'; m.goal.value = 20000;
+    return m;
+  };
+  const check = (m: ReturnType<typeof current>) => verify(m, m.factors[0]!.baseline_evidence!.quote);
+  it('B1 credits a signed net change only beside its explicit direction and matching period', () => {
+    expect(check(loss())).toBe(true);
+    const wrongPeriod = loss(); wrongPeriod.factors[0]!.unit = 'people/year';
+    expect(check(wrongPeriod)).toBe(false);
+  });
+  it('B1 refuses both opposite signs, absent direction, a remote direction and a prospective delta', () => {
+    for (const [value, quote] of [
+      [-35, 'We have been gaining a net 35 people a month.'],
+      [35, 'We work off a net 35 people a month.'],
+      [-35, 'We have a net 35 people a month.'],
+      [-35, 'We work off a net 10 people a month and have 35 people a month.'],
+      [-35, 'We could work off a net 35 people a month.'],
+    ] as const) expect(check(current('Net waiting-list change per month', value, 'people/month', quote)), quote).toBe(false);
+  });
+  it('B2 credits identical current stock and goal quantity, including a terminal dated label', () => {
+    expect(check(stock())).toBe(true);
+    const dated = stock(); dated.factors[0]!.label = 'Registered borrowers at month 0';
+    expect(check(dated)).toBe(true);
+  });
+  it('B2 retains a rival sharing the quantity and rejects a different scope, noun or period', () => {
+    const rival = stock(); rival.factors.push({ ...rival.factors[0]!, label: 'Registered borrowers', baseline_evidence: null });
+    expect(check(rival)).toBe(false);
+    const scoped = stock(); scoped.factors[0]!.label = 'Campus registered borrowers today';
+    expect(check(scoped)).toBe(false);
+    const noun = stock(); noun.goal.metric = 'Registered borrower capacity';
+    expect(check(noun)).toBe(false);
+    const period = stock(); period.goal.unit = 'borrowers/month';
+    expect(check(period)).toBe(false);
+  });
+  it('B2 preserves the goal-target refusal for a compound number word with no target vocabulary', () => {
+    const m = stock(); m.goal.value = 19000;
+    expect(check(m)).toBe(false);
+  });
+  it('B3 credits typed compound counts and written percent units in owned current reports', () => {
+    expect(check(bikes())).toBe(true);
+    expect(check(share())).toBe(true);
+  });
+  it('B3 refuses a nearby unit from a different quantity and an unnamed qualified subset', () => {
+    expect(check(current('Bikes in service', 340, 'bikes', 'We have three hundred and forty scooters in service.'))).toBe(false);
+    expect(check(current('Campus bikes', 340, 'bikes', 'We have three hundred and forty bikes.'))).toBe(false);
+  });
+  it('B3 preserves third-party ownership refusal with the same number words and unit', () => {
+    expect(check(current('Rival e-scooters in zone', 340, 'scooters', 'The rival e-scooter operator runs three hundred and forty rival e-scooters in zone.'))).toBe(false);
+    expect(check(current('Competitor monthly brewing volume', 6500, 'litres/month', 'Our nearest competitor brews six thousand five hundred litres a month.'))).toBe(false);
+  });
+  it('B3 refuses a hundred without a counted quantity, an idiom, and a rate with a different unit', () => {
+    for (const [value, unit, quote] of [
+      [100, 'bikes', 'We have a hundred.'],
+      [70, 'bikes', 'We have seventy reasons to keep bikes in service.'],
+      [70, 'bikes', 'We have seventy bikes a month.'],
+      [70, '%', 'We have seventy bikes in service.'],
+    ] as const) expect(check(current('Bikes in service', value, unit, quote)), quote).toBe(false);
+  });
+  it('all three paths refuse goal targets, ceilings, option effects and add-roughly deltas', () => {
+    for (const [label, value, unit, quote] of [
+      ['Registered borrowers today', 20000, 'borrowers', 'Our goal is to have twenty thousand registered borrowers.'],
+      ['Bikes in service', 340, 'bikes', 'We have at most three hundred and forty bikes in service.'],
+      ['Bikes in service', 340, 'bikes', 'We could add three hundred and forty bikes in service.'],
+      ['Bikes in service', 340, 'bikes', 'We add roughly three hundred and forty bikes in service.'],
+      ['Net waiting-list change per month', -35, 'people/month', 'We could add roughly 35 people a month.'],
+    ] as const) expect(check(current(label, value, unit, quote)), quote).toBe(false);
+  });
+  it('B3 keeps exact quote and compound-word neighbour uniqueness gates', () => {
+    const m = bikes(); const quote = m.factors[0]!.baseline_evidence!.quote;
+    expect(verify(m, quote.replace('have', 'own'))).toBe(false);
+    expect(verify(m, `${quote} We mentioned three hundred and forty.`)).toBe(false);
+    expect(verify(m, `${quote} We mentioned 340.`)).toBe(false);
+    expect(verify(m, `${quote} Olumi suggested the number.`)).toBe(false);
+  });
+});

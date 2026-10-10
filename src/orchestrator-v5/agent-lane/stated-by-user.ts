@@ -34,7 +34,6 @@ import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, ty
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
-import type { CandidateModel } from './admit-model.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
@@ -42,7 +41,6 @@ import { labelHeadUnit } from './label-head-unit.js';
 import { readUnitParts, sameUnit } from './same-unit.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
-import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { readCount } from './same-unit.js';
@@ -482,6 +480,8 @@ export interface EntityScope {
   readonly strict?: true;
   /** A short answer may use a live question elsewhere; this door requires the figure's entity in this clause. */
   readonly requireNamed?: true;
+  /** Typed, located amounts supplied only by the current-level quote validator. Other doors retain their scanner. */
+  readonly writtenAmounts?: readonly (StatedAmount | ReturnType<typeof countsInWords>[number])[];
   /**
    * ⭐ A4 (CODEX CEE BUDDY 5919834707, AIQ 5919953251): read ONLY the written amount that starts at this index — one span,
    * never "the same figure anywhere". Opt-in, passed only by `writtenRangeFor`; every other door reads as before.
@@ -628,7 +628,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
   const mentionOf = (w: string, decisiveTarget: readonly string[]): 'target' | 'other' | null =>
     quantityMentionOf(w, unitWords, decisiveTarget, decisiveOther);
   const strict = scope.strict === true;
-  const written = [...findStatedAmounts(userText), ...countsInWords(userText)];
+  const written = scope.writtenAmounts ?? [...findStatedAmounts(userText), ...countsInWords(userText)];
   const severalFigures = written.length >= 2;
   const matched = written.find((a) => {
     if (scope.at !== undefined && a.index !== scope.at) return false;

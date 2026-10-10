@@ -24,8 +24,8 @@ export interface Probe { id: string; description: string; model: CandidateModel;
 export const probes: Probe[] = json('r5-verified-probes.json');
 export type Row = { name: string; run: () => void | Promise<void> };
 export const level = (m: CandidateModel, option: string, factor: string) => m.options.find(o => o.label === option)!.interventions!.find(i => i.factor_label === factor)!;
-export const preflight = (m: CandidateModel, brief: string): CandidateModel => keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(m)).model;
-export const prepare = (m: CandidateModel, brief: string) => prepareProvisionalCandidate(preflight(m, brief), brief);
+export const preflight = (m: CandidateModel): CandidateModel => keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(m)).model;
+export const prepare = (m: CandidateModel, brief: string) => prepareProvisionalCandidate(preflight(m), brief);
 export const admitted = (m: CandidateModel, brief: string) => admitCandidateModel(withCountInterventionRanges(m, brief), {}, brief);
 export function censusInput(index: number): { model: CandidateModel; brief: string } {
   const c = census[index]!;
@@ -41,7 +41,7 @@ export function assertCell(m: CandidateModel, brief: string, option: string, fac
   assert.equal(iv.provenance, expected);
   // The verifier neither replaces figures nor promotes an estimated baseline.
   assert.equal(iv.value, level(m, option, factor).value);
-  assert.deepEqual(p.candidate.factors, preflight({ ...m, factors: before }, brief).factors);
+  assert.deepEqual(p.candidate.factors, preflight({ ...m, factors: before }).factors);
   const a = admitted(p.candidate, brief);
   const f = a.nodes.find(n => n.label === factor)!; const o = a.nodes.find(n => n.label === option)!;
   const cell = o.interventions?.[f.id];
