@@ -70,6 +70,7 @@
 import type { InterventionHumanAuthority } from '../orchestrator/tools/encode-option-interventions.js';
 import { extractNumericIntervention } from '../orchestrator/tools/analysis-ready-helper.js';
 import { log } from '../utils/telemetry.js';
+import { InterventionV3 } from '../schemas/cee-v3.js';
 
 /** Slash-keyed flat intervention entry, e.g. `data/interventions/fac_annual_cost`. */
 const SLASH_KEY_RE = /^data\/interventions\/(.+)$/;
@@ -153,7 +154,10 @@ function carriedUnitRaw(value: number, src: unknown): RecoveredIntervention {
     out.raw_value = rawValue;
   }
   if (src.range !== undefined) out.range = src.range;
-  if (src.source === 'cee_hypothesis') out.source = src.source;
+  // Transport the source belonging to this recovered value; never borrow the overwritten cell's source.
+  // User-class credit is never read from graph bytes: it needs the caller's scoped human authority.
+  const source = InterventionV3.shape.source.safeParse(src.source);
+  if (source.success && source.data === 'cee_hypothesis') out.source = source.data;
   return out;
 }
 

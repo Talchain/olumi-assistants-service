@@ -31,7 +31,7 @@ describe('encodeOptionInterventionsForEdit (add-option encoding)', () => {
       nodes: [goal(), cappedFactor(), { id: 'opt_x', kind: 'option', label: 'X', data: { interventions: { fac_annual_cost: { unit: '£', raw_value: 120000 } } } }],
       edges: [edge('opt_x', 'fac_annual_cost')],
     };
-    const { graph, unresolvedOptionIds } = encodeOptionInterventionsForEdit(g);
+    const { graph, unresolvedOptionIds } = encodeOptionInterventionsForEdit(g, undefined, undefined, [{ optionId: 'opt_x', factorId: 'fac_annual_cost' }]);
     expect(unresolvedOptionIds).toEqual([]);
     const opt = optionOf(graph as { nodes: Dict[] }, 'opt_x');
     expect(iv(opt, 'fac_annual_cost')).toEqual({
@@ -96,7 +96,7 @@ describe('encodeOptionInterventionsForEdit (add-option encoding)', () => {
       }],
       edges: [edge('opt_mix', 'fac_annual_cost')],
     };
-    const fac = iv(optionOf(encodeOptionInterventionsForEdit(g).graph as { nodes: Dict[] }, 'opt_mix'), 'fac_annual_cost');
+    const fac = iv(optionOf(encodeOptionInterventionsForEdit(g, undefined, undefined, [{ optionId: 'opt_mix', factorId: 'fac_annual_cost' }]).graph as { nodes: Dict[] }, 'opt_mix'), 'fac_annual_cost');
     expect(fac.value).toBe(0.55);                 // data wins
     expect(fac.source).toBe('user_specified');    // override → user edit
     expect(fac.reasoning).toBeUndefined();        // stale value-descriptive metadata dropped

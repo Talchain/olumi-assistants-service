@@ -313,7 +313,8 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
 
 /** User levels and ranges bind their frames. A goal's raw target alone does not. */
 function olumiMayReframe(node: Rec, edges: readonly Rec[]): boolean {
-  return !usersLevel(node) && !edges.some((e) => (e.from === node.id || e.to === node.id)
+  return !usersLevel(node) && node.observed_state?.user_material_unverified !== true
+    && !edges.some((e) => (e.from === node.id || e.to === node.id)
     && userStated(e) && e.provenance?.natural_effect?.stated_range !== undefined);
 }
 

@@ -32,7 +32,8 @@ import type { SessionStore, SessionTurnWrite } from '../../../src/orchestrator-v
 import { repairGraphForPersistence } from '../../../src/orchestrator-v5/repair-graph-for-persistence.js';
 import { normaliseOptionInterventionContract } from '../../../src/orchestrator-v5/normalise-option-interventions.js';
 import { setTestSink } from '../../../src/utils/telemetry.js';
-import { GraphV3 } from '../../../src/schemas/cee-v3.js';
+import { GraphV3, InterventionV3 } from '../../../src/schemas/cee-v3.js';
+import { refitFramesForOlumiEstimates } from '../../../src/orchestrator-v5/agent-lane/refit-frames.js';
 import { computeStructuralReadiness } from '../../../src/orchestrator/tools/analysis-ready-helper.js';
 
 type AnyNode = Record<string, unknown> & { id: string };
@@ -111,6 +112,9 @@ const buildCombinedGraph = (): AnyGraph => ({
   ],
 });
 
+// RUN40: this harness is the direct edit entry for exactly these two submitted cells.
+const HUMAN_EDIT_CELLS = [{ optionId: 'opt_hybrid', factorId: 'fac_a' }, { optionId: 'opt_hybrid', factorId: 'fac_b' }];
+
 const PROMOTED_OPT_HYBRID_INTERVENTIONS = {
   fac_a: {
     value: 0.55,
@@ -143,6 +147,82 @@ afterEach(() => {
 });
 
 describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)', () => {
+  it.each([false, true])('RUN40 Olumi frame fitting preserves withheld user material (%s) without crediting it', userMaterialUnverified => {
+    const observed = { value: 0.6, baseline: 0.6, raw_value: 75000, cap: 125000, unit: 'GBP/month',
+      source: 'cee_inference', ...(userMaterialUnverified ? { user_material_unverified: true } : {}) };
+    const graph = { nodes: [
+      { id: 'fac', kind: 'factor', scale_frame: 100 },
+      { id: 'goal', kind: 'goal', goal_threshold: 0.8, goal_threshold_cap: 125000, observed_state: observed },
+    ], edges: [{ from: 'fac', to: 'goal', strength: { mean: 0.5, std: 0.1 }, provenance: {
+      magnitude: 'olumi_placeholder', olumi_fit_candidate: { strength_mean: 2, strength_std: 0.1 },
+    } }] };
+    const result = refitFramesForOlumiEstimates(graph);
+    const goal = result.graph.nodes.find((n: AnyNode) => n.id === 'goal');
+    if (userMaterialUnverified) {
+      expect(result.fitted).toEqual([]);
+      expect(result.refused).toEqual([{ link: 'fac→goal', reason: 'levels_set_on_node' }]);
+      expect(goal.observed_state).toStrictEqual(observed);
+    } else {
+      expect(result.fitted).toEqual(['fac→goal']);
+      expect(goal.observed_state).toMatchObject({ value: 0.15, baseline: 0.15, raw_value: 75000, cap: 500000, source: 'cee_inference' });
+    }
+    expect(graph.nodes[1]!.observed_state).toStrictEqual(observed);
+  });
+
+  for (const humanAuthority of [[], HUMAN_EDIT_CELLS.slice(0, 1), HUMAN_EDIT_CELLS]) {
+    it(`RUN40 commit transports only the ${humanAuthority.length} checked human cells through reload`, async () => {
+      const { store, appendCalls } = makeSpyStore();
+      const composed = composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
+      const graph = buildCombinedGraph();
+      graph.edges = graph.edges.map(edge => ({ ...edge, strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }));
+      await commitDirectAnswer(composed, { ...META, graph, humanAuthority }, store);
+      const persisted = GraphV3.parse(appendCalls[0]!.graph);
+      const cells = persisted.nodes.find(n => n.id === 'opt_hybrid')!.interventions!;
+      expect(cells.fac_a).toMatchObject({ value: 0.55, raw_value: 55, unit: '£' });
+      expect(cells.fac_b).toMatchObject({ value: 0.4 });
+      for (const factorId of ['fac_a', 'fac_b']) {
+        expect(cells[factorId]!.source).toBe(humanAuthority.some(cell => cell.factorId === factorId) ? 'user_specified' : undefined);
+      }
+      const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(persisted)));
+      expect(reloaded.nodes.find(n => n.id === 'opt_hybrid')?.interventions).toEqual(cells);
+      expect(normaliseOptionInterventionContract(persisted)).toBe(persisted);
+    });
+  }
+
+  it.each(['brief_extraction', 'user_specified'])('RUN40 a user-class %s source in graph bytes is NOT credit without scoped human authority', source => {
+    const g = { nodes: [{ id: 'opt', kind: 'option', label: 'Option',
+      interventions: { fac: { value: 0.2, source: 'brief_extraction', reasoning: 'old value' } },
+      data: { interventions: { fac: { value: 0.4, raw_value: 40, unit: 'GBP', source } } },
+    }], edges: [] };
+    const bare = InterventionV3.parse(normaliseOptionInterventionContract(g).nodes[0]!.interventions.fac);
+    expect(bare).toEqual({ value: 0.4, target_match: { node_id: 'fac', match_type: 'exact_id', confidence: 'high' }, unit: 'GBP', raw_value: 40 });
+    const g2 = JSON.parse(JSON.stringify(g));
+    const human = InterventionV3.parse(normaliseOptionInterventionContract(g2, { humanAuthority: [{ optionId: 'opt', factorId: 'fac' }] }).nodes[0]!.interventions.fac);
+    expect(human.source).toBe('user_specified');
+  });
+
+  it.each(['cee_hypothesis'])('RUN40 repair transports the existing %s source of the new value without borrowing old credit', source => {
+    const g = { nodes: [{ id: 'opt', kind: 'option', label: 'Option',
+      interventions: { fac: { value: 0.2, source: 'brief_extraction', reasoning: 'old value' } },
+      data: { interventions: { fac: { value: 0.4, raw_value: 40, unit: 'GBP', source } } },
+    }], edges: [] };
+    const stored = normaliseOptionInterventionContract(g);
+    const cell = InterventionV3.parse(stored.nodes[0]!.interventions.fac);
+    expect(cell).toEqual({ value: 0.4, source, target_match: { node_id: 'fac', match_type: 'exact_id', confidence: 'high' }, unit: 'GBP', raw_value: 40 });
+    expect(GraphV3.parse(JSON.parse(JSON.stringify(stored))).nodes[0]!.interventions?.fac).toEqual(cell);
+    expect(normaliseOptionInterventionContract(stored)).toBe(stored);
+  });
+
+  it('RUN40 an unattributed replacement never borrows the old value source', () => {
+    const g = { nodes: [{ id: 'opt', kind: 'option', label: 'Option',
+      interventions: { fac: { value: 0.2, source: 'user_specified', reasoning: 'old value' } },
+      data: { interventions: { fac: { value: 0.4 } } },
+    }], edges: [] };
+    const stored = normaliseOptionInterventionContract(g);
+    const cell = InterventionV3.parse(stored.nodes[0]!.interventions.fac);
+    expect(cell).toEqual({ value: 0.4, target_match: { node_id: 'fac', match_type: 'exact_id', confidence: 'high' } });
+  });
+
   it('through commitDirectAnswer: BOTH repairs fire — intercept stripped AND option interventions promoted — draft byte-equivalent', async () => {
     const events: Array<{ event: string; data: Record<string, unknown> }> = [];
     setTestSink((event, data) => events.push({ event, data }));
@@ -151,7 +231,7 @@ describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)'
     const composed = composeDirectAnswerResponse({
 answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
 
-    await commitDirectAnswer(composed, { ...META, graph: g }, store);
+    await commitDirectAnswer(composed, { ...META, graph: g, humanAuthority: HUMAN_EDIT_CELLS }, store);
 
     expect(appendCalls).toHaveLength(1);
     const persisted = appendCalls[0]!.graph as AnyGraph;
@@ -255,7 +335,7 @@ answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
 answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
 
     const first = makeSpyStore();
-    await commitDirectAnswer(composed, { ...META, graph: buildCombinedGraph() }, first.store);
+    await commitDirectAnswer(composed, { ...META, graph: buildCombinedGraph(), humanAuthority: HUMAN_EDIT_CELLS }, first.store);
     const persisted1 = first.appendCalls[0]!.graph as AnyGraph;
     vi.restoreAllMocks();
 
@@ -270,7 +350,7 @@ answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
   });
 
   it('commutativity: repair→normalise (commit.ts order) === normalise→repair (the two repairs commute)', () => {
-    const ctx = { scenarioId: 'sc', turnId: 't', source: 'edit_graph' };
+    const ctx = { scenarioId: 'sc', turnId: 't', source: 'edit_graph', humanAuthority: HUMAN_EDIT_CELLS };
 
     // commit.ts order: Track S first, then the option normaliser.
     const repairThenNormalise = normaliseOptionInterventionContract(
