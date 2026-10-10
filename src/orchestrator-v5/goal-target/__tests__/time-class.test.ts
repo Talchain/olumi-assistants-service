@@ -35,12 +35,13 @@ describe('the grammar: an onset verb beside a month reference, or a named season
     ['We will phase in the new price.', 'gradual_build_up', 'phase in'],
     ['Membership gradually grows after launch.', 'gradual_build_up', 'gradually grows'],
     ['The change takes effect at the beginning of month 3.', 'scheduled_start', 'takes effect at the beginning of month 3'],
-    ['The campaign starts in three months.', 'scheduled_start', 'starts in three months'],
     ['The new depot is available from month 2 onwards.', 'scheduled_start', 'from month 2 onwards'],
     ['Demand peaks each December.', 'seasonal', 'each December'],
     ['Demand varies over the seasons.', 'seasonal', 'over the seasons'],
     ['The lift increases gradually over six months.', 'gradual_build_up', 'increases gradually'],
     ['We gradually add capacity over six months.', 'gradual_build_up', 'gradually add'],
+    ['Demand is not seasonal but seasonal promotions lift sales.', 'seasonal', 'seasonal'],
+    ['Sign-ups are flat. The depot opens from month 3 onwards.', 'scheduled_start', 'from month 3 onwards'],
   ])('%s', (text, kind, words) => {
     expect(timeClassOf(text)).toEqual({ supported: false, shapes: [{ kind, words }] });
   });
@@ -63,6 +64,13 @@ describe('the grammar: an onset verb beside a month reference, or a named season
     'We have no seasonal pattern.',
     'We will not phase in the new price; it applies in full immediately.',
     'Each March we hold our AGM.',
+    'Our one-off launch celebration starts in 2 months.',
+    'From month 3 onwards we review the model every month.',
+    'The team away day will begin in the second month.',
+    'The customer count increases steadily.',
+    'The customer count grows slowly.',
+    'Each April we invoice our clients and drop a copy in the archive.',
+    'The campaign starts in three months.',
     'We would open for 4 Saturday sessions each quarter.',
     'Starting from 1,500 riders today, we add 60 a month.',
     'The project starts in 2027.',
