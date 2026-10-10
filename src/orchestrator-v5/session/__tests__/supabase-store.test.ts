@@ -1971,3 +1971,70 @@ describe('SupabaseSessionStore.readNewestRunDeliveryFor (0.79, agent lane delive
     expect(wrapped.map((w) => w.fact.fact_type)).toStrictEqual(['run_delivery', 'add_constraint']);
   });
 });
+
+describe('SupabaseSessionStore.readStatedObjectionFactsFor (S8: the user\'s stated disagreement, scenario-wide)', () => {
+  const dissentRow = (id: string, createdAt: string, statement: string) => ({
+    id,
+    created_at: createdAt,
+    handler_id: 'finding_dissent',
+    noop: false,
+    payload: {
+      fact_type: 'finding_dissent',
+      fact_version: 1,
+      result: {
+        finding_id: 'finding-price',
+        analysis_id: '0d9c7b6a-5e4f-4a3b-8c2d-1e0f9a8b7c6d',
+        statement,
+        provenance: 'user_set',
+      },
+    },
+  });
+  const storeOf = (selectResult: { data: unknown; error: unknown }) => {
+    const { client, selectCalls } = makeClient({ selectResult: selectResult as never });
+    return {
+      selectCalls,
+      store: new SupabaseSessionStore(
+        client,
+        new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+        { defaultReadLimit: 20 },
+      ),
+    };
+  };
+
+  it('is scenario-scoped, finding_dissent-only, non-noop, newest-first, bounded, and is NOT a conversation read', async () => {
+    const { store, selectCalls } = storeOf({
+      data: [dissentRow('b', '2026-10-10T10:00:00.000Z', 'Newest reason.'), dissentRow('a', '2026-10-09T10:00:00.000Z', 'Older reason.')],
+      error: null,
+    });
+    const facts = await store.readStatedObjectionFactsFor(SCENARIO, 25);
+    expect(facts.map((f) => (f as { result: { statement: string } }).result.statement)).toEqual(['Newest reason.', 'Older reason.']);
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0]!.table).toBe('v5_handler_facts');
+    const filters = selectCalls[0]!.filters as Record<string, unknown>;
+    expect(filters['eq:scenario_id']).toBe(SCENARIO);
+    expect(filters['eq:handler_id']).toBe('finding_dissent');
+    expect(filters['eq:noop']).toBe(false);
+    expect(filters['order:created_at']).toEqual({ ascending: false });
+    expect(filters['order:id']).toEqual({ ascending: false });
+    expect(filters.limit).toBe(25);
+    // No turn-window read: the conversation table is never touched.
+    expect(selectCalls.some((c) => c.table === 'v5_conversation_turns')).toBe(false);
+  });
+
+  it('a clean zero-row read is an empty set; a database error and a malformed row THROW (unknown, never none)', async () => {
+    await expect(storeOf({ data: [], error: null }).store.readStatedObjectionFactsFor(SCENARIO, 25)).resolves.toEqual([]);
+    await expect(storeOf({ data: null, error: { message: 'read unavailable', code: '08006' } }).store.readStatedObjectionFactsFor(SCENARIO, 25))
+      .rejects.toMatchObject({ name: 'SessionReadError', code: '08006' });
+    await expect(storeOf({ data: null, error: null }).store.readStatedObjectionFactsFor(SCENARIO, 25))
+      .rejects.toMatchObject({ name: 'SessionReadError', code: 'stated_objection_corrupt' });
+    const wrongType = { ...dissentRow('c', '2026-10-10T10:00:00.000Z', 'x'), handler_id: 'edit_graph' };
+    await expect(storeOf({ data: [wrongType], error: null }).store.readStatedObjectionFactsFor(SCENARIO, 25))
+      .rejects.toMatchObject({ name: 'SessionReadError', code: 'stated_objection_corrupt' });
+  });
+
+  it('refuses a non-positive limit before any query', async () => {
+    const { store, selectCalls } = storeOf({ data: [], error: null });
+    await expect(store.readStatedObjectionFactsFor(SCENARIO, 0)).rejects.toMatchObject({ code: 'stated_objection_limit_invalid' });
+    expect(selectCalls).toHaveLength(0);
+  });
+});

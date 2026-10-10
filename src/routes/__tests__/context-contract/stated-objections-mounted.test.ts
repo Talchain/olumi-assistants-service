@@ -16,10 +16,11 @@ const dissent = (finding: string, statement: string, noop = false): HandlerFact 
   fact_type: 'finding_dissent', fact_version: 1, noop,
   result: { finding_id: finding, analysis_id: '0d9c7b6a-5e4f-4a3b-8c2d-1e0f9a8b7c6d', statement, provenance: 'user_set' },
 });
+// The scenario-wide `finding_dissent` read, NOT the conversation window: `readRecent`/`readFactsFor` are NOT given, so a
+// regression that reads objections through the turn window (a second history read per turn) finds none and goes RED.
 const withFacts = (facts: readonly HandlerFact[]) => ({
   storage: {
-    readRecent: async () => [{ id: 'row-1' }],
-    readFactsFor: async () => structuredClone(facts),
+    readStatedObjectionFactsFor: async () => structuredClone(facts),
   },
 });
 const payloadsOf = (w: Awaited<ReturnType<typeof capture>>) => w.calls.flatMap(c => c.payloads);
@@ -59,7 +60,7 @@ describe.each(['ordinary-converse', 'selected-converse'] as const)('S8 stated ob
 
   it('an unreadable fact store is no objections, never a failed turn', async () => {
     const w = await capture(turn, 'run2', { storage: {
-      readRecent: async () => { throw new Error('store unavailable'); },
+      readStatedObjectionFactsFor: async () => { throw new Error('store unavailable'); },
     } });
     expect(w.calls.length).toBeGreaterThan(0);
     expect(valueAt(payloadsOf(w), 'stated_objections')).toEqual([]);
