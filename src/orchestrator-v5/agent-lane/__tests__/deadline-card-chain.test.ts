@@ -178,8 +178,12 @@ describe('R2 Run → deadline Yes → existing reading, with exact unrelated-byt
     expect(answer._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
     const after = w.read(); expect(goal(after)).toMatchObject({ goal_horizon: { deadline: '2027-08-10' }, goal_horizon_months: 10 });
     for (const n of before.nodes.filter((n: Rec) => n.kind !== 'goal')) expect(JSON.stringify(after.nodes.find((a: Rec) => a.id === n.id))).toBe(JSON.stringify(n));
-    const nonStructural = (n: Rec) => { const { goal_horizon, goal_horizon_months, goal_horizon_reference_date, goal_horizon_stated_months,
-      nonlinear_identity, observed_state, ...other } = n; return other; };
+    const nonStructural = (n: Rec) => {
+      const other = { ...n };
+      for (const key of ['goal_horizon', 'goal_horizon_months', 'goal_horizon_reference_date', 'goal_horizon_stated_months',
+        'nonlinear_identity', 'observed_state']) delete other[key];
+      return other;
+    };
     expect(nonStructural(goal(after))).toEqual(nonStructural(goal(before)));
     expect(goal(after).observed_state).toEqual(goal(before).observed_state);
     expect(after.goal_constraints).toEqual(before.goal_constraints);
