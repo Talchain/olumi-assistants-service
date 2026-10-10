@@ -202,7 +202,7 @@ describe('R2 Run → deadline Yes → existing reading, with exact unrelated-byt
     const value = p.operations[0]!.value as Rec;
     if (shape === 'd2 structural') { expect(value.ceiling_stock).toBeUndefined(); expect(offered.card.words).not.toContain('at or under'); }
     else { expect(value.ceiling_stock).toMatchObject({ goal_id: goal(after).id, comparator: '<=', horizon_months: 10, ceiling: { raw_value: 1900 } });
-      expect(offered.card.words).toBe('Olumi reads ‘Rider capacity surplus at month 10’ as ‘Registered riders at month 10’ staying at or under 1,900 riders if nothing changes. Is that how you work it out?'); }
+      expect(offered.card.words).toBe('Olumi reads ‘Rider capacity surplus at month 10’ as ‘Registered riders at month 10’ at or under 1,900 riders (1,900 riders included; you said ‘at most 1,900 riders’), checked at month 10 only, assuming 1,400 riders today and a net 30 riders a month continue. Is that how you work it out?'); }
     if (shape === 'd1 ceiling') {
       const carrier = proposalPendingAction(p, chips[0]!, { scenario_id: w.sid, emitted_at_iso: new Date().toISOString() });
       expect(proposalRecord(carrier, undefined)).toBeDefined();
