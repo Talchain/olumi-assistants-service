@@ -8,6 +8,7 @@ import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { sayDate } from './deadline-date.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/projector.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { timeClassOf, unsupportedTimeSentence } from './time-class.js';
 
 type Rec = Record<string, unknown>;
 const rec = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
@@ -28,11 +29,15 @@ function horizonGoal(graph: unknown): { goal: Rec; nodes: Rec[]; month: number |
  * The carrier's positional operands are [count today, leave share per month, additions per month]. No label or unit
  * text assigns a role. Without that typed carrier, the factual opening stands alone rather than guessing missing slots.
  */
-export function goalHorizonWithholdDetail(graph: unknown): string | null {
+export function goalHorizonWithholdDetail(graph: unknown, brief?: string | null): string | null {
   const held = horizonGoal(graph);
   if (held === undefined) return null;
   const { goal, nodes, month, deadline } = held;
   if (month === undefined) return `Your goal is for ${sayDate(deadline!)}, and this model only has today's numbers.`;
+  // A timing shape the brief states and the product cannot yet model (`time-class.ts`): said in the user's own phrase, instead of
+  // the generic opening. Only words change; what is withheld is decided by the verdict, never by this text.
+  const unsupported = timeClassOf(brief).shapes[0];
+  if (unsupported !== undefined) return unsupportedTimeSentence(unsupported, month);
   const opening = `Your goal is for month ${month}, and this model only has today's numbers.`;
   const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
   if (product?.operation !== 'product' || !Array.isArray(product.factor_ids)) return opening;

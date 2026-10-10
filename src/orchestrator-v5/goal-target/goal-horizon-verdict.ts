@@ -7,6 +7,7 @@ import { GOAL_FIGURES_HORIZON_NOT_TESTED, readOptionResultSources } from '../../
 import { goalHorizonWithholdDetail } from './goal-horizon-detail.js';
 import { horizonSteadyAttested } from './horizon-basis.js';
 import { goalKindOf } from './goal-kind.js';
+import { timeClassOf } from './time-class.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
@@ -66,13 +67,20 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
   return horizonSteadyAttested(graph) ? 'steady_attested' : 'withhold';
 }
 
-/** A held month needs this Run's evaluated carrier or a verified S5 door attestation. */
-export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unknown): E {
-  return goalHorizonVerdict(graph, response) === 'withhold' ? withholdUntestedHorizonFigures(response, graph) : response;
+/**
+ * A held month needs this Run's evaluated carrier or a verified S5 door attestation. And a brief that STATES a timing shape the
+ * product cannot yet work out over time (`time-class.ts`: "starting in month 3", seasonality, a gradual build-up) loses the at-H
+ * chance even when a carrier exists: the carrier knows nothing of that mechanism, so its chance would be manufactured certainty.
+ * The brief may only WITHHOLD here (never license, compute or add a figure), and it is said in the user's own words.
+ */
+export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unknown, brief?: string | null): E {
+  const verdict = goalHorizonVerdict(graph, response);
+  const outsideTheClass = verdict === 'computed_at_h' && timeClassOf(brief).shapes.length > 0;
+  return verdict === 'withhold' || outsideTheClass ? withholdUntestedHorizonFigures(response, graph, brief) : response;
 }
 
 /** Only callers that have obtained the ONE verdict enter this projection. */
-function withholdUntestedHorizonFigures<E>(response: E, graph: unknown): E {
+function withholdUntestedHorizonFigures<E>(response: E, graph: unknown, brief?: string | null): E {
   const goals = recordOf(graph)?.nodes;
   const goal = Array.isArray(goals) ? goals.map(recordOf).find(node => node?.kind === 'goal') : undefined;
   const env = recordOf(response);
@@ -85,7 +93,7 @@ function withholdUntestedHorizonFigures<E>(response: E, graph: unknown): E {
   const scored = [...new Set([...readOptionResultSources(env).flat().map(row => row.option_id ?? row.id), ...displayIds]
     .filter((id): id is string => typeof id === 'string' && id !== ''))];
   if (goal === undefined || scored.length === 0) return response;
-  const message = goalHorizonWithholdDetail(graph);
+  const message = goalHorizonWithholdDetail(graph, brief);
   return withholdOptionGoalFigures(response, new Set(scored), {
     code: GOAL_FIGURES_HORIZON_NOT_TESTED, severity: 'warning', message, say: message,
     node_ids: [String(goal.id)], option_ids: scored,

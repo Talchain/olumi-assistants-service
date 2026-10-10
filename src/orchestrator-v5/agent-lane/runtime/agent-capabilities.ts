@@ -63,7 +63,9 @@ import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitRea
 import { applyIdentityConfirmEdit, identityConfirmReadingToken, identityPartLevelAsk, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { goalStockAccumulationOf } from '../../goal-target/goal-horizon-detail.js';
-import { proposeCeilingStock, ceilingStockRecorded } from '../ceiling-stock.js';
+import { ceilingStockRecorded } from '../ceiling-stock.js';
+import { identityReadingWithinTimeClass } from '../identity-reading.js';
+import { timeClassOf } from '../../goal-target/time-class.js';
 import { identityReceiptWords, proposeProductIdentity, type IdentityPartLevel, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { canonicaliseUnitForDisplay, ratePeriodOf, ratePeriodWord, unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -3149,15 +3151,16 @@ export function createAgentCapabilities(
   const identityCardFor = (_ctx: { scenario_id: string; authenticated_user_id: string | null },
     read: { readonly raw: unknown; readonly graph_hash: unknown; readonly brief_text?: string | null } | null | undefined) => {
     if (read === null || read === undefined || typeof read.graph_hash !== 'string' || read.graph_hash === '') return undefined;
-    const card = proposeProductIdentity(read.raw) ?? proposeCeilingStock(read.raw, read.brief_text);
+    const card = identityReadingWithinTimeClass(read.raw, read.brief_text);
     // An unwritable base (the writer's own check) offers no card: its Yes could not be recorded (DL 5897757819). Nor does a
     // part with no level (B1 828d87ac): the writer refuses that Yes, and the level is asked first (`identityLevelAskFor`).
     return identityCardHintFor(card !== null && identityConfirmBaseIsWritable(read.raw)
       && (card.ceiling_stock !== undefined || identityPartsWithoutLevel(read.raw, card.factor_ids).length === 0) ? card : null, false);
   };
   /** The words said instead of the card when the stored reading has a part with no level; null otherwise. */
-  const identityLevelAskFor = (raw: unknown): string | null => {
-    const card = proposeProductIdentity(raw);
+  const identityLevelAskFor = (raw: unknown, brief?: string | null): string | null => {
+    // A brief outside the time class is offered no reading (`identityReadingWithinTimeClass`), so no level is asked for one either.
+    const card = timeClassOf(brief).supported ? proposeProductIdentity(raw) : null;
     if (card === null) return null;
     const missing = identityPartsWithoutLevel(raw, card.factor_ids);
     if (missing.length === 0) return null;
@@ -4248,7 +4251,7 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'held_change_waiting',
           detail: 'A suggested change is waiting for your yes. Approve it, or change something first. Nothing was offered.' };
       }
-      let card = proposeProductIdentity(g.raw) ?? proposeCeilingStock(g.raw, g.brief_text);
+      let card = identityReadingWithinTimeClass(g.raw, g.brief_text);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
           detail: 'The model holds no reading of the goal for the user to confirm. Nothing was offered; say nothing about one.' };
@@ -9554,7 +9557,7 @@ export function createAgentCapabilities(
         // ⭐ MC D1 (c): #416's ONE ask, from the graph this Run analysed (the read above), said after its reason by the route.
         ...(() => {
           // The level a waiting reading's part lacks is asked here too (B1 828d87ac): its card is not offered until it has one.
-          const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) ?? identityLevelAskFor(postRunRead.raw) : null;
+          const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) ?? identityLevelAskFor(postRunRead.raw, postRunRead.brief_text) : null;
           return say !== null ? { identity_ask_say: say } : {};
         })(),
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
