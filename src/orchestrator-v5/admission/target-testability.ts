@@ -1,6 +1,6 @@
+import { confirmedCeilingStockOf } from '../agent-lane/ceiling-stock-carrier.js';
 import { linkList } from '../agent-lane/unsized-path-cause.js';
 import { evaluatedIdentityCarriers, exactIdentityOperandLinks, identityCanCarryExactLinks } from './identity-evaluations.js';
-import { goalStockAccumulationOf } from '../goal-target/goal-horizon-detail.js';
 /**
  * ⭐ IS THE GOAL'S TARGET TESTABLE, BEFORE ANY RUN (DECISION-REPRESENTATION-v1 row 4; PTL A #77 5912737934).
  *
@@ -266,9 +266,9 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const byId = new Map(nodes.map(n => [n.id, n] as const));
   const goalId = scoredGoalIdOf(graph, scoredGoalId);
-  const stock = goalStockAccumulationOf(graph);
+  const ceilingStock = confirmedCeilingStockOf(graph);
   // A confirmed unary stock reading defines the entire goal. Retained surplus parents do not alter its calculation.
-  const goalEdges = stock?.identity.stated_in_brief === true ? edges.filter(e => e.to !== goalId || stock.identity.factor_ids.includes(String(e.from))) : edges;
+  const goalEdges = ceilingStock !== null && ceilingStock.goalId === goalId ? edges.filter(e => e.to !== goalId || String(e.from) === ceilingStock.carrierId) : edges;
   const ids = optionIds;
   const walkable = (id: unknown): boolean => byId.get(id)?.kind !== 'option' && byId.get(id)?.kind !== 'decision';
   const toGoal = new Set<unknown>(goalId === undefined ? [] : [goalId]);
@@ -389,7 +389,7 @@ export function targetTestabilityOf(
     // subscribers-at-12-months) that does not hold by definition: B6's ONE test (`olumiGuessedLink`), so the goal and a
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
-    const stockReading = goalStockAccumulationOf(graph)?.identity.stated_in_brief === true;
+    const stockReading = confirmedCeilingStockOf(graph) !== null;
     const guesses = edges.filter((e) => (!stockReading || goalPaths.has(e)) && reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
       && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf) && !convertingOlumiEstimate(e, graph, goalId, identityEvaluations));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.

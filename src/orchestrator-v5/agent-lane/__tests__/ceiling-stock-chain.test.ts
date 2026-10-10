@@ -26,7 +26,8 @@ import { approvalChipsFor } from '../approval-chips.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
-import { targetTestabilityOf } from '../../admission/target-testability.js';
+import { admitAccumulationIdentities, withAdmittedAccumulations } from '../accumulation-identity.js';
+import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
 
 type Rec = Record<string, any>;
 const SID = '550e8400-e29b-41d4-a716-4466554400c6';
@@ -76,7 +77,7 @@ describe('typed ceiling-stock confirmation chain', () => {
     expect(offered.ok, JSON.stringify(offered)).toBe(true);
     expect(offered.card.words).toContain('1,900 riders');
     expect(offered.card.words).toContain('month 10');
-    expect(offered.card.words).toBe('Olumi reads ‘Rider capacity surplus at month 10’ as ‘Registered riders at month 10’ at or under 1,900 riders if nothing changes (under the ceiling throughout). Is that how you work it out?');
+    expect(offered.card.words).toBe('Olumi reads ‘Rider capacity surplus at month 10’ as ‘Registered riders at month 10’ staying at or under 1,900 riders if nothing changes. Is that how you work it out?');
     expect(offered.card.words).toContain('if nothing changes');
     expect(offered.card.words).not.toContain('2,500'); expect(offered.card.words).not.toContain('2,050');
     expect(w.read()).toEqual(before); expect(w.writes).toHaveLength(0);
@@ -173,7 +174,7 @@ describe('typed ceiling-stock confirmation chain', () => {
     expect((await uncertain.confirm(offered)).applied).toBe(true);
     const g = held(); Object.assign(node(g, 'net_rider_growth_per_month').observed_state, { raw_value: 0, value: 0 });
     const zero = await world(g, fixture.brief.replace('net 30', 'net 0')).offer() as Rec;
-    expect(zero.ok).toBe(true); expect(zero.card.words).toContain('throughout');
+    expect(zero.ok).toBe(true); expect(zero.card.words).toContain('staying at or under');
   });
   it('currency stock, monthly net flow and ceiling use the same typed amount authority', async () => {
     const g = held(); goal(g).goal_threshold_unit = 'GBP'; goal(g).label = 'Cash surplus at month 10';
@@ -247,4 +248,142 @@ describe('typed ceiling-stock confirmation chain', () => {
     const result = await w.confirm(offered);
     expect(result.applied).not.toBe(true); expect(w.writes).toHaveLength(0);
   });
+  // Each replacement has its own unmodified control; these rows do not borrow role evidence from another sentence.
+  it.each([
+    ['stock hope', 'At the moment we have 1,400 registered riders.', 'Today we hope to reach 1,400 registered riders.'],
+    ['stock neighbour', 'At the moment we have 1,400 registered riders.', 'Currently our neighbour has 1,400 registered riders.'],
+    ['stock forecast', 'At the moment we have 1,400 registered riders.', 'Today we forecast 1,400 registered riders next year.'],
+    ['stock past', 'At the moment we have 1,400 registered riders.', "Today we reviewed last year's total of 1,400 registered riders."],
+    ['stock conditional', 'At the moment we have 1,400 registered riders.', 'If we rent another depot, we have room for 1,400 registered riders.'],
+    ['ceiling conditional', 'Our depot can service at most 1,900 riders over ten months.', 'If we rent another depot, we can service at most 1,900 riders over ten months.'],
+    ['ceiling neighbour', 'Our depot can service at most 1,900 riders over ten months.', 'Our neighbour can service at most 1,900 riders over ten months.'],
+    ['flow forecast', 'We are gaining a net 30 riders every month.', 'We forecast a net 30 riders every month.'],
+    ['flow competitor', 'We are gaining a net 30 riders every month.', 'Our competitor is gaining a net 30 riders every month.'],
+    ['flow complaints', 'We are gaining a net 30 riders every month.', 'We get a net 30 riders per month complaining about maintenance.'],
+    ['flow decrease', 'We are gaining a net 30 riders every month.', 'We have a net 30 riders fewer every month.'],
+    ['flow week reviewed monthly', 'We are gaining a net 30 riders every month.', 'We are gaining a net 30 riders per week, reviewed every month.'],
+    ['flow year reviewed monthly', 'We are gaining a net 30 riders every month.', 'We are gaining a net 30 riders per year, reviewed every month.'],
+    ['flow quarter reviewed monthly', 'We are gaining a net 30 riders every month.', 'We are gaining a net 30 riders per quarter, reviewed every month.'],
+    ['flow alternate months', 'We are gaining a net 30 riders every month.', 'We are gaining a net 30 riders every other month, with a review each month.'],
+  ] as const)('R6 role/period: %s refuses with paired control', async (_name, original, replacement) => {
+    const brief = 'At the moment we have 1,400 registered riders. We are gaining a net 30 riders every month. Our depot can service at most 1,900 riders over ten months.';
+    expect((await world(held(), brief).offer()).ok).toBe(true);
+    expect(await world(held(), brief.replace(original, replacement)).offer()).toMatchObject({ ok: false, refusal: 'no_reading_to_confirm' });
+  });
+  it.each(['every month', 'per month', 'a month', 'each month'])('R6 own monthly tail control: %s', tail => {
+    expect(proposeCeilingStock(held(), fixture.brief.replace('every month', tail))).not.toBeNull();
+  });
+  it('R6 exceeded projection is a requirement card with ceiling 1600', async () => {
+    const g = held(); node(g, 'serviceable_rider_capacity').observed_state.raw_value = 1600;
+    const w = world(g, fixture.brief.replace('1,900', '1,600')), offered = await w.offer() as Rec;
+    expect(offered.ok).toBe(true);
+    expect(offered.card.words).toBe('Olumi reads ‘Rider capacity surplus at month 10’ as ‘Registered riders at month 10’ staying at or under 1,600 riders if nothing changes. Is that how you work it out?');
+    expect((identityReadingOf(w.proposals.get(offered.proposal_id)!) as Rec).ceiling_stock.ceiling.raw_value).toBe(1600);
+    expect((await w.confirm(offered)).applied).toBe(true);
+    expect(goal(w.read()).goal_threshold_raw).toBe(1600);
+  });
+  it('R6 awaiting accumulation preserves not_testable / goal_path_placeholder', () => {
+    const g = held();
+    for (const from of ['registered_riders_today', 'net_rider_growth_per_month']) g.edges.push({ from, to: goal(g).id, strength: { mean: 1, std: .01 }, exists_probability: 1 });
+    const admission = admitAccumulationIdentities(g.nodes, g.edges, [{ outcome: 'Rider capacity surplus at month 10', operation: 'accumulation',
+      factors: ['Registered riders today', 'Net rider growth per month'], reading: 'net', provenance: 'explicit' }]);
+    expect(admission.loss).toEqual([]);
+    const admitted = { ...g, ...withAdmittedAccumulations(g.nodes, g.edges, admission) };
+    const stock = goalStockAccumulationOf(admitted)!;
+    expect(stock.identity.stated_in_brief).toBe(true); expect(stock.accumulation.stated_in_brief).toBe(false);
+    const ids = admitted.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => n.id as string);
+    expect(reachedGoalPaths(admitted, ids, new Map(ids.map(id => [id, [id]]))).paths.some(p => p.links.length > 0)).toBe(true);
+    expect(targetTestabilityOf(admitted)).toMatchObject({ kind: 'not_testable', failures: expect.arrayContaining([expect.objectContaining({ code: 'goal_path_placeholder' })]) });
+  });
+  it('R6 pending accumulation retains the prior off-goal placeholder check', () => {
+    const g = held();
+    for (const from of ['registered_riders_today', 'net_rider_growth_per_month']) g.edges.push({ from, to: goal(g).id, strength: { mean: 1, std: .01 }, exists_probability: 1 });
+    const admission = admitAccumulationIdentities(g.nodes, g.edges, [{ outcome: goal(g).label, operation: 'accumulation',
+      factors: ['Registered riders today', 'Net rider growth per month'], reading: 'net', provenance: 'explicit' }]);
+    const admitted: Rec = { ...g, ...withAdmittedAccumulations(g.nodes, g.edges, admission) };
+    admitted.edges.forEach((e: Rec) => { delete e.defaulted; e.provenance = { ...e.provenance, magnitude: 'user_stated', mean_projected: false }; });
+    admitted.nodes.push({ id: 'off_goal', kind: 'outcome', label: 'Off goal' });
+    admitted.edges.push({ from: 'serviceable_rider_capacity', to: 'off_goal', strength: { mean: 1, std: .01 }, exists_probability: 1,
+      provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
+    expect(targetTestabilityOf(admitted)).toMatchObject({ kind: 'not_testable', failures: expect.arrayContaining([expect.objectContaining({ code: 'goal_path_placeholder' })]) });
+  });
+  it('R6 typed ceiling noun cannot borrow a compatible label', () => {
+    const g = held(); node(g, 'serviceable_rider_capacity').label = 'Bikes capacity';
+    expect(proposeCeilingStock(g, fixture.brief.replace('1,900 riders', '1,900 bikes'))).toBeNull();
+  });
+  it('R6 scoped amount must name its quantity', () => {
+    const g = held(); node(g, 'registered_riders_today').label = 'Current stock';
+    const brief = fixture.brief.replace('1,400 registered riders', '1,400 riders');
+    expect(proposeCeilingStock(g, brief)).toBeNull();
+  });
+  it.each(['awaiting ceiling id', 'confirmed other id'] as const)('R6 filter scope: %s retains surplus paths', variant => {
+    const g = held();
+    for (const from of ['registered_riders_today', 'net_rider_growth_per_month']) g.edges.push({ from, to: goal(g).id, strength: { mean: 1, std: .01 }, exists_probability: 1 });
+    const admission = admitAccumulationIdentities(g.nodes, g.edges, [{ outcome: goal(g).label, operation: 'accumulation',
+      factors: ['Registered riders today', 'Net rider growth per month'], reading: 'net', provenance: 'explicit' }]);
+    const admitted = { ...g, ...withAdmittedAccumulations(g.nodes, g.edges, admission) };
+    const stock = goalStockAccumulationOf(admitted)!;
+    if (variant === 'awaiting ceiling id') {
+      const oldId = stock.carrier.id, newId = `${goal(g).id}_ceiling_stock_at_month_10`;
+      node(admitted, String(oldId)).id = newId;
+      goal(admitted).nonlinear_identity.factor_ids = [newId];
+      admitted.edges.forEach((e: Rec) => { if (e.from === oldId) e.from = newId; if (e.to === oldId) e.to = newId; });
+    } else node(admitted, String(stock.carrier.id)).nonlinear_identity.stated_in_brief = true;
+    const ids = admitted.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => n.id as string);
+    expect(reachedGoalPaths(admitted, ids, new Map(ids.map(id => [id, [id]]))).paths.some(p => p.links.length > 0)).toBe(true);
+    expect(targetTestabilityOf(admitted)).toMatchObject({ kind: 'not_testable', failures: expect.arrayContaining([expect.objectContaining({ code: 'goal_path_placeholder' })]) });
+  });
+  it('R6 duplicate own stock writing is ambiguous', () => {
+    expect(proposeCeilingStock(held(), fixture.brief + ' Today we have 1,400 registered riders.')).toBeNull();
+  });
+  it('R6 stock tail must describe the named present level', () => {
+    expect(proposeCeilingStock(held(), fixture.brief.replace('1,400 registered riders.', '1,400 registered riders forecast next year.'))).toBeNull();
+  });
+  it.each(['last', 'nine'])('R6 ceiling duration: %s is not the held future period', duration => {
+    const brief = 'At the moment we have 1,400 registered riders. We are gaining a net 30 riders every month. Our depot can service at most 1,900 riders over ten months.';
+    expect(proposeCeilingStock(held(), brief)).not.toBeNull();
+    expect(proposeCeilingStock(held(), brief.replace('over ten months', `over ${duration} months`))).toBeNull();
+  });
+  it('R6 ceiling tail must describe the stated present capacity', () => {
+    expect(proposeCeilingStock(held(), fixture.brief.replace('1,900 riders without breaking its maintenance targets', '1,900 riders forecast next year'))).toBeNull();
+  });
+  it.each([
+    ['flow typed source', (g: Rec) => { node(g, 'net_rider_growth_per_month').observed_state.source = 'cee_inference'; }],
+    ['two ceilings', (g: Rec) => { g.nodes.push({ ...structuredClone(node(g, 'serviceable_rider_capacity')), id: 'second_ceiling' }); }],
+    ['negative raw stock', (g: Rec) => { node(g, 'registered_riders_today').observed_state.raw_value = -1400; }],
+    ['goal unit mismatch', (g: Rec) => { goal(g).goal_threshold_unit = 'bikes'; }],
+    ['incoming stock', (g: Rec) => { g.edges.push({ from: 'second_depot', to: 'registered_riders_today' }); }],
+    ['incoming flow', (g: Rec) => { g.edges.push({ from: 'second_depot', to: 'net_rider_growth_per_month' }); }],
+    ['carrier id collision', (g: Rec) => { g.nodes.push({ id: `${goal(g).id}_ceiling_stock_at_month_10`, kind: 'outcome' }); }],
+    ['zero id collision', (g: Rec) => { g.nodes.push({ id: `${goal(g).id}_ceiling_stock_at_month_10_net_zero_rate`, kind: 'factor' }); }],
+    ['negative raw flow positive words', (g: Rec) => { node(g, 'net_rider_growth_per_month').observed_state.raw_value = -30; }],
+    ['overlong card', (g: Rec) => { goal(g).label = 'R'.repeat(401); }],
+  ] as const)('R6 guard: %s', (_name, mutate) => {
+    const g = held(); mutate(g); expect(proposeCeilingStock(g, fixture.brief)).toBeNull();
+  });
+  it('R6 likely_range selects verbatim month-only card accepted by the shell', async () => {
+    const g = held(); node(g, 'net_rider_growth_per_month').observed_state.likely_range = { min: 20, max: 40 };
+    const w = world(g), offered = await w.offer() as Rec;
+    expect(offered.ok).toBe(true);
+    expect(offered.card.words).toBe('Olumi reads ‘Rider capacity surplus at month 10’ as ‘Registered riders at month 10’ at or under 1,900 riders at month 10 only, if nothing changes. Is that how you work it out?');
+    expect((identityReadingOf(w.proposals.get(offered.proposal_id)!) as Rec).ceiling_stock.coverage).toBe('at_month_only');
+    expect((await w.confirm(offered)).applied).toBe(true);
+  });
+  it.each(['coverage', 'ceiling unit', 'carrier_id', 'zero_id', 'carrier_label', 'scale_frame'] as const)('R6 token field: %s', key => {
+    const card = proposeCeilingStock(held(), fixture.brief)!, changed = structuredClone(card), p = changed.ceiling_stock!;
+    if (key === 'coverage') p.coverage = 'at_month_only';
+    else if (key === 'ceiling unit') p.ceiling.unit = 'bikes';
+    else if (key === 'scale_frame') p.transformation.scale_frame++;
+    else p.transformation[key] += '_changed';
+    expect(identityConfirmReadingToken(changed)).not.toBe(identityConfirmReadingToken(card));
+  });
+  it.each(['words', 'extra factor', 'part_levels', 'choice'] as const)('R6 direct writer refuses: %s with fresh token', key => {
+    const g = held(), card = proposeCeilingStock(g, fixture.brief)!;
+    const changed = { ...card, ...(key === 'words' ? { words: card.words.replace('1,900', '2,500') } : {}),
+      ...(key === 'extra factor' ? { factor_ids: [...card.factor_ids, 'registered_riders_today'] } : {}),
+      ...(key === 'part_levels' ? { part_levels: [] } : {}), ...(key === 'choice' ? { choice: 'one_off' as const } : {}) };
+    expect(applyIdentityConfirmEdit({ persistedGraph: g, brief_text: fixture.brief, ...changed, expected_graph_hash: hash(g),
+      reading_token: identityConfirmReadingToken(changed) })).toMatchObject({ kind: 'refused', reason: 'reading_not_confirmed' });
+  });
+
 });

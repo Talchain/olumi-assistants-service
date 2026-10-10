@@ -2,9 +2,9 @@ import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
-import { readCount, readUnitParts, words } from './same-unit.js';
-import { periodNoun } from '../../utils/unit-alphabet.js';
-import { ceilingTheUserWroteFor, figureTheUserWroteSpan, figureTheUserWroteForSpan, hasApproximateFigureQualifier } from './stated-by-user.js';
+import { readCount, readUnitParts, statedTailParts, words } from './same-unit.js';
+import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { ceilingTheUserWroteFor, figureTheUserWroteForSpan, hasApproximateFigureQualifier, countsInWords } from './stated-by-user.js';
 import { sayFigureAsWritten } from './say-figure.js';
 import type { IdentityProposal } from './identity-proposal.js';
 import { assignEntityRefs } from '../graph/entity-refs.js';
@@ -28,6 +28,11 @@ const levelUnit = (u: unknown) => {
 };
 const sameNoun = (a: unknown, b: unknown) => levelUnit(a) !== null && isDeepStrictEqual(levelUnit(a), levelUnit(b));
 
+const namedLevelTail = (tail: string, n: Rec, unit: string): boolean => words(tail).every(w =>
+  words(String(n.label)).includes(w) || readCount(w)?.some(v => levelUnit(unit)?.noun?.includes(v)));
+
+export { isConfirmedCeilingStockCarrier, confirmedCeilingStockOf } from './ceiling-stock-carrier.js';
+
 /** The existing amount authority binds the value; this separate recogniser reads CURRENT/LIMIT/net roles. */
 export function recogniseCeilingStock(graph: unknown, brief: string | null | undefined): CeilingStockPending | null {
   if (!rec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || typeof brief !== 'string') return null;
@@ -37,38 +42,57 @@ export function recogniseCeilingStock(graph: unknown, brief: string | null | und
     || h === undefined || h < 1 || h > 120 || goal.observed_state != null
     || ['user_stated', 'user_ratified'].includes(classifyValueSource(goal.threshold_source))
     || graph.goal_constraints?.some((r: Rec) => r.node_id === goal.id && r.provenance === 'explicit')) return null;
+  const writtenAmounts = findStatedAmounts(brief);
   const rows = nodes.flatMap(n => {
     const os = n.observed_state;
     if (n.kind !== 'factor' || !rec(os) || classifyValueSource(os.source) !== 'user_stated'
       || typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value) || typeof os.unit !== 'string') return [];
-    const span = figureTheUserWroteSpan(Math.abs(os.raw_value), os.unit, brief);
-    if (span === null) return [];
-    // Sentence boundaries do not split thousands separators or decimal figures.
-    const left = brief.slice(0, span.start), right = brief.slice(span.end);
-    const start = [...left.matchAll(/[.!?](?=\s)|[;\n]/g)].at(-1)?.index;
-    const end = right.search(/[.!?](?=\s|$)|[;\n]/);
-    const sentence = brief.slice(start === undefined ? 0 : start + 1, end < 0 ? brief.length : span.end + end);
     const parsed = readUnitParts(os.unit);
-    if (parsed === null || !['count', 'currency'].includes(parsed.kind) || (parsed.noun !== null
-      && !parsed.noun.every(w => words(right.replace(/[.!?;,]/g, ' ')).slice(0, 3).some(s => readCount(s)?.includes(w))))) return [];
-    if (parsed.kind === 'currency' && figureTheUserWroteForSpan(Math.abs(os.raw_value), os.unit, brief,
-      { target: [String(n.label)], others: [], strict: true, requireNamed: true }) === null) return [];
-    return [{ n, sentence, span, q: { id: String(n.id), raw_value: os.raw_value, unit: os.unit } }];
+    if (parsed === null || !['count', 'currency'].includes(parsed.kind)) return [];
+    // Every candidate must bind to exactly one writing, never to keywords elsewhere in its sentence.
+    const matches = writtenAmounts.flatMap(amount => {
+      const owner = brief.slice(0, amount.index).match(/\bour ([\p{L}]+) can service at most\s*$/iu)?.[1] ?? '';
+      const span = figureTheUserWroteForSpan(Math.abs(os.raw_value), os.unit, brief,
+        { target: [String(n.label), owner], others: nodes.filter(o => o.id !== n.id && o.kind === 'factor' && Math.abs(o.observed_state?.raw_value) === Math.abs(os.raw_value)).map(o => String(o.label)),
+          rivals: nodes.filter(o => o.id !== n.id && Math.abs(o.observed_state?.raw_value) === Math.abs(os.raw_value) && isDeepStrictEqual(readUnitParts(o.observed_state?.unit), parsed)).map(o => String(o.label)),
+          strict: true, requireNamed: true, at: amount.index });
+      if (span === null) return [];
+      const left = brief.slice(0, span.start), right = brief.slice(span.end);
+      const start = [...left.matchAll(/[.!?](?=\s)|[;\n]/g)].at(-1)?.index;
+      const before = brief.slice(start === undefined ? 0 : start + 1, span.start).trim();
+      const tail = right.split(/[.!?;,\n]/)[0]!.trim();
+      const stated = statedTailParts(brief, amount);
+      if (stated === null || stated.kind !== parsed.kind || stated.code !== parsed.code
+        || (parsed.noun !== null && !parsed.noun.every(w => stated.noun?.includes(w)))) return [];
+      return [{ n, before, tail, stated, span, q: { id: String(n.id), raw_value: os.raw_value, unit: os.unit } }];
+    });
+    return matches.length === 1 ? matches : [];
   });
-  const limits = rows.filter(r => levelUnit(r.q.unit) !== null && ceilingTheUserWroteFor(r.q.raw_value, r.q.unit, brief));
+  // Deliberately narrow affirmative grammar. The subject and present-tense predicate must lead THIS writing.
+  // No arbitrary preamble or remainder is admitted: conditional, forecast, historical and third-party readings abstain.
+  const limits = rows.filter(r => levelUnit(r.q.unit) !== null
+    && /^(?:our depot can service|we can service|we must hold) at most$/i.test(r.before)
+    && ceilingTheUserWroteFor(r.q.raw_value, r.q.unit, brief, { target: [String(r.n.label), r.before.match(/^our ([\p{L}]+)/iu)?.[1] ?? ''], others: [], strict: true })
+    && (() => {
+      const parts = /^(.*?)(?:\s+(over (?:the next )?(.+) months|without breaking its maintenance targets))?$/iu.exec(r.tail)!;
+      if (parts[3] !== undefined) {
+        const amounts = [...findStatedAmounts(parts[3]), ...countsInWords(parts[3])];
+        if (amounts.length !== 1 || amounts[0]!.magnitude !== h || amounts[0]!.matchedText !== parts[3]) return false;
+      }
+      return namedLevelTail(parts[1]!, r.n, r.q.unit);
+    })());
   if (limits.length !== 1) return null;
   const limit = limits[0]!;
   const stocks = rows.filter(r => sameNoun(r.q.unit, limit.q.unit)
-    && /\b(?:at the moment|today|currently|now|current|we have|we hold)\b/i.test(r.sentence)
-    && !/\b(?:want|aim|target|ceiling|limit|capacity|at most|under|below|maximum)\b/i.test(r.sentence));
+    && /^(?:(?:at the moment|today|currently|now)\s+)?we (?:have|hold)$/i.test(r.before)
+    && r.stated.period === null && r.stated.per === null
+    && namedLevelTail(r.tail, r.n, r.q.unit));
   const flows = rows.filter(r => {
-    const tokens = words(r.q.unit), p = readUnitParts(r.q.unit);
-    const negativeWords = /(?:[-−]\s*|\bminus\s*)$/i.test(brief.slice(0, r.span.start))
-      || /\b(?:loss|losing|lost|decrease|decreasing|decline|declining|shrinking)\b/i.test(r.sentence);
-    return !negativeWords && p?.period === 'month' && isDeepStrictEqual(readUnitParts(tokens.slice(0, -2).join(' ')), levelUnit(limit.q.unit))
-      && periodNoun(tokens.at(-1) ?? '') === 'month' && ['/', 'per', 'a', 'each', 'every'].includes(tokens.at(-2) ?? '')
-      && /\bnet(?:\s+(?:change|growth|gain|increase|loss|decrease)(?:\s+of)?)?(?:\s+(?:about|around|roughly|approximately))?\s*[+-]?\s*$/i.test(brief.slice(0, r.span.start))
-      && /(?:\b(?:every|each|per|a)\s+|\/\s*)month\b/i.test(r.sentence);
+    const p = readUnitParts(r.q.unit);
+    return /^(?:counting [^,]+,\s*)?we (?:are gaining|gain) a net(?:\s+(?:about|around|roughly|approximately))?$/i.test(r.before)
+      && p?.period === 'month' && isDeepStrictEqual({ ...p, period: null }, levelUnit(limit.q.unit))
+      && isDeepStrictEqual(r.stated, p)
+      && /^(?:[\p{L}]+\s+){0,3}(?:every|each|per|a) month$/iu.test(r.tail);
   });
   if (stocks.length !== 1 || flows.length !== 1) return null;
   const stock = stocks[0]!, flow = flows[0]!;
@@ -90,8 +114,9 @@ export function recogniseCeilingStock(graph: unknown, brief: string | null | und
 export function ceilingStockWords(graph: unknown, p: CeilingStockPending): string {
   const label = rec(graph) && Array.isArray(graph.nodes) ? graph.nodes.find((n: Rec) => n.id === p.goal_id)?.label : '';
   const bound = sayFigureAsWritten(p.ceiling.raw_value, p.ceiling.unit);
-  const coverage = p.coverage === 'throughout' ? 'under the ceiling throughout' : `at month ${p.horizon_months} only`;
-  return `Olumi reads ‘${label}’ as ‘${p.transformation.carrier_label}’ at or under ${bound} if nothing changes (${coverage}). Is that how you work it out?`;
+  return p.coverage === 'throughout'
+    ? `Olumi reads ‘${label}’ as ‘${p.transformation.carrier_label}’ staying at or under ${bound} if nothing changes. Is that how you work it out?`
+    : `Olumi reads ‘${label}’ as ‘${p.transformation.carrier_label}’ at or under ${bound} at month ${p.horizon_months} only, if nothing changes. Is that how you work it out?`;
 }
 export function proposeCeilingStock(graph: unknown, brief: string | null | undefined): IdentityProposal | null {
   const p = recogniseCeilingStock(graph, brief);
