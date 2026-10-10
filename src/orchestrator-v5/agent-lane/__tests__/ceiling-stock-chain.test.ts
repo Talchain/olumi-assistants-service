@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type {} from '../../../plugins/scenario-ownership.js';
 import type {} from '@fastify/rate-limit';
 const liveStore = vi.hoisted(() => ({ value: null as unknown }));
+const runHint = vi.hoisted(() => ({ value: false }));
 vi.mock('../../session/index.js', async original => ({
   ...(await original<typeof import('../../session/index.js')>()), getSessionStore: () => liveStore.value,
 }));
@@ -16,7 +17,9 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 // A no-tool Agent reply is replayed locally; this never calls a model or provider adapter.
 vi.mock('../runtime/agent-loop.js', async original => ({
   ...(await original<typeof import('../runtime/agent-loop.js')>()),
-  runAgentTurn: async () => ({ assistant_text: 'Local no-tool reply', items: [], tool_calls: [], tool_results: [], mutated: false,
+  runAgentTurn: async () => ({ assistant_text: 'Local no-tool reply', items: [],
+    tool_calls: runHint.value ? [{ name: 'run_analysis', ok: true, mutated: false }] : [],
+    tool_results: runHint.value ? [{ ok: true, ran: false, identity_card: { available: true } }] : [], mutated: false,
     hops: 0, stopped_reason: 'answered', timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0,
       tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } }),
 }));
@@ -542,6 +545,52 @@ describe('ceiling route reoffer', () => {
     const settled = await turn({ agent_session_id: yes._agent.session_id });
     expect(settled._agent.tool_calls.filter((c: Rec) => c.name === 'propose_identity')).toHaveLength(0);
     expect(settled.suggested_actions.some((c: Rec) => c.id === chip.id)).toBe(false);
+  });
+  const routeWorld = async (answer: 'No' | 'Yes' | null = 'No') => {
+    const w = world(held(), fixture.brief, randomUUID()), offered = await w.offer() as Rec;
+    vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
+    vi.stubGlobal('fetch', vi.fn(() => { throw new Error('No network in ceiling replay'); }));
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const app = Fastify({ logger: false }); replayApps.push(app);
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: w.read(), graph_hash: hash(w.read()), brief_text: fixture.brief }));
+    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
+    await app.register(agentV1TurnRoute); await app.ready();
+    const turn = async (over: Rec = {}) => {
+      const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        turn_id: randomUUID(), scenario_id: w.scenarioId, message: 'Run the analysis.', ...over } });
+      expect(response.statusCode, response.body).toBe(200); return response.json() as Rec;
+    };
+    const first = await turn();
+    const chip = first.suggested_actions.find((c: Rec) => c.detail === offered.card.words);
+    expect(chip).toMatchObject({ id: `agent-approve-proposal:${offered.proposal_id}` });
+    const answered = answer === null ? first : await turn({ message: answer === 'Yes' ? chip.message : 'No.', source: 'chip_click',
+      chip: { id: answer === 'Yes' ? chip.id : `agent-decline-proposal:${offered.proposal_id}` }, agent_session_id: first._agent.session_id });
+    return { w, offered, turn, chip, answered };
+  };
+  it('R3-P2-3 the history scan never runs while the card is live, and a hanging history fails closed in time', async () => {
+    const live = await routeWorld(null);
+    const earlier = new Set(live.w.writes.map(x => x.turn_id)); const reads: string[] = [];
+    const original = live.w.store.readCommittedTurn!.bind(live.w.store);
+    live.w.store.readCommittedTurn = ((sid: string, id: string) => { if (earlier.has(id)) reads.push(id); return original(sid, id); }) as typeof original;
+    await live.turn({ agent_session_id: live.answered._agent.session_id });
+    expect(reads, 'a held card cannot be re-issued: no history read').toHaveLength(0);
+    const { w, offered, turn, answered } = await routeWorld('No');
+    const rows = new Set(w.writes.map(x => x.turn_id)); const real = w.store.readCommittedTurn!.bind(w.store);
+    w.store.readCommittedTurn = ((sid: string, id: string) => rows.has(id) ? new Promise(() => undefined) : real(sid, id)) as typeof real;
+    const started = Date.now();
+    const next = await turn({ agent_session_id: answered._agent.session_id });
+    expect(Date.now() - started).toBeLessThan(4_500);
+    expect(next._agent.tool_calls.filter((c: Rec) => c.name === 'propose_identity')).toHaveLength(0);
+    expect(next.suggested_actions.some((c: Rec) => c.id === `agent-approve-proposal:${offered.proposal_id}`)).toBe(false);
+  }, 12_000);
+  it('R3-P2-4a a Run result that hints the reading is waiting never re-issues the card after a typed No', async () => {
+    const { offered, turn, answered } = await routeWorld('No');
+    runHint.value = true;
+    try {
+      const next = await turn({ agent_session_id: answered._agent.session_id });
+      expect(next._agent.tool_calls.filter((c: Rec) => c.name === 'propose_identity')).toHaveLength(0);
+      expect(next.suggested_actions.some((c: Rec) => c.id === `agent-approve-proposal:${offered.proposal_id}`)).toBe(false);
+    } finally { runHint.value = false; }
   });
   it('brief-aware read-back requires exact ceiling reading, not a target or changed words', () => {
     const graph = held(), reading = proposeCeilingStock(graph, fixture.brief)!;
