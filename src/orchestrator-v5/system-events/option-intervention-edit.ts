@@ -338,7 +338,7 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
       scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
     if (decision.blockApply || decision.governing !== 'proceed') return refuse(`mutation_${decision.governing}`);
     const applied = applyPatchOperations(before, operations);
-    const encoded = encodeOptionInterventionsForEdit(applied, new Set(written.map(t => t.optionId)));
+    const encoded = encodeOptionInterventionsForEdit(applied, new Set(written.map(t => t.optionId)), undefined, written);
     if (encoded.unresolvedOptionIds.length > 0) return refuse('intervention_encoding_unavailable');
     const graph = projectGraphForPersistence(mergeAppliedGraphForPersistence({
       appliedGraph: encoded.graph, persistedBase: before, ingressBase: before,

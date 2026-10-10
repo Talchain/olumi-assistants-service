@@ -5,10 +5,21 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { admitCandidateModel, framedObservedState, type CandidateModel } from '../admit-model.js';
 import { verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from '../verified-option-setting.js';
-import { prepareProvisionalCandidate, BUILD_INSTRUCTIONS, buildCandidateSchema } from '../runtime/build-model.js';
+import { prepareProvisionalCandidate, BUILD_INSTRUCTIONS, buildCandidateSchema, strictForTheDrafter, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import { valueAuthorshipOf } from '../turn-context/guidance-signals.js';
 import { nodeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
 import { createHash } from 'node:crypto';
+import { Ajv } from 'ajv';
+import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
+import { normaliseOptionInterventionContract } from '../../normalise-option-interventions.js';
+import { buildAddOptionTransaction } from '../../routing/add-option-transaction.js';
+import { classifyValueSource } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { executeGmHeldResume } from '../../handlers/gm-held-execute.js';
+import { PatchOperationsArraySchema } from '../../../orchestrator/patch-validation.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 
 const CURRENT = 'Our backlog is 40 jobs.';
 const candidate = (quote: string | null = CURRENT): CandidateModel => ({
@@ -109,6 +120,144 @@ describe('one authority construction', () => {
   });
 });
 
+// These are caller proofs, not candidate/graph flags. Approval is scoped to one cell.
+const HUMAN_CELL = [{ optionId: 'option', factorId: 'factor' }] as const;
+const interventionGraph = (level: unknown = { value: 0.4 }) => ({
+  nodes: [
+    { id: 'decision', kind: 'decision', label: 'Choose' },
+    { id: 'factor', kind: 'factor', label: 'Spend', observed_state: { value: 0.2, raw_value: 20, cap: 100, unit: 'GBP', source: 'cee_inference' } },
+    { id: 'sibling', kind: 'factor', label: 'Other spend' },
+    { id: 'option', kind: 'option', label: 'Improve', data: { interventions: { factor: level, sibling: { value: 0.2 } } } },
+  ], edges: [],
+});
+function storedCells(graph: unknown) {
+  const stored = projectGraphForPersistence(graph);
+  const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(stored)));
+  return reloaded.nodes.find(n => n.id === 'option')!.interventions!;
+}
+
+describe('RUN25 producer receipts and source defaults', () => {
+  it('goal receipt mirrors the factor schema and is compulsory only at the provider boundary', () => {
+    type Receipt = { anyOf: unknown[]; description: string };
+    type Schema = { properties: { goal: { properties: { baseline_evidence: Receipt }; required: string[] }; factors: { items: { properties: { baseline_evidence: Receipt } } } } };
+    const schema = buildCandidateSchema();
+    const typed = schema as Schema;
+    expect(typed.properties.goal.properties.baseline_evidence.anyOf).toStrictEqual(typed.properties.factors.items.properties.baseline_evidence.anyOf);
+    expect(typed.properties.goal.properties.baseline_evidence.description).toBe('Complete verbatim brief sentence stating the goal’s current level; null otherwise.');
+    for (const providerBoundary of [true, false]) {
+      const strict = strictForTheDrafter(schema, { providerBoundary }) as Schema;
+      expect(strict.properties.goal.required.includes('baseline_evidence')).toBe(providerBoundary);
+    }
+    const validate = new Ajv({ strict: false }).compile((schema.properties as Record<string, object>).goal!);
+    const old = { ...candidate(null).goal, frame: 'level', target_stated: true, scope: null };
+    delete old.baseline_evidence;
+    expect(validate(old), JSON.stringify(validate.errors)).toBe(true);
+    expect(createHash('sha256').update(BUILD_INSTRUCTIONS, 'utf8').digest('hex')).toBe('ca036d122da73946c2d7d68ca135d44e512b2769d654bad6785b9b1199b6c444');
+  });
+  it('generated goal receipt survives the real zero-provider build and registration path', async () => {
+    for (const quote of [CURRENT, null]) {
+      const m = { ...candidate(quote), goal: { ...candidate(quote).goal, frame: 'level', target_stated: true, scope: null },
+        identities: [], unknowns: [], decision_question: null,
+        options: [{ label: 'Keep current', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: true },
+          { label: 'Improve', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: null }] };
+      let graph: ReturnType<typeof GraphV3.parse> | undefined;
+      const dispatch: InternalDispatch = async (path, body) => {
+        if (path.endsWith('/graph/register')) graph = GraphV3.parse(projectGraphForPersistence((body as { graph: unknown }).graph));
+        return { status: 200, json: { registered: true, graph: { nodes: [], edges: [] } } };
+      };
+      const call: CallStructuredModel = async () => ({ text: JSON.stringify(m) });
+      const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', CURRENT, dispatch, call);
+      expect(out.ok, JSON.stringify(out)).toBe(true);
+      const os = graph!.nodes.find(n => n.kind === 'goal')!.observed_state!;
+      expect(os.raw_value).toBe(40);
+      expect(valueAuthorshipOf(os)).toBe(quote === null ? 'unknown' : 'yours');
+      expect(nodeProvenanceDisplay(os.extractionType, os)).toBe(quote === null ? 'unverified_brief' : 'from_brief');
+    }
+  });
+  for (const source of [undefined, 'unrecognised', 'brief_extraction', 'user_specified']) {
+    it(`encoder withheld absent/unproved ${String(source)} provenance survives projection and reload`, () => {
+      const g = interventionGraph({ value: 0.4, raw_value: 40, unit: 'GBP', ...(source === undefined ? {} : { source }), human_authority: true });
+      const encoded = encodeOptionInterventionsForEdit(g);
+      expect(encoded.unresolvedOptionIds).toStrictEqual([]);
+      const cell = storedCells(encoded.graph).factor!;
+      expect(cell).toMatchObject({ value: 0.4, raw_value: 40, unit: 'GBP' });
+      expect(cell.source).toBeUndefined();
+      expect(classifyValueSource(cell.source)).toBe('unattributed');
+    });
+  }
+  it('encoder direct human approval marks only approved cells, preserves conversion and AI attribution', () => {
+    const g = interventionGraph({ raw_value: 40, unit: 'GBP' });
+    const encoded = encodeOptionInterventionsForEdit(g, undefined, undefined, HUMAN_CELL);
+    expect(encoded.unresolvedOptionIds).toStrictEqual([]);
+    const cells = storedCells(encoded.graph);
+    expect(cells.factor).toMatchObject({ value: 0.4, raw_value: 40, unit: 'GBP', source: 'user_specified' });
+    expect(classifyValueSource(cells.factor!.source)).toBe('user_stated');
+    expect(cells.sibling!.source).toBeUndefined();
+    const ai = encodeOptionInterventionsForEdit(interventionGraph({ value: 0.4, source: 'cee_hypothesis', reasoning: 'A provisional estimate', value_confidence: 'low' }), undefined, undefined, HUMAN_CELL);
+    expect(storedCells(ai.graph).factor).toMatchObject({ source: 'cee_hypothesis', reasoning: 'A provisional estimate', value_confidence: 'low' });
+  });
+  it('encoder legacy canonical levels stay unknown until that cell is directly approved', () => {
+    const g = { nodes: [{ id: 'option', kind: 'option', label: 'Improve', interventions: { factor: { value: 0.4 }, sibling: { value: 0.2 } } }], edges: [] };
+    expect(encodeOptionInterventionsForEdit(g).graph).toBe(g);
+    expect(storedCells(g).factor!.source).toBeUndefined();
+    const edited = storedCells(encodeOptionInterventionsForEdit(g, undefined, undefined, HUMAN_CELL).graph);
+    expect(edited.factor!.source).toBe('user_specified');
+    expect(edited.sibling!.source).toBeUndefined();
+  });
+  for (const location of ['data', 'slash']) {
+    it(`normalizer ${location} is unattributed without a scoped human edit and refuses graph flags`, () => {
+      const g = location === 'data' ? interventionGraph({ value: 0.4, source: 'user_specified', human_authority: true })
+        : { nodes: [{ id: 'option', kind: 'option', label: 'Improve', 'data/interventions/factor': 0.4 }], edges: [] };
+      const unknown = storedCells(normaliseOptionInterventionContract(g, { source: 'set_factor_value' }));
+      expect(unknown.factor!.source).toBeUndefined();
+      expect(classifyValueSource(unknown.factor!.source)).toBe('unattributed');
+      const human = storedCells(normaliseOptionInterventionContract(g, { humanAuthority: HUMAN_CELL }));
+      expect(human.factor!.source).toBe('user_specified');
+      expect(classifyValueSource(human.factor!.source)).toBe('user_stated');
+    });
+  }
+  it('normalizer never inherits old user authority onto a replacement and keeps explicit AI origin', () => {
+    const g = { ...interventionGraph(), nodes: interventionGraph().nodes.map(n => n.kind === 'option'
+      ? { ...n, interventions: { factor: { value: 0.1, source: 'user_specified', reasoning: 'Old text' } } } : n) };
+    expect(storedCells(normaliseOptionInterventionContract(g)).factor).toStrictEqual({ value: 0.4, target_match: { node_id: 'factor', match_type: 'exact_id', confidence: 'high' } });
+    expect(storedCells(normaliseOptionInterventionContract(interventionGraph({ value: 0.4, source: 'cee_hypothesis' }), { humanAuthority: HUMAN_CELL })).factor!.source).toBe('cee_hypothesis');
+  });
+  it('actual held human approval grants exact cells while an approved AI estimate stays AI', () => {
+    for (const source of [undefined, 'cee_hypothesis'] as const) {
+      const g = GraphV3.parse({ nodes: interventionGraph().nodes.filter(n => n.kind !== 'option'), edges: [] });
+      const built = buildAddOptionTransaction({ parent_decision_id: 'decision', label: 'Improve',
+        interventions: [{ factor_id: 'factor', value: 0.4, raw_value: 40, unit: 'GBP', ...(source === undefined ? {} : { source }) }] },
+      { nodes: g.nodes, edges: g.edges });
+      expect(built.matched).toBe(true);
+      if (!built.matched) throw new Error(built.reason);
+      const out = executeGmHeldResume({ operations: PatchOperationsArraySchema.parse(built.proposal.operations), currentGraph: g,
+        currentGraphHash: computeAnalysisAffectingGraphHash(g)!, freshness: 'none', hasExistingAnalysis: false,
+        scenarioId: 's', turnId: 'confirm', requestId: 'r' });
+      expect(out.status, JSON.stringify(out)).toBe('executed');
+      if (out.status !== 'executed') throw new Error(out.status);
+      const stored = GraphV3.parse(JSON.parse(JSON.stringify(projectGraphForPersistence(out.mutatedGraph))));
+      const cell = stored.nodes.find(n => n.kind === 'option')!.interventions!.factor!;
+      expect(cell).toMatchObject({ value: 0.4, raw_value: 40, unit: 'GBP' });
+      expect(cell.source).toBe(source === undefined ? 'user_specified' : 'cee_hypothesis');
+      expect(classifyValueSource(cell.source)).toBe(source === undefined ? 'user_stated' : 'ai_drafted');
+    }
+  });
+  for (const source of [undefined, 'user_specified', 'cee_hypothesis'] as const) {
+    it(`add-option preparation preserves ${String(source)} without a missing-source user default`, () => {
+      const out = buildAddOptionTransaction({ parent_decision_id: 'decision', label: 'Improve',
+        interventions: [{ factor_id: 'factor', value: 0.4, raw_value: 40, unit: 'GBP', ...(source === undefined ? {} : { source }) }], human_authority: true },
+      { nodes: [{ id: 'decision', kind: 'decision' }, { id: 'factor', kind: 'factor' }], edges: [] });
+      expect(out.matched).toBe(true);
+      if (!out.matched) throw new Error(out.reason);
+      const node = out.proposal.operations.find(op => op.op === 'add_node')!.value;
+      const cells = storedCells({ nodes: [{ ...node as object, id: 'option' }], edges: [] });
+      expect(cells.factor).toMatchObject({ value: 0.4, raw_value: 40, unit: 'GBP' });
+      expect(cells.factor!.source).toBe(source);
+      expect(classifyValueSource(cells.factor!.source)).toBe(source === undefined ? 'unattributed' : source === 'user_specified' ? 'user_stated' : 'ai_drafted');
+    });
+  }
+});
+
 function addition(baseline: number, increment: number, quote: string | null): CandidateModel {
   return { ...candidate(null), goal: { ...candidate(null).goal, metric: 'Outcome', unit: 'GBP', value: 1000 },
     factors: [{ label: 'Engineers', unit: 'engineers', role: 'controllable', baseline_known: true,
@@ -144,6 +293,10 @@ const ALLOWED_SITES: Readonly<Record<string, number>> = {
   'admit-model.ts:admitOnce@framedObservedState': 3,
   'runtime/agent-capabilities.ts:createAgentCapabilities/proposeNewOption@framedObservedState': 1,
   'runtime/agent-capabilities.ts:createAgentCapabilities/proposeNewFactor@framedObservedState': 1,
+  '../../orchestrator/tools/encode-option-interventions.ts:buildInterventionV3': 1, // Exact approved cell verdict.
+  '../../orchestrator/tools/encode-option-interventions.ts:encodeOptionInterventionsForEdit': 1, // Exact approved canonical cell, no legacy upgrade.
+  '../normalise-option-interventions.ts:freshInterventionV3': 1, // Exact caller-approved cell verdict.
+  'runtime/agent-capabilities.ts:createAgentCapabilities/proposeNewOption@typedOptionLevel': 2, // Existing figureTheUserWroteFor verdict, not omitted-source credit.
   'stated-by-user.ts:holdStatedGoalAttributes': 1, // Required scoped typed goal target.
 };
 // INPUT census debt, not newly authorised grants. This scoped task cannot claim
@@ -173,6 +326,10 @@ const CREDIT = new Set(['brief_extraction', 'explicit', 'user_specified', 'user_
 const FIELDS = new Set(['source', 'provenance', 'extractionType', 'authored_by', 'author', 'magnitude',
   'stated_by', 'threshold_source', 'value_source']);
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const SOURCE_PRODUCERS = ['../../orchestrator/tools/encode-option-interventions.ts',
+  '../normalise-option-interventions.ts', '../routing/add-option-transaction.ts'] as const;
+// The three census defaults W235/W190/W195 are removed, never carried as debt.
+const MISSING_SOURCE_DEFAULT_BUDGET = 0;
 function productionFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory()
     ? e.name === '__tests__' ? [] : productionFiles(join(dir, e.name))
@@ -228,7 +385,13 @@ function creditSites(file: string, text = readFileSync(file, 'utf8')): Record<st
       value = n.right;
     } else if (ts.isReturnStatement(n) && n.expression && containsCredit(n.expression)) { name = '<return>'; value = n.expression; }
     if (name && value && (FIELDS.has(name) || name === '<return>') && containsCredit(value)) {
-      const key = relative(ROOT, file).split(sep).join('/') + ':' + enclosingSymbol(n, src);
+      let key = relative(ROOT, file).split(sep).join('/') + ':' + enclosingSymbol(n, src);
+      if (key === 'runtime/agent-capabilities.ts:createAgentCapabilities/proposeNewOption' && name === 'source'
+        && ts.isConditionalExpression(value) && ['byUser', 'wrote'].includes(value.condition.getText(src))) {
+        expect(value.whenTrue.getText(src)).toBe("'user_specified' as const");
+        expect(value.whenFalse.getText(src)).toBe("'cee_hypothesis' as const");
+        key += '@typedOptionLevel';
+      }
       out[key] = (out[key] ?? 0) + 1;
     }
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)
@@ -260,8 +423,32 @@ function unexpectedSites(sites: Record<string, number>): string[] {
 }
 
 describe('agent-lane user-credit ratchet', () => {
+  it('RUN25 missing-source credit debt remains zero at the three corrected producers', () => {
+    let defaults = 0;
+    for (const p of SOURCE_PRODUCERS) {
+      const source = readFileSync(join(ROOT, p), 'utf8');
+      // A raw source flag or omitted value can never be the human verdict.
+      expect(source).not.toMatch(/source:\s*(?:rec|iv)\.source\s*\?\?\s*['"]user_specified['"]/u);
+      const sf = ts.createSourceFile(p, source, ts.ScriptTarget.Latest, true);
+      function visit(n: ts.Node): void {
+        if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+          && ts.isPropertyAssignment(n.parent) && n.parent.name.getText(sf) === 'source'
+          && ts.isStringLiteralLike(n.right) && CREDIT.has(n.right.text)) defaults++;
+        if (ts.isPropertyAssignment(n) && n.name.getText(sf) === 'source'
+          && ts.isStringLiteralLike(n.initializer) && CREDIT.has(n.initializer.text)) {
+          // In these producers a literal user stamp must be the true arm of the required human verdict.
+          const branch = n.parent.parent;
+          if (!ts.isConditionalExpression(branch) || branch.condition.getText(sf) !== 'humanAuthority'
+            || branch.whenTrue !== n.parent) defaults++;
+        }
+        ts.forEachChild(n, visit);
+      }
+      visit(sf);
+    }
+    expect(defaults).toBe(MISSING_SOURCE_DEFAULT_BUDGET);
+  });
   it('D no unlisted credit sites or growing listed site budgets', () => {
-    const sites = Object.assign({}, ...productionFiles(ROOT).map(file => creditSites(file)));
+    const sites = Object.assign({}, ...[...productionFiles(ROOT), ...SOURCE_PRODUCERS.map(p => join(ROOT, p))].map(file => creditSites(file)));
     expect(unexpectedSites(sites)).toStrictEqual([]);
     const source = ts.createSourceFile('admit-model.ts', readFileSync(join(ROOT, 'admit-model.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
     const formatter = source.statements.find((n): n is ts.FunctionDeclaration => ts.isFunctionDeclaration(n) && n.name?.text === 'framedObservedState')!;

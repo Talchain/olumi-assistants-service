@@ -29,7 +29,7 @@
  * canonical top-level bundle at the single `scenarios.graph` write chokepoint
  * (`commitDirectAnswer` → `store.append`), with the SAME precedence the read
  * path uses — Source 1 `data.interventions` > Source 2 slash-keyed > top-level —
- * so the newer edit WINS and is marked `source: 'user_specified'`, preserving
+ * so the newer value WINS; a `user_specified` stamp requires scoped human authority, preserving
  * only the still-valid factor match (`target_match`) from any existing top-level
  * entry. The persisted record then matches draft-created options and survives
  * the read-time NodeV3 strip.
@@ -67,6 +67,7 @@
  *    to the SWEPT graph — never re-exposing a parse-breaking shape. Emits a
  *    redacted warning (IDs + counts only, never values or graph content).
  */
+import type { InterventionHumanAuthority } from '../orchestrator/tools/encode-option-interventions.js';
 import { extractNumericIntervention } from '../orchestrator/tools/analysis-ready-helper.js';
 import { log } from '../utils/telemetry.js';
 
@@ -93,6 +94,8 @@ function safeLog(level: 'info' | 'warn', payload: Record<string, unknown>, msg: 
 }
 
 export interface OptionContractNormaliseContext {
+  /** Exact direct human edit/approval cells supplied by the caller, never a graph flag. */
+  readonly humanAuthority?: InterventionHumanAuthority;
   readonly scenarioId?: string;
   /** Per-turn correlation id (turn_id doubles as request_id in V5). */
   readonly turnId?: string;
@@ -105,6 +108,7 @@ type Dict = Record<string, unknown>;
 
 /** A numeric value recovered from a non-canonical source, with optional carried unit/raw_value. */
 interface RecoveredIntervention {
+  readonly source?: string;
   readonly value: number;
   readonly unit?: string;
   readonly raw_value?: number | string | boolean;
@@ -142,13 +146,14 @@ function hasInvalidInterventionsShape(node: Dict): boolean {
 
 function carriedUnitRaw(value: number, src: unknown): RecoveredIntervention {
   if (!isPlainObject(src)) return { value };
-  const out: { value: number; unit?: string; raw_value?: number | string | boolean; range?: unknown } = { value };
+  const out: { value: number; source?: string; unit?: string; raw_value?: number | string | boolean; range?: unknown } = { value };
   if (typeof src.unit === 'string') out.unit = src.unit;
   const rawValue = src.raw_value;
   if (typeof rawValue === 'number' || typeof rawValue === 'string' || typeof rawValue === 'boolean') {
     out.raw_value = rawValue;
   }
   if (src.range !== undefined) out.range = src.range;
+  if (src.source === 'cee_hypothesis') out.source = src.source;
   return out;
 }
 
@@ -188,10 +193,10 @@ function recoverFromDataSources(node: Dict): Map<string, RecoveredIntervention> 
 }
 
 /** Construct a fresh canonical InterventionV3 for a factor with no pre-existing top-level entry. */
-function freshInterventionV3(fac: string, rec: RecoveredIntervention): Dict {
+function freshInterventionV3(fac: string, rec: RecoveredIntervention, humanAuthority: boolean): Dict {
   const iv: Dict = {
     value: rec.value,
-    source: 'user_specified',
+    ...(rec.source !== undefined ? { source: rec.source } : humanAuthority ? { source: 'user_specified' } : {}),
     target_match: { node_id: fac, match_type: 'exact_id', confidence: 'high' },
   };
   if (rec.unit !== undefined) iv.unit = rec.unit;
@@ -208,16 +213,16 @@ function freshInterventionV3(fac: string, rec: RecoveredIntervention): Dict {
  * a draft; leave it untouched).
  *
  * Overlay semantics (data wins; provenance stays truthful):
- *  - factor present in BOTH top-level and a recovered source → a USER EDIT:
- *    rebuild a fresh `user_specified` InterventionV3 from the recovered value,
+ *  - factor present in BOTH top-level and a recovered source → a new value:
+ *    rebuild a fresh intervention from the recovered value; user credit requires human authority,
  *    preserving ONLY the still-valid `target_match` from the existing entry.
  *    Stale `source`/`reasoning`/`value_confidence`/`display_value` described the
  *    OLD value (`source` means "how this intervention was determined") and are
  *    NOT carried forward — that would misreport the edit's provenance;
- *  - factor present ONLY in a recovered source → fresh `user_specified` InterventionV3;
+ *  - factor present ONLY in a recovered source → fresh intervention, with the same authority requirement;
  *  - factor present ONLY at top-level → preserved verbatim (not edited).
  */
-function buildMergedInterventions(node: Dict): Dict | null {
+function buildMergedInterventions(node: Dict, humanAuthority: InterventionHumanAuthority): Dict | null {
   const recovered = recoverFromDataSources(node);
   if (recovered.size === 0) return null; // nothing to overlay → no-op
 
@@ -232,9 +237,9 @@ function buildMergedInterventions(node: Dict): Dict | null {
   }
 
   // Overlay the recovered (newer) values — data wins, and an overridden value is
-  // re-marked `user_specified` (only the factor match is carried from the old entry).
+  // attributed only by the new source or human authority (only the old factor match is carried).
   for (const [fac, rec] of recovered) {
-    const fresh = freshInterventionV3(fac, rec);
+    const fresh = freshInterventionV3(fac, rec, humanAuthority.some(cell => cell.optionId === node.id && cell.factorId === fac));
     const existing = out[fac];
     if (isPlainObject(existing) && isPlainObject(existing.target_match)) {
       fresh.target_match = existing.target_match;
@@ -412,7 +417,7 @@ export function normaliseOptionInterventionContract<T>(
     if (Array.isArray(nodes)) {
       for (const node of nodes) {
         if (!isPlainObject(node) || node.kind !== 'option') continue;
-        const merged = buildMergedInterventions(node);
+        const merged = buildMergedInterventions(node, ctx.humanAuthority ?? []);
         if (merged === null) continue;
         node.interventions = merged;
         if (isPlainObject(node.data)) {

@@ -157,7 +157,7 @@ export interface CandidateModel {
     baseline_known?: boolean;
     baseline_value?: number | null;
     baseline_provenance?: string;
-    /** Internal receipt; absent from the frozen drafter schema. */
+    /** Drafter receipt; verified by verifiedGoalLevel. */
     baseline_evidence?: { readonly quote: string } | null;
     /**
      * Whether the goal metric is one part or the whole (C46: "£20k MRR" — Pro MRR or total
@@ -181,6 +181,8 @@ export interface CandidateModel {
     interventions?: readonly {
       factor_label: string;
       value: number;
+      /** Existing absolute/additional discriminator; absent legacy and unknown kinds remain guarded by construction. */
+      value_kind?: string;
       unit?: string;
       provenance: string;
       estimate?: true;

@@ -348,7 +348,7 @@ export function buildAddOptionTransaction(
   }
 
   // Canonical top-level InterventionV3 bundle (the spelling GraphV3 preserves
-  // and run_analysis reads). `source` (the user's unless the spec says Olumi's) and an exact-id
+  // and run_analysis reads). A supplied `source` and an exact-id
   // `target_match` mirror `normalise-option-interventions.freshInterventionV3`.
   const valued = interventions.filter(
     (iv): iv is typeof iv & { value: number } => iv.value !== null,
@@ -358,7 +358,7 @@ export function buildAddOptionTransaction(
   for (const iv of valued) {
     const entry: Record<string, unknown> = {
       value: iv.value,
-      source: iv.source ?? 'user_specified',
+      ...(iv.source !== undefined ? { source: iv.source } : {}),
       target_match: {
         node_id: iv.factor_id,
         match_type: 'exact_id',

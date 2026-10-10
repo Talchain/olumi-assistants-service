@@ -669,7 +669,8 @@ export function createApplyOperations(
     // the whole write is refused rather than persisted.
     const touched = optionIdsTouchedByOperations(operations, applied);
     const mustConfigure = optionIdsAddedWithInterventionIntent(operations);
-    const encoded = encodeOptionInterventionsForEdit(applied, touched, mustConfigure);
+    const approvedLevels = approvedInterventionTargets(operations, applied.nodes);
+    const encoded = encodeOptionInterventionsForEdit(applied, touched, mustConfigure, approvedLevels);
     if (encoded.unresolvedOptionIds.length > 0) {
       return refuse('I could not work out what that change means for the options, so I have not saved it');
     }
@@ -678,7 +679,6 @@ export function createApplyOperations(
     }
 
     // Approvals name option/factor cells, never every level on a touched factor or option.
-    const approvedLevels = approvedInterventionTargets(operations, applied.nodes);
     const preserved = preserveSiblingQuantities(before, encoded.graph, approvedLevels);
     if (preserved.kind === 'refused') {
       return refuse('I could not work out what that change means for the options, so I have not saved it');
