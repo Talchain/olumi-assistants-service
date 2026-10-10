@@ -102,7 +102,7 @@ it('material scope is said once even if the drafter repeats the same question', 
 });
 it('material identity keeps one question when the old disclosure would also fire', async () => {
   const row = synthetic(c => {
-    const option = {
+    const option: CandidateModel['options'][number] = {
       label: 'Add subscribers', provenance: 'ai_proposed', is_status_quo: false, changes: [],
       interventions: [{ factor_label: 'Pro subscribers today', value: 100, value_kind: 'absolute', unit: 'subscribers', provenance: 'ai_proposed' }],
     };

@@ -9,13 +9,17 @@ import { narrateWriteOutcome } from '../write-outcome.js';
 // Paul's 24 September hiring brief, reconstructed as a corrected producer candidate.
 // This is a no-provider contract fixture, not a claim about generated model quality.
 function hiring() {
+  type Intervention = NonNullable<CandidateModel['options'][number]['interventions']>[number];
+  const techLead: Intervention = { factor_label: 'Tech leads', value: 1, value_kind: 'additional', unit: 'people', provenance: 'explicit' };
+  const developers: Intervention = { factor_label: 'Developers', value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit' };
+  const maintain: Intervention[] = [];
   return {
     goal: { metric: 'Productivity', operator: '>=', target_stated: false, frame: 'level' as const, value: null, unit: '%', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
     constraints: [],
     options: [
-      { label: 'Hire a tech lead', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Tech leads', value: 1, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
-      { label: 'Hire two developers', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Developers', value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
-      { label: 'Maintain current staffing', provenance: 'ai_proposed', is_status_quo: null, changes: [], interventions: [] as { factor_label: string; value: number; value_kind: string; unit: string; provenance: string }[] },
+      { label: 'Hire a tech lead', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [techLead] },
+      { label: 'Hire two developers', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [developers] },
+      { label: 'Maintain current staffing', provenance: 'ai_proposed', is_status_quo: null, changes: [], interventions: maintain },
     ],
     factors: [
       { label: 'Tech leads', role: 'controllable' as const, baseline_known: false, baseline_value: 0, unit: 'people', plausible_max: 5, provenance: 'ai_proposed' },
@@ -212,7 +216,7 @@ describe('provisional hiring construction uses real admission and registration p
   });
 
   it('B3 RED (B2 on the repair path): a demoted user total is still said after an adopted retry', async () => {
-    const seven = { factor_label: 'Developers', value: 7, value_kind: 'absolute', unit: 'people', provenance: 'explicit' };
+    const seven: NonNullable<CandidateModel['options'][number]['interventions']>[number] = { factor_label: 'Developers', value: 7, value_kind: 'absolute', unit: 'people', provenance: 'explicit' };
     const first = hiring(); first.options[1].interventions[0] = { ...seven };
     const repaired = hiring(); repaired.options[1].interventions[0] = { ...seven };
     const echo = prepareProvisionalCandidate(repaired).candidate;

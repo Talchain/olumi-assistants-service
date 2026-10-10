@@ -301,6 +301,11 @@ function ownsFactorLevel(before: string, factor: Factor): boolean {
   const verb = said.findIndex((w, i) => STATE_VERBS.has(w)
     && !(namedAt >= 0 && i >= namedAt && i < namedAt + quantity.length));
   const subject = said.slice(1, verb);
+  // A possessive subject naming the quantity's head must also name its qualifiers.
+  // "Our pub sales share" owns the pub claim, not a differently qualified taproom share.
+  const head = labelHead(currentQuantityLabel(factor.label));
+  if (head !== undefined && sameName(labelHead(currentQuantityLabel(subject.join(' '))) ?? '', head)
+    && !quantity.every(w => grammar(w) || subject.some(x => sameName(x, w)))) return false;
   // One possessive noun phrase owns its state predicate without an organisation-name vocabulary.
   // Reuse the existing verb/clause grammar: modals, another subject or another predicate cannot be noun words.
   const nounPhrase = subject.every(w => grammar(w) || OWN_ORGANISATION.has(w) || names(w))
