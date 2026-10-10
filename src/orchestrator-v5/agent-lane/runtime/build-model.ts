@@ -826,12 +826,12 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (!factor.unit || !intervention.unit || factor.unit.trim().toLowerCase() !== intervention.unit.trim().toLowerCase()) {
         unresolved('unit_mismatch'); continue;
       }
-      // A stated addition to known zero IS the stated figure, regardless of who named the factor.
-      const statedFigure = intervention.provenance === 'explicit' && factor.baseline_known === true && factor.baseline_value === 0;
+      const total: Iv = { ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value };
+      const verifiedTotal = verifiedOptionSetting(model, option, total, brief);
+      const statedFigure = factor.baseline_value === 0 && verifiedTotal;
       interventions.push({
-        ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value,
-        provenance: statedFigure || (factor.baseline_known && factor.provenance === 'explicit' && intervention.provenance === 'explicit')
-          ? 'explicit' : 'ai_proposed',
+        ...total,
+        provenance: verifiedTotal ? 'explicit' : 'ai_proposed',
         // ⛔ A TOTAL WE COMPUTED IS NOT A FIGURE THE USER WROTE (RT-4 class A, #2603; Codex r1): a stated 5% today plus a
         // stated 2% is the user's 7%, but "7%" appears nowhere as theirs, and an unrelated "Churn is 7%" was credited to it.
         // Admission marks the level (`constructedLevel`) so the not-modelled manifest never credits a brief literal to it.

@@ -464,3 +464,15 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     return false;
   }
 }
+
+/** A goal's current level uses the factor authority on the same complete model and receipt.
+ * The target and constraints remain in that model; no drafter flag licenses a baseline.
+ */
+export function verifiedGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
+  if (model?.goal == null || !Array.isArray(model.factors)) return false;
+  const goal = model.goal;
+  const current: Factor = { label: goal.metric, unit: goal.unit, baseline_value: goal.baseline_value ?? null,
+    baseline_known: goal.baseline_known === true, provenance: goal.baseline_provenance ?? goal.provenance,
+    baseline_evidence: goal.baseline_evidence, role: 'observable' };
+  return verifiedFactorLevel({ ...model, factors: [...model.factors, current] }, current, brief);
+}

@@ -77,7 +77,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { verifiedFactorLevel } from './verified-option-setting.js';
+import { verifiedFactorLevel, verifiedGoalLevel } from './verified-option-setting.js';
 
 const MAX_ID = 100;
 
@@ -157,6 +157,8 @@ export interface CandidateModel {
     baseline_known?: boolean;
     baseline_value?: number | null;
     baseline_provenance?: string;
+    /** Internal receipt; absent from the frozen drafter schema. */
+    baseline_evidence?: { readonly quote: string } | null;
     /**
      * Whether the goal metric is one part or the whole (C46: "£20k MRR" — Pro MRR or total
      * MRR?). Optional because the banked contract has no such field: absent or `null` means
@@ -783,7 +785,7 @@ function framedByRange(x: { plausible_max?: number | null }): { node?: { scale_f
 
 export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
-}, verifiedCurrentLevel?: boolean, userMaterialUnverified = false): Record<string, unknown> {
+}, verifiedCurrentLevel: boolean | 'human_authority' | 'legacy', userMaterialUnverified = false): NonNullable<AdmittedNode['observed_state']> {
   const raw = f.baseline_value as number;
   // ⛔ A KNOWN BASELINE THE BUILDER INFERRED IS OLUMI'S, NOT NOBODY'S (AIQ #70 5852160429). Source-less, served
   // eng-hiring (`2d0df14`) left salary spend and both headcounts unauthored: "I supplied N values" skipped them and
@@ -792,9 +794,9 @@ export function framedObservedState(f: {
   // not evidence for a user's measured level; construction attribution requires the verified receipt.
   // Construction always passes a receipt verdict. The two typed human doors use this
   // formatter after verifying the figure themselves; preserve their trusted carrier shape.
-  const base = verifiedCurrentLevel === undefined ? {
+  const base: Omit<NonNullable<AdmittedNode['observed_state']>, 'value'> = verifiedCurrentLevel === 'human_authority' || verifiedCurrentLevel === 'legacy' ? {
     ...(f.unit ? { unit: f.unit } : {}),
-    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' }
+    ...(verifiedCurrentLevel === 'human_authority' ? { source: 'brief_extraction' }
       : f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {} : { source: 'cee_inference' }),
   } : {
     ...(f.unit ? { unit: f.unit } : {}),
@@ -3618,8 +3620,11 @@ function admitOnce(
             targetUnit: model.goal.unit,
           });
           if (verdict.admitted) {
-            // Only the user's stated level reaches here (see `estimated` above).
-            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap);
+            observed_state = verifiedGoalLevel(model, brief)
+              ? { ...briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap), extractionType: 'explicit' }
+              : { ...framedObservedState({ baseline_value: baselineRaw, unit: model.goal.unit,
+                provenance: model.goal.baseline_provenance ?? model.goal.provenance, plausible_max: resolved.cap }, false, true),
+                baseline: verdict.normalised };
           } else {
             withheld(verdict.reason);
           }
@@ -3705,7 +3710,7 @@ function admitOnce(
           const c = capFor(f.label) ?? f.plausible_max;
           if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
           if ((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number') {
-            const os = framedObservedState({ ...f, plausible_max: c }) as { cap?: unknown };
+            const os = framedObservedState({ ...f, plausible_max: c }, false) as { cap?: unknown };
             // Already framed inside `observed_state` — a second carrier could
             // disagree with it, so do not write one.
             if (typeof os.cap === 'number') return {};

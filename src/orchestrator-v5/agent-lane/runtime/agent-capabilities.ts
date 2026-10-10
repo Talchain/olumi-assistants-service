@@ -8300,7 +8300,7 @@ export function createAgentCapabilities(
           .map((x) => x.level?.value).filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
         const largest = Math.max(Math.abs(t.value), ...named.map((v) => Math.abs(v)));
         const os = framedObservedState({ baseline_value: t.value, unit: unit ?? null, provenance: 'explicit',
-          plausible_max: largest > 1 ? defaultFrameFor(largest) : null });
+          plausible_max: largest > 1 ? defaultFrameFor(largest) : null }, 'human_authority');
         statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
       }
       const entries = plans.map(({ spec, plan }) => {
@@ -9082,7 +9082,7 @@ export function createAgentCapabilities(
         // figure this change carries for the factor — its own — then stamped as the user's.
         const v = t.value;
         const observed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
-          plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }), source: USER_TODAY_SOURCE };
+          plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }, 'human_authority'), source: USER_TODAY_SOURCE };
         planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed,
           basis: confirmPairing ? 'confirmed_by_approval' : 'written_about', quote });
       }

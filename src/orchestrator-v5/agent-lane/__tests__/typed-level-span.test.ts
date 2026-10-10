@@ -115,7 +115,7 @@ describe('typed current-level sentence authority', () => {
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
   });
   it('a legacy absent-type numeric origin remains unknown with no validator verdict', () => {
-    const os = framedObservedState({ ...model().factors[0]!, provenance: 'ai_proposed' });
+    const os = framedObservedState({ ...model().factors[0]!, provenance: 'ai_proposed' }, 'legacy');
     expect(os.source).toBe('cee_inference');
     expect(os.extractionType).toBeUndefined();
     expect(os.user_material_unverified).toBeUndefined();
@@ -123,7 +123,7 @@ describe('typed current-level sentence authority', () => {
     expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('ai_inferred');
   });
   it('the trusted human formatter preserves its absent-type carrier without a validator verdict', () => {
-    const os = framedObservedState(model().factors[0]!);
+    const os = framedObservedState(model().factors[0]!, 'human_authority');
     expect(os).toStrictEqual({ value: 0.46, raw_value: 920, cap: 2000, declared_scale: 'unit_interval', unit: 'appointments/month', source: 'brief_extraction' });
     expect(valueAuthorshipOf(os)).toBe('unknown');
     expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('ai_inferred');
@@ -139,7 +139,7 @@ describe('typed current-level sentence authority', () => {
   it('withdrawal preserves unverified claims and leaves legacy withdrawn numeric origins unknown', () => {
     const m = model(); m.factors[0]!.baseline_evidence = null;
     const unverified = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
-    const legacy = { kind: 'factor', label: cases[2]!.label, observed_state: framedObservedState(model().factors[0]!) };
+    const legacy = { kind: 'factor', label: cases[2]!.label, observed_state: framedObservedState(model().factors[0]!, 'human_authority') };
     const [kept, withdrawn] = withdrawUnstatedBaselineStamps([unverified, legacy], 'We are reviewing service.');
     expect(kept).toBe(unverified);
     expect(kept?.observed_state).toMatchObject({ source: 'cee_inference', extractionType: 'inferred', user_material_unverified: true });
