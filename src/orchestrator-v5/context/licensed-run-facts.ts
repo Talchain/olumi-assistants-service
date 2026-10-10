@@ -13,7 +13,7 @@ import { selectCanonicalAnalysisState } from './canonical-analysis-state.js';
 import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { readGraph, buildNodeLabelMap } from './enrichment-graph-labels.js';
-import { readTopLevelFlipRows, flipRowScaleUnsafeForPromptUnits, type TopLevelFlipRow } from './flip-threshold-rows.js';
+import { flipThresholdsAvailable, readTopLevelFlipRows, flipRowScaleUnsafeForPromptUnits, type TopLevelFlipRow } from './flip-threshold-rows.js';
 import { projectRunGraphForDecisionReview } from '../coaching/decision-review-graph-projection.js';
 
 export interface LicensedReviewOption {
@@ -81,7 +81,7 @@ export function buildLicensedRunFacts(
   // Only the producer's explicit `unavailable` (or a Run that is not current) withholds flip data. `computed`,
   // `partial_no_effect` (real pairs beside no-effect rows) and `all_no_effect` (the honest "no factor flips it" fact)
   // all carry licensed rows; absent status keeps the legacy behaviour, as `lens-selector` does.
-  const flipAvailable = current && raw.flip_thresholds_status !== 'unavailable';
+  const flipAvailable = current && flipThresholdsAvailable(raw);
   // The tipping point names a factor and a threshold, never an option, so the LEADER permission does not gate it.
   if (!flipAvailable) {
     delete analysis.tipping_point;

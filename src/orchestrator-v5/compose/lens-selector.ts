@@ -114,6 +114,7 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
   readFlipClaimPosture,
+  flipThresholdsAvailable,
   readTopLevelFlipRows,
   type FlipClaimPosture,
 } from '../context/flip-threshold-rows.js';
@@ -1572,7 +1573,7 @@ export function hasMeasuredFlipThresholdFor(
   subjectFactorId: string | null,
 ): boolean {
   return subjectFactorId !== null &&
-    enrichment.flip_thresholds_status !== 'unavailable' &&
+    flipThresholdsAvailable(enrichment) &&
     readTopLevelFlipRows(enrichment).some(
       (row) => row.kind === 'flip_pair' && row.factor_id === subjectFactorId,
     );

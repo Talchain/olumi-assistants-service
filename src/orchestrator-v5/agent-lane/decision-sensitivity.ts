@@ -29,7 +29,7 @@ import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 import { goalChanceDriverAvailabilityForAgent, goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, runHasGoalChanceLicenceRecord } from '../goal-target/goal-chance-range-agent.js';
 import { robustnessComputed } from './goal-chance-driver-egress.js';
-import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
+import { flipThresholdsAvailable, readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import {
@@ -127,6 +127,8 @@ const inUnit = (value: number, unit: string | null): string => {
 export function tippingPointOf(enrichment: unknown): TippingPoint {
   const e = recordOf(enrichment);
   if (e === undefined) return { status: 'not_evaluated' };
+  // The producer said its flip analysis did not run: rows that ride beside that word state no threshold.
+  if (!flipThresholdsAvailable(e)) return { status: 'not_evaluated' };
   const rows = readTopLevelFlipRows(e);
   if (rows.length === 0) return { status: 'not_evaluated' };
   const first = rows.find((r) => r.kind === 'flip_pair' && r.current_value !== null && r.flip_value !== null

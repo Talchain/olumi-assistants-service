@@ -60,6 +60,14 @@ describe('typed tipping-point fact from the served corpus', () => {
     expect(tippingPointOf(undefined)).toEqual({ status: 'not_evaluated' });
     expect(JSON.stringify(analysisResultForAgent(CONTROL))).not.toContain('a factor that could change this');
   });
+  it('the producer\'s own "unavailable" withholds a threshold that rides beside it; every other status word keeps it', () => {
+    expect(tippingPointOf({ ...ENRICHMENT, flip_thresholds_status: 'unavailable' })).toEqual({ status: 'not_evaluated' });
+    // CONTRAST: same rows, only the status word differs. Absent keeps the legacy reading (older Runs carry no status).
+    for (const status of [undefined, 'computed', 'partial_no_effect']) {
+      expect(tippingPointOf({ ...ENRICHMENT, flip_thresholds_status: status }), String(status))
+        .toMatchObject({ status: 'found', factor_id: 'pro_plan_price', threshold: 55.76 });
+    }
+  });
   it('does not depend on alternative-winner identity or label', () => {
     expect(tippingPointOf(withRows([{ ...rows[0]!, alternative_winner_id: null, alternative_winner_label: null }])))
       .toEqual(tippingPointOf(ENRICHMENT));
