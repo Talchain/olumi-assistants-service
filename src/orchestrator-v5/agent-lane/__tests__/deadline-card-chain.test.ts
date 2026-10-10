@@ -145,6 +145,8 @@ describe('R3 deterministic authorship and placement guards', () => {
     ['previous-sentence subject (buddy r1 P1)', 'We have registered riders. We must reach revenue of £10,000 in ten months.'],
     ['course duration, not a deadline (buddy r1 P1)', 'We have registered riders. We keep training staff over ten months as a course duration, not a deadline.'],
     ['same-sentence duration, not a deadline', 'We keep training registered riders over ten months as a course duration, not a deadline.'],
+    ['same-sentence duration only', 'We keep training registered riders over ten months as a course.'],
+    ['same-sentence "lasts"', 'We keep registered riders onboarded in a programme that lasts ten months.'],
   ])('%s is silent', (_name, storedBrief) => { expect(deadlineCardToIssue({ ...issueInput(), storedBrief })).toBeUndefined(); });
   it('whole words: 6 months cannot come from 16 months', () => {
     const g = structuredClone(d2.graph); goal(g).goal_deadline_as_stated = '6 months';
