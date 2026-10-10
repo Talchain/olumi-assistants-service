@@ -372,6 +372,17 @@ describe('R6 the draft was built inside an Agent turn', () => {
     expect(firstAgentTurnAfterDraft({ rowId: resent.id, rows: [resent, built, construction] }, sid, brief)).toBe(false);
     expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [{ ...built, user_message: 'Which one?' }, construction] }, sid, brief)).toBe(false);
   });
+  it('whitespace around the typed message still matches the trimmed stored brief; an answer that asks the card question is an offer, not the build', () => {
+    const sid = randomUUID(), brief = d2.brief;
+    const row = (request_hash: string, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: randomUUID(), request_hash,
+      turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, ...over });
+    const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false });
+    const spaced = row('agent_turn:build', { user_message: ` ${brief}\n`, assistant_message: 'Here is the model.' });
+    expect(firstAgentTurnAfterDraft({ rowId: spaced.id, rows: [spaced, construction] }, sid, brief)).toBe(true);
+    // Construction committed, build answer never recorded; the user re-sent the brief, was offered the card, declined next turn.
+    const offer = row('agent_turn:resent', { user_message: brief, assistant_message: 'Is your deadline 10 August 2027 (10 months from 10 October 2026)?' });
+    expect(firstAgentTurnAfterDraft({ rowId: offer.id, rows: [offer, construction] }, sid, brief)).toBe(false);
+  });
 });
 
 /**

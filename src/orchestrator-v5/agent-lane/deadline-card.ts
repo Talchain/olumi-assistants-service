@@ -30,7 +30,12 @@ export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, s
   const newer = rows.slice(0, at);
   if (!newer.every(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string')) return false;
   const answers = newer.filter(r => r.request_hash.startsWith('agent_turn:'));
-  return answers.length === 0 || (answers.length === 1 && answers[0]!.user_message === brief);
+  // The stored brief is trimmed, the answer row keeps the message as typed (buddy r1 P2: " "+brief+"\n" never matched). An
+  // answer that itself ASKS the deadline question is an offer, not the build answer (buddy r1 P2: a resent brief whose answer
+  // carried the card, declined next turn, would otherwise look like the build answer and re-offer).
+  const builtTheDraft = (r: SessionTurnWithContent): boolean => typeof r.user_message === 'string' && r.user_message.trim() === brief.trim()
+    && !/\bis your deadline\b/i.test(r.assistant_message ?? '');
+  return answers.length === 0 || (answers.length === 1 && builtTheDraft(answers[0]!));
 }
 /**
  * Cheap pre-read gate: more than ONE Agent answer newer than the newest construction registration is never a first
