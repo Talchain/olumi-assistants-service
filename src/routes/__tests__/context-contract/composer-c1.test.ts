@@ -199,7 +199,7 @@ async function proposalTurn(trigger: Trigger, name: string) {
   recordC2(name, w);
   return w;
 }
-it('P1 proposal carrier: base text is a byte-whole prefix, then exact action and Science Why; approval unchanged', async () => {
+it('P1-prime proposal carrier: base text is a byte-whole prefix, then Science Why only; approval unchanged', async () => {
   const w = await proposalTurn('W6', 'P1');
   expect(carriers(w)).toHaveLength(2);
   expect(carriers(w)[1]).toEqual(carriers(w)[0]);
@@ -209,7 +209,7 @@ it('P1 proposal carrier: base text is a byte-whole prefix, then exact action and
   const label = object(object(object(w.response.guidance).slot1).primary_action).label;
   expect(label).toBe('Suggest risks');
   expect(String(w.response.assistant_text).slice(0, baseText.length)).toBe(baseText);
-  expect(String(w.response.assistant_text).slice(baseText.length)).toBe(`\n\n- ${String(label)}\n\n${disclosure}`);
+  expect(String(w.response.assistant_text).slice(baseText.length)).toBe(`\n\n${disclosure}`);
   expect(w.response.suggested_actions).toEqual(base.suggested_actions);
   expect(array(w.response.suggested_actions).some(a => String(object(a).id).startsWith('agent-approve-proposal:'))).toBe(true);
   expect(w.response._answer_shape).toBeUndefined();
@@ -219,7 +219,7 @@ it('P1 proposal carrier: base text is a byte-whole prefix, then exact action and
     const input = { text: baseText, ...identity };
     const normal = composeReplyShape(input);
     const carried = composeReplyShape({ ...input, eligibleIntervention: intervention as never, interventionActionLabel: String(label) });
-    expect(carried).toEqual({ ...normal, text: `${baseText}\n\n- ${String(label)}\n\n${disclosure}` });
+    expect(carried).toEqual({ ...normal, text: `${baseText}\n\n${disclosure}` });
   }
 });
 it('P2 proposal without carrier: byte-identical base text and suggested actions', async () => {
@@ -282,5 +282,5 @@ it('X5 profile gate: method_step with carrier is byte-identical; proposal append
   const method = { text: String(w.response.assistant_text), profile: 'method_step' as const };
   expect(composeReplyShape({ ...method, eligibleIntervention: intervention as never, interventionActionLabel: 'Suggest risks' })).toEqual(composeReplyShape(method));
   const proposed = await proposalTurn('W6', 'X5-proposal');
-  expect(String(proposed.response.assistant_text)).toBe(`${String(c2Base.P1.assistant_text)}\n\n- Suggest risks\n\n${disclosure}`);
+  expect(String(proposed.response.assistant_text)).toBe(`${String(c2Base.P1.assistant_text)}\n\n${disclosure}`);
 });
