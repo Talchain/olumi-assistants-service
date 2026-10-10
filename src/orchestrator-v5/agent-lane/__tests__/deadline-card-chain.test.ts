@@ -338,7 +338,7 @@ describe('R4 durable first-Agent-turn gate', () => {
       for (const [version, scenario] of [[null, '2026-10-09T10:00:00Z'], ['2026-10-10T10:00:00Z', '2026-10-09T10:00:00Z']] as const) {
         const w = world(); w.reference(version, scenario);
         const offer = await w.caps.deadlineCardFromDraft(w.ctx('Run'), { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } });
-        const viaOffer = await offer!.issue(w.ctx('Run'), { rationale: '' }) as Rec;
+        const viaOffer = await offer!.issue(w.ctx('Run'), { deadline_words: offer!.words, rationale: '' }) as Rec;
         const viaDoor = await world(), door = (viaDoor.reference(version, scenario), await viaDoor.caps.proposeGoalDeadline!(viaDoor.ctx('My deadline is ten months'), { deadline_words: 'ten months', rationale: '' })) as Rec;
         expect(viaOffer.public_label, String(version)).toBe(door.public_label);
         expect(viaOffer.public_label).toContain(version === null ? '9 October 2026' : '10 October 2026');
