@@ -1,3 +1,4 @@
+import { isGuidanceVariant } from '../turn-context/guidance-history.js';
 /**
  * ⭐ T3: AN ASKED PRE-MORTEM RUNS THE REASONING COACH'S METHOD ON TYPED INPUTS, AND ITS REPLY IS CHECKED BEFORE IT IS
  * SENT (DL 5937411688 / 5937503623; RC `method_turns.RC-PREMORTEM`, vendored in `guidance/policy.ts` @a00cb9c8).
@@ -107,6 +108,8 @@ function guidanceStateOf(entries: Readonly<Record<string, unknown>>): GuidanceSt
       status: r.status as GuidanceRecord['status'],
       ...(typeof r.state_key_hash === 'string' ? { state_key_hash: r.state_key_hash } : {}),
       ...(typeof r.turn_id === 'string' ? { turn_id: r.turn_id } : {}),
+      ...(isGuidanceVariant(key, r.variant_id) ? { variant_id: r.variant_id } : {}),
+      ...(typeof r.slot === 'number' && Number.isInteger(r.slot) && r.slot >= 1 && r.slot <= 3 ? { slot: r.slot } : {}),
     };
   }
   return out;

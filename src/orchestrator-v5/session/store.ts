@@ -302,6 +302,7 @@ export interface SessionTurnWrite {
 
 /** What {@link SessionStore.readCommittedTurn} returns — the durable facts a replay is answered from. */
 export interface CommittedTurnRecord {
+  readonly agent_guidance?: AnswerGuidance;
   readonly id: string;
   readonly request_hash: string;
   readonly assistant_message: string | null;

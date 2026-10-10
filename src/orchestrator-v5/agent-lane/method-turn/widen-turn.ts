@@ -24,7 +24,8 @@ import { midSentence } from '../guidance/render.js';
 import type { SuggestedAction } from '../../compose/types.js';
 import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import { widenVariantOf } from '../guidance/index.js';
-import type { Target, Variant } from '../guidance/types.js';
+import { isGuidanceVariant } from '../turn-context/guidance-history.js';
+import type { GuidanceState, Target, Variant } from '../guidance/types.js';
 import { POLICY } from '../guidance/policy.js';
 import { doorLevelOf, estimateLevelPersists } from '../runtime/agent-capabilities.js';
 import { assembleGuidanceSignals, type GuidanceSignals as TurnSignals } from '../turn-context/guidance-signals.js';
@@ -204,7 +205,12 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown, question?: 
   const g = graphOf(graph);
   const goalLabel = question?.goal_label ?? labelOf(goalOf(graph, g)) ?? s['model.goal_label'] ?? 'your goal';
   const vt = widenVariantOf(selectorSignalsOf(s, null));
-  const variant = vt?.target === 'options' ? vt.variant : null;
+  // A pressed offer keeps the identity selected on its original wire; all method inputs are current.
+  const offered = s.guidance[METHOD];
+  const stored = offered !== null && typeof offered === 'object' ? (offered as Record<string, unknown>) : undefined;
+  const storedVariant = stored?.status === 'offered' && isGuidanceVariant(METHOD, stored.variant_id)
+    && stored.variant_id !== 'W6' && stored.variant_id !== 'W7' ? stored.variant_id : undefined;
+  const variant = storedVariant ?? (vt?.target === 'options' ? vt.variant : null);
   const labels = s['model.option_labels'];
   const sq = s['model.status_quo_option_id'];
   const ownIds = s['model.non_sq_option_ids'];
@@ -227,7 +233,7 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown, question?: 
       + `with 1 to ${WIDEN_MAX_OPTIONS} options (one option: \`label\` + \`acts_on\`; two or three: \`options\`). The user approves `
       + 'the change before anything is added.',
     `The goal is ${quote(goalLabel)}.`,
-    ...(variant === 'W1' ? ['On the latest run, every current option is likely to break the user’s limit: each suggestion must work in a different way.'] : []),
+    ...(variant === 'W1' && vt?.variant === 'W1' ? ['On the latest run, every current option is likely to break the user’s limit: each suggestion must work in a different way.'] : []),
     ...(optionIds.length > 0 ? ['The options already in the model, and the factors each one changes (never propose any of these again):', ...optionIds.map(describe)] : []),
     `The model's factors (use these exact labels in acts_on, and no others): ${factors.map((n) => quote(labelOf(n)!)).join(', ')}.`,
     `Shape: ${CONTRACT.body}`,
@@ -248,7 +254,7 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown, question?: 
 }
 
 /** The Widen turn for a press, from the route's own readback (the same licence and identity projection as the pre-mortem). */
-export function widenTurnForReadback(chipId: unknown, rb: MethodReadback): WidenTurn | null {
+export function widenTurnForReadback(chipId: unknown, rb: MethodReadback, guidance?: GuidanceState | null): WidenTurn | null {
   if (!isWidenPress(chipId)) return null;
   if (rb.graph === undefined || rb.graph === null) return unavailable('model_unread');
   const pressed = questionedLinkOf(chipId);
@@ -256,6 +262,7 @@ export function widenTurnForReadback(chipId: unknown, rb: MethodReadback): Widen
   if (pressed !== null && question === undefined) return unavailable('not_an_assumption');
   const signals = assembleGuidanceSignals({
     request: 'method',
+    guidance: guidance ?? {},
     explicitRequest: METHOD,
     offeredSpecific: [],
     graph: rb.graph,
