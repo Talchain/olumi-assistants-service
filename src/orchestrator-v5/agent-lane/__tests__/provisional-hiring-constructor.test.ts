@@ -117,9 +117,11 @@ describe('provisional hiring construction uses real admission and registration p
     c.options[1].interventions[0].value_kind = 'additional';
     const prepared = prepareProvisionalCandidate(c).candidate;
     expect(prepared.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'explicit' });
-    // S7 (disposition `unverified_human_claim`): the factor is the user's declared 5, but this candidate carries no
-    // `baseline_evidence.quote` and no brief sentence the verifier can bind — the figure stays VISIBLE as the user's UNVERIFIED claim
-    // (never brief_extraction, never Olumi's estimate); the absolute/additional arithmetic above is unchanged.
+    // S7 (disposition `unsupported_unit_conversion`): the factor is the user's declared 5 PEOPLE. No sentence is stated in this
+    // fixture, and even an exact first-person receipt ("We have 5 developers today." quoted, brief supplied) is refused by the
+    // verifier: a developers count is not a `people` level without a conversion (measured on this row, not assumed). So the figure
+    // stays VISIBLE as the user's UNVERIFIED claim (never brief_extraction, never Olumi's estimate); the absolute/additional
+    // arithmetic above is unchanged.
     expect(admitCandidateModel(prepared, {}).nodes.find((n) => n.label === 'Developers')?.observed_state)
       .toMatchObject({ raw_value: 5, source: 'cee_inference', user_material_unverified: true });
   });

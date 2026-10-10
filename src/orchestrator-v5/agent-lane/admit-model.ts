@@ -3479,9 +3479,17 @@ function admitOnce(
   const goalScope = unstatedGoalScope(model.goal);
 
   // Fixed traversal order => deterministic ids.
-  /** The drafter cites the brief for this level (a non-empty quote): a claim about what the user wrote, verified or not. */
-  const quotesBrief = (f: { baseline_evidence?: { quote?: string } | null }): boolean =>
-    typeof f.baseline_evidence?.quote === 'string' && f.baseline_evidence.quote.trim() !== '';
+  /**
+   * The drafter cites a brief sentence that WRITES this figure (`findStatedAmounts`, the same amount reader the verifier
+   * starts from): a claim about what the user wrote, verified or not. A quote that does not carry the figure is context
+   * ("Staffing is fixed…"), never the user's claim, so an estimate that cites it stays Olumi's.
+   */
+  const quotesBrief = (f: { baseline_value?: number | null; baseline_evidence?: { quote?: string } | null }): boolean => {
+    const quote = f.baseline_evidence?.quote;
+    const value = f.baseline_value;
+    return typeof quote === 'string' && typeof value === 'number' && Number.isFinite(value)
+      && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value));
+  };
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
