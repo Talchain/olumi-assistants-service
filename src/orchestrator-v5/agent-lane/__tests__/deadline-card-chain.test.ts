@@ -142,6 +142,9 @@ describe('R3 deterministic authorship and placement guards', () => {
     ['other goal date', 'We have 1,400 registered riders. Our revenue goal is to reach £1,900 in ten months.'],
     ['duration, not deadline', 'We have registered riders. Our staff training lasts ten months.'],
     ['owner absent', 'Registered riders should stay under the ceiling over the next ten months.'],
+    ['previous-sentence subject (buddy r1 P1)', 'We have registered riders. We must reach revenue of £10,000 in ten months.'],
+    ['course duration, not a deadline (buddy r1 P1)', 'We have registered riders. We keep training staff over ten months as a course duration, not a deadline.'],
+    ['same-sentence duration, not a deadline', 'We keep training registered riders over ten months as a course duration, not a deadline.'],
   ])('%s is silent', (_name, storedBrief) => { expect(deadlineCardToIssue({ ...issueInput(), storedBrief })).toBeUndefined(); });
   it('whole words: 6 months cannot come from 16 months', () => {
     const g = structuredClone(d2.graph); goal(g).goal_deadline_as_stated = '6 months';
@@ -255,23 +258,47 @@ describe('R4 durable first-Agent-turn gate', () => {
     const w = world(); w.failSnapshot(); const body = await (await route(w))();
     expect(body._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
   });
-  it('newest system event, unreadable identity, and an earlier Agent answer fail closed', async () => {
+  it('a later system event or earlier Agent conversation does not suppress the first offer; an Agent answer after the draft does', async () => {
     const w = world(); w.rows.unshift(makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_class: 'direct_answer', handler_id: null,
       request_hash: 'sha256:system-event', turn_id: 'system-event' }));
-    const body = await (await route(w))(); expect(body._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
+    const body = await (await route(w))(); const { call } = card(body);
+    expect(call.proposal_id).toEqual(expect.any(String));
+    // Unreadable identity, no draft row, and an Agent answer NEWER than the draft stay closed.
     expect(firstAgentTurnAfterDraft(undefined, w.sid, d2.brief)).toBe(false);
     expect(firstAgentTurnAfterDraft({ rowId: 'wrong-row', rows: w.rows }, w.sid, d2.brief)).toBe(false);
     const draft = w.rows.find(r => r.request_hash.startsWith('graph_registration:'))!;
-    expect(firstAgentTurnAfterDraft({ rowId: draft.id, rows: [draft, makeSessionTurnRow({ request_hash: 'agent_turn:prior' })] }, w.sid, d2.brief)).toBe(false);
+    const prior = makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, request_hash: 'agent_turn:prior', turn_id: 'prior' });
+    expect(firstAgentTurnAfterDraft({ rowId: prior.id, rows: [prior, draft] }, w.sid, d2.brief)).toBe(false);
+    expect(firstAgentTurnAfterDraft({ rowId: draft.id, rows: [draft, prior] }, w.sid, d2.brief)).toBe(true);
+    expect(firstAgentTurnAfterDraft({ rowId: prior.id, rows: [prior] }, w.sid, d2.brief)).toBe(false);
   });
-  it('scenario immutable reference is fallback; missing both cannot use clock', async () => {
+  it('a pre-draft Agent conversation still gets the first post-draft offer, and the second turn never repeats it', async () => {
+    const w = world(); w.rows.push(makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_class: 'direct_answer', handler_id: null,
+      request_hash: 'agent_turn:before-the-draft', turn_id: 'before-the-draft' }));
+    const turn = await route(w), first = await turn(); card(first);
+    const second = await turn({ agent_session_id: first._agent.session_id });
+    expect(second._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
+  });
+  it('without the construction version the automatic card is silent: no scenario-time and no clock fallback', async () => {
     const w = world(); w.reference(null, '2026-10-09T10:00:00Z');
     const input = { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } };
-    const issuer = await w.caps.deadlineCardFromDraft(w.ctx('Run'), input); expect(issuer).toBeDefined();
-    const out = await issuer!.issue(w.ctx('Run'), { deadline_words: issuer!.words, rationale: '' }) as Rec;
-    expect(out.public_label).toBe('Is your deadline 9 August 2027 (10 months from 9 October 2026)?');
-    expect(w.proposals.get(out.proposal_id)!.operations[0]!.value).toMatchObject({ reference: '2026-10-09', expected_deadline: null });
+    expect(await w.caps.deadlineCardFromDraft(w.ctx('Run'), input)).toBeUndefined();
     w.reference(null, null); expect(await w.caps.deadlineCardFromDraft(w.ctx('Run'), input)).toBeUndefined();
+    // The model-facing door keeps its own (unchanged) fallback: a typed deadline still gets a card there.
+    expect(await w.caps.proposeGoalDeadline!(w.ctx('My deadline is ten months'), { deadline_words: 'ten months', rationale: '' })).toMatchObject({ ok: true });
+  });
+  it('Yes on the route-issued card writes byte-for-byte what Yes on the model-facing door\'s card writes', async () => {
+    const viaRoute = world(), turn = await route(viaRoute), first = await turn(), { yes } = card(first);
+    await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: first._agent.session_id });
+    const viaDoor = world();
+    const out = await viaDoor.caps.proposeGoalDeadline!(viaDoor.ctx('My deadline is ten months'), { deadline_words: 'ten months', rationale: '' }) as Rec;
+    expect(out.ok).toBe(true);
+    const p = viaDoor.proposals.get(out.proposal_id)!;
+    const chip = approvalChipsFor([{ name: 'propose_goal_deadline', ok: true, mutated: false, proposal_id: p.proposal_id }], () => ({ proposal: p, result: out as ToolResult }))[0]!;
+    const applied = await viaDoor.caps.authoriseChange({ ...viaDoor.ctx(chip.message), typed_approval_of: p.proposal_id, typed_approval_words: chip.message }, { proposal_id: p.proposal_id }) as Rec;
+    expect(applied.applied, JSON.stringify(applied)).toBe(true);
+    expect(JSON.stringify(viaRoute.read())).toBe(JSON.stringify(viaDoor.read()));
+    expect(goal(viaRoute.read())).toMatchObject({ goal_horizon: { deadline: '2027-08-10' } });
   });
   it('Change date follow-up can still propose THIS newly typed deadline through the model door', async () => {
     const w = world(); const out = await w.caps.proposeGoalDeadline!(w.ctx('My deadline is eleven months'), { deadline_words: 'eleven months', rationale: '' });

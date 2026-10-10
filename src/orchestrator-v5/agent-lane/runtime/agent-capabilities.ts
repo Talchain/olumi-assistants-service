@@ -1,4 +1,4 @@
-import { deadlineCardToIssue, firstAgentTurnAfterDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
+import { deadlineCardToIssue, firstAgentTurnAfterDraft, newestRowIsAgentAnswer, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
@@ -9567,13 +9567,16 @@ export function createAgentCapabilities(
     ...caps,
     /** Route-only authorship entry: no model argument can select the stored-brief source. */
     async deadlineCardFromDraft(ctx, input) {
-      if (readOnly) return undefined;
+      if (readOnly || newestRowIsAgentAnswer(input.start)) return undefined;
       try {
         const g = await readGraph(ctx.scenario_id);
         if (!g || !firstAgentTurnAfterDraft(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
+        // The immutable reference is THIS draft's own creation time; without the construction version it stays silent
+        // (no scenario-time or clock fallback on the automatic path: buddy r1 P2).
         const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
-        const stamp = [draft?.created_at, g.scenario_created_at].find(t => typeof t === 'string' && Number.isFinite(Date.parse(t)));
-        const reference = typeof stamp === 'string' ? todayInLondon(new Date(stamp)) : undefined;
+        const stamp = draft?.created_at;
+        const reference = typeof stamp === 'string' && Number.isFinite(Date.parse(stamp)) ? todayInLondon(new Date(stamp)) : undefined;
+        if (reference === undefined) return undefined;
         const card = deadlineCardToIssue({ ...input, graph: g.raw, storedBrief: g.brief_text, reference, priorOffer: false });
         return card === undefined ? undefined : { words: card.words,
           issue: (subject, args) => proposePlacedDeadline(subject, args, g, card.words, card.reference) };

@@ -9,15 +9,26 @@ export interface DeadlineTurnStart {
   readonly rowId: string | null;
   readonly rows: readonly SessionTurnWithContent[];
 }
-/** The strict pending read and the content read must identify the SAME newest non-claim row. */
+/**
+ * The strict pending read and the content read must identify the SAME newest non-claim row, and NO Agent answer is newer
+ * than this brief's construction row. Earlier (pre-draft) Agent conversation and later system events are not an offer
+ * of this card; the Agent answer that carries the offer is, so it can never be offered twice (buddy r1 P2).
+ */
 export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): boolean {
   if (!start || !start.rowId || brief.trim() === '') return false;
-  const row = start.rows[0];
-  if (!row || row.id !== start.rowId || row.scenario_id !== scenarioId || row.turn_class !== 'direct_answer' || row.handler_id !== null
-    || typeof row.request_hash !== 'string' || start.rows.some(r => r.request_hash.startsWith('agent_turn:'))) return false;
-  return row.request_hash.startsWith('graph_registration:')
-    && row.turn_id === registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief))
-    || row.response_emitted === true && row.user_message === brief;
+  const rows = start.rows;
+  if (rows[0]?.id !== start.rowId) return false;
+  const draftTurnId = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
+  const at = rows.findIndex(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string'
+    && (r.turn_id === draftTurnId && r.request_hash.startsWith('graph_registration:')
+      || r.turn_class === 'direct_answer' && r.handler_id === null && r.response_emitted === true && r.user_message === brief));
+  return at >= 0 && rows.slice(0, at).every(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string'
+    && !r.request_hash.startsWith('agent_turn:'));
+}
+/** Cheap pre-read gate: the newest row is itself an Agent answer, so an offer was already possible and is never repeated. */
+export function newestRowIsAgentAnswer(start: DeadlineTurnStart | undefined): boolean {
+  const row = start?.rows[0];
+  return row !== undefined && typeof row.request_hash === 'string' && row.request_hash.startsWith('agent_turn:');
 }
 const plainOf = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
 const escaped = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -30,17 +41,18 @@ function goalOwnsDeadline(goal: RecordLike, words: string, source: string): bool
   const sentences = plainOf(source).split(/[.!?\n]+/);
   const subject = plainOf(String(goal.goal_threshold_unit ?? goal.label ?? ''));
   const nouns = subject.match(/\p{L}+/gu)?.filter(w => !['at', 'month', 'months', 'per', 'the', 'a', 'level', 'surplus'].includes(w)) ?? [];
-  return sentences.some((sentence, i) => {
+  return sentences.some((sentence) => {
     if (!whole(words, sentence) || /\b(?:rival|competitor|example|e\.g|their|they|another goal|other goal)\b/.test(sentence)) return false;
+    if (/\b(?:not (?:a |the |our |my )?(?:deadline|target|goal)|duration|lasts?|takes?|course)\b/.test(sentence)) return false;
     if (/\b(?:goal|target)\b/.test(sentence) && !nouns.some(noun => whole(noun, sentence))) return false;
     const before = sentence.slice(0, sentence.indexOf(plainOf(words)));
     if (!/\b(?:we|i|us|our|my)\b/.test(before)
       || !/\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline|deliver|finish|complete)\b/.test(before)
       || !/\b(?:by|within|over|next|deadline|before|until|in)\b/.test(before)) return false;
-    // A bare owned deadline refers to the sole goal. Otherwise its subject must occur in this goal-intent sentence
-    // or the immediately preceding context (the d2 ceiling sentence names its stock there).
-    return /\b(?:our|my) deadline\b/.test(before)
-      || nouns.some(noun => whole(noun, sentence) || whole(noun, sentences[i - 1] ?? ''));
+    // A bare owned deadline refers to the sole goal. Otherwise its subject must occur in THIS goal-intent sentence: a
+    // noun of the previous sentence never attributes a date to this goal (buddy r1 P1: "We have registered riders. We
+    // must reach revenue of £10,000 in ten months." is revenue's date). The d2 ceiling sentence names its riders itself.
+    return /\b(?:our|my) deadline\b/.test(before) || nouns.some(noun => whole(noun, sentence));
   });
 }
 export interface DeadlineIssueInput {
