@@ -189,6 +189,8 @@ export interface CandidateModel {
       provenance: string;
       estimate?: true;
       basis?: string;
+      /** Existing intervention uncertainty, independent of the point's credit. */
+      value_confidence?: InterventionV3T['value_confidence'];
       stated_evidence?: StatedOptionEvidence | null;
       /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
       range?: InterventionV3T['range'];
@@ -445,12 +447,14 @@ function constructedLevel(
   factor: Pick<AdmittedNode, 'observed_state' | 'scale_frame'> | undefined,
   declaredUnit: string | undefined,
   derivedTotal = false,
+  computedConfidence?: InterventionV3T['value_confidence'],
 ): ConstructedLevel {
   const level: ConstructedLevel = {
     value: cap !== undefined ? figure / cap : figure,
     source,
     target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
-    ...(derivedTotal && source === 'brief_extraction' ? { value_confidence: 'medium' as const } : {}),
+    ...(derivedTotal && (source === 'brief_extraction' || computedConfidence === 'medium')
+      ? { value_confidence: 'medium' as const } : {}),
   };
   const os = factor?.observed_state;
   const usable = (u: unknown): u is string => typeof u === 'string' && u.trim() !== '';
@@ -4092,7 +4096,7 @@ function admitOnce(
       }
       const cap = capByFactorId.get(factorId);
       bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId),
-        (iv as { derived_total?: unknown }).derived_total === true);
+        (iv as { derived_total?: unknown }).derived_total === true, iv.value_confidence);
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });

@@ -175,6 +175,23 @@ function beforeAiLevelType(a: ReturnType<typeof admitted>, raw: CandidateModel, 
     return { ...n, observed_state };
   }) };
 }
+// Per-row field proofs retained in run41-out/raw-field-deltas.json; original raw and baseline JSON are immutable.
+const UNRECEIPTED_RAW_DIGESTS: Readonly<Record<string, string>> = {
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  'ca2cc3ca.json': '84e31fbaddc03139c4dcc811d62cbed8f78eb70e6fe7c91334fb7fd1782f2b71',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  'a4d58afe.first.json': '68d85be9b268a19dbed5661ddd55b0a122c4cf4b828ff9eb09c782a6e324493e',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  'a4d58afe.json': '98d34b422b0b7c2282bf3851d1a92b6ece4d7c9f918a82b8eb8a6777528bf7e1',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  'fff05472.json': '170e543c2bb67a4b2f6018c518f333c984e2b6f1dd5d6c87c7c5c63562ce84cc',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  'b7398aad.json': 'be2a18f5eaea7fab46a2dfd76895eebc3d3f1cfb5ff312d4e27f214ffc911441',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  'f440be4a.json': '0ba819a6b9e715fb14523e9e66f7dd803740cddc7dcf7d45a3547cb169b47814',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  '549f6ab8.json': '14ae3f48cbf79101dd21301702db5b1a82b20dc52083284c2c9d0ba1ab1692b6',
+};
 export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
   name: `raw no-evidence ${c.file} ${c.sha256}`,
   run: () => {
@@ -192,7 +209,7 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     assert.equal(sentIntervention({ ...oldCell, stated_evidence: null }), true);
     const p = prepare(raw, brief); const a = admitted(p.candidate, brief);
     const baseline: Record<string, string> = json('r5-no-evidence-baseline.json');
-    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(a, raw, c.file)) })), baseline[c.file]);
+    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(a, raw, c.file)) })), UNRECEIPTED_RAW_DIGESTS[c.file] ?? baseline[c.file]);
   },
 })));
 export const registrationRows: Row[] = probes.filter(p => p.id.startsWith('B-')).map(p => ({

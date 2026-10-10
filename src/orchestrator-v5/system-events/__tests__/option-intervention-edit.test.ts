@@ -115,7 +115,8 @@ describe('explicit option-intervention preparation — existing canonical operat
     const result = prepare(graph(), { modelValue: value });
     expect(result.kind).toBe('prepared');
     if (result.kind !== 'prepared') throw new Error('Expected prepared operation');
-    expect(result.operation.value).toEqual({ value });
+    // Checked human cell — #94 6101950357(a).
+    expect(result.operation.value).toEqual({ value, source: 'user_specified' });
   });
 
   it.each(['reverse', 'bidirected', 'parallel'] as const)('preserves the existing %s option-factor identity-link semantics', kind => {
@@ -145,7 +146,8 @@ describe('explicit option-intervention preparation — existing canonical operat
     const result = prepare(g);
     expect(result.kind).toBe('prepared');
     if (result.kind !== 'prepared') throw new Error('Expected prepared operation');
-    expect(result.operation.value).toEqual({ value: 0.3 });
+    // Checked human cell — #94 6101950357(a).
+    expect(result.operation.value).toEqual({ value: 0.3, source: 'user_specified' });
     expect(result.operation.path).toBe('/nodes/option/data/interventions/factor');
   });
 

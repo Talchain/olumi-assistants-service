@@ -72,7 +72,8 @@ describe('RT-4 class A — a computed total is never credited with a brief liter
     const { result, graph } = await construct(training('additional') as unknown as CandidateModel, BRIEF);
     expect(result.ok, JSON.stringify(result)).toBe(true);
     // The precondition: the level IS the user's (brief_extraction) and holds 7%, the same value and unit as churn.
-    expect(trainingLevel(graph)).toMatchObject({ raw_value: 7, unit: '%', source: 'brief_extraction', value_confidence: 'medium' });
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    expect(trainingLevel(graph)).toMatchObject({ raw_value: 7, unit: '%', source: 'cee_hypothesis', value_confidence: 'medium' });
     const churn = item(graph as unknown as Record<string, unknown>, BRIEF, '7%');
     expect(churn.verdict).not.toBe('in_model');
     expect(churn.matched_node_id).toBeNull();

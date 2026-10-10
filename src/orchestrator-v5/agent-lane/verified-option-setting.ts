@@ -7,7 +7,7 @@ import { parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { labelHead, LABEL_HEAD_BOUNDARY } from './label-head-unit.js';
 import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } from './same-unit.js';
 import { findLinkEffectAmounts } from './link-effect-figures.js';
-import { figureTheUserWroteForSpan, isChangeWord, afterChangeWord, figureWrittenAsAChange, linkEffectFigureNotAChange } from './stated-by-user.js';
+import { figureTheUserWroteForSpan, isChangeWord, afterChangeWord, figureWrittenAsAChange, linkEffectFigureNotAChange, linkEffectQuoteContextMiss } from './stated-by-user.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -104,14 +104,24 @@ function onlySiblingArms(model: CandidateModel, selected: Option, others: readon
     return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN));
   });
 }
-/** A positive ownership frame. History, current-state reporting, conditions and third-party claims abstain. */
+/** An option-setting frame. Current-level ownership stays separate; history, conditions and third-party claims abstain. */
 function settingClause(a: Assertion, at: number, change = false, ownedStart?: number): { text: string; start: number; frame: string[]; others: { text: string; next: boolean }[] } | null {
   const lead = /^(?:We (?:could|will) |Our options are to |One option is to |Decision: )/iu.exec(a.text);
   // A labelled prospective assertion is also owned, e.g. "The premium plan would attract ...".
   const prospective = /^The (?:[\p{L}]{1,64} ){1,6}would [\p{L}]{1,64} /iu.exec(a.text);
-  if (lead === null && prospective === null && ownedStart === undefined) return null;
-  if (words(a.text).some(w => w === 'last' || w === 'previous')) return null;
-  const bodyStart = ownedStart ?? lead?.[0].length ?? 0;
+  // DL #94 6101950357(c): this reader is exclusively for an option setting. An imperative proposal or
+  // a first-person question can name that option's quantity; the typed/named-option gates below still decide it.
+  // Current-level receipts never use this frame and retain their own ownership and assertion gates.
+  const opening = [...a.text.matchAll(/[\p{L}\p{N}]{1,64}/gu)];
+  const proposalStart = ACTIONS.has(opening[0]?.[0].toLowerCase() ?? '') ? 0
+    : linkEffectQuoteContextMiss(a.text, a.text) === 'question'
+      && opening[1]?.[0].toLowerCase() === 'we' && ACTIONS.has(opening[2]?.[0].toLowerCase() ?? '')
+      ? opening[2]!.index : undefined;
+  if (lead === null && prospective === null && ownedStart === undefined && proposalStart === undefined) return null;
+  if (FOREIGN_LEVEL.test(a.text) || ATTRIBUTION.test(a.text)
+    || linkEffectQuoteContextMiss(a.text, a.text) === 'denied'
+    || words(a.text).some(w => w === 'last' || w === 'previous' || w === 'not')) return null;
+  const bodyStart = ownedStart ?? lead?.[0].length ?? proposalStart ?? 0;
   const body = a.text.slice(bodyStart);
   let start = bodyStart;
   let found: { text: string; start: number; frame: string[] } | null = null;
@@ -538,7 +548,8 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
       || typeof value !== 'number' || !Number.isFinite(value)) return false;
     const sentences = assertions(brief);
     const a = exactEvidence(brief, factor.baseline_evidence.quote, sentences);
-    if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
+    if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)
+      || linkEffectQuoteContextMiss(a.text, brief) !== null) return false;
     if (model.factors.filter(f => f.label === factor.label).length !== 1) return false;
     // The sentence holding the goal target cannot also attest a current level, even for a differently named factor
     // (typed-level-span "refuses the sentence holding goal.value even without goal vocabulary" / B2 pin this: kept).

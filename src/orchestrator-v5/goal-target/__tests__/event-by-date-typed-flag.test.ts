@@ -201,7 +201,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       }
       // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
       // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
-      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(admissionBase, sealed(), 'sealedR-d3'))).digest('hex')).toBe('4822ddd3cd04fdbbd132bb88c1e83b7143875147c063e4fce170f282beb5014e');
+      // original raw has no receipt; credit unproved — #94 6101950357(b)
+      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(admissionBase, sealed(), 'sealedR-d3'))).digest('hex')).toBe('51dedb4c60d079449c34092aa5af38a7de169b193db8e84444c78195eaba14bb');
       expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
       expect(info.mock.calls.some(c => (c[0] as { event?: string } | undefined)?.event === 'cee.event_by_date.fallback_kept')).toBe(false);
       const { result, registrations } = await built(sealed(), SEALED_BRIEF);

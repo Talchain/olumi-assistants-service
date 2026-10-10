@@ -200,8 +200,10 @@ describe('(b) each writer of a framed level writes the same key-set', () => {
     if (!built.matched) return;
     const addNode = built.operations[0]!.value as { interventions: Record<string, Record<string, unknown>> };
     const addKeys = Object.keys(addNode.interventions[factor.id]!).sort();
-    expect(addKeys).toEqual(['raw_value', 'source', 'target_match', 'unit', 'value']);
-    expect(buildKeys).toEqual(addKeys);
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    // The builder input supplies no human authority; the receipted build alone carries a source.
+    expect(addKeys).toEqual(['raw_value', 'target_match', 'unit', 'value']);
+    expect(buildKeys).toEqual([...addKeys, 'source'].sort());
   });
 
   it('every framed level the build writes carries all five members (magnitude-checked)', () => {

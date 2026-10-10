@@ -97,8 +97,8 @@ export function withCountInterventionRanges(model: CandidateModel, brief: string
       const unit = factor?.unit;
       if (typeof unit !== 'string'
         || (point.unit !== undefined && !sameUnit(point.unit, unit))
-        || (point as typeof point & { value_kind?: string }).value_kind === 'additional'
-        || (point as typeof point & { derived_total?: boolean }).derived_total === true) return point;
+        || point.value_kind === 'additional') return point;
+      // A withheld/computed point does not withdraw a separately verified written range around that same value.
       const range = statedCountInterventionRange(point.value, unit, point.factor_label, option.label, brief, quantities);
       if (range === undefined) return point;
       const verdict = admitInterventionRange({ ...point, range: {
@@ -837,6 +837,10 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       const receipt = verifiedOptionTotal(model, option, intervention, brief);
       const verifiedTotal = receipt.verified;
       const statedFigure = verifiedTotal && !receipt.derived;
+      // Withholding credit does not remove the existing uncertainty of a claimed-user operand computation.
+      const uncertainty: Pick<Iv, 'value_confidence'> = !statedFigure && factor.baseline_known && factor.baseline_value !== 0
+        && factor.provenance === 'explicit' && intervention.provenance === 'explicit'
+        ? { value_confidence: 'medium' } : {};
       interventions.push({
         ...total,
         provenance: verifiedTotal ? 'explicit' : 'ai_proposed',
@@ -844,6 +848,7 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
         // stated 2% is the user's 7%, but "7%" appears nowhere as theirs, and an unrelated "Churn is 7%" was credited to it.
         // Admission marks the level (`constructedLevel`) so the not-modelled manifest never credits a brief literal to it.
         ...(statedFigure ? {} : { derived_total: true }),
+        ...uncertainty,
         ...(receipt.basis === undefined ? {} : { basis: receipt.basis }),
       } as Iv);
     }

@@ -78,7 +78,9 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     // `target_derived_headroom`: cap = 20000 * 1.25 = 25000, so the target is 0.8.
     expect(goal.goal_threshold_cap).toBe(25000);
     expect(goal.observed_state).toStrictEqual({
-      value: 16000 / 25000, baseline: 16000 / 25000, unit: 'GBP', source: 'brief_extraction', raw_value: 16000, cap: 25000,
+      // original raw has no receipt; credit unproved — #94 6101950357(b)
+      value: 16000 / 25000, baseline: 16000 / 25000, unit: 'GBP', source: 'cee_inference', raw_value: 16000, cap: 25000,
+      declared_scale: 'unit_interval', extractionType: 'inferred', user_material_unverified: true,
     });
   });
 
@@ -102,9 +104,11 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
 
   it('CONTROL (pair, stated): the same figure STATED is carried, and nothing is said about an estimate', async () => {
     const { goal, graph, out } = await registeredGoal(pricing({ baseline_known: true, baseline_value: 15000, baseline_provenance: 'explicit' }));
-    expect(goal.observed_state).toMatchObject({ baseline: 0.6, raw_value: 15000, source: 'brief_extraction' });
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    expect(goal.observed_state).toMatchObject({ baseline: 0.6, raw_value: 15000, source: 'cee_inference', user_material_unverified: true });
     const analysed = (resolveRunAdmission(graph).canonicalGraph as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === GOAL);
-    expect(analysed?.observed_state).toMatchObject({ baseline: 0.6, source: 'brief_extraction' });
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    expect(analysed?.observed_state).toMatchObject({ baseline: 0.6, source: 'cee_inference', user_material_unverified: true });
     expect((out.not_represented as string[]).filter((x) => x.includes("Olumi's own estimate"))).toEqual([]);
   });
 
@@ -140,7 +144,9 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
   it('RED: zero is a baseline', () => {
     const m = admitCandidateModel(pricing({ baseline_known: true, baseline_value: 0 }));
     expect(m.nodes.find((n) => n.id === GOAL)?.observed_state).toStrictEqual({
-      value: 0, baseline: 0, unit: 'GBP', source: 'brief_extraction', raw_value: 0, cap: 25000,
+      // original raw has no receipt; credit unproved — #94 6101950357(b)
+      value: 0, baseline: 0, unit: 'GBP', source: 'cee_inference', raw_value: 0, cap: 25000,
+      declared_scale: 'unit_interval', extractionType: 'inferred', user_material_unverified: true,
     });
   });
 
@@ -181,7 +187,8 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
   it('CONTROL (meaning): the same figures on an "at least" goal DO carry the baseline', async () => {
     for (const operator of ['>=']) {
       const { goal } = await registeredGoal(pricing({ operator, value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
-      expect(goal.observed_state, operator).toMatchObject({ baseline: 0.04, raw_value: 4, source: 'brief_extraction' });
+      // original raw has no receipt; credit unproved — #94 6101950357(b)
+    expect(goal.observed_state, operator).toMatchObject({ baseline: 0.04, raw_value: 4, source: 'cee_inference', user_material_unverified: true });
     }
   });
 
@@ -232,7 +239,8 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     );
     const run = resolveRunAdmission(graph);
     const analysed = (run.canonicalGraph as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === GOAL);
-    expect(analysed?.observed_state).toMatchObject({ baseline: 0.8, raw_value: 20000, source: 'brief_extraction' });
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    expect(analysed?.observed_state).toMatchObject({ baseline: 0.8, raw_value: 20000, source: 'cee_inference', user_material_unverified: true });
   });
 
   it('the instructions ask for the goal\u2019s current level only as the brief states it — never an estimate, never the target', () => {

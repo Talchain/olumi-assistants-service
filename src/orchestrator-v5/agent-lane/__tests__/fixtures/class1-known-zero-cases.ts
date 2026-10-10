@@ -37,7 +37,8 @@ function statedZero(answer: Answer): void {
     const f = raw.factors.find((f) => f.label === i.factor_label);
     if (i.value_kind !== 'additional' || i.provenance !== 'explicit' || f?.baseline_known !== true || f.baseline_value !== 0) continue;
     const actual = level(prepared.candidate, o.label, i.factor_label);
-    assert.deepEqual(actual, { ...i, value_kind: 'absolute' }, 'stated figure, author, and all other fields retained; no computed marker');
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    assert.deepEqual(actual, { ...i, value_kind: 'absolute', provenance: 'ai_proposed', derived_total: true }, 'figure and receipt bytes retained; arithmetic is not user credit');
     checked++;
   }
   assert.equal(checked, 2, 'both raw settings exercise the class');
@@ -56,10 +57,11 @@ function control(factorPatch: Partial<CandidateModel['factors'][number]>, ivPatc
   Object.assign(i, ivPatch);
   return { c, option: option.label, factor: i.factor_label, original: structuredClone(i) };
 }
-function converted(factorPatch: Partial<CandidateModel['factors'][number]>, provenance: string, value: number, ivPatch: Partial<Iv> = {}): void {
+function converted(factorPatch: Partial<CandidateModel['factors'][number]>, provenance: string, value: number, ivPatch: Partial<Iv> = {}, confidence?: 'medium'): void {
   const { c, option, factor, original } = control(factorPatch, ivPatch);
   assert.deepEqual(level(prepareProvisionalCandidate(c).candidate, option, factor), {
     ...original, value_kind: 'absolute', value, provenance, derived_total: true,
+    ...(confidence === undefined ? {} : { value_confidence: confidence }),
   });
 }
 
@@ -90,7 +92,8 @@ async function registeredBakery(): Promise<void> {
     const target: AdmittedNode = graph.nodes.find((n) => n.label === factor)!;
     const cell: ConstructedLevel | undefined = graph.nodes.find((n) => n.label === option)?.interventions?.[target.id];
     assert.ok(cell, `${option} -> ${factor} registered cell`);
-    assert.equal(cell.source, 'brief_extraction');
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    assert.equal(cell.source, 'cee_hypothesis');
     assert.equal(cell.raw_value, value);
     assert.equal(Object.hasOwn(cell, 'value_confidence'), false, 'stated addition is not a computed total');
     assert.deepEqual(cell.target_match, { node_id: target.id, match_type: 'exact_id', confidence: 'high' });
@@ -129,17 +132,20 @@ export const class1Rows: { name: string; check: () => void | Promise<void> }[] =
     assert.deepEqual(level(prepareProvisionalCandidate(c).candidate, option, factor), original);
   } },
   { name: 'CONTROL factor-explicit non-zero path retains user source and medium computed confidence', check: () => {
-    converted({ baseline_value: 5, provenance: 'explicit' }, 'explicit', 17);
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    converted({ baseline_value: 5, provenance: 'explicit' }, 'ai_proposed', 17, {}, 'medium');
     const { c, option, factor } = control({ baseline_value: 5, provenance: 'explicit' });
     const admitted = admitCandidateModel(prepareProvisionalCandidate(c).candidate, {});
     const id = admitted.nodes.find((n) => n.label === factor)!.id;
     const cell = admitted.nodes.find((n) => n.label === option)?.interventions?.[id];
-    assert.equal(cell?.source, 'brief_extraction');
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    assert.equal(cell?.source, 'cee_hypothesis');
     assert.equal(cell?.value_confidence, 'medium');
   } },
   { name: 'factor-explicit known-zero stated figure has no computed marker', check: () => {
     const { c, option, factor, original } = control({ provenance: 'explicit' });
-    assert.deepEqual(level(prepareProvisionalCandidate(c).candidate, option, factor), { ...original, value_kind: 'absolute' });
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    assert.deepEqual(level(prepareProvisionalCandidate(c).candidate, option, factor), { ...original, value_kind: 'absolute', provenance: 'ai_proposed', derived_total: true });
   } },
   ...(['inferred', 'ai_proposed'] as const).map((provenance) => ({
     name: `CONTROL ${provenance} addition on known zero is still Olumi's computed total`,

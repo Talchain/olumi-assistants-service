@@ -187,8 +187,10 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
     };
     const opt = nodeById(normaliseOptionInterventionContract(g, { humanAuthority: [{ optionId: 'opt_mix', factorId: 'fac_b' }] }) as AnyGraph, 'opt_mix');
     // existing top-level entry preserved verbatim
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    // fac_a is untouched graph material; only the fac_b edit has scoped human authority.
     expect(ivOf(opt, 'fac_a')).toEqual({
-      value: 0.9, unit: '£', source: 'brief_extraction', reasoning: 'orig',
+      value: 0.9, unit: '£', reasoning: 'orig',
       target_match: { node_id: 'fac_a', confidence: 'high', match_type: 'exact_id' }, value_confidence: 'high',
     });
     // new factor from data promoted as fresh InterventionV3
