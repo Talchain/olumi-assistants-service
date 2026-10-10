@@ -14,7 +14,7 @@ import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { readGraph, buildNodeLabelMap } from './enrichment-graph-labels.js';
 import { readTopLevelFlipRows, flipRowScaleUnsafeForPromptUnits, type TopLevelFlipRow } from './flip-threshold-rows.js';
-import { flipRowScaleIsDisplaySafe } from './analysis-signals.js';
+import { projectRunGraphForDecisionReview } from '../coaching/decision-review-graph-projection.js';
 
 export interface LicensedReviewOption {
   readonly id: string;
@@ -78,7 +78,8 @@ export function buildLicensedRunFacts(
   // `partial_no_effect` (real pairs beside no-effect rows) and `all_no_effect` (the honest "no factor flips it" fact)
   // all carry licensed rows; absent status keeps the legacy behaviour, as `lens-selector` does.
   const flipAvailable = current && raw.flip_thresholds_status !== 'unavailable';
-  if (!flipAvailable || !mayNameLeader) {
+  // The tipping point names a factor and a threshold, never an option, so the LEADER permission does not gate it.
+  if (!flipAvailable) {
     delete analysis.tipping_point;
     delete analysis.tipping_point_run_key;
   }
@@ -89,22 +90,26 @@ export function buildLicensedRunFacts(
     winner = selectWinner(source, result.leading_option_id);
     if (winner !== null) { chosen = source; break; }
   }
-  const ownGraph = readGraph(raw);
-  const graph = Object.keys(ownGraph).length > 0 ? ownGraph : readRecord(groundingGraph) ?? {};
+  // The SAME run-matched representation the review's own graph section is built from, so label and unit lookups (and the
+  // flip units drawn from them) are exactly what they were before the review was given licensed facts.
+  const graph = projectRunGraphForDecisionReview(readGraph(raw), groundingGraph).graph;
   const labels = buildNodeLabelMap(graph);
   const units = buildNodeUnitMap(graph);
   const topLevel = Array.isArray(raw.flip_thresholds);
   const rows = flipAvailable && topLevel ? readTopLevelFlipRows(raw, labels, units) : [];
   const pairs = rows.filter(row => row.kind === 'flip_pair');
-  const kept = pairs.filter(row => row.current_value !== null && row.flip_value !== null
-    && (flipRowScaleIsDisplaySafe({ value_scale: row.value_scale }, row.current_value, row.flip_value)
-      // Existing unitless probability-like pairs are not presented as display units.
-      || (row.unit === null && row.value_scale === null))
-    && !flipRowScaleUnsafeForPromptUnits(row));
+  // The one scale predicate the review always used (a trimmed-empty scale token is absent). No second, stricter gate.
+  const kept = pairs.filter(row => !flipRowScaleUnsafeForPromptUnits(row));
   const legacy = flipAvailable && !topLevel ? collectFactorFlipEntries(raw as V2RunResponseEnvelope, labels, units) : [];
-  const approvedRows = mayNameLeader ? [...kept, ...legacy] : [];
-  // Withholding identity uses the existing prose/leader authority; shares and stale findings are a review gate.
-  const projected = mayNameLeader && flipAvailable ? raw
+  // Flip data follows its own availability. Only the identity of the option that would take over is leader-licensed.
+  const withoutAlternativeIdentity = <T extends { alternative_winner_id?: unknown; alternative_winner_label?: unknown }>(row: T): T => {
+    const { alternative_winner_id: _id, alternative_winner_label: _label, ...rest } = row;
+    return rest as T;
+  };
+  const approvedRows = [...(mayNameLeader ? kept : kept.map(withoutAlternativeIdentity)), ...legacy];
+  // The withheld-leader projection runs only when the LEADER is withheld. Flip availability removes flip data by key
+  // (below); it never strips the producer's ordinary prose.
+  const projected = mayNameLeader ? raw
     : readRecord(readRecord(licensedRunBlockForModel({ enrichment: raw }))?.enrichment) ?? {};
   const clean = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(clean);

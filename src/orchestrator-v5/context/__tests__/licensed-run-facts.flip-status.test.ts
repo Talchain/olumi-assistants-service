@@ -29,13 +29,13 @@ const graph = {
 const PAIR: Rec = { factor_id: 'churn', factor_label: 'Monthly churn', current_value: 3, flip_value: 4.2, value_scale: 'display', unit: '%' };
 const NO_EFFECT: Rec = { factor_id: 'seats', factor_label: 'Seats', current_value: 10, flip_value: null, flip_reason: 'no_effect_within_bounds' };
 
-const factWith = (enrichment: Rec): Extract<HandlerFact, { fact_type: 'run_analysis' }> => {
+const factWith = (enrichment: Rec, mayNameLeader = true): Extract<HandlerFact, { fact_type: 'run_analysis' }> => {
   const parsed = HandlerFactSchema.parse({
     fact_type: 'run_analysis', fact_version: 1, noop: false,
     result: {
       scenario_id: SCENARIO, summary: 'summary', leading_option_id: 'raise',
       graph_hash_at_run: HASH, computed_at: '2026-10-10T10:00:00.000Z', run_id: RUN,
-      constraint_verdict: { constraint_verdict_state: 'not_applicable', may_name_leading_option: true },
+      constraint_verdict: { constraint_verdict_state: mayNameLeader ? 'not_applicable' : 'unevaluated', may_name_leading_option: mayNameLeader },
       enrichment: {
         option_comparison: [
           { option_id: 'raise', option_label: 'Raise price', win_probability: 0.7 },
@@ -48,8 +48,8 @@ const factWith = (enrichment: Rec): Extract<HandlerFact, { fact_type: 'run_analy
   if (parsed.fact_type !== 'run_analysis') throw new Error('fixture is not a run_analysis fact');
   return parsed;
 };
-const facts = (enrichment: Rec, currentHash: string = HASH) =>
-  buildLicensedRunFacts(factWith(enrichment), SCENARIO, graph, undefined, currentHash);
+const facts = (enrichment: Rec, currentHash: string = HASH, mayNameLeader = true) =>
+  buildLicensedRunFacts(factWith(enrichment, mayNameLeader), SCENARIO, graph, undefined, currentHash);
 const ids = (rows: readonly { factor_id: string }[]): string[] => rows.map(r => r.factor_id);
 
 describe('flip admission follows the producer\'s own status word', () => {
@@ -75,6 +75,30 @@ describe('flip admission follows the producer\'s own status word', () => {
     expect(out.flipRows).toEqual([]);
     expect(out.flipNoEffectCount).toBe(0);
     expect(out.analysis).not.toHaveProperty('tipping_point');
+  });
+  it('a trimmed-empty scale token is an absent scale, exactly as before (the pair is admitted)', () => {
+    const unitless = { ...PAIR, unit: null, value_scale: '', current_value: 0.35, flip_value: 0.62 };
+    const out = facts({ flip_thresholds: [unitless], flip_thresholds_status: 'computed' });
+    expect(ids(out.flipRows)).toEqual(['churn']);
+    expect(out.flipScaleRefusedCount).toBe(0);
+  });
+  it('LEADER PERMISSION IS NOT FLIP AVAILABILITY: a withheld leader keeps the pair, without who would take over', () => {
+    const named = { ...PAIR, alternative_winner_id: 'keep', alternative_winner_label: 'Keep price' };
+    const licensed = facts({ flip_thresholds: [named], flip_thresholds_status: 'computed' });
+    expect(licensed.flipRows[0]).toMatchObject({ factor_id: 'churn', alternative_winner_id: 'keep' });
+    const withheld = facts({ flip_thresholds: [named], flip_thresholds_status: 'computed' }, HASH, false);
+    expect(withheld.mayNameLeader).toBe(false);
+    expect(ids(withheld.flipRows)).toEqual(['churn']);
+    expect(withheld.flipRows[0]).not.toHaveProperty('alternative_winner_id');
+    expect(withheld.flipRows[0]).not.toHaveProperty('alternative_winner_label');
+  });
+  it('unavailable flips withhold flip DATA only: an ordinary producer critique survives a licensed leader, not a withheld one', () => {
+    const critique = { m1_coaching: { model_critiques: [{ type: 'anchoring', severity: 'warning', message: 'Check vendor reliability' }] } };
+    const kept = facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'unavailable', ...critique });
+    expect(kept.flipRows).toEqual([]);
+    expect(JSON.stringify(kept.enrichment)).toContain('Check vendor reliability');
+    const withheld = facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'unavailable', ...critique }, HASH, false);
+    expect(JSON.stringify(withheld.enrichment)).not.toContain('Check vendor reliability');
   });
   it('a Run the graph has moved past withholds the same rows (computed status does not rescue it)', () => {
     const out = facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'computed' }, OTHER_HASH);

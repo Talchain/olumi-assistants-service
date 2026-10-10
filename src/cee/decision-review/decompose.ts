@@ -344,7 +344,7 @@ export function buildSlices(input: DecisionReviewInvokeInput, licensedFacts?: Li
     block('BRIEF', briefSlice(input.brief)),
     block('EVIDENCE_GAPS', evidenceGaps),
     block('FACTOR_SENSITIVITY', factorSensitivity),
-    ...(leaderLicensed ? [block('WINNER_LABEL', input.winner.label)] : []),
+    ...(leaderLicensed ? [block('WINNER_LABEL', input.winner.label ?? '')] : []),
     ...(licensedFacts === undefined ? [] : [block('DECISION_CONTEXT', analysis)]),
     ...scaffoldBlocks,
   ].join('\n\n');

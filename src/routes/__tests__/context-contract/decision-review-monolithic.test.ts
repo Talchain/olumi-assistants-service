@@ -4,7 +4,7 @@
  * Positive plant REVIEW_BRIEF is synthetic and listed in fixtures/README.md.
  */
 import { beforeAll, describe, it, expect } from 'vitest';
-import { reviewCapture, REVIEW_BRIEF, REVIEW_PRODUCER_PROSE, type ReviewWitness } from './decision-review-harness.js';
+import { reviewCapture, REVIEW_BRIEF, REVIEW_ORDINARY_PROSE, REVIEW_PRODUCER_PROSE, type ReviewWitness } from './decision-review-harness.js';
 import { object, array, keysDeep, valueAt, seedOf, type Variant, type Captured, findState } from './provider-harness.js';
 const memo = new Map<Variant, Promise<ReviewWitness>>();
 const run = (variant: Variant) => {
@@ -128,6 +128,15 @@ describe('decision review monolithic: serialized provider contract', () => {
     expect.soft(array(stale.sections.FLIP_THRESHOLD_DATA)).toEqual([]);
     expect.soft(object(stale.sections.winner)).not.toHaveProperty('win_probability');
   }, 60_000);
+  it('LEADER PERMISSION IS NOT FLIP AVAILABILITY: a withheld leader keeps the computed flip pair, without who would take over', async () => {
+    const w = ready.get('leader-withheld')!;
+    expect(object(w.sections.winner)).not.toHaveProperty('id');
+    expect(array(w.sections.FLIP_THRESHOLD_DATA).map(object)).toEqual([
+      { factor_id: 'monthly_pro_churn', factor_label: 'Monthly Pro churn', current_value: 3, flip_value: 4.2, direction: 'increase', unit: '%' },
+    ]);
+    expect(valueAt(w.calls[0]!.payloads, 'alternative_winner_id')).toEqual([]);
+    expect(valueAt(w.calls[0]!.payloads, 'alternative_winner_label')).toEqual([]);
+  });
   it('standalone HTTP caller without licensed facts retains exact legacy message bytes', async () => {
     const { buildDecisionReviewUserMessage } = await import('../../../cee/decision-review/invoke.js');
     const input = { brief: 'Request brief', brief_hash: 'unused', graph: {}, isl_results: {}, deterministic_coaching: {},
@@ -144,11 +153,16 @@ describe('decision review monolithic: serialized provider contract', () => {
     const current = ready.get('current')!;
     expect(array(object(current.sections.ISL_RESULTS).fragile_edges)).toHaveLength(1);
     expect(JSON.stringify(current.calls[0]!.payloads)).toContain(REVIEW_PRODUCER_PROSE);
-    for (const variant of ['flip-unavailable', 'leader-withheld', 'stale'] as const) {
-      const negative = ready.get(variant)!;
-      expect(array(object(negative.sections.ISL_RESULTS).fragile_edges)).toEqual([]);
-      expect(JSON.stringify(negative.calls[0]!.payloads)).not.toContain(REVIEW_PRODUCER_PROSE);
+    // Fragility is flip-dependent data: withheld with unavailable flips or a stale Run. A withheld LEADER does not remove it.
+    for (const variant of ['flip-unavailable', 'stale'] as const) {
+      expect(array(object(ready.get(variant)!.sections.ISL_RESULTS).fragile_edges), variant).toEqual([]);
     }
+    expect(array(object(ready.get('leader-withheld')!.sections.ISL_RESULTS).fragile_edges)).toHaveLength(1);
+    for (const variant of ['leader-withheld', 'stale'] as const) {
+      expect(JSON.stringify(ready.get(variant)!.calls[0]!.payloads), variant).not.toContain(REVIEW_PRODUCER_PROSE);
+    }
+    // Only flip DATA is withheld when flips are unavailable: the producer's ordinary prose is not stripped with it.
+    expect(JSON.stringify(ready.get('flip-unavailable')!.calls[0]!.payloads)).toContain(REVIEW_ORDINARY_PROSE);
     expect(array(object(ready.get('stale')!.sections.ISL_RESULTS).factor_sensitivity)).toEqual([]);
   });
 

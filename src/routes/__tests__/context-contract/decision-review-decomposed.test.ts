@@ -1,6 +1,6 @@
 /** Real enricher -> buildSlices -> Anthropic SDK transport, with fixture responses only. */
 import { beforeAll, describe, expect, it } from 'vitest';
-import { reviewCapture, REVIEW_PRODUCER_PROSE, type ReviewWitness } from './decision-review-harness.js';
+import { reviewCapture, REVIEW_ORDINARY_PROSE, REVIEW_PRODUCER_PROSE, type ReviewWitness } from './decision-review-harness.js';
 import { array, object, valueAt, type Variant } from './provider-harness.js';
 
 const ready = new Map<Variant, ReviewWitness>();
@@ -28,8 +28,9 @@ describe('decision review decomposed: serialized provider contract', () => {
     for (const slice of unavailable.slices) {
       expect(array(slice.FLIP_THRESHOLD_DATA)).toEqual([]);
       expect(array(slice.FRAGILE_EDGES)).toEqual([]);
-      expect(JSON.stringify(slice)).not.toContain(REVIEW_PRODUCER_PROSE);
     }
+    // Only flip DATA is withheld; the producer's ordinary prose is not stripped with it.
+    expect(JSON.stringify(unavailable.slices[3]!.MODEL_CRITIQUES)).toContain(REVIEW_ORDINARY_PROSE);
     const current = ready.get('current')!;
     expect(array(current.slices[2]!.FLIP_THRESHOLD_DATA)).toEqual([
       { factor_id: 'monthly_pro_churn', factor_label: 'Monthly Pro churn', current_value: 3,

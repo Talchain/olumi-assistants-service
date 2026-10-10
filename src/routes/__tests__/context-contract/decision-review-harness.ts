@@ -18,6 +18,8 @@ vi.mock('undici', async original => ({
 }));
 
 export const REVIEW_BRIEF = 'S8_REVIEW_POSITIVE: Our goal is £20,000 MRR within 12 months. Keep £49 price or raise price to £59. Paul assumes renewal churn stays at 3%; Maya disagrees. May we retain the assumption that monthly churn stays at 3%?';
+/** An ordinary producer critique with no leader or flip claim: it must survive when only flip data is unavailable. */
+export const REVIEW_ORDINARY_PROSE = 'Check vendor reliability before relying on this estimate.';
 export const REVIEW_PRODUCER_PROSE = 'SYNTHETIC_REVIEW_PRODUCER: Raise price to £59 wins with share 1; churn could flip at 4.2%.';
 export interface ReviewWitness { calls: Captured[]; sections: Record<string, unknown>; seed: ReturnType<typeof fixture>; slices: Record<string, unknown>[] }
 /**
@@ -31,6 +33,8 @@ export async function reviewCapture(variant: Variant, decomposed = false, supply
   config.llm.openaiApiKey = 'offline-context-contract';
   // Select the existing monolithic task model; no feature gate is changed.
   config.cee.models.decision_review = 'gpt-4.1';
+  // The default configuration IS the monolith (served): pin it before this capture selects the path under test.
+  if (!decomposed) expect(config.cee.decisionReviewDecompose, 'default config is the monolithic review').toBe(false);
   config.cee.decisionReviewDecompose = decomposed;
   config.llm.anthropicApiKey = 'offline-context-contract';
   const seed = fixture(variant), s = seed.snapshot;
@@ -47,8 +51,15 @@ export async function reviewCapture(variant: Variant, decomposed = false, supply
       { edge_id: 'pro_price->monthly_pro_churn', from_id: 'pro_price', to_id: 'monthly_pro_churn', switch_probability: 0.25 },
     ] };
     s.analysis_result.enrichment.m1_coaching = { model_critiques: [
-      { type: 'anchoring', severity: 'warning', message: REVIEW_PRODUCER_PROSE },
+      { type: 'anchoring', severity: 'warning', message: variant === 'flip-unavailable' ? REVIEW_ORDINARY_PROSE : REVIEW_PRODUCER_PROSE },
     ] };
+  }
+  if (variant === 'leader-withheld') {
+    // Isolate the LEADER permission from flip availability: the producer computed a pair and names who would take over.
+    s.analysis_result.enrichment.flip_thresholds = [{ factor_id: 'monthly_pro_churn', factor_label: 'Monthly Pro churn',
+      current_value: 3, flip_value: 4.2, value_scale: 'display', unit: '%',
+      alternative_winner_id: 'keep_49_price', alternative_winner_label: 'Keep £49 price' }];
+    s.analysis_result.enrichment.flip_thresholds_status = 'computed';
   }
   const result: Obj = { scenario_id: seed.scenario_id, summary: s.analysis_result.summary,
     leading_option_id: s.analysis_result.leading_option_id,
