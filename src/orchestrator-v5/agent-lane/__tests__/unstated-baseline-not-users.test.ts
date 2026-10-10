@@ -59,16 +59,28 @@ describe('a baseline is the user\'s only when the brief states it', () => {
     expect(os['Tech leads hired']!.source).toBe('cee_inference');
   });
 
-  it('CONTROL: a 0 the brief states, in digits or as "zero", stays the user\'s', async () => {
+  /**
+   * S7 dispositions (AIE quantity contract), named — the user's sentence stays VISIBLE as the user's unverified claim, never
+   * Olumi's estimate and never brief-credited, with the figure preserved:
+   *  · `unsupported_unit_conversion` — "We have 0 tech leads today" / "three developers" state a HEADCOUNT; the factor is
+   *    "hired" (hires): count noun tech lead/developer + today ≠ hire, no verified conversion exists;
+   *  · `unsupported_word_zero` — the shared cardinal grammar deliberately has no word for zero (cardinal-words.ts).
+   * The digits-0 sentence is located and bound; it stops on the unit frame alone.
+   */
+  const unverifiedHumanClaim = { source: 'cee_inference', user_material_unverified: true };
+  it('CONTROL: a 0 the brief states, in digits or as "zero", stays visible as the user\'s unverified claim (no conversion, no word-zero)', async () => {
     const digits = await registeredBaselines('We have 0 tech leads today. Should I hire a Tech lead or two developers to increase velocity?', { 'Tech leads hired': 0 });
-    expect(digits['Tech leads hired']!.source).toBe('brief_extraction');
+    expect(digits['Tech leads hired']).toMatchObject(unverifiedHumanClaim);
+    expect(figureOf(digits['Tech leads hired']!)).toBe(0);
     const word = await registeredBaselines('We have zero tech leads today. Should I hire a Tech lead or two developers to increase velocity?', { 'Tech leads hired': 0 });
-    expect(word['Tech leads hired']!.source).toBe('brief_extraction');
+    expect(word['Tech leads hired']).toMatchObject(unverifiedHumanClaim);
+    expect(figureOf(word['Tech leads hired']!)).toBe(0);
   });
 
-  it('CONTROL (word-number): "three developers" stays the user\'s 3; the same 3 unstated is withdrawn', async () => {
+  it('CONTROL (word-number): "three developers" stays visible as the user\'s unverified claim (headcount ≠ hires); the same 3 unstated is withdrawn', async () => {
     const stated = await registeredBaselines('We have three developers today. Should I hire a Tech lead or two developers to increase velocity?', { 'Developers hired': 3 });
-    expect(stated['Developers hired']!.source).toBe('brief_extraction');
+    expect(stated['Developers hired']).toMatchObject(unverifiedHumanClaim);
+    expect(figureOf(stated['Developers hired']!)).toBe(3);
     const unstated = await registeredBaselines(UNSTATED, { 'Developers hired': 3 });
     expect(figureOf(unstated['Developers hired']!)).toBe(3);
     expect(unstated['Developers hired']!.source).toBe('cee_inference');

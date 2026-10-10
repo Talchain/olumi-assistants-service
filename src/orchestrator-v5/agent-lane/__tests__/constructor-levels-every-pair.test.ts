@@ -181,8 +181,14 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     // An ESTIMATE stays Olumi's: 0.5 FTE is written nowhere in the brief.
     expect(node(graph, 'technical_leadership_capacity').observed_state).toMatchObject({ source: 'cee_inference' });
     // ⛔ #2311 (R3 5896630173 (2)): "Capacity today is 40 story points" STATES the 40 the drafter tagged an estimate, so it is
-    // the user's (`creditStatedFactorLevels`), never Olumi's guess.
-    expect(node(graph, 'engineering_delivery_capacity').observed_state).toMatchObject({ source: 'brief_extraction', raw_value: 40 });
+    // the USER'S figure, never Olumi's guess. S7 (AIE quantity contract, disposition `unverified_human_claim`): the sentence
+    // has no first-person owner ("Capacity today is …"), so the receipt gate cannot CREDIT it — it stays the user's claim,
+    // visible and unverified (display "Not confirmed from your brief"), 40 preserved, never Olumi's estimate and never
+    // brief-credited. The separate 0.5 FTE above is the genuine AI estimate.
+    const claimed = node(graph, 'engineering_delivery_capacity');
+    expect(claimed.observed_state).toMatchObject({ raw_value: 40, source: 'cee_inference', user_material_unverified: true });
+    expect(claimed.observed_state?.extractionType).not.toBe('explicit');
+    expect(claimed.provenance).toBe('unverified_brief');
     expect(JSON.stringify(graph.nodes)).not.toMatch(/user_specified|user_override|user_stated/);
   });
 

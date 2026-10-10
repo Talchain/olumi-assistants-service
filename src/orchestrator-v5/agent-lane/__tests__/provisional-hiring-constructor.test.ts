@@ -117,7 +117,11 @@ describe('provisional hiring construction uses real admission and registration p
     c.options[1].interventions[0].value_kind = 'additional';
     const prepared = prepareProvisionalCandidate(c).candidate;
     expect(prepared.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'explicit' });
-    expect(admitCandidateModel(prepared, {}).nodes.find((n) => n.label === 'Developers')?.observed_state).toMatchObject({ raw_value: 5, source: 'brief_extraction' });
+    // S7 (disposition `unverified_human_claim`): the factor is the user's declared 5, but this candidate carries no
+    // `baseline_evidence.quote` and no brief sentence the verifier can bind — the figure stays VISIBLE as the user's UNVERIFIED claim
+    // (never brief_extraction, never Olumi's estimate); the absolute/additional arithmetic above is unchanged.
+    expect(admitCandidateModel(prepared, {}).nodes.find((n) => n.label === 'Developers')?.observed_state)
+      .toMatchObject({ raw_value: 5, source: 'cee_inference', user_material_unverified: true });
   });
 
   /**

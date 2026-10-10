@@ -3479,6 +3479,9 @@ function admitOnce(
   const goalScope = unstatedGoalScope(model.goal);
 
   // Fixed traversal order => deterministic ids.
+  /** The drafter cites the brief for this level (a non-empty quote): a claim about what the user wrote, verified or not. */
+  const quotesBrief = (f: { baseline_evidence?: { quote?: string } | null }): boolean =>
+    typeof f.baseline_evidence?.quote === 'string' && f.baseline_evidence.quote.trim() !== '';
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
@@ -3645,13 +3648,16 @@ function admitOnce(
         // it is the latter that `src/cee/provenance/money-invariant.ts:211` reads
         // to decide whether to audit the figure against the brief. Correcting only
         // the entity stamp left the figure unaudited; measured, not assumed.
-        ...((f.baseline_known || verifiedLevels.has(f)) && typeof f.baseline_value === 'number'
-          ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f), !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief')) }
+        // A factor the drafter tagged an estimate BUT quoted the brief for is a user CLAIM the receipt gate could not verify
+        // (e.g. no first-person owner): it stays visible as the user's unverified claim, never Olumi's estimate.
+        ...((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number'
+          ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
+            !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))) }
           : {}),
         // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
         // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
         ...((): Record<string, unknown> => {
-          const os = verifiedLevels.has(f) ? null : estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
+          const os = verifiedLevels.has(f) || quotesBrief(f) ? null : estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
           return os === null ? {} : { observed_state: os };
         })(),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
@@ -3690,7 +3696,7 @@ function admitOnce(
         ...((): Record<string, number> => {
           const c = capFor(f.label) ?? f.plausible_max;
           if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
-          if ((f.baseline_known || verifiedLevels.has(f)) && typeof f.baseline_value === 'number') {
+          if ((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number') {
             const os = framedObservedState({ ...f, plausible_max: c }) as { cap?: unknown };
             // Already framed inside `observed_state` — a second carrier could
             // disagree with it, so do not write one.
