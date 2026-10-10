@@ -13,6 +13,23 @@ const SCRIPT = join(ROOT, 'scripts/census/model-writer-census.mjs');
 // Door callers are reported, not capped: routing a writer through the door raises that count.
 const BASELINE = 10;
 
+// SYS10 shrink-only exemptions, one CALL SITE per file:symbol, not a file-wide
+// permission. Remove an entry (and lower BASELINE) when its writer takes the
+// door. Never add/rename an entry to admit a new bypass. The exact multiset
+// check also refuses a second write using an already-exempted symbol.
+const BYPASS_EXEMPTIONS = [
+  'src/collab/rounds-service.ts:store.createModelVersion',
+  'src/collab/store.ts:service.saveVersion',
+  'src/orchestrator-v5/guest-copy/index.ts:copy_guest_scenario',
+  'src/orchestrator-v5/model-management/service.ts:this.store.saveVersion',
+  'src/orchestrator-v5/model-management/service.ts:this.store.restoreVersionAtomic!',
+  'src/orchestrator-v5/model-management/store-adapter.ts:create_model_version_cas_v1',
+  'src/orchestrator-v5/model-management/store-adapter.ts:restore_model_version_atomic_cas_v1',
+  'src/routes/assist.v1.scenario-copy.ts:resolveStore().copyGuestScenario',
+  'src/routes/assist.v1.scenario-versions.ts:service.saveVersion',
+  'src/routes/assist.v1.scenario-versions.ts:service.restoreVersionAtomic',
+] as const;
+
 interface Site { file: string; line: number; kind: string; callee: string; reason?: string }
 interface Census {
   outside_door: number;
@@ -24,6 +41,19 @@ interface Census {
 }
 
 let measured: Census;
+
+function requireOnlyExemptedWrites(census: Census): void {
+  const sites = census.sites.filter(s => s.kind !== 'door_caller');
+  const allowance = new Map<string, number>(BYPASS_EXEMPTIONS.map(key => [key, 1]));
+  for (const site of sites) {
+    const key = `${site.file}:${site.callee}`;
+    const remaining = allowance.get(key) ?? 0;
+    if (remaining === 0) throw new Error(`Unexempted graph write: ${key} (line ${site.line})`);
+    allowance.set(key, remaining - 1);
+  }
+  const stale = [...allowance].filter(([, count]) => count > 0).map(([key]) => key);
+  if (stale.length > 0) throw new Error(`Remove migrated graph-write exemptions: ${stale.join(', ')}`);
+}
 
 describe('model writer census ratchet', () => {
   beforeAll(() => {
@@ -41,6 +71,26 @@ describe('model writer census ratchet', () => {
 
   it('refuses a stale baseline: a fixed writer lowers BASELINE in the same PR', () => {
     expect(measured.outside_door, `lower baseline to ${measured.outside_door}`).toBe(BASELINE);
+  });
+
+  it('allows only the shrink-only file:symbol bypass list, with no duplicate call sites', () => {
+    requireOnlyExemptedWrites(measured);
+    expect(new Set(BYPASS_EXEMPTIONS).size).toBe(BYPASS_EXEMPTIONS.length);
+    expect(BYPASS_EXEMPTIONS.length).toBe(BASELINE);
+  });
+
+  it('the ordinary turn commit already takes the controlled door and has no exempted write', () => {
+    const commitSites = measured.sites.filter(s => s.file === 'src/orchestrator-v5/commit.ts');
+    expect(commitSites.map(s => ({ kind: s.kind, callee: s.callee })))
+      .toEqual([{ kind: 'door_caller', callee: 'appendCheckedGraphWrite' }]);
+  });
+
+  it('a duplicate exempted writer is RED, and a migrated writer requires removing its exemption', () => {
+    const bypass = measured.sites.find(s => s.kind !== 'door_caller')!;
+    expect(() => requireOnlyExemptedWrites({ ...measured, sites: [...measured.sites, bypass] }))
+      .toThrow('Unexempted graph write');
+    expect(() => requireOnlyExemptedWrites({ ...measured, sites: measured.sites.filter(s => s !== bypass) }))
+      .toThrow('Remove migrated graph-write exemptions');
   });
 
   it('every production RPC must have resolved migration SQL or named deployed evidence', () => {
@@ -75,6 +125,17 @@ describe('model writer census ratchet', () => {
       "// client.rpc('append_turn_atomic_v5', {});",
       "const prose = `client.rpc('append_turn_atomic_v5', {})`; void prose;",
       "client.rpc('census_unclassified_rpc_control', {});",
+      `import type { SessionStore } from ${JSON.stringify(join(ROOT, 'src/orchestrator-v5/session/store.js'))};`,
+      'declare const store: SessionStore;',
+      'store.append({ graph: { nodes: [], edges: [] } } as any);',
+      'const directAppend = store.append;',
+      'directAppend({ graph: { nodes: [], edges: [] } } as any);',
+      'declare const db: any;',
+      "db.from('scenarios').insert({ graph: { nodes: [], edges: [] } });",
+      "db.from('model_versions').upsert({ graph: { nodes: [], edges: [] } });",
+      'function nestedWriter() {',
+      "  client.rpc('append_turn_atomic_v6', {});",
+      '}',
     ].join('\n'));
     // Import in a subprocess: avoid loading a compiler and service dependencies
     // into the Vitest worker. The fixture uses the exact production instrument.
@@ -91,7 +152,19 @@ describe('model writer census ratchet', () => {
     const local = (s: Site) => s.file === relative(ROOT, fixture);
     expect(controls.sites.filter(local).filter(s => s.kind === 'rpc')).toEqual([
       { file: relative(ROOT, fixture), line: 2, kind: 'rpc', callee: 'append_turn_atomic_v5' },
+      { file: relative(ROOT, fixture), line: 23, kind: 'rpc', callee: 'append_turn_atomic_v6' },
     ]);
+    expect(controls.sites.filter(local).filter(s => s.kind === 'store_method').map(s => s.callee))
+      .toEqual(['store.append', 'directAppend']);
+    expect(controls.sites.filter(local).filter(s => s.kind === 'table').map(s => s.callee))
+      .toEqual(['scenarios.insert', 'model_versions.upsert']);
+    // Run the SAME acceptance assertion used on production. Planted writes
+    // make it RED; each primitive/alias is tested independently so an earlier
+    // mutant cannot conceal a hole in detection of the later ones.
+    for (const mutant of controls.sites.filter(local).filter(s => s.kind !== 'door_caller')) {
+      expect(() => requireOnlyExemptedWrites({ ...measured, sites: [...measured.sites, mutant] }))
+        .toThrow(`Unexempted graph write: ${mutant.file}:${mutant.callee}`);
+    }
     expect(controls.excluded.filter(local).filter(s => s.kind === 'rpc')).toHaveLength(2);
     expect(controls.sites.filter(local).filter(s => s.kind === 'door_caller')).toHaveLength(1);
     expect(controls.diagnostics).toEqual([
