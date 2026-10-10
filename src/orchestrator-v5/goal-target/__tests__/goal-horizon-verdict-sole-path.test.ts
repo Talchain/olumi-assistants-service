@@ -30,6 +30,8 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
   "orchestrator-v5/agent-lane/runtime/build-model.ts": "Build-time deadline/carrier admission documentation; not a chance decision.",
   "orchestrator-v5/admission/target-testability.ts": "P1 current-level admission: validates every operand and unit, including accumulation horizon equality. Broader than evaluated goal-chance verdict; preserving existing behavior.",
   "orchestrator-v5/tools/handlers/run-analysis.ts": "withoutDriftedAccumulations removes every drifted carrier, even unbound ones and with no H, and formats its drift warning. Broader than goal-bound chance verdict; preserving existing behavior.",
+  "orchestrator-v5/agent-lane/ceiling-stock.ts": "S4 typed ceiling-stock pending: read-back (ceilingStockRecorded) compares the goal's held months with the approved pending after the user's Yes; it never decides a chance or a horizon, and the typed writer's postimage is re-attested by the canonical writer.",
+  "orchestrator-v5/agent-lane/ceiling-stock-carrier.ts": "S4 import-free leaf: matches the goal's held months to the exact ceiling-stock carrier id shape so admission never imports the verdict module (config init cycle); it grants no chance permission.",
 };
 
 const GATE_FILES = [

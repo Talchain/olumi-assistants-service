@@ -27,7 +27,7 @@ export function identityProposalOfferable(proposal: StructuredProposal | undefin
   }
   const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
   if (graph === undefined || reading === undefined) return true;
-  return identityCardOfferable(graph, reading.part_levels);
+  return identityCardOfferable(graph, reading.part_levels, reading);
 }
 
 /** The SAME process store the turn route authorises and settles. */
