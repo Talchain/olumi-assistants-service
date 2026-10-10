@@ -3477,7 +3477,7 @@ function admitOnce(
   const goalScope = unstatedGoalScope(model.goal);
 
   // Fixed traversal order => deterministic ids.
-  const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief)));
+  const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
       label: model.goal.metric,

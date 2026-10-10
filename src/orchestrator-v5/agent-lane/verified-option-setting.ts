@@ -314,12 +314,30 @@ function currentLevelRole(text: string): boolean {
     || ['goal', 'target', 'limit', 'plan', 'forecast', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w));
 }
 
+/** Set aside a rival only on the located amount's complete typed frame, never on its name alone. */
+function incompatibleFactorFrame(rival: { label: string; unit?: string | null; protected?: boolean }, factor: Factor,
+  text: string, amount: StatedAmount): boolean {
+  if (rival.protected || !currentLevelRole(rival.label)
+    || !sameFrame(text, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount)) return false;
+  const before = text.slice(0, amount.index);
+  const horizon = /\s+at\s+([\p{L}]+)\s+([0-9]+)$/iu.exec(rival.label);
+  if (horizon !== null && periodNoun(horizon[1]!.toLowerCase()) !== null && Number(horizon[2]) > 0
+    && ownsFactorLevel(before, factor) && words(before).some(w => STATE_VERBS.has(w)) && currentLevelRole(text)) return true;
+  const claim = statedTailParts(text, amount); const declared = readUnitParts(rival.unit);
+  if (claim === null || declared === null) return false;
+  if (claim.kind !== declared.kind || claim.code !== declared.code || claim.period !== declared.period) return true;
+  if (claim.kind === 'count' && claim.noun?.length && declared.noun?.length
+    && !sameName(claim.noun.at(-1)!, declared.noun.at(-1)!)) return true;
+  // Scale changes are conversions, not proof of a different quantity. Missing denominators remain unknown.
+  return claim.per !== null && declared.per !== null && claim.per.length > 0 && declared.per.length > 0
+    && JSON.stringify(claim.per) !== JSON.stringify(declared.per);
+}
+
 /** Bind only the figure, quantity and complete frame; ownership and role remain separate gates. */
 function factorLevelSpans(model: CandidateModel, factor: Factor, text: string, value = factor.baseline_value): { start: number; end: number }[] {
   const sameQuantity = sameCurrentQuantity(model, factor);
-  const others = [...(sameQuantity ? [] : [model.goal.metric]),
-    ...model.factors.filter(f => f !== factor).map(f => f.label),
-    ...model.outcomes.map(o => o.label), ...model.risks.map(r => r.label)];
+  const rivals = [...(sameQuantity ? [] : [{ label: model.goal.metric, unit: model.goal.unit, protected: true }]),
+    ...model.factors.filter(f => f !== factor), ...model.outcomes, ...model.risks];
   const parts = readUnitParts(factor.unit);
   const unitNamesFactor = parts?.kind === 'count'
     && labelStandsForCountUnit(parts.noun?.join(' '), factor.label, factor.unit);
@@ -333,6 +351,7 @@ function factorLevelSpans(model: CandidateModel, factor: Factor, text: string, v
     const countNamesFactor = parts?.kind === 'count' && name.length > 0
       && name.join(' ') === adjacent.join(' ') && parts.noun?.length === 1
       && sameName(parts.noun[0]!, labelHead(currentQuantityLabel(factor.label)) ?? '');
+    const others = rivals.filter(r => !incompatibleFactorFrame(r, factor, text, amount)).map(r => r.label);
     const tail = statedTailParts(text, amount);
     const written = amount.kind === 'plain' && !/[0-9]/u.test(amount.matchedText)
       ? { ...amount, kind: tail?.kind === 'percent' ? 'percent' as const : 'words' as const } : amount;
@@ -353,13 +372,12 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     const a = exactEvidence(brief, factor.baseline_evidence.quote, sentences);
     if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
     if (model.factors.filter(f => f.label === factor.label).length !== 1) return false;
-    // The sentence holding the goal target cannot also attest a current level, even for a differently named factor.
-    if (typeof model.goal.value === 'number' && [...findLinkEffectAmounts(a.text).map(n => n.magnitude),
-      ...words(a.text).flatMap(w => { const n = figure(w); return n === null ? [] : [n]; })].includes(model.goal.value)) return false;
     if (model.constraints.some(c => c.value === value && metricNamesLabel(c.metric, factor.label))) return false;
     const matches = factorLevelSpans(model, factor, a.text);
     if (matches.length !== 1) return false;
     const span = matches[0]!;
+    // Numeric equality alone is not a target: this unique bound quantity and its role must also agree.
+    if (sameCurrentQuantity(model, factor) && model.goal.value === value && !currentLevelRole(a.text)) return false;
     if (!ownsFactorLevel(a.text.slice(0, span.start), factor)
       || !currentLevelRole(a.text)) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {
