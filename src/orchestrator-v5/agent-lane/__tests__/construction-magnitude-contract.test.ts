@@ -13,6 +13,7 @@
  *   `ai_feature_availability` is a yes/no factor on frame 1 that both AI options set to 1 (status quo 0), so d = [0, 1];
  *   `monthly_churn` is a % factor on frame 100 at 4% today (T2's figure), so b = 0.04 on the domain [0, 1].
  */
+import type { CandidateModel } from '../admit-model.js';
 import { describe, expect, it } from 'vitest';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
@@ -88,6 +89,15 @@ function t3(aiToChurn: Size, aiToChurnProvenance: Prov = 'inferred') {
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 async function register(wire: Record<string, unknown>, brief: string = BRIEF): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+  const receipts: Record<string, string> = { 'Pro plan price': 'Our Pro price is £49 a month.', 'Monthly churn': 'Our monthly churn is 4%.' };
+  const model = wire as unknown as CandidateModel;
+  wire = { ...wire, factors: model.factors.map((f) => {
+    const quote = receipts[f.label];
+    return quote && f.baseline_known && f.provenance === 'explicit'
+      && ((f.label === 'Pro plan price' && f.baseline_value === 49) || (f.label === 'Monthly churn' && f.baseline_value === 4))
+      ? { ...f, baseline_evidence: { quote } } : f;
+  }) };
+  brief = `${Object.values(receipts).join(' ')}\n\n${brief}`;
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let body: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;

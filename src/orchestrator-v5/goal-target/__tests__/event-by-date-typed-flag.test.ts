@@ -169,7 +169,9 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
         });
         delete e.provenance!.olumi_fit_candidate;
       }
-      expect(createHash('sha256').update(JSON.stringify(admissionBase)).digest('hex')).toBe('758a0f1140259bf4641f687ca33d145d8629c2a56d899c36ee9b9618ce345dbf');
+      // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
+      // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
+      expect(createHash('sha256').update(JSON.stringify(admissionBase)).digest('hex')).toBe('4822ddd3cd04fdbbd132bb88c1e83b7143875147c063e4fce170f282beb5014e');
       expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
       expect(info.mock.calls.some(c => (c[0] as { event?: string } | undefined)?.event === 'cee.event_by_date.fallback_kept')).toBe(false);
       const { result, registrations } = await built(sealed(), SEALED_BRIEF);
@@ -196,8 +198,10 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
               strength_mean_frame: 'edge_strength' } }, defaulted: true };
       }
       expect(JSON.stringify(registrations[0])).not.toContain('olumi_fit_candidate');
+      // S7 PR-B re-record (field-by-field vs staging cbf36b7a): only nodes 5, 6, 9 (drafter-declared explicit, no verbatim brief quote) gain
+      // extractionType inferred + user_material_unverified, provenance from_brief->unverified_brief (and source brief_extraction->cee_inference where it was set).
       expect(createHash('sha256').update(JSON.stringify(registrationBase)).digest('hex'))
-        .toBe('6b2f1c91002476b918f9322d2a0053d6f1d08cf73c43b7894d7ad2be464010e9');
+        .toBe('e6e213467888242aaf6e74c98deccdea5415774ea85bae69540b5992aa9dccf7');
       expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
       expect(eventAdmission).not.toHaveBeenCalled();
     } finally { info.mockRestore(); eventAdmission.mockRestore(); }
@@ -360,6 +364,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     const explicitFalse = admitCandidateModel(normal(), {}, brief, undefined, undefined, undefined, undefined, undefined,
       { event_by_date_prompted: false });
     expect(JSON.stringify(explicitFalse)).toBe(JSON.stringify(a));
-    expect(createHash('sha256').update(JSON.stringify(a)).digest('hex')).toBe('71f5dbb733c3844ea76c431d12823d32b972cc71369648e7817c5622c6524c6e');
+    // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
+    // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
+    expect(createHash('sha256').update(JSON.stringify(a)).digest('hex')).toBe('28e2aee7fbe6e85c468c897e27c181016d1efa53a7ab3d8888a01b9caa5056e0');
   });
 });

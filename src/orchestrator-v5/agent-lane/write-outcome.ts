@@ -228,7 +228,7 @@ export interface NotSavedValue {
   readonly unit: string;
   /** The figure not saved was the user's own (`user_stated`); else Olumi's suggestion. */
   readonly yours: boolean;
-  readonly still?: { readonly value: number; readonly unit: string; readonly owner: 'yours' | 'brief' | 'olumi' | 'olumi_accepted' };
+  readonly still?: { readonly value: number; readonly unit: string; readonly owner: 'yours' | 'brief' | 'olumi' | 'olumi_accepted' | 'unverified_brief' };
   /** The model could not be read after the refusal: what it holds now is not said (never inferred). */
   readonly unconfirmed?: true;
 }
@@ -246,6 +246,7 @@ function notSavedValueLine(x: NotSavedValue, why: string): string {
   if (x.still === undefined) return `${head} The model still has no figure for it.`;
   // A figure this approval does not write is said the estate's way: exact, else "about" (`sayFigureRead`; AIQ 5924240860).
   const held = sayFigureRead(x.still.value, x.still.unit);
+  if (x.still.owner === 'unverified_brief') return `${head} Not confirmed from your brief`;
   const still = x.still.owner === 'yours' ? `your figure of ${held}`
     : x.still.owner === 'brief' ? `the figure from your brief, ${held}`
       : x.still.owner === 'olumi_accepted' ? `Olumi\u2019s estimate of ${held}, which you accepted` : `Olumi\u2019s estimate of ${held}`;

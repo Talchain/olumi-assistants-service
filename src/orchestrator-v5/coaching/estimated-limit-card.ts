@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 /**
  * A LIMIT CHECKED AGAINST OLUMI'S OWN ESTIMATE — the run-turn card for a limit
  * the analysis DID check, but only against a level Olumi supplied (AI Quality
@@ -116,7 +117,7 @@ function whoseLevel(source: unknown): EstimatedLimit['whose'] | null {
 }
 
 function levelOf(observed: Record<string, unknown> | null): { level: string; whose: EstimatedLimit['whose'] } | null {
-  if (observed === null) return null;
+  if (observed === null || isUnverifiedUserMaterial(observed)) return null;
   const whose = whoseLevel(observed.source);
   if (whose === null) return null;
   const raw = observed.raw_value;

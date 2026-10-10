@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../../cee/transforms/provenance-display.js';
 /**
  * THE SCIENCE CONTEXT FOR AN AGENT-LANE METHOD TURN (SCIENCE/DSK, #85 5933229708).
  *
@@ -436,7 +437,7 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
         observed_state?: { source?: unknown; extractionType?: unknown; value?: unknown; reviewed_by_user?: unknown };
       } | undefined;
       const os = node?.observed_state;
-      return os?.source === 'cee_inference' && os.extractionType === undefined && node?.extractionType === undefined
+      return !isUnverifiedUserMaterial(os) && os?.source === 'cee_inference' && os.extractionType === undefined && node?.extractionType === undefined
         && os.reviewed_by_user === undefined && typeof os.value === 'number' && Number.isFinite(os.value);
     }).sort((a, b) => a.goal_distance - b.goal_distance || byCodepoint(a.factor_id, b.factor_id))
       .map(f => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: null,

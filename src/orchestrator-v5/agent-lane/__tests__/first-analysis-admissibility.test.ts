@@ -112,6 +112,11 @@ type Node = { id: string; kind: string; label: string; observed_state?: Record<s
 type Graph = { nodes: Node[]; edges: { from: string; to: string; origin?: string }[] };
 
 async function constructed(model: CandidateModel, brief = 'A decision brief.') {
+  const price = model.factors.find(f => f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit');
+  if (price && brief !== 'A decision brief.') {
+    price.baseline_evidence = { quote: 'Our Pro price is £49.' };
+    brief = `Our Pro price is £49.\n\n${brief}`;
+  }
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify({ ...model, unknowns: [] }) })) as unknown as CallStructuredModel;
   const d: InternalDispatch = async (path, body) => {

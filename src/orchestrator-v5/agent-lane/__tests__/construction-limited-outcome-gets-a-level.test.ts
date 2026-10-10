@@ -65,6 +65,19 @@ const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 const construct = (...drafts: Draft[]) => constructOn(BRIEF, ...drafts);
 async function constructOn(brief: string, ...drafts: Draft[]) {
+  const receipts = new Set(['Our Pro price is £49 a month.']);
+  const statedChurn = /Monthly churn is (\d+)% today|Monthly churn costs us £([\d,]+) today/.exec(brief);
+  for (const d of drafts) {
+    const price = d.factors.find(f => f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit');
+    if (price) price.baseline_evidence = { quote: 'Our Pro price is £49 a month.' };
+    const churn = d.factors.find(f => f.label === CHURN && f.baseline_known && f.provenance === 'explicit');
+    if (churn && statedChurn && churn.baseline_value === Number((statedChurn[1] ?? statedChurn[2]!).replace(/,/g, ''))) {
+      const quote = statedChurn[1] ? `Our monthly churn is ${statedChurn[1]}%.` : `Our monthly churn is £${statedChurn[2]}.`;
+      churn.baseline_evidence = { quote };
+      receipts.add(quote);
+    }
+  }
+  brief = `${[...receipts].join(' ')}\n\n${brief}`;
   for (const d of drafts) expect(strict(d), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown;
   let trace: ConstructionTrace | undefined;

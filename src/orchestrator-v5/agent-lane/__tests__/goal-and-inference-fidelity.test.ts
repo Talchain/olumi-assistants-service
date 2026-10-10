@@ -29,8 +29,12 @@ import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 
 const d = new URL('./fixtures/', import.meta.url);
 const faithful = JSON.parse(readFileSync(new URL('faithful.json', d), 'utf8')) as CandidateModel;
+const priceReceipt = 'Our Pro price is £49.';
+const receipted = { ...faithful, factors: faithful.factors.map((f) =>
+  f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit'
+    ? { ...f, baseline_evidence: { quote: priceReceipt } } : f) };
 const widened = JSON.parse(readFileSync(new URL('widened.json', d), 'utf8'));
-const admitted = () => admitCandidateModel(faithful, widened);
+const admitted = () => admitCandidateModel(receipted, widened, priceReceipt);
 
 describe('goal fidelity', () => {
   it('the capture really carries all three (control on the fixture)', () => {

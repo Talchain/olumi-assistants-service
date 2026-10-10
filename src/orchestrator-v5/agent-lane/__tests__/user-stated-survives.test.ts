@@ -203,14 +203,16 @@ it('census eligibility reads digits and number words through the shared readers,
 function additionRow(baseline: number | null, known: boolean, stock: boolean): Row {
   const draft = JSON.parse(r2[0]!.drafter_texts[0]!) as CandidateModel;
   const label = stock ? 'Team headcount' : 'Senior hires';
+  const baselineQuote = stock && known && baseline === 8 ? 'Our team has 8 people.' : null;
   const brief = stock ? 'Team headcount is 8. Add +2 to team headcount.' : 'Hire two seniors.';
   const own = stock ? 'Add +2 to team headcount.' : brief;
-  return { id: stock ? 'stock-addition' : 'flow-addition', brief, drafter_texts: [JSON.stringify({
+  return { id: stock ? 'stock-addition' : 'flow-addition', brief: baselineQuote ? `${baselineQuote}\n\n${brief}` : brief, drafter_texts: [JSON.stringify({
     ...draft, options: [{ ...draft.options[0], label: 'Add capacity', changes: [], interventions: [{
       factor_label: label, value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit',
       stated_evidence: { quote: brief, option_quote: own },
     }] }, { ...draft.options[1], label: 'Keep capacity', is_status_quo: true, changes: [], interventions: [] }], factors: [{ label, role: 'controllable', baseline_known: known, baseline_value: baseline,
-      unit: 'people', provenance: known ? 'explicit' : 'ai_proposed', plausible_max: 20 }],
+      unit: 'people', provenance: known ? 'explicit' : 'ai_proposed', plausible_max: 20,
+      ...(baselineQuote ? { baseline_evidence: { quote: baselineQuote } } : {}) }],
     links: [{ ...draft.links[0], from: 'Add capacity', to: label }, { ...draft.links[0], from: label, to: draft.goal.metric }],
     identities: [],
   })] };

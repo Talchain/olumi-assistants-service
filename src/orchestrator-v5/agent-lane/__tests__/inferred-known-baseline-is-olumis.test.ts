@@ -64,14 +64,17 @@ describe('a known baseline the builder inferred is Olumi\'s', () => {
     expect(knownBaseline(lead as unknown as MagnitudeNode)).toBeUndefined();
   });
 
-  it('CONTROL: a 0 the brief states stays the user\'s, and is today\'s known level', async () => {
+  it('CONTROL (S7 disposition `unsupported_unit_conversion`): a 0 the brief states is the user\'s UNVERIFIED claim — kept visible, never Olumi\'s estimate, never today\'s known level', async () => {
+    // "We have 0 tech leads today" is a HEADCOUNT; the factor is "Tech leads hired" (hires). Count noun + today ≠ hire: no verified
+    // conversion exists, so the receipt gate does not credit it (`brief_extraction`/'explicit'). The figure survives as the user's claim.
     const nodes = await registered(`We have 0 tech leads today. ${BRIEF}`, {
       'Tech leads hired': { provenance: 'explicit', baseline_known: true, baseline_value: 0 } as Partial<Factor>,
     });
     const lead = factor(nodes, 'Tech leads hired');
-    expect(lead.observed_state).toMatchObject({ value: 0, raw_value: 0, cap: 10, source: 'brief_extraction' });
+    expect(lead.observed_state).toMatchObject({ value: 0, raw_value: 0, source: 'cee_inference', user_material_unverified: true });
+    expect(lead.observed_state).not.toMatchObject({ source: 'brief_extraction' });
     expect(deriveInferredValues({ nodes }).map((r) => r.factor_id)).not.toContain(lead.id);
-    expect(knownBaseline(lead as unknown as MagnitudeNode)).toBe(0);
+    expect(knownBaseline(lead as unknown as MagnitudeNode)).toBeUndefined();
   });
 
   it('CONTROL (#1767): an UNKNOWN baseline the builder estimated stays capless, as before', async () => {

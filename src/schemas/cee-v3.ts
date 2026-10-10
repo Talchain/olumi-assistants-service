@@ -129,6 +129,8 @@ export const ObservedStateV3 = z.object({
    *  couldn't save that change." Derived BY EXECUTION at this tip, with a
    *  `user_override` positive control, before this line was written. */
   source: z.enum(OBSERVED_STATE_SOURCE_LITERALS).optional(),
+  /** Drafter claimed user material, but current-level quote validation refused credit. */
+  user_material_unverified: z.literal(true).optional(),
   /** Raw value before normalization (preserves original extraction) */
   raw_value: z.number().optional(),
   /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
@@ -550,7 +552,7 @@ export const NodeV3 = z.object({
    *  RESPONSE-ONLY: recomputed deterministically by `transformResponseToV3`
    *  on every response. Not read by analysis, repair, or PLoT pipelines.
    *  Safe to ignore on round-tripped graphs — value is regenerated. */
-  provenance: z.enum(["from_brief", "ai_inferred", "user_set"]).optional(),
+  provenance: z.enum(["from_brief", "ai_inferred", "user_set", "unverified_brief"]).optional(),
   /** ⭐⭐ THE USER'S EXACT WORDS, for the inspector and the hover surface.
    *
    *  Present only on nodes projected from a stated record, carrying that

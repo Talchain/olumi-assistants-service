@@ -65,7 +65,7 @@ vi.mock('../../../utils/telemetry.js', async original => ({
 
 type Rec = Record<string, any>;
 const SCENARIO = '62626262-6262-4626-8626-626262626262';
-const BRIEF = 'MRR is £120,000 a month today, with a net change of £2,000 each month. Our goal is £150,000 MRR within 9 months. '
+const BRIEF = 'Our MRR is £120,000 a month. Our monthly change is £2,000 a month. Our price is £49.\n\nOur goal is £150,000 MRR within 9 months. '
   + 'Keep the price at £49 or raise it to £59. Each £10 price rise adds £5,000 MRR a month.';
 const REFUSAL = 'it needs exactly three quantities: the level today, the rate lost each month and the amount added each month';
 const goalOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.kind === 'goal');
@@ -83,9 +83,9 @@ function candidate(reading: 'net' | 'gross' | undefined, explicit = true): Candi
       { label: 'Raise price', provenance: 'explicit', is_status_quo: false, changes: ['Price'],
         interventions: [{ factor_label: 'Price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ], factors: [
-      { label: 'MRR today', role: 'external', baseline_known: true, baseline_value: 120000, unit: 'GBP/month', provenance: 'explicit', plausible_max: 300000 },
-      { label: 'Monthly change', role: 'external', baseline_known: true, baseline_value: 2000, unit: 'GBP/month', provenance: 'explicit', plausible_max: 10000 },
-      { label: 'Price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 100 },
+      { label: 'MRR today', role: 'external', baseline_known: true, baseline_value: 120000, unit: 'GBP/month', provenance: 'explicit', plausible_max: 300000, baseline_evidence: { quote: 'Our MRR is £120,000 a month.' } },
+      { label: 'Monthly change', role: 'external', baseline_known: true, baseline_value: 2000, unit: 'GBP/month', provenance: 'explicit', plausible_max: 10000, baseline_evidence: { quote: 'Our monthly change is £2,000 a month.' } },
+      { label: 'Price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 100, baseline_evidence: { quote: 'Our price is £49.' } },
     ], risks: [], outcomes: [], unknowns: [], links: [
       ...['MRR today', 'Monthly change'].map(from => ({ from, to: 'MRR', direction: 'positive', provenance: 'inferred',
         effect_amount: null, effect_per_source_change: null, effect_provenance: null })),

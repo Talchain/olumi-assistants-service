@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 /**
  * ⛔ THE AGENT SAYS HOW EACH LIMIT WAS CHECKED, FROM THE RUN'S OWN PER-LIMIT VERDICTS (MG #72 5864956818).
  *
@@ -78,6 +79,7 @@ function guessWords(
   f: PlaceholderPartsFinding,
   labelOf: (id: unknown) => string | null,
   target: string | null,
+  unverifiedLevel = false,
 ): { why: string; ask: string } | null {
   if (f.arm === 'link' && f.link !== undefined) {
     const [x, y] = [labelOf(f.link.from), labelOf(f.link.to)];
@@ -85,6 +87,7 @@ function guessWords(
       : { why: `it depends on how strongly ${q(x)} moves ${q(y)}, which Olumi estimated.`, ask: `How much does ${q(x)} change ${q(y)}?` };
   }
   if (target === null) return null;
+  if (f.arm === 'level' && unverifiedLevel) return { why: 'Not confirmed from your brief', ask: `What is "${target}" today? Not confirmed from your brief` };
   if (f.arm === 'level') return { why: `it starts from Olumi’s estimate of today’s ${q(target)}.`, ask: `What is ${q(target)} today?` };
   if (f.arm === 'point') {
     return { why: `it uses a single Olumi figure for ${q(target)}.`, ask: `What’s each option’s likely range for ${q(target)}?` };
@@ -124,7 +127,7 @@ function withheldOptionsFor(
       identityEvaluated === undefined ? undefined : [...identityEvaluated].map(node_id => ({ node_id, evaluated: true })));
     const label = labelOf(optionIdOf(o));
     if (finding === null || label === null) continue;
-    const words = finding.reason === OLUMI_GUESS_LIMIT_REASON ? guessWords(finding, labelOf, target) : null;
+    const words = finding.reason === OLUMI_GUESS_LIMIT_REASON ? guessWords(finding, labelOf, target, isUnverifiedUserMaterial(recs.find(n => n.id === targetId)?.observed_state)) : null;
     // Q6: filtering per-option words must not change the row's own sentence or revive its superseded level ask.
     if (words !== null) out.hasGuesses = true;
     const id = optionIdOf(o);
@@ -255,7 +258,8 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     // the row no longer claims a check against those estimates, and Olumi's level ask (which says it would be) yields to
     // the ONE question of the first withheld option's arm.
     const b6 = perOption.hasGuesses;
-    const rowSays = !b6 ? [sentenceFor(label, row.state, row.reason)]
+    const levelUnverified = Array.isArray(nodes) && isUnverifiedUserMaterial((nodes.find(n => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === limit?.node_id) as { observed_state?: unknown } | undefined)?.observed_state);
+    const rowSays = levelUnverified && row.state === 'estimate_only' ? ['Not confirmed from your brief'] : !b6 ? [sentenceFor(label, row.state, row.reason)]
       : row.state === 'unscored' ? [`${q(label)} isn’t shown for any option.`]
         : row.state === 'estimate_only' && row.reason === 'level_olumi_estimate' ? [] : [sentenceFor(label, row.state, row.reason)];
     const say = [...rowSays, ...why, ...guessed].join(' ');
