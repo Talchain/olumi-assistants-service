@@ -94,14 +94,16 @@ describe('typed current-level sentence authority', () => {
     expect(n.observed_state?.source).toBe('cee_inference');
     expect(n.observed_state?.user_material_unverified).toBeUndefined();
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
-    expect(valueAuthorshipOf(n.observed_state)).toBe('olumi_estimate');
+    // The node's own display field is the production read (a source-only observed_state is `unknown` to guidance, as on staging).
+    expect(n.provenance).toBe('ai_inferred');
   });
   it('valid receipt carries user credit, display and authorship with no unverified marker', () => {
     const m = model(); const n = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
     expect(n.observed_state).toMatchObject({ source: 'brief_extraction' });
     expect(n.observed_state?.user_material_unverified).toBeUndefined();
-    expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('from_brief');
-    expect(valueAuthorshipOf(n.observed_state)).toBe('yours');
+    // The node's own display field carries the verified credit (production read); the source-only observed_state keeps its
+    // staging bytes and staging reads (served captures pin `unknown` for that exact shape).
+    expect(n.provenance).toBe('from_brief');
   });
   it('existing stock/time stated-level proposer refuses a flagged level, including contradictory legacy source', () => {
     const stock = { id: 'stock', kind: 'factor', label: 'Current paying subscribers', observed_state: { value: 0.15, raw_value: 1500, cap: 10000, unit: 'subscribers', source: 'brief_extraction' } };
@@ -414,8 +416,8 @@ describe('RUN8 independently bound current claims', () => {
     const m = pair(tail, 'subscribers'); m.factors[1]!.label = 'Other subscribers';
     expect(verify(m, `${subscribers.quote} ${tail}`)).toBe(false);
   });
-  it('a verified brief source projects its existing display without redundant extraction metadata', () => {
-    expect(nodeProvenanceDisplay(undefined, { source: 'brief_extraction', value: 0 })).toBe('from_brief');
+  it('an extraction-type-free carrier keeps staging reads: the display authority never derives credit from a residual source stamp', () => {
+    expect(nodeProvenanceDisplay(undefined, { source: 'brief_extraction', value: 0 })).toBe('ai_inferred');
     expect(nodeProvenanceDisplay(undefined, { source: 'brief_extraction' })).toBe('ai_inferred');
     expect(nodeProvenanceDisplay('inferred', { source: 'brief_extraction', value: 0 })).toBe('ai_inferred');
     expect(nodeProvenanceDisplay(undefined, { source: 'cee_inference', value: 0 })).toBe('ai_inferred');
