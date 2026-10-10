@@ -36,9 +36,14 @@ export const ASSEMBLERS = [
 // 17 → 22: added build/draft specialists A18–A22; 22 → 21: #2900 removed A6. Target: 1.
 // #2900's opt-in getCanonicalState section remains A1 (its fact projection remains A3).
 const BASELINE_N = 21;
+interface MappedTransport { assembler?: string; kind?: string; via?: string; reason: string }
 const known = JSON.parse(readFileSync(new URL('./fixtures/source-inventory.json', import.meta.url), 'utf8')) as {
-  transport_files: string[]; infrastructure: string[]; unclassified_census_gap: string[];
+  transport_files: string[]; infrastructure: string[]; unclassified_census_gap: string[]; mapped: Record<string, MappedTransport>;
 };
+/** Transport files that are neither provider infrastructure nor mapped to an assembler / a classified kind. Pure, so it can be mutated. */
+export function unmappedTransport(files: readonly string[], infrastructure: readonly string[], mapped: Record<string, MappedTransport>): string[] {
+  return files.filter(file => !infrastructure.includes(file) && mapped[file] === undefined).sort();
+}
 /** LLM provider transport only (never generic HTTP fetch): a file matching this sends a model request. */
 const LLM_TRANSPORT = /\.(?:chat|chatWithTools)\s*\(|\bcallModelFor\s*\(|\bcallStructured\s*\(|api\.openai\.com|\/v1\/responses|api\.anthropic\.com/;
 
@@ -73,6 +78,24 @@ describe('assembler count may only fall toward 1', () => {
     // Every manifest assembler's file that builds a provider body directly is a known transport file or calls one.
     expect(actual.length, 'the inventory saw transport files (contrast: not a blind scan)').toBeGreaterThanOrEqual(known.infrastructure.length + 1);
   }, 30_000);
+  it('closes the census gap: every non-infrastructure transport file is mapped to a manifest assembler or a classified kind', () => {
+    expect(known.unclassified_census_gap, 'the census gap is closed and stays closed').toEqual([]);
+    expect(unmappedTransport(known.transport_files, known.infrastructure, known.mapped)).toEqual([]);
+    const symbols = new Set<string>(ASSEMBLERS.map(entry => ('local' in entry ? entry.local : entry.symbol)));
+    for (const [file, entry] of Object.entries(known.mapped)) {
+      expect(known.transport_files, `${file} is a listed transport file`).toContain(file);
+      expect(entry.reason.trim().length, `${file}: a stated reason`).toBeGreaterThan(20);
+      expect(Boolean(entry.assembler) !== Boolean(entry.kind), `${file}: exactly one of assembler / kind`).toBe(true);
+      for (const named of [entry.assembler, entry.via]) {
+        if (named !== undefined) expect(symbols.has(named), `${file} -> ${named} is a manifest assembler`).toBe(true);
+      }
+    }
+  });
+  it('mutant: a NEW transport file with no mapping is reported; a mapped one and infrastructure are not', () => {
+    const files = [...known.transport_files, 'src/orchestrator-v5/agent-lane/new-model-call.ts'];
+    expect(unmappedTransport(files, known.infrastructure, known.mapped)).toEqual(['src/orchestrator-v5/agent-lane/new-model-call.ts']);
+    expect(unmappedTransport(known.transport_files, known.infrastructure, known.mapped)).toEqual([]);
+  });
   it('discovery contrast: a model call is recognised, a plain HTTP fetch and a comment are not', () => {
     expect(hasLlmTransport('const r = await adapter.chat(messages);')).toBe(true);
     expect(hasLlmTransport("await fetch('https://api.openai.com/v1/responses', init);")).toBe(true);

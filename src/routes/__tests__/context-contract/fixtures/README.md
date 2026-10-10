@@ -71,3 +71,5 @@ Expected-failure witnesses and positive controls run in ordinary beforeAll setup
 a route/transport error fails setup and cannot satisfy an it.fails assertion.
 The default ordinary run2 exact-key negative has #2900's checked-in provider
 parity SHA fixture and its opt-in one-assembly test as positive controls.
+
+Decision-review harness also plants labelled SYNTHETIC_REVIEW_PRODUCER prose and one fragile-edge row (pro_price -> monthly_pro_churn, switch_probability 0.25) in current, stale, leader-withheld and flip-unavailable variants. These are synthetic gating probes; the captured fixture files remain unchanged.

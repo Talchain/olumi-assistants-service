@@ -13043,6 +13043,12 @@ export async function runTurnExecutor(
               // turn-start reread and remains only as the fallback for a
               // handler that produced no snapshot.
               runGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
+              // CURRENCY, DELIBERATELY THE SAME SNAPSHOT. The review fires in this request, right after its OWN Run, and
+              // `__run_graph_snapshot` is run-analysis's own fresh scenario read (the freshest existing read). The turn-start
+              // `currentAnalysisGraphHashForTurn` can only be OLDER than it and would falsely stale a healthy edit -> Run ->
+              // review. A graph edited after this point is marked stale at read time (`deriveAnalysisFreshness`), and the
+              // gate fires for any caller that supplies a newer graph (pinned by the edit-after-Run row). No new read.
+              currentGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
               ...(timingsEnabled ? { callTelemetrySink } : {}),
               // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder
               // disclosure channel — the review must never narrate a
