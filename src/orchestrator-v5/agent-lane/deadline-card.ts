@@ -11,7 +11,7 @@ import { registrationTurnId } from '../graph-registration/registration-identity.
  * (buddy r4 P2: "Aug." and a newline inside the question both slipped past a [^.!?\n] matcher).
  */
 export function asksAboutTheDeadline(text: string): boolean {
-  return text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence) && sentence.trim().endsWith('?'));
+  return text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence) && sentence.includes('?'));
 }
 export interface DeadlineTurnStart {
   readonly rowId: string | null;
@@ -92,16 +92,14 @@ function goalOwnsDeadline(goal: RecordLike, words: string, source: string): bool
     const intent = unitHasLetters ? /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline|deliver|finish|complete)\b/
       : /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline)\b/;
     if (!unitHasLetters) {
-      // The clause immediately before the date owns it (split on , ; and). It may not hold its own number (digits or written-out:
-      // that clause's quantity is a count target, never a goal that holds none), and it must be either about the goal (a label stem) or
-      // a bare time adverbial ("over the next"). ANY other clause — whatever its verb ("finish/renovate/refurbish …") — owns its own date.
+      // The clause immediately before the date owns it (split on , ; and). On this path it must be a BARE time adverbial ("over the
+      // next", "within the next"): any clause with other content — a verb, a count, even the goal's own words ("…, and refurbish
+      // the depot serving our riders in ten months") — owns its own date, so it is refused. A comma-free "…keep riders served in ten
+      // months" is refused too (closed = silent, never a wrong offer; the unit-with-letters path covers the common goals).
       const ownClause = before.split(/[,;]|\band\b/).pop() ?? '';
-      const ownWords = ownClause.match(/\p{L}+/gu) ?? [];
       const TIMEWORDS = ['over', 'the', 'next', 'within', 'in', 'for', 'by', 'end', 'of', 'during', 'about', 'around', 'roughly', 'approximately',
         'another', 'coming', 'then', 'so', 'is', 'are', 'to', 'be', 'a', 'an', 'at', 'least', 'most', 'than', 'less', 'more', 'later', 'from', 'now', 'today'];
-      const NUMBERWORDS = /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|dozen)\b/;
-      if (/\d/.test(ownClause) || NUMBERWORDS.test(ownClause)) return false;
-      if (!labelStems.some(stem => stemsOf(ownClause).includes(stem)) && !ownWords.every(w => TIMEWORDS.includes(w))) return false;
+      if (!(ownClause.match(/\p{L}+/gu) ?? []).every(w => TIMEWORDS.includes(w)) || /\d/.test(ownClause)) return false;
     }
     if (!/\b(?:we|i|us|our|my)\b/.test(before)
       || !intent.test(before)
