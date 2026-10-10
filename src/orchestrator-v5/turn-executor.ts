@@ -13043,6 +13043,7 @@ export async function runTurnExecutor(
               // turn-start reread and remains only as the fallback for a
               // handler that produced no snapshot.
               runGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
+              currentGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
               ...(timingsEnabled ? { callTelemetrySink } : {}),
               // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder
               // disclosure channel — the review must never narrate a
