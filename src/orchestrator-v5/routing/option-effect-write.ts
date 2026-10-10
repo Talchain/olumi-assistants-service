@@ -199,7 +199,7 @@
  * machinery speak.
  */
 
-import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T, type InterventionV3T } from '../../schemas/cee-v3.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
@@ -1438,11 +1438,12 @@ export function buildOptionEffectRawOperation(resolved: {
   readonly factorId: string;
   readonly factorLabel: string;
   readonly value: number;
+  readonly source?: InterventionV3T['source'];
 }): Record<string, unknown> {
   return {
     op: 'update_node',
     path: `/nodes/${resolved.optionId}/data/interventions/${resolved.factorId}`,
-    value: { value: resolved.value },
+    value: { value: resolved.value, ...(resolved.source !== undefined ? { source: resolved.source } : {}) },
     old_value: null,
     impact: 'moderate',
     rationale: `Sets the effect value the user gave for ${resolved.optionLabel} on ${resolved.factorLabel}.`,

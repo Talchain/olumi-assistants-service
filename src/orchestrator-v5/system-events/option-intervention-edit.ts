@@ -114,11 +114,11 @@ export interface OptionInterventionEditInput {
   readonly modelValue: number;
   readonly expectedGraphHash: string;
   /**
-   * The cell's stamp when it is NOT the user's own level: an approved adoption of Olumi's
-   * proposed level (`approvedLevelSourceFor`). Absent → `user_specified`, the inspector's
-   * stamp. Never from a wire field: `executeOptionInterventionEdit` derives it server-side.
+   * Internal direct-human marker or approved adoption of Olumi's proposed level
+   * (`approvedLevelSourceFor`). The inspector supplies user_specified explicitly.
+   * Never from a wire field: executeOptionInterventionEdit derives it server-side.
    */
-  readonly source?: typeof APPROVED_LEVEL_ADOPTION_SOURCE;
+  readonly source?: typeof APPROVED_LEVEL_ADOPTION_SOURCE | 'user_specified';
   /** Canvas edits may derive display coordinates; explicit approval batches may not. */
   readonly inferFactorFigure?: boolean;
   /**
@@ -932,7 +932,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // Set LAST and unconditionally: a `source` a caller slipped onto the input is overwritten, never kept.
   let targets: OptionLevelTarget[] = input.targets.map(t => {
     const source = approvedLevelSourceFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
-    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
+    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, source: source ?? 'user_specified',
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   // Decide value-only no-ops on the original graph, before attaching any range.
@@ -1588,6 +1588,8 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   const built = buildOptionEffectRawOperation({
     optionId: option.id, optionLabel: option.label,
     factorId: factor.id, factorLabel: factor.label, value: input.modelValue,
+    // RUN37: this caller is the direct inspector edit, not a model-authored write.
+    source: input.source ?? 'user_specified',
   });
   // ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (DL #75 5902916137 (3); P0 partner 5902892060; served W4 run2 on `f074916`):
   // the card sends the level on the model scale and shows it on the factor's own range ("£57" = 0.285 of 200). Written
@@ -1604,7 +1606,7 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     ...(levelFigure !== undefined ? { raw_value: levelFigure.raw_value, ...(levelFigure.cap !== undefined ? { cap: levelFigure.cap } : {}),
       ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } : {}),
     ...(likely !== undefined ? { range: { low: likely.low, high: likely.high, meaning: 'likely_range', source: 'user_specified' } } : {}) } };
-  if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
+  if (input.source === undefined || input.source === 'user_specified') return { kind: 'prepared', operation, ...withLink };
   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
   // instead of defaulting the cell to `user_specified`, and the rationale says whose it is.
   return {

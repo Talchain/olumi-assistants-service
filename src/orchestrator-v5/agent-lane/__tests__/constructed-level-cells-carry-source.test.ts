@@ -52,7 +52,7 @@ const banked = (): CandidateModel =>
   (fixture('live-hiring-envelope-candidate-20260923.json') as { candidate: CandidateModel }).candidate;
 
 /** The writer's own enum — read off the producer schema, never re-spelled here. */
-const WRITER_SOURCES: readonly string[] = InterventionV3.shape.source.options;
+const WRITER_SOURCES: readonly string[] = InterventionV3.shape.source.unwrap().options;
 
 // Identity, not position: the option and factor the brief names, by label.
 const OPTION_LABEL = 'Hire Two Developers';

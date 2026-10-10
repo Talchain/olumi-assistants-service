@@ -49,7 +49,7 @@ describe('explicit option-intervention preparation — existing canonical operat
     expect(operations).toHaveLength(1);
     expect(operations[0]?.path).toBe('option');
     const applied = applyPatchOperations(before, operations);
-    const encoded = encodeOptionInterventionsForEdit(applied, new Set(['option']));
+    const encoded = encodeOptionInterventionsForEdit(applied, new Set(['option']), undefined, [{ optionId: 'option', factorId: 'factor' }]);
     expect(encoded.unresolvedOptionIds).toEqual([]);
     // The applier deliberately returns structural nodes/edges only. Production
     // merges that result onto the persisted base before projecting for commit.

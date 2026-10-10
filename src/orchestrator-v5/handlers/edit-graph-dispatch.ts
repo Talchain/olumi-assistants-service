@@ -1824,7 +1824,7 @@ function canonicaliseOptionEffectOperation(
   },
   requestId: string,
 ): readonly PatchOperation[] | null {
-  const raw = buildOptionEffectRawOperation(resolved);
+  const raw = buildOptionEffectRawOperation({ ...resolved, source: 'user_specified' });
   let parsedOperations: unknown[];
   try {
     parsedOperations = parseEditGraphResponse(

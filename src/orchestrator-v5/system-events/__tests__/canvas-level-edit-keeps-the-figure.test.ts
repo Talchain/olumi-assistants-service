@@ -46,7 +46,7 @@ function writtenGraph(g: ReturnType<typeof served>, modelValue: number): ReturnT
   expect(r.kind, JSON.stringify(r)).toBe('prepared');
   if (r.kind !== 'prepared') return undefined;
   const ops = parseEditGraphResponse(JSON.stringify({ operations: [r.operation], removed_edges: [], warnings: [], coaching: null })).operations as PatchOperation[];
-  const encoded = encodeOptionInterventionsForEdit(applyPatchOperations(g, ops), new Set(['raise_to_59']));
+  const encoded = encodeOptionInterventionsForEdit(applyPatchOperations(g, ops), new Set(['raise_to_59']), undefined, [{ optionId: 'raise_to_59', factorId: 'pro_plan_price' }]);
   const merged = mergeAppliedGraphForPersistence({ appliedGraph: encoded.graph, persistedBase: g, ingressBase: g, scenarioId: 's', requestId: 'r' });
   const after = GraphV3.parse(JSON.parse(JSON.stringify(projectGraphForPersistence(merged))));
   return after;

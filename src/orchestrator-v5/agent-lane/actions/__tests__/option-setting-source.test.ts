@@ -11,6 +11,9 @@ import { deriveAnalysisFreshness } from '../../../context/freshness.js';
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
 import type { RunAnalysisProbeInput } from '../../../tools/handlers/run-analysis-probe.js';
 import { encodeOptionInterventionsForEdit } from '../../../../orchestrator/tools/encode-option-interventions.js';
+import { bindRecentMutationHistoryToPriorFacts } from '../../../context/reconcile-recent-mutation-facts.js';
+import { applyOptionInterventionEdit, prepareOptionInterventionEdit } from '../../../system-events/option-intervention-edit.js';
+import { buildOptionEffectRawOperation } from '../../../routing/option-effect-write.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
 import * as census from '../../olumi-estimates-feeding-result.js';
@@ -145,7 +148,9 @@ describe('optional provenance boundaries retain unattributed quantities through 
       entity_registry: { option_ids: ['raise'], goal_id: 'goal' }, capabilities: {}, messages: [],
       session_id: '7d2e3f40-5b6c-4d7e-8f90-a1b2c3d4e5f6', request_id: requestId,
       budgets: { turn_ms: 180000, llm_narrate_ms: 60000 } }),
-      prior_turns: [], prior_facts: [], prior_facts_with_turn: [],
+      prior_turns: [], prior_facts: bindRecentMutationHistoryToPriorFacts([], {
+        recent_mutation_facts: [], recent_changes_status: 'complete',
+      }), prior_facts_with_turn: [],
       persisted_analysis_freshness: deriveAnalysisFreshness([], computeAnalysisAffectingGraphHash(canonical)),
       scenarioBriefText: null, persistedGraph: canonical, decision_context: EMPTY_DECISION_CONTEXT,
       coaching_state: EMPTY_COACHING_STATE, prior_coaching_state: null, coaching_lifecycle: EMPTY_COACHING_LIFECYCLE };
@@ -373,5 +378,43 @@ describe('RUN36 typed count identity and additive claim role', () => {
     expect(registered!.nodes.find(n => n.label === 'Hire developers')!.interventions!.developers).toMatchObject({
       raw_value: 7, source: 'brief_extraction', value_confidence: 'medium' });
     expect(registered!.nodes.find(n => n.label === 'Hire developers')!.interventions!.developers.basis).toContain('(5 + 2 = 7 people)');
+  });
+});
+
+
+describe('RUN37 human callers supply authority; generic builders never manufacture it', () => {
+  it('a direct canvas edit keeps the human marker and native figure through commit projection and reload', () => {
+    const initial = graph('cee_hypothesis');
+    const before = GraphV3.parse(projectGraphForPersistence({ ...initial, edges: [...initial.edges,
+      { from: 'raise', to: 'price', exists_probability: 1, strength: { mean: 0.5, std: 0.1 }, effect_direction: 'positive' },
+    ] }));
+    const prepared = prepareOptionInterventionEdit({ persistedGraph: before, optionId: 'raise', factorId: 'price', source: 'user_specified',
+      modelValue: 0.64, expectedGraphHash: computeAnalysisAffectingGraphHash(before)! });
+    expect(prepared.kind).toBe('prepared');
+    if (prepared.kind !== 'prepared') throw new Error('Expected human edit operation');
+    expect(prepared.operation.value).toMatchObject({ source: 'user_specified' });
+    expect(prepared.operation.rationale).not.toContain('Olumi');
+    const out = applyOptionInterventionEdit({ persistedGraph: before, optionId: 'raise', factorId: 'price',
+      modelValue: 0.64, expectedGraphHash: computeAnalysisAffectingGraphHash(before)!,
+      scenarioId: '7d2e3f40-5b6c-4d7e-8f90-a1b2c3d4e5f6', turnId: 'human-edit', requestId: 'human-edit',
+      freshness: 'none', hasExistingAnalysis: false });
+    expect(out.kind, JSON.stringify(out)).toBe('candidate');
+    if (out.kind !== 'candidate') throw new Error('Expected human edit candidate');
+    const { settings, cold } = readSettings(out.graph);
+    expect(cold.nodes.find(n => n.id === 'raise')!.interventions!.price)
+      .toMatchObject({ value: 0.64, raw_value: 64, unit: 'GBP', source: 'user_specified' });
+    expect(settings).toStrictEqual([{ id: 'raise:price', label: 'Price under Raise price', authorship: 'user' }]);
+  });
+
+  it('the shared raw builder with no human authority still emits no source', () => {
+    const operation = buildOptionEffectRawOperation({ optionId: 'raise', optionLabel: 'Raise price',
+      factorId: 'price', factorLabel: 'Price', value: 0.64 });
+    expect(operation.value).toStrictEqual({ value: 0.64 });
+  });
+
+  it('the shared raw builder carries an explicit caller marker rather than defaulting it', () => {
+    const operation = buildOptionEffectRawOperation({ optionId: 'raise', optionLabel: 'Raise price',
+      factorId: 'price', factorLabel: 'Price', value: 0.64, source: 'user_specified' });
+    expect(operation.value).toStrictEqual({ value: 0.64, source: 'user_specified' });
   });
 });

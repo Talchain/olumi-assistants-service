@@ -115,7 +115,7 @@ const applyChain = () => {
   const g = calibratedGraph();
   const base = GraphV3.parse(g) as GraphV3T;
   const applied = applyPatchOperations(base, canonicalise(g));
-  return encodeOptionInterventionsForEdit(applied, new Set([OPTION_ID]));
+  return encodeOptionInterventionsForEdit(applied, new Set([OPTION_ID]), undefined, [{ optionId: OPTION_ID, factorId: FACTOR_ID }]);
 };
 
 describe('native-quantity write — the ACTUAL apply chain', () => {
@@ -233,7 +233,7 @@ describe('an answered Olumi estimate is the user’s figure (AIQ Q1): the ask en
   }
   const answered = () => {
     const g = estimatedGraph();
-    return encodeOptionInterventionsForEdit(applyPatchOperations(GraphV3.parse(g) as GraphV3T, canonicalise(g)), new Set([OPTION_ID])).graph;
+    return encodeOptionInterventionsForEdit(applyPatchOperations(GraphV3.parse(g) as GraphV3T, canonicalise(g)), new Set([OPTION_ID]), undefined, [{ optionId: OPTION_ID, factorId: FACTOR_ID }]).graph;
   };
   const askOn = (g: unknown) => {
     const nodes = (g as { nodes: Array<Record<string, unknown>> }).nodes;

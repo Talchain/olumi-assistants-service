@@ -33,8 +33,9 @@ const validParams = () => ({
   parent_decision_id: 'dec_choice',
   label: 'Outsource to a BPO vendor',
   interventions: [
-    { factor_id: 'fac_effort', value: 0.55 },
-    { factor_id: 'fac_uplift', value: 0.7, unit: '%' },
+    // RUN37: these values are the human add-option submission (DL #94 6099157525).
+    { factor_id: 'fac_effort', value: 0.55, source: 'user_specified' },
+    { factor_id: 'fac_uplift', value: 0.7, unit: '%', source: 'user_specified' },
   ],
 });
 

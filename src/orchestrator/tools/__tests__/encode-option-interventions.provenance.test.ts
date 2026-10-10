@@ -167,7 +167,8 @@ describe('encode-option-interventions — a model-authored value is not attribut
     const graph = zeroConfiguredGraph();
     const cell = firstSettableCell(graph);
     const stored = encodeThroughChain(graph, cell, { value: 0.4 }, 'user value');
-    expect(stored.source).toBe('user_specified');
+    // DL #94 6099157525 + RUN25: absent/unpreserved provenance is unattributed, not a human default.
+    expect(stored.source).toBeUndefined();
   });
 
   it('an UNRECOGNISED source cannot be smuggled in, and cannot claim user authorship', () => {
@@ -181,7 +182,8 @@ describe('encode-option-interventions — a model-authored value is not attribut
       { value: 0.4, source: 'totally_made_up', value_confidence: 'high' },
       'junk',
     );
-    expect(stored.source).toBe('user_specified');
+    // DL #94 6099157525 + RUN25: absent/unpreserved provenance is unattributed, not a human default.
+    expect(stored.source).toBeUndefined();
     // The confidence rides ONLY with a preserved provenance, never on its own.
     expect(stored.value_confidence).toBeUndefined();
   });
@@ -199,7 +201,8 @@ describe('encode-option-interventions — a model-authored value is not attribut
       { value: 0.4, source: 'brief_extraction', value_confidence: 'high' },
       'brief',
     );
-    expect(stored.source).toBe('user_specified');
+    // DL #94 6099157525 + RUN25: absent/unpreserved provenance is unattributed, not a human default.
+    expect(stored.source).toBeUndefined();
     expect(stored.value_confidence).toBeUndefined();
   });
 });
