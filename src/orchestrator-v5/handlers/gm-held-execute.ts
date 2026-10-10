@@ -42,6 +42,8 @@
 import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRisk, type UserEventRisk } from '../routing/stated-event-risk.js';
 import { reliesOnRefereeOperations } from '../routing/relies-on-risk.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import { encodeOptionInterventionsForEdit } from '../../orchestrator/tools/encode-option-interventions.js';
+import { approvedInterventionTargets } from '../untouched-level-invariant.js';
 import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import { sizeNewFactorLinks } from './size-new-factor-links.js';
 import { GM_HELD_USER_TODAY_KEY, readUserTodayMember, recheckAddFactorBatch, stampNewUserTodayLevels, type UserTodayLevel } from '../routing/add-factor-transaction.js';
@@ -959,7 +961,11 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   let rawAppliedGraph: GraphV3T | null = null;
   try {
     const applied = applyAndValidateMutation(input.currentGraph, (clone) => {
-      const candidate = applyPatchOperations(clone, opsForApplier);
+      const patched = applyPatchOperations(clone, opsForApplier);
+      const approvedCells = approvedInterventionTargets(opsForApplier, patched.nodes);
+      const encoded = encodeOptionInterventionsForEdit(patched, new Set(approvedCells.map(cell => cell.optionId)), undefined, approvedCells);
+      if (encoded.unresolvedOptionIds.length > 0) throw new Error('apply_error');
+      const candidate = encoded.graph;
       rawAppliedGraph = candidate;
       clone.nodes = candidate.nodes;
       clone.edges = candidate.edges;

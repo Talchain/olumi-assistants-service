@@ -21,6 +21,7 @@ const pluralNoun = (w: string): string => nounKey(w) !== w ? w : /(?:ss|x|z|ch|s
   : /[^aeiou]y$/u.test(w) ? `${w.slice(0, -1)}ies` : `${w}s`;
 const MOVEMENT = /^(?:cut|cuts|reduce|reduces|lower|lowers|raise|raises|increase|increases|decrease|decreases|rise|rises|fall|falls|drop|drops|by|about|around|roughly|approximately|nearly|almost)$/iu;
 const BOUNDARY = /^(?:a|an|per|of|in|each|every|would|will|could|should|might|may|can|must|adds?|costs?|prevents?|avoids?|reduces?|increases?|cuts?|falls?|rises?|and|but|so|to|for|we|you|they)$/iu;
+export { BOUNDARY as LABEL_HEAD_BOUNDARY };
 const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 const periodWords = Object.values(PERIOD_NOUN_SPELLINGS).flat().sort((a, b) => b.length - a.length).map(escape).join('|');
 const periodAdverbs = Object.values(PERIOD_ADVERB_SPELLINGS).flat().sort((a, b) => b.length - a.length).map(escape).join('|');

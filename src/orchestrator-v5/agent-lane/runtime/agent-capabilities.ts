@@ -8299,7 +8299,7 @@ export function createAgentCapabilities(
           .map((x) => x.level?.value).filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
         const largest = Math.max(Math.abs(t.value), ...named.map((v) => Math.abs(v)));
         const os = framedObservedState({ baseline_value: t.value, unit: unit ?? null, provenance: 'explicit',
-          plausible_max: largest > 1 ? defaultFrameFor(largest) : null });
+          plausible_max: largest > 1 ? defaultFrameFor(largest) : null }, 'human_authority');
         statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
       }
       const entries = plans.map(({ spec, plan }) => {
@@ -8373,7 +8373,7 @@ export function createAgentCapabilities(
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           lvl.by = byUser ? 'user' : 'olumi';
-          const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
+          const stamp = { source: byUser ? 'user_specified' as const : 'cee_hypothesis' as const };
           if (placed.kind === 'out_of_range') {
             outOfRange.push({ option: plan.label, factor: f.label, value: lvl.value, range: placed.range });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
@@ -8400,7 +8400,7 @@ export function createAgentCapabilities(
          * rides the option's own `add_node` beside today's level on the hold, and the confirm binds the two to one frame
          * (`stampNewGradedTodayLevels`). Before, "£59 for new Pro customers" landed with no level on the new price, and the
          * final Run was refused MISSING_OPTION_VALUE, asking the user for the £59 they had typed. WHOSE: the user's
-         * (`user_specified`, no stamp) only when their own words write it for this factor or option
+         * (`user_specified`, explicit stamp) only when their own words write it for this factor or option
          * (`figureTheUserWroteFor`, the same matcher an existing factor's level uses); else Olumi's estimate
          * (`cee_hypothesis`, said) only when the Agent says so, with a basis; else not set, and said. A non-number, a unit
          * of another kind than today's, a figure contradicting the option's name, or one outside the frame: not set, said.
@@ -8413,7 +8413,7 @@ export function createAgentCapabilities(
          */
         /** A1 £59: this option's level on each new GRADED factor with an accepted today level, by the factor's batch key. */
         const newGradedLevels = new Map<string, { value: number; unit?: string; by: 'user' | 'olumi'; basis?: string;
-          iv: { value: number; raw_value?: number; unit?: string; source?: 'cee_hypothesis' } }>();
+          iv: { value: number; raw_value?: number; unit?: string; source?: 'user_specified' | 'cee_hypothesis' } }>();
         for (const a of plan.newActsOn) {
           // ⛔ EVERY entry that names this factor (VERIFIER-S1 on A1 r2): reading only the first let a bare entry followed
           // by `{1, '%'}` through — held, approved, committed with the user's figure dropped — while the reverse was refused.
@@ -8471,14 +8471,14 @@ export function createAgentCapabilities(
           newGradedLevels.set(a.key, {
             value: asked, ...(levelUnit !== undefined ? { unit: levelUnit } : {}), by: wrote ? 'user' : 'olumi', ...(!wrote ? { basis } : {}),
             iv: { value: framed, ...(typeof cap === 'number' ? { raw_value: asked } : {}), ...(levelUnit !== undefined ? { unit: levelUnit } : {}),
-              ...(wrote ? {} : { source: 'cee_hypothesis' as const }) },
+              source: wrote ? 'user_specified' as const : 'cee_hypothesis' as const },
           });
         }
         /**
          * ⛔ A NEW SWITCH'S ON-LEVEL IS STRUCTURAL, NEVER OLUMI'S ESTIMATE (AIQ condition (c), #70 5859422189; DL on #2132
          * @510bfa00). The option turns the switch on: that 1 is what "switch" means, whoever's word it is — a bare 1, no
          * level, or `{ 1, estimate: true }` alike — so it carries no `source` and is stored as every non-estimate level is
-         * (the builder's `user_specified`), exactly as a 1 the user's own words name. `cee_hypothesis` there marked the
+         * (unattributed structural 1 unless separately verified), rather than a user's numeric claim. `cee_hypothesis` there marked the
          * option as resting on Olumi's figure, which can make results provisional and withhold a leader over a structural
          * 1. Only its today-0 is Olumi's (`cee_inference`, `stampNewSwitchFactors`). A GRADED new factor carries its level
          * only when it was set above (A1 £59, whose link then says whose level it carries, as an existing factor's does);
@@ -9081,7 +9081,7 @@ export function createAgentCapabilities(
         // figure this change carries for the factor — its own — then stamped as the user's.
         const v = t.value;
         const observed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
-          plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }), source: USER_TODAY_SOURCE };
+          plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }, 'human_authority'), source: USER_TODAY_SOURCE };
         planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed,
           basis: confirmPairing ? 'confirmed_by_approval' : 'written_about', quote });
       }

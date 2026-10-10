@@ -13,7 +13,7 @@ interface Answer { cohort_file: string; output_sha256: string; brief_sha256: str
 const fixture: { answers: Answer[] } = JSON.parse(readFileSync(new URL('./class1-known-zero-raw.json', import.meta.url), 'utf8'));
 const answers = fixture.answers;
 type Option = CandidateModel['options'][number];
-type Iv = NonNullable<Option['interventions']>[number] & { value_kind?: 'absolute' | 'additional' };
+type Iv = NonNullable<Option['interventions']>[number];
 type RawModel = Omit<CandidateModel, 'options'> & { options: (Omit<Option, 'interventions'> & { interventions?: Iv[] })[] };
 const candidate = (answer: Answer): RawModel => JSON.parse(answer.output_text);
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');

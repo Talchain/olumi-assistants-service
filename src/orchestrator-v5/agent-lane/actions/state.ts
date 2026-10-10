@@ -43,7 +43,8 @@ import { readOptionResultSources } from '../../../orchestrator/context/option-re
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
-const settingProvenance = InterventionV3.pick({ value: true, source: true });
+// Internal readback accepts an unattributed native cell; strict wire schemas remain unchanged.
+const settingProvenance = InterventionV3.pick({ value: true, source: true }).partial({ source: true });
 type OptionSetting = NonNullable<Parameters<typeof olumiEstimatesFeedingResult>[0]['optionSettings']>[number];
 
 /** Distinct option settings from this read, restricted to the bound Run's options and goal-path factors. */
@@ -72,7 +73,8 @@ function optionSettingsOf(read: ActionRead, goalPathFactors: readonly GoalPathFa
       if (!setting.success) continue;
       // Approved Olumi levels retain cee_hypothesis; this read has no distinct acceptance marker.
       settings.push({ id: `${option.id}:${factorId}`, label: `${factor.label} under ${optionLabel}`,
-        authorship: setting.data.source === 'cee_hypothesis' ? 'olumi_estimate' : 'user' });
+        authorship: setting.data.source === 'cee_hypothesis' ? 'olumi_estimate'
+          : setting.data.source === 'brief_extraction' || setting.data.source === 'user_specified' ? 'user' : 'unknown' });
     }
   }
   return settings;

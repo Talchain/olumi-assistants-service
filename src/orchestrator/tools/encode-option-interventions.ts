@@ -146,9 +146,8 @@ export function parseFlatInterventionKey(key: string): string | undefined {
  * USER provenance here, not a second non-user one — that file's own header
  * names it among the producer-written stamps whose gaps "must STILL block".
  *
- * ⚠ A `brief_extraction` record therefore defaults to `user_specified` exactly
- * as it did before this change — same `user_stated` class, same `required`
- * obligation, no behaviour change for any existing writer. The invariant this
+ * A recovered `brief_extraction` claim without independent human authority is
+ * unattributed. The invariant this
  * set must keep is the narrow one: NOTHING in it may map to `user_stated`, so
  * the carry can only ever NARROW a value's claim, never widen it to
  * user-authored. That is pinned in
@@ -187,13 +186,16 @@ interface RawIntervention {
   readonly unit?: string;
   /** Cap carried on the intervention object itself (proposal cap). */
   readonly cap?: number;
-  /** A NON-user provenance the writer stated explicitly; absent ⇒ default. */
+  /** A NON-user provenance the writer stated explicitly; absent ⇒ unattributed. */
   readonly source?: string;
   readonly value_confidence?: string;
   readonly reasoning?: string;
   /** TEMPORAL: a stated range the writer supplied with THIS figure (validated at persist, `intervention-range.ts`). */
   readonly range?: Dict;
 }
+
+/** In-process proof of the exact cells in a direct human edit/approval; never read from graph bytes. */
+export type InterventionHumanAuthority = readonly { readonly optionId: string; readonly factorId: string }[];
 
 export interface EncodeOptionInterventionsResult<T> {
   /** The encoded graph (a clone) when any option was rewritten; else the original reference. */
@@ -238,7 +240,7 @@ function toRawIntervention(src: unknown): RawIntervention {
   if (cap !== undefined) out.cap = cap;
   if (isPlainObject(src.range)) out.range = { ...src.range };
   // Carried ONLY when explicitly stated and recognised; anything else falls
-  // through to the unchanged default in `buildInterventionV3`.
+  // through to unattributed in `buildInterventionV3` unless the caller supplies human authority.
   if (typeof src.source === 'string' && PRESERVED_INTERVENTION_SOURCES.has(src.source)) {
     out.source = src.source;
     if (typeof src.value_confidence === 'string' && INTERVENTION_CONFIDENCES.has(src.value_confidence)) {
@@ -431,7 +433,7 @@ function sameNativeQuantity(before: Dict, after: Dict, oldFrame?: FactorScaleInf
   return oldPoint.value !== null && oldPoint.value === newPoint.value;
 }
 
-function buildInterventionV3(fac: string, value: number, rec: RawIntervention, existing: unknown, frame?: FactorScaleInfo): Dict {
+function buildInterventionV3(fac: string, value: number, rec: RawIntervention, existing: unknown, frame?: FactorScaleInfo, humanAuthority = false): Dict {
   const carried: Dict = {};
   if (isPlainObject(existing)) {
     for (const [key, entryValue] of Object.entries(existing)) {
@@ -441,10 +443,8 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   const iv: Dict = {
     ...carried,
     value,
-    // Default UNCHANGED. `rec.source` is only ever a non-user provenance the
-    // writer stated explicitly (see `PRESERVED_INTERVENTION_SOURCES`), so this
-    // can narrow the claim but never widen it to user-authored.
-    source: rec.source ?? 'user_specified',
+    // Missing or unpreserved provenance is unattributed. Only an approved cell may be user-authored.
+    ...(rec.source !== undefined ? { source: rec.source } : humanAuthority ? { source: 'user_specified' } : {}),
     target_match:
       isPlainObject(existing) && isPlainObject(existing.target_match)
         ? existing.target_match
@@ -624,6 +624,7 @@ export function encodeOptionInterventionsForEdit<T>(
   graph: T,
   touchedOptionIds?: ReadonlySet<string>,
   mustConfigureOptionIds?: ReadonlySet<string>,
+  humanAuthority: InterventionHumanAuthority = [],
 ): EncodeOptionInterventionsResult<T> {
   if (!isPlainObject(graph) || !Array.isArray((graph as Dict).nodes)) {
     return { graph, unresolvedOptionIds: [] };
@@ -669,14 +670,23 @@ export function encodeOptionInterventionsForEdit<T>(
 
       // Preserve numeric top-level entries verbatim (PR #276 configured entries).
       const base: Dict = {};
+      let humanStamped = false;
       const top = node.interventions;
       if (isPlainObject(top)) {
         for (const [fac, iv] of Object.entries(top)) {
-          if (toRawIntervention(iv).value !== undefined) base[fac] = isPlainObject(iv) ? { ...iv } : iv;
+          if (toRawIntervention(iv).value !== undefined) {
+            base[fac] = isPlainObject(iv) ? { ...iv } : iv;
+            if (isPlainObject(base[fac]) && base[fac].source === undefined
+              && humanAuthority.some(cell => cell.optionId === id && cell.factorId === fac)) {
+              base[fac].source = 'user_specified';
+              humanStamped = true;
+            }
+          }
         }
       }
 
       if (recovered.size === 0) {
+        if (humanStamped) plan.push({ index: i, id, bundle: base });
         // Nothing to encode here. A touched option carrying node-level intervention
         // intent that gatherRawInterventions could not attribute (SHAPE 2 with an
         // ambiguous target — zero or multiple factor edges) is malformed → defer.
@@ -711,7 +721,8 @@ export function encodeOptionInterventionsForEdit<T>(
           optionUnresolved = true;
           break;
         }
-        bundle[fac] = buildInterventionV3(fac, value, rec, base[fac], frames.get(fac));
+        bundle[fac] = buildInterventionV3(fac, value, rec, base[fac], frames.get(fac),
+          humanAuthority.some(cell => cell.optionId === id && cell.factorId === fac));
       }
 
       if (optionUnresolved) {

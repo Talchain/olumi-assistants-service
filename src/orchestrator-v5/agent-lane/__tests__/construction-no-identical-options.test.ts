@@ -877,7 +877,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
    */
   const GAP_54 = '£54 with AI release -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
     + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
-  const PRICE_54 = { factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' };
+  const PRICE_54: NonNullable<CandidateModel['options'][number]['interventions']>[number] = { factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' };
   type Opt = CandidateModel['options'][number];
   /** Within the limit: `padded(0, withTest)` (the user's option gap-free) plus Olumi's £54, AI availability open unless `o54` sets it. */
   const with54 = (withTest: boolean, o54: Partial<Opt> = {}) => {
