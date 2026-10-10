@@ -5041,7 +5041,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
-      let reply = withCellHorizon(typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
+      // A route-issued deadline card says its own question (the door's public_label, nothing added) as this turn's text:
+      // it enters the ONE composer and the egress gate like every other reply, so nothing below writes it again.
+      let reply = withCellHorizon(automaticDeadlineLabel !== undefined ? automaticDeadlineLabel
+        : typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
@@ -5197,10 +5200,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         obligations: obligations.length,
         ...(composedReply.measure ?? {}),
       }, 'agent-lane: the reply passed the one composer');
-    }
-    if (automaticDeadlineLabel !== undefined) {
-      const { _answer_shape: _priorShape, ...cardBody } = wireBody;
-      wireBody = { ...cardBody, assistant_text: automaticDeadlineLabel };
     }
     // History and the durable answer row below remember the same FINAL SENT text, after every gate.
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
