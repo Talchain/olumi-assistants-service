@@ -25,7 +25,7 @@ import { proposalRecord } from '../proposal-object/record.js';
 import { approvalChipsFor, approvalChipIdFor, DEADLINE_CHANGE_CHIP } from '../approval-chips.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { deadlineCardToIssue, firstAgentTurnAfterDraft, type DeadlineIssueInput } from '../deadline-card.js';
+import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, type DeadlineIssueInput } from '../deadline-card.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
 type Rec = Record<string, any>;
@@ -43,7 +43,8 @@ function world(fixture: { graph: Rec; brief: string } = d2) {
     loadGraph: async () => read(), loadGraphAndBriefText: async () => ({ graph: read(), briefText: brief }),
     ensureScenarioExists: async () => ({ user_id: null }),
     readCommittedTurn: async (_sid, id) => { const r = rows.find(r => r.turn_id === id); return r ? { id: r.id, request_hash: r.request_hash,
-      user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used } : null; },
+      user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used,
+      pending_actions: (r as Rec).pending_actions ?? [] } : null; },
     readMostRecentPendingActions: async (_sid, opts) => { if (broken) throw new Error('unreadable carrier'); if (snapshotBroken && opts?.onLatestRowId) { snapshotBroken = false; throw new Error('snapshot read failed'); } opts?.onLatestRowId?.(latest()?.id ?? null); return (latest() as Rec)?.pending_actions ?? []; },
     readRecent: async () => rows.filter(r => !r.turn_id.endsWith(':claim')),
     readFactsWithTurnFor: async ids => rows.flatMap(r => ids.includes(r.id) ? (writes.find(w => w.turn_id === r.turn_id)?.handler_facts ?? [])
@@ -335,5 +336,159 @@ describe('R4 durable first-Agent-turn gate', () => {
   it('Change date follow-up can still propose THIS newly typed deadline through the model door', async () => {
     const w = world(); const out = await w.caps.proposeGoalDeadline!(w.ctx('My deadline is eleven months'), { deadline_words: 'eleven months', rationale: '' });
     expect(out).toMatchObject({ ok: true, public_label: 'Is your deadline 10 September 2027 (11 months from 10 October 2026)?' });
+  });
+});
+
+/**
+ * R6 — served 08bbe2eb (scenario b2ad8385, UI a75a01fd, CEE 08bbe2e): the create turn is ITSELF an Agent turn (the model
+ * calls `build_model_from_brief`), so its answer row is always newer than the registration row. R4's "no Agent answer
+ * after the draft" made the route-issued card unreachable on every real draft; only synthetic rows (a registration row
+ * and nothing after it) reached it. The ONE answer to the turn that built the draft — the Agent row whose user message
+ * IS the stored brief — is not an offer; any second Agent answer still closes it.
+ */
+describe('R6 the draft was built inside an Agent turn', () => {
+  const buildAnswer = (w: ReturnType<typeof world>, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_id: randomUUID(),
+    request_hash: 'agent_turn:build', turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: d2.brief, assistant_message: 'Here is the model.', ...over });
+  it('the first turn after the build turn offers exactly one bound card; the turn after that never repeats it', async () => {
+    const w = world(), before = w.read(); w.rows.unshift(buildAnswer(w));
+    const turn = await route(w), first = await turn(), { call, yes } = card(first);
+    expect(first.assistant_text).toBe(yes.detail); expect(w.read()).toEqual(before);
+    expect(call.proposal_id).toEqual(expect.any(String));
+    const second = await turn({ agent_session_id: first._agent.session_id });
+    expect(second._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
+  });
+  it('an Agent answer that is not the build answer, or a second Agent answer, keeps the offer closed', async () => {
+    const other = world(); other.rows.unshift(buildAnswer(other, { user_message: 'What do you think?' }));
+    expect((await (await route(other))())._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
+    const two = world(); two.rows.unshift(buildAnswer(two), buildAnswer(two, { request_hash: 'agent_turn:chat', user_message: 'Why?' }));
+    expect((await (await route(two))())._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
+  });
+  it('a re-sent brief (a second answer carrying the same text) is a second answer, not the build answer', () => {
+    const sid = randomUUID(), brief = d2.brief;
+    const row = (request_hash: string, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: randomUUID(), request_hash,
+      turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, ...over });
+    const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false });
+    const built = row('agent_turn:build', { user_message: brief, assistant_message: 'Here is the model.' }), resent = row('agent_turn:resent', { user_message: brief, assistant_message: 'Here is the model.' });
+    expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [built, construction] }, sid, brief)).toBe(true);
+    expect(firstAgentTurnAfterDraft({ rowId: resent.id, rows: [resent, built, construction] }, sid, brief)).toBe(false);
+    expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [{ ...built, user_message: 'Which one?' }, construction] }, sid, brief)).toBe(false);
+  });
+  const rowsOf = () => {
+    const sid = randomUUID(), brief = d2.brief;
+    const row = (request_hash: string, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: randomUUID(), request_hash,
+      turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, ...over });
+    const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false });
+    return { sid, brief, row, construction };
+  };
+  it('whitespace around the typed message still matches the trimmed stored brief; nothing the answer SAYS decides whether it was the build answer', () => {
+    const { sid, brief, row, construction } = rowsOf();
+    const spaced = row('agent_turn:build', { user_message: ` ${brief}\n`, assistant_message: 'Here is the model.' });
+    expect(firstAgentTurnAfterDraft({ rowId: spaced.id, rows: [spaced, construction] }, sid, brief)).toBe(true);
+    // DL github-6d (#2948 r6-r9): no reply prose decides it. Null content, a question about the deadline, a stated date in any wording,
+    // and a year in passing all leave the build answer a build answer; only the committed offer (below) can close the card.
+    for (const said of [null, '', 'Here is the model.', 'Is your deadline 10 August 2027 (10 months from 10 October 2026)?', 'The deadline is August 10th, 2027. Does that work?',
+      'Your deadline is:\n\n10 August 2027.\n\nDoes that work for you?', 'Would you like to use 10 August 2027 as your due date?', 'Launch by 31 December 2027.']) {
+      const built = row('agent_turn:build', { user_message: brief, assistant_message: said });
+      expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [built, construction] }, sid, brief), String(said)).toBe(true);
+    }
+  });
+  describe('R8 the build turn already OFFERED a deadline: a committed proposal, never the prose (DL github-6d)', () => {
+    const proposal = (over: Rec = {}) => ({ id: randomUUID(), scenario_id: 'x', chip_id: 'chip', action: { kind: 'apply_proposed_change', proposal_ref: 'chip',
+      inline_patch: { agent_proposal: { operations: [{ op: 'set_goal_deadline', path: 'g', value: {} }] } } }, ...over });
+    const startOf = (committedPending: ((id: string) => Promise<readonly unknown[] | null | undefined>) | undefined) => {
+      const { sid, brief, row, construction } = rowsOf(), built = row('agent_turn:build', { user_message: brief, assistant_message: 'Here is the model.' });
+      return { sid, brief, built, start: { rowId: built.id, rows: [built, construction], ...(committedPending ? { committedPending } : {}) } };
+    };
+    it('a committed set_goal_deadline proposal on the build row means it was offered; any other committed action does not', async () => {
+      const offered = startOf(async () => [proposal()]);
+      expect(await buildTurnAlreadyOfferedDeadline(offered.start, offered.sid, offered.brief)).toBe(true);
+      for (const committed of [[], [proposal({ action: { kind: 'run_analysis' } })], [proposal({ action: { kind: 'apply_proposed_change', proposal_ref: 'c',
+        inline_patch: { agent_proposal: { operations: [{ op: 'set_factor_value', path: 'f', value: 1 }] } } } })]]) {
+        const other = startOf(async () => committed);
+        expect(await buildTurnAlreadyOfferedDeadline(other.start, other.sid, other.brief), JSON.stringify(committed)).toBe(false);
+      }
+    });
+    it('an unreadable carrier is UNKNOWN and fails closed: no reader, a throw, a missing row, a non-array, an entry that is not a record', async () => {
+      for (const reader of [undefined, async () => { throw new Error('unreadable'); }, async () => null, async () => undefined,
+        async () => 'nope' as unknown as unknown[], async () => [null], async () => ['junk']]) {
+        const w = startOf(reader as never);
+        expect(await buildTurnAlreadyOfferedDeadline(w.start, w.sid, w.brief)).toBe(true);
+      }
+    });
+    it('no Agent build answer means nothing was offered; a second answer is closed by the answer count, not by this', async () => {
+      const { sid, brief, construction } = rowsOf();
+      expect(await buildTurnAlreadyOfferedDeadline({ rowId: construction.id, rows: [construction] }, sid, brief)).toBe(false);
+      const { sid: s2, brief: b2, row, construction: c2 } = rowsOf(), a = row('agent_turn:build', { user_message: b2 }), b = row('agent_turn:chat', { user_message: 'Why?' });
+      expect(await buildTurnAlreadyOfferedDeadline({ rowId: b.id, rows: [b, a, c2], committedPending: async () => [] }, s2, b2)).toBe(true);
+    });
+    // The route, end to end: the real carrier a first turn commits is lifted onto a build row, and a LATER system row (the user's
+    // decline, say) is the newest, so nothing is live and only the committed proposal can say the date was already offered.
+    const offeredEarlier = async () => { const w = world(), turn = await route(w); await turn(); return (w.rows[0] as Rec).pending_actions as Rec[]; };
+    const declined = (w: ReturnType<typeof world>) => makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_id: randomUUID(), request_hash: 'system_event:decline',
+      turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, assistant_message: null });
+    const proposals = (b: Rec) => b._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline');
+    it('the build turn committed the deadline proposal, the user declined, the next turn is NOT offered the card again', async () => {
+      const carried = await offeredEarlier(); expect(carried.length).toBeGreaterThan(0);
+      const w = world(); w.rows.unshift(buildAnswer(w, { pending_actions: carried }), declined(w));
+      expect(proposals(await (await route(w))())).toEqual([]);
+    });
+    it('CONTRAST: the same build row with nothing committed is offered the card', async () => {
+      const w = world(); w.rows.unshift(buildAnswer(w, { pending_actions: [] }), declined(w));
+      card(await (await route(w))());
+    });
+    it('a build answer whose prose asks about the deadline and mentions years, with no committed proposal, is still offered the card', async () => {
+      const w = world(); w.rows.unshift(buildAnswer(w, { assistant_message: 'Is your deadline 10 August 2027? Launch is planned for 31 December 2027. What is the deadline?' }));
+      card(await (await route(w))());
+    });
+    it('a goal that already holds a deadline is never offered one', () => {
+      const g = structuredClone(d2.graph); Object.assign(goal(g), { goal_horizon: { deadline: '2027-08-10' } });
+      expect(deadlineCardToIssue(issueInput(g))).toBeUndefined();
+    });
+  });
+});
+
+/**
+ * R7 — the SERVED goal node of scenario b2ad8385 (CEE 08bbe2e): `goal_threshold_unit: "%"`, label "Riders served without
+ * being turned away". A unit with no letters named no subject, so attribution failed even once the build answer stopped
+ * closing the offer. The label names the subject then, minus function words.
+ */
+describe('R7 attribution on the served share-of-riders goal', () => {
+  const brief = 'Our bike-share scheme has 1,500 registered riders today and adds about 60 new riders a month. Our depot can handle at most 1,900 riders, '
+    + 'and we want to stay under that ceiling, without turning anyone away, over the next ten months. We could rent a second depot or add a Sunday maintenance crew. Which should we do?';
+  const served = { id: 'riders_served_without_being_turned_away', ref: 'G1', kind: 'goal', label: 'Riders served without being turned away',
+    provenance: 'ai_inferred', goal_threshold_unit: '%', goal_threshold_frame: 'level', goal_deadline_as_stated: 'ten months' };
+  const input = (over: Partial<DeadlineIssueInput> = {}): DeadlineIssueInput => ({ graph: { nodes: [served], edges: [] }, storedBrief: brief, typedNow: null,
+    reference: R, toolCalls: [], mutated: false, fastPath: 'run', proposalOffered: false, pending: [], priorOffer: false, ...over });
+  it('offers the served goal its ten months, bound to the goal id and verbatim words', () => {
+    expect(deadlineCardToIssue(input())).toEqual({ goal_id: served.id, words: 'ten months', reference: R, date: '2027-08-10' });
+  });
+  it('a label-derived subject never attributes a date through a function word ("without") or another subject', () => {
+    const other = 'Our depot can handle at most 1,900 riders. We must finish the migration without downtime in ten months.';
+    expect(deadlineCardToIssue(input({ storedBrief: other }))).toBeUndefined();
+    const noSubject = 'We want to stay under that ceiling, without turning anyone away, over the next ten months.';
+    expect(deadlineCardToIssue(input({ storedBrief: noSubject }))).toBeUndefined();
+  });
+  it('one shared label word never attributes another quantity\'s date or a duration (buddy r2 P2)', () => {
+    for (const text of ['We want to increase customers served to 500 in ten months.', 'We must finish the survey of riders in ten months.',
+      'We keep riders enrolled in the survey over ten months.', 'We must finish the survey of riders served in ten months.',
+      'We want to keep riders served without turning anyone away indefinitely, and finish our depot renovation in ten months.',
+      'We want to increase survey responses from riders served to 500 in ten months.',
+      'We want to keep riders served without turning anyone away indefinitely, and renovate our depot in ten months.',
+      'We want to keep riders served without turning anyone away indefinitely, and refurbish our depot in ten months.',
+      'We want to increase survey responses from riders served to five hundred in ten months.',
+      'We want to keep riders served without turning anyone away indefinitely, and refurbish the depot serving our riders in ten months.',
+      'We want to keep riders served without turning anyone away indefinitely, and renovate our riders\' depot in ten months.',
+      'We want to increase survey responses from riders served in ten months.',
+      'We want to increase survey responses from riders served, ideally to 500, in ten months.',
+      'We want to increase survey responses from riders served, ideally, in ten months.',
+      'We want to increase survey responses from 200 to 500, over the next ten months.'])
+      expect(deadlineCardToIssue(input({ storedBrief: text })), text).toBeUndefined();
+    // The served sentence (its date in a bare "over the next ten months" clause) and a comma-free level stance still qualify.
+    expect(deadlineCardToIssue(input())).toMatchObject({ date: '2027-08-10' });
+  });
+  it('the unit-with-letters path is unchanged: "under" is still a subject word there (buddy r2 P3)', () => {
+    const goal = { id: 'under_65_population', kind: 'goal', label: 'Under-65 population', goal_threshold_unit: 'people under 65', goal_deadline_as_stated: 'ten months' };
+    expect(deadlineCardToIssue(input({ graph: { nodes: [goal], edges: [] }, storedBrief: 'We want to increase our under-65 population to 500 in ten months.' })))
+      .toEqual({ goal_id: 'under_65_population', words: 'ten months', reference: R, date: '2027-08-10' });
   });
 });

@@ -2907,7 +2907,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       try {
         let latestRowId: string | null = null;
         heldAtStart = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict', onLatestRowId: id => { latestRowId = id; } })).filter(isHeldProposal);
-        if (latestRowId !== null) deadlineTurnStart = { rowId: latestRowId, rows: await store.readRecent(scenarioId, CONVERSATION_ROWS_READ) };
+        if (latestRowId !== null) deadlineTurnStart = { rowId: latestRowId, rows: await store.readRecent(scenarioId, CONVERSATION_ROWS_READ),
+          ...(typeof store.readCommittedTurn === 'function' ? { committedPending: async (turnId: string) => (await store.readCommittedTurn!(scenarioId, turnId))?.pending_actions } : {}) };
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: held proposals unreadable at turn start — the latest row rules');
       }
