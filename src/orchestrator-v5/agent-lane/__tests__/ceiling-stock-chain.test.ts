@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import Fastify from 'fastify';
+import { randomUUID } from 'node:crypto';
+import type {} from '../../../plugins/scenario-ownership.js';
+import type {} from '@fastify/rate-limit';
 const liveStore = vi.hoisted(() => ({ value: null as unknown }));
 vi.mock('../../session/index.js', async original => ({
   ...(await original<typeof import('../../session/index.js')>()), getSessionStore: () => liveStore.value,
@@ -9,9 +13,20 @@ vi.mock('../../../adapters/llm/router.js', () => ({
   getAdapterWithResolution: () => { throw new Error('Ceiling chain forbids providers'); },
   getMaxTokensFromConfig: () => undefined,
 }));
+// A no-tool Agent reply is replayed locally; this never calls a model or provider adapter.
+vi.mock('../runtime/agent-loop.js', async original => ({
+  ...(await original<typeof import('../runtime/agent-loop.js')>()),
+  runAgentTurn: async () => ({ assistant_text: 'Local no-tool reply', items: [], tool_calls: [], tool_results: [], mutated: false,
+    hops: 0, stopped_reason: 'answered', timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0,
+      tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } }),
+}));
+vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 import fixture from '../../../../tests/fixtures/ceiling-stock-t3.json';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { proposalPendingAction } from '../durable-proposal.js';
+import { proposalRecord } from '../proposal-object/record.js';
+import { identityProposalOfferable, readExecutableHeldProposalOffers } from '../held-approval-offers.js';
 import { ProposalStore } from '../proposal.js';
 import { identityApproveMessage, identityReadingOf } from '../identity-card.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
@@ -19,7 +34,7 @@ import { applyGoalHorizonEdit } from '../../goal-target/goal-horizon-write.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { goalStockAccumulationOf } from '../../goal-target/goal-horizon-detail.js';
 import { CeilingStockPendingSchema, ceilingStockPostimage, ceilingStockRecorded, proposeCeilingStock, recogniseCeilingStock } from '../ceiling-stock.js';
-import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
+import { applyIdentityConfirmEdit, identityCardOfferable, identityConfirmPostimageIsScoped, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { approvalChipsFor } from '../approval-chips.js';
@@ -41,16 +56,18 @@ function held(): Rec {
   if (result.kind !== 'mutated') throw new Error(JSON.stringify(result));
   return result.mutatedGraph as Rec;
 }
-function world(initial = held(), brief = fixture.brief) {
+function world(initial = held(), brief = fixture.brief, scenarioId = SID) {
   let bytes = JSON.stringify(initial);
   const read = (): Rec => JSON.parse(bytes);
   const proposals = new ProposalStore(); const writes: Rec[] = [];
   const store = createMockSessionStore({
     loadGraph: async () => read(), loadGraphAndBriefText: async () => ({ graph: read(), briefText: brief }),
     append: async write => { writes.push(write); if (write.graph !== undefined) bytes = JSON.stringify(write.graph); return { id: `row-${writes.length}` }; },
+    readCommittedTurn: async (_sid, id) => { const w = writes.find(w => w.turn_id === id); return w ? { id: `row-${writes.indexOf(w)+1}`, request_hash: w.request_hash, pending_actions: w.pending_actions ?? [], user_message: w.userMessage ?? null, assistant_message: w.assistantMessage ?? null, llm_calls_used: w.llm_calls_used } : null; },
+    readMostRecentPendingActions: async (_sid, opts) => { const w = [...writes].reverse().find(w => !w.turn_id.endsWith(':claim')); opts?.onLatestRowId?.(w ? `row-${writes.indexOf(w)+1}` : null); return w?.pending_actions ?? []; },
     readRecent: async () => writes.map((w, i) => makeSessionTurnRow({ id: `row-${i+1}`, scenario_id: w.scenario_id, turn_id: w.turn_id,
       turn_class: w.turn_class, handler_id: w.handler_id, request_hash: w.request_hash, response_emitted: w.response_emitted,
-      llm_calls_used: w.llm_calls_used, duration_ms: w.duration_ms })),
+      llm_calls_used: w.llm_calls_used, duration_ms: w.duration_ms })).filter(r => !r.turn_id.endsWith(':claim')).reverse(),
     readFactsWithTurnFor: async ids => writes.flatMap((w, i) => ids.includes(`row-${i+1}`)
       ? w.handler_facts.map((fact: Rec) => ({ turn_id: `row-${i+1}`, fact_created_at: '2026-10-10T12:00:00Z', fact })) : []),
   });
@@ -63,13 +80,13 @@ function world(initial = held(), brief = fixture.brief) {
   const caps = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, {
     commitOptionLevels: input => commitOptionLevelsInProcess(input, 'ceiling-chain'),
   });
-  const ctx = (text: string) => ({ scenario_id: SID, authenticated_user_id: null, request_id: 'ceiling-chain', user_text: text, user_turn_text: text });
+  const ctx = (text: string) => ({ scenario_id: scenarioId, authenticated_user_id: null, request_id: 'ceiling-chain', user_text: text, user_turn_text: text });
   const offer = () => caps.proposeIdentity!(ctx('Confirm the reading'));
   const confirm = (offered: Rec) => {
     const text = identityApproveMessage(offered.card.words);
     return caps.authoriseChange({ ...ctx(text), typed_approval_of: offered.proposal_id, typed_approval_words: text }, { proposal_id: offered.proposal_id });
   };
-  return { read, writes, proposals, offer, confirm, replace: (g: Rec) => { bytes = JSON.stringify(g); } };
+  return { scenarioId, store, read, writes, proposals, offer, confirm, replace: (g: Rec) => { bytes = JSON.stringify(g); } };
 }
 describe('typed ceiling-stock confirmation chain', () => {
   it('T3: offers on held H, preserves the derived goal until Yes, atomically records stock ≤ stated ceiling, and reloads', async () => {
@@ -461,4 +478,78 @@ describe('typed ceiling-stock confirmation chain', () => {
       reading_token: key === 'wrong token' ? 'wrong' : identityConfirmReadingToken(changed) })).toMatchObject({ kind: 'refused', reason: 'reading_not_confirmed' });
   });
 
+});
+
+// #2946 owns the stored approval authority, independently of the automatic deadline issuer.
+describe('ceiling offerability on the stored graph', () => {
+  it('O1 pending projection and fresh-worker held chip survive carry and reload', async () => {
+    const w = world(), offered = await w.offer() as Rec, graph = w.read();
+    const proposal = w.proposals.get(offered.proposal_id)!;
+    const chip = approvalChipsFor([{ name: 'propose_identity', ok: true, mutated: false, proposal_id: proposal.proposal_id }],
+      () => ({ proposal, result: offered as never }))[0]!;
+    const carrier = proposalPendingAction(proposal, chip, { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+    expect(proposalRecord(carrier, graph)).toBeDefined();
+    expect(identityProposalOfferable(proposal, graph)).toBe(true);
+    const reloaded = await readExecutableHeldProposalOffers({ scenarioId: SID, userId: null, graphHash: hash(graph), graph,
+      latest: [carrier], rows: [{ turn_id: 'offered' }], store: { readCommittedTurn: async () => ({ pending_actions: [carrier] }) } });
+    expect(reloaded).toEqual([expect.objectContaining({ proposal_id: proposal.proposal_id,
+      suggested_actions: expect.arrayContaining([expect.objectContaining({ id: chip.id, detail: offered.card.words })]) })]);
+  });
+  it.each(['stock', 'flow', 'ceiling'] as const)('O4 changed %s value or unit removes the stored card', async key => {
+    const w = world(), offered = await w.offer() as Rec, proposal = w.proposals.get(offered.proposal_id)!, reading = identityReadingOf(proposal)!;
+    for (const field of ['raw_value', 'unit']) {
+      const graph = w.read(), os = node(graph, reading.ceiling_stock![key].id).observed_state;
+      os[field] = field === 'unit' ? 'bikes' : os[field]+1;
+      expect(identityProposalOfferable(proposal, graph)).toBe(false);
+    }
+  });
+  it('O4 any existing identity, wrong goal/H, or installed carrier/zero removes the stored card', async () => {
+    const w = world(), offered = await w.offer() as Rec, proposal = w.proposals.get(offered.proposal_id)!, p = identityReadingOf(proposal)!.ceiling_stock!;
+    for (const change of [(g: Rec) => { goal(g).nonlinear_identity = { operation: 'sum', factor_ids: ['already'], stated_in_brief: true }; },
+      (g: Rec) => { goal(g).id += '_other'; }, (g: Rec) => { goal(g).goal_horizon_months = 11; },
+      (g: Rec) => { g.nodes.push({ id: p.transformation.carrier_id }); }, (g: Rec) => { g.nodes.push({ id: p.transformation.zero_id }); }]) {
+      const graph = w.read(); change(graph); expect(identityProposalOfferable(proposal, graph)).toBe(false);
+    }
+    expect((await w.confirm(offered)).applied).toBe(true);
+    expect(identityProposalOfferable(proposal, w.read())).toBe(false);
+  });
+});
+
+const replayApps: ReturnType<typeof Fastify>[] = [];
+afterEach(async () => { for (const app of replayApps.splice(0)) await app.close(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+describe('ceiling route reoffer', () => {
+  it.each(['Yes', 'No'])('O3 typed Run without tools reoffers once with the same chip; settled %s never reoffers', async answer => {
+    const w = world(held(), fixture.brief, randomUUID()), offered = await w.offer() as Rec;
+    vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
+    vi.stubGlobal('fetch', vi.fn(() => { throw new Error('No network in ceiling replay'); }));
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const app = Fastify({ logger: false }); replayApps.push(app);
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: w.read(), graph_hash: hash(w.read()), brief_text: fixture.brief }));
+    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
+    await app.register(agentV1TurnRoute); await app.ready();
+    const turn = async (over: Rec = {}) => {
+      const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        turn_id: randomUUID(), scenario_id: w.scenarioId, message: 'Run the analysis.', ...over } });
+      expect(response.statusCode, response.body).toBe(200); return response.json() as Rec;
+    };
+    const first = await turn();
+    expect(first._agent.tool_calls.filter((c: Rec) => c.name === 'propose_identity')).toEqual([
+      expect.objectContaining({ ok: true, proposal_id: offered.proposal_id })]);
+    const chip = first.suggested_actions.find((c: Rec) => c.detail === offered.card.words);
+    expect(chip).toMatchObject({ id: `agent-approve-proposal:${offered.proposal_id}` });
+    const second = await turn({ agent_session_id: first._agent.session_id });
+    expect(second.suggested_actions).toContainEqual(expect.objectContaining({ id: chip.id, detail: chip.detail }));
+    expect(second._agent.tool_calls.filter((c: Rec) => c.name === 'propose_identity')).toHaveLength(0);
+    const yes = await turn({ message: answer === 'Yes' ? chip.message : 'No.', source: 'chip_click', chip: { id: answer === 'Yes' ? chip.id : `agent-decline-proposal:${offered.proposal_id}` }, agent_session_id: second._agent.session_id });
+    expect(yes._agent.tool_calls).toContainEqual(expect.objectContaining({ name: answer === 'Yes' ? 'authorise_change' : 'withdraw_proposal', ok: true, mutated: answer === 'Yes' }));
+    const settled = await turn({ agent_session_id: yes._agent.session_id });
+    expect(settled._agent.tool_calls.filter((c: Rec) => c.name === 'propose_identity')).toHaveLength(0);
+    expect(settled.suggested_actions.some((c: Rec) => c.id === chip.id)).toBe(false);
+  });
+  it('brief-aware read-back requires exact ceiling reading, not a target or changed words', () => {
+    const graph = held(), reading = proposeCeilingStock(graph, fixture.brief)!;
+    expect(identityCardOfferable(graph, undefined, reading, fixture.brief)).toBe(true);
+    expect(identityCardOfferable(graph, undefined, reading, fixture.brief.replace('at most', 'we want'))).toBe(false);
+    expect(identityCardOfferable(graph, undefined, { ...reading, words: reading.words+' changed' }, fixture.brief)).toBe(false);
+  });
 });

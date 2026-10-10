@@ -80,7 +80,7 @@ import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/gr
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { declinedProposalOf, declineChipIdFor, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt, PLAIN_APPROVAL_SUPERSEDED } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
@@ -4163,10 +4163,32 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (`identityCardToIssue`): the SAME tool, once; it writes nothing, and `approvalChipsFor` offers its button.
     // …and RE-OFFERED on a turn that asks for the reading but proposed nothing (R3 5910559613: a typed "Run the analysis."
     // before confirming got the question and no button, `identityCardToReoffer`), read off the STORED model.
+    const identityOfferRead = readbackGraph == null ? undefined
+      : await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {}).catch(() => undefined);
+    const identityOfferBrief = typeof identityOfferRead?.json.brief_text === 'string' ? identityOfferRead.json.brief_text : null;
+    let ceilingAnswerSettled = false;
+    // Only the new ceiling branch needs this historical check; preserve the legacy re-offer's predicate.
+    if (readbackGraph != null && !identityCardOfferable(readbackGraph)
+      && identityCardOfferable(readbackGraph, undefined, undefined, identityOfferBrief)) {
+      try {
+        const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
+        for (let i = 0; i < rows.length && !ceilingAnswerSettled; i++) {
+          const committed = await store.readCommittedTurn?.(scenarioId, rows[i]!.turn_id);
+          for (const held of committed?.pending_actions ?? []) {
+            const parsed = parsePendingAction(held), proposal = parsed === null ? undefined : agentProposalOf(parsed);
+            const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
+            if (proposal?.scenario_id !== scenarioId || proposal.user_id !== userId || reading?.ceiling_stock === undefined
+              || !identityCardOfferable(readbackGraph, undefined, reading, identityOfferBrief)) continue;
+            const declineSuffix = withChipOperation('', chipOperationOf({ chip: { id: declineChipIdFor(proposal.proposal_id) } }));
+            ceilingAnswerSettled = rows.slice(0, i).some(row => row.request_hash.endsWith(declineSuffix));
+          }
+        }
+      } catch { ceilingAnswerSettled = true; } // An unreadable answer cannot authorise another question.
+    }
     const reoffer = identityCardToReoffer({
       toolCalls: result.tool_calls, mutated: result.mutated, fastPath,
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
-      readingWaiting: readbackGraph != null && identityCardOfferable(readbackGraph),
+      readingWaiting: !ceilingAnswerSettled && readbackGraph != null && identityCardOfferable(readbackGraph, undefined, undefined, identityOfferBrief),
     });
     let automaticIdentityProposalId: string | undefined;
     const partFigures = identityPartFiguresToIssue({ graph: readbackGraph, userText: typedNow,

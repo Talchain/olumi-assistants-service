@@ -31,7 +31,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { admitStoredProductDeclaration, type StoredProductDeclarationRefusal } from '../agent-lane/admit-model.js';
-import { proposeProductIdentity, todaysLevelFor, type IdentityPartLevel } from '../agent-lane/identity-proposal.js';
+import { proposeProductIdentity, todaysLevelFor, type IdentityPartLevel, type IdentityProposal } from '../agent-lane/identity-proposal.js';
 import { identityConfirmBaseIsWritable } from './editable-graph.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { plotResolvesFrame } from '../../cee/graph-readiness/identity-frames.js';
@@ -41,7 +41,8 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { identityConflictsWithScope } from '../agent-lane/goal-scope.js';
 import type { GoalScope } from '../../schemas/goal-scope.js';
-import { ceilingStockPostimage, ceilingStockWords, type CeilingStockPending } from '../agent-lane/ceiling-stock.js';
+import { ceilingStockPostimage, ceilingStockWords, proposeCeilingStock, type CeilingStockPending } from '../agent-lane/ceiling-stock.js';
+import { ceilingStockPendingOfferable } from '../agent-lane/ceiling-stock-carrier.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 
 export interface IdentityWithdrawalReading {
@@ -236,8 +237,18 @@ export function identityPartLevelAsk(goalLabel: string, formula: readonly string
  * Whether the STORED model holds a reading whose card may be offered: one to confirm, a base its writer can record, and
  * every part with a level (`identityPartsWithoutLevel`). The re-offer's predicate (`readingWaiting`), the same as the Run hint's.
  */
-export function identityCardOfferable(storedGraph: unknown, partLevels?: readonly IdentityPartLevel[]): boolean {
+export function identityCardOfferable(storedGraph: unknown, partLevels?: readonly IdentityPartLevel[],
+  reading?: IdentityProposal, brief?: string | null): boolean {
+  if (reading?.ceiling_stock !== undefined) {
+    return ceilingStockPendingOfferable(storedGraph, reading.ceiling_stock)
+      && (brief === undefined || isDeepStrictEqual(proposeCeilingStock(storedGraph, brief), reading));
+  }
   const card = proposeProductIdentity(storedGraph);
+  // A route with the canonical brief may discover the new reading; graph-only carries must name their typed pending.
+  if (card === null && brief !== undefined) {
+    const ceiling = proposeCeilingStock(storedGraph, brief);
+    return ceiling !== null && ceilingStockPendingOfferable(storedGraph, ceiling.ceiling_stock);
+  }
   if (card === null || !identityConfirmBaseIsWritable(storedGraph)) return false;
   // A card CARRYING the user's typed figures (#4b) is offerable when its Yes would write them: the writer's own
   // asked-check, then the same part-level write on a copy, then the same no-missing-part predicate the writer applies.
