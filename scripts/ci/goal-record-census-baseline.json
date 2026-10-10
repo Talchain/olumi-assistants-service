@@ -1,5 +1,5 @@
 {
-  "source_sha": "72359a6e36c96d61919fd4f70a82791a9a749905",
+  "source_sha": "3ace48693cba1a03e6f36b490d442fc12d3cfc48",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -213,7 +213,7 @@
       "src/orchestrator-v5/admission/target-testability.ts": 1,
       "src/orchestrator-v5/agent-lane/accumulation-identity.ts": 2,
       "src/orchestrator-v5/agent-lane/admit-model.ts": 1,
-      "src/orchestrator-v5/agent-lane/ceiling-stock-carrier.ts": 1,
+      "src/orchestrator-v5/agent-lane/ceiling-stock-carrier.ts": 2,
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 1,
       "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 1,
       "src/orchestrator-v5/agent-lane/horizon-attestation.ts": 1,
@@ -801,7 +801,7 @@
     "goal_deadline_as_stated": 9,
     "goal_direction": 97,
     "goal_horizon": 52,
-    "goal_horizon_months": 41,
+    "goal_horizon_months": 42,
     "goal_level_reading": 18,
     "goal_node_id": 280,
     "goal_period": 3,
@@ -826,7 +826,7 @@
     "threshold_source": 36,
     "unit_reading": 79
   },
-  "total_references": 2378,
+  "total_references": 2379,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
