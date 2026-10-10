@@ -246,9 +246,9 @@ describe('B5 recorded ACC stock beside separately bound monthly inflow and MRR',
     });
   }
   it('keeps the recorded current £12,250 with the existing required goal product', () => {
-    const { brief, draft } = recordedACC('accumulation-pilot-head.json');
-    draft.identities = [...(draft.identities ?? []), { outcome: 'MRR', operation: 'product',
-      factors: ['Pro price', 'Pro subscribers at month 12'], provenance: 'inferred' }];
+    const { brief, draft: original } = recordedACC('accumulation-pilot-head.json');
+    const draft: CandidateModel = { ...original, identities: [...(original.identities ?? []),
+      { outcome: 'MRR', operation: 'product', factors: ['Pro price', 'Pro subscribers at month 12'], provenance: 'inferred' }] };
     const stock = draft.factors.find(f => f.label === 'Pro subscribers today')!;
     stock.baseline_evidence = { quote: ACC_STOCK };
     const { reloaded } = readBack(draft, brief, stock.label);
@@ -293,9 +293,9 @@ describe('B5 recorded ACC stock beside separately bound monthly inflow and MRR',
     });
   }
   it('does not detach an ambiguous independently bound flow', () => {
-    const { brief, draft } = recordedACC('accumulation-live2-head.json');
-    const flow = draft.factors.find(f => f.baseline_value === 20)!;
-    draft.factors.push({ ...flow });
+    const { brief, draft: original } = recordedACC('accumulation-live2-head.json');
+    const flow = original.factors.find(f => f.baseline_value === 20)!;
+    const draft: CandidateModel = { ...original, factors: [...original.factors, { ...flow }] };
     const stock = draft.factors.find(f => f.label === 'Pro subscribers today')!;
     stock.baseline_evidence = { quote: ACC_STOCK };
     expect(verifiedFactorLevel(draft, stock, brief)).toBe(false);
