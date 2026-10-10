@@ -24,7 +24,13 @@ vi.mock('../runtime/agent-loop.js', async original => ({
       tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } }),
 }));
 vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
-import fixture from '../../../../tests/fixtures/ceiling-stock-t3.json';
+import recordedFixture from '../../../../tests/fixtures/ceiling-stock-t3.json';
+// S4 time class (`goal-target/time-class.ts`, #2952): the recorded T3 brief says the second depot starts "in month 3", which the product
+// cannot yet work out, so that FULL brief is refused a ceiling card (pinned in goal-target/__tests__/time-class.test.ts). This chain tests the
+// card machinery on the SAME brief with only that clause removed; the recorded graph is untouched.
+const ONSET_CLAUSE = ', starting in month 3,';
+if (!recordedFixture.brief.includes(ONSET_CLAUSE)) throw new Error('the recorded T3 brief no longer states its month-3 start: drop this adaptation');
+const fixture = { ...recordedFixture, brief: recordedFixture.brief.replace(ONSET_CLAUSE, ',') };
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { proposalPendingAction } from '../durable-proposal.js';

@@ -184,7 +184,9 @@ describe('R3 deterministic authorship and placement guards', () => {
 });
 describe('R2 Run → deadline Yes → existing reading, with exact unrelated-byte scope', () => {
   it.each([['d2 structural', d2], ['d1 ceiling', d1]] as const)('%s', async (shape, fixture) => {
-    const w = world(fixture), before = w.read(), turn = await route(w), first = await turn(), { yes } = card(first);
+    // S4 time class (#2952): both recorded briefs state a month-3 start the product cannot yet work out, so the FULL brief is refused a
+    // reading card (time-class.test.ts pins that). This chain tests the existing reading path on the same brief without that clause.
+    const w = world({ ...fixture, brief: fixture.brief.replace(', starting in month 3,', ',') }), before = w.read(), turn = await route(w), first = await turn(), { yes } = card(first);
     expect(w.read()).toEqual(before);
     const answer = await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: first._agent.session_id });
     expect(answer._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
