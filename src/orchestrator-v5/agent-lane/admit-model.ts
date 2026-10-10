@@ -802,7 +802,7 @@ export function framedObservedState(f: {
     // trusted affine conversion of a verified receipt) proved this exact quantity. Everything else keeps its staging bytes.
     ...(verifiedCurrentLevel ? { source: 'brief_extraction', extractionType: 'explicit' }
       : !userMaterialUnverified && f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {}
-        : { source: 'cee_inference', ...(userMaterialUnverified ? { extractionType: 'inferred' } : {}) }),
+        : { source: 'cee_inference', ...(userMaterialUnverified || f.provenance === 'ai_proposed' || f.provenance === 'inferred' ? { extractionType: 'inferred' } : {}) }),
     ...(userMaterialUnverified ? { user_material_unverified: true as const } : {}),
   };
   const cap = f.plausible_max;
