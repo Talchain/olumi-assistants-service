@@ -10,9 +10,12 @@ export interface DeadlineTurnStart {
   readonly rows: readonly SessionTurnWithContent[];
 }
 /**
- * The strict pending read and the content read must identify the SAME newest non-claim row, and NO Agent answer is newer
- * than this brief's construction row. Earlier (pre-draft) Agent conversation and later system events are not an offer
- * of this card; the Agent answer that carries the offer is, so it can never be offered twice (buddy r1 P2).
+ * The strict pending read and the content read must identify the SAME newest non-claim row, and no Agent answer is newer
+ * than this brief's construction row — EXCEPT the one answer to the turn that BUILT the draft: the user's message there
+ * IS the stored brief (served 08bbe2eb, scenario b2ad8385: the create turn is itself an Agent turn, so its answer row
+ * is always newer than the registration row, and the offer could never fire). Earlier (pre-draft) Agent conversation and
+ * later system events are not an offer of this card; the Agent answer that carries the offer is, so it can never be
+ * offered twice (buddy r1 P2). A second Agent answer of any kind closes the offer.
  */
 export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): boolean {
   if (!start || !start.rowId || brief.trim() === '') return false;
@@ -23,13 +26,21 @@ export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, s
     && (r.turn_id === draftTurnId && r.request_hash.startsWith('graph_registration:')
       || r.turn_class === 'direct_answer' && r.handler_id === null && r.response_emitted === true && r.user_message === brief
         && !r.request_hash.startsWith('agent_turn:')));
-  return at >= 0 && rows.slice(0, at).every(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string'
-    && !r.request_hash.startsWith('agent_turn:'));
+  if (at < 0) return false;
+  const newer = rows.slice(0, at);
+  if (!newer.every(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string')) return false;
+  const answers = newer.filter(r => r.request_hash.startsWith('agent_turn:'));
+  return answers.length === 0 || (answers.length === 1 && answers[0]!.user_message === brief);
 }
-/** Cheap pre-read gate: the newest row is itself an Agent answer, so an offer was already possible and is never repeated. */
-export function newestRowIsAgentAnswer(start: DeadlineTurnStart | undefined): boolean {
-  const row = start?.rows[0];
-  return row !== undefined && typeof row.request_hash === 'string' && row.request_hash.startsWith('agent_turn:');
+/**
+ * Cheap pre-read gate: more than ONE Agent answer newer than the newest construction registration is never a first
+ * offer (the offer was already possible, or the card was already carried/answered), so nothing is read for it.
+ */
+export function moreThanOneAnswerSinceDraft(start: DeadlineTurnStart | undefined): boolean {
+  const rows = start?.rows ?? [];
+  const reg = rows.findIndex(r => typeof r.request_hash === 'string' && r.request_hash.startsWith('graph_registration:'));
+  return (reg < 0 ? rows : rows.slice(0, reg))
+    .filter(r => typeof r.request_hash === 'string' && r.request_hash.startsWith('agent_turn:')).length > 1;
 }
 const plainOf = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
 const escaped = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

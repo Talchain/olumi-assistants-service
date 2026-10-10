@@ -337,3 +337,39 @@ describe('R4 durable first-Agent-turn gate', () => {
     expect(out).toMatchObject({ ok: true, public_label: 'Is your deadline 10 September 2027 (11 months from 10 October 2026)?' });
   });
 });
+
+/**
+ * R6 — served 08bbe2eb (scenario b2ad8385, UI a75a01fd, CEE 08bbe2e): the create turn is ITSELF an Agent turn (the model
+ * calls `build_model_from_brief`), so its answer row is always newer than the registration row. R4's "no Agent answer
+ * after the draft" made the route-issued card unreachable on every real draft; only synthetic rows (a registration row
+ * and nothing after it) reached it. The ONE answer to the turn that built the draft — the Agent row whose user message
+ * IS the stored brief — is not an offer; any second Agent answer still closes it.
+ */
+describe('R6 the draft was built inside an Agent turn', () => {
+  const buildAnswer = (w: ReturnType<typeof world>, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_id: randomUUID(),
+    request_hash: 'agent_turn:build', turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: d2.brief, ...over });
+  it('the first turn after the build turn offers exactly one bound card; the turn after that never repeats it', async () => {
+    const w = world(), before = w.read(); w.rows.unshift(buildAnswer(w));
+    const turn = await route(w), first = await turn(), { call, yes } = card(first);
+    expect(first.assistant_text).toBe(yes.detail); expect(w.read()).toEqual(before);
+    expect(call.proposal_id).toEqual(expect.any(String));
+    const second = await turn({ agent_session_id: first._agent.session_id });
+    expect(second._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
+  });
+  it('an Agent answer that is not the build answer, or a second Agent answer, keeps the offer closed', async () => {
+    const other = world(); other.rows.unshift(buildAnswer(other, { user_message: 'What do you think?' }));
+    expect((await (await route(other))())._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
+    const two = world(); two.rows.unshift(buildAnswer(two), buildAnswer(two, { request_hash: 'agent_turn:chat', user_message: 'Why?' }));
+    expect((await (await route(two))())._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
+  });
+  it('a re-sent brief (a second answer carrying the same text) is a second answer, not the build answer', () => {
+    const sid = randomUUID(), brief = d2.brief;
+    const row = (request_hash: string, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: randomUUID(), request_hash,
+      turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, ...over });
+    const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false });
+    const built = row('agent_turn:build', { user_message: brief }), resent = row('agent_turn:resent', { user_message: brief });
+    expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [built, construction] }, sid, brief)).toBe(true);
+    expect(firstAgentTurnAfterDraft({ rowId: resent.id, rows: [resent, built, construction] }, sid, brief)).toBe(false);
+    expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [{ ...built, user_message: 'Which one?' }, construction] }, sid, brief)).toBe(false);
+  });
+});
