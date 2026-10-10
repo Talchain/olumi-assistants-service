@@ -94,7 +94,7 @@ describe('typed ceiling-stock confirmation chain', () => {
     expect(node(reloaded, 'serviceable_rider_capacity')).toEqual(node(before, 'serviceable_rider_capacity'));
     expect(GraphV3.parse(reloaded).nodes.find(n => n.kind === 'goal')?.nonlinear_identity).toEqual(goal(reloaded).nonlinear_identity);
     const chips = approvalChipsFor([{ name: 'propose_identity', ok: true, mutated: false, proposal_id: offered.proposal_id }],
-      () => ({ proposal: w.proposals.get(offered.proposal_id)!, result: offered }));
+      () => ({ proposal: w.proposals.get(offered.proposal_id)!, result: offered as never }));
     expect(JSON.stringify(chips)).toContain(offered.card.words);
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'ceiling-run', createMockSessionStore({ loadGraph: async () => reloaded,
       loadGraphAndBriefText: async () => ({ graph: reloaded, briefText: fixture.brief }) }));
@@ -108,9 +108,10 @@ describe('typed ceiling-stock confirmation chain', () => {
       expect(carrier.nonlinear_identity).toMatchObject({ operation: 'accumulation', horizon_months: 10 });
       const [stock, rate, flow] = carrier.nonlinear_identity.factor_ids.map((id: string) => node(request.graph, id));
       expect(rate.observed_state.raw_value).toBe(0);
-      computed = stock.observed_state.raw_value + flow.observed_state.raw_value * carrier.nonlinear_identity.horizon_months;
-      expect(computed).toBe(1700);
-      const probability = computedProbability = computed <= wireGoal.goal_threshold_raw ? 1 : 0;
+      const total: number = stock.observed_state.raw_value + flow.observed_state.raw_value * carrier.nonlinear_identity.horizon_months;
+      computed = total;
+      expect(total).toBe(1700);
+      const probability = computedProbability = total <= wireGoal.goal_threshold_raw ? 1 : 0;
       return { ...structuredClone(minimalFixture), inference_warnings: [], results: request.options.map((o: Rec) => ({ option_id: o.id, win_probability: 1/3 })),
         option_comparison: request.options.map((o: Rec) => ({ option_id: o.id, option_label: o.label, probability_of_goal: probability, win_probability: 1/3,
           outcome: { p10: computed, p50: computed, p90: computed, mean: computed, std: 0, n_samples: 100, n_valid_samples: 100, validity_ratio: 1, percentiles_source: 'samples' } })),
