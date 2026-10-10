@@ -124,7 +124,7 @@ describe('an oversized first model gets exactly ONE bounded retry', () => {
     expect(retry).toMatch(/not negotiable|must not be dropped/i);
     expect(retry).toContain('`unknowns`');
     // The first pass's rules still hold — the delta is APPENDED, not a replacement.
-    expect(retry).toContain('DECISION-CRITICAL');
+    expect(retry).toContain(s.calls[0]!);
   });
 
   it('NEVER retries twice — still oversized means refuse, not keep asking', async () => {
