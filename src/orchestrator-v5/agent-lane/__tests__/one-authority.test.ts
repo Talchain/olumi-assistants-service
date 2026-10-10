@@ -98,8 +98,10 @@ describe('one authority construction', () => {
     const m = addition(2, 3, quote);
     const iv = m.options[0]!.interventions![0]!;
     expect(verifiedOptionSetting(m, m.options[0]!, { ...iv, value: 5, value_kind: 'absolute' }, quote)).toBe(true);
-    expect(prepareProvisionalCandidate(m, quote).candidate.options[0]!.interventions![0])
-      .toMatchObject({ value: 5, provenance: 'explicit', derived_total: true });
+    // DL RUN35: the quoted total is literal user material, not an operand-derived figure.
+    const literal = prepareProvisionalCandidate(m, quote).candidate.options[0]!.interventions![0]!;
+    expect(literal).toMatchObject({ value: 5, provenance: 'explicit' });
+    expect(literal).not.toHaveProperty('derived_total');
   });
   it('C an addition receipt cannot attest a different computed total', () => {
     const quote = 'One option is to hire 3 engineers.';

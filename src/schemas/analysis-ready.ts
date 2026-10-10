@@ -38,7 +38,7 @@ export const ANALYSIS_READY_CONTRACT_VERSION = '1.0.0';
  */
 export const ExtractionMetadata = z.object({
   /** How the values were determined */
-  source: z.enum(["brief_extraction", "cee_hypothesis", "user_specified"]),
+  source: z.enum(["brief_extraction", "cee_hypothesis", "user_specified"]).optional(),
   /** Confidence in the extraction */
   confidence: z.enum(["high", "medium", "low"]),
   /** Explanation for transparency */

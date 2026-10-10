@@ -5,6 +5,8 @@ import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
+import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { labelStandsForCountUnit } from '../same-unit.js';
 
 // Paul's 24 September hiring brief, reconstructed as a corrected producer candidate.
 // This is a no-provider contract fixture, not a claim about generated model quality.
@@ -59,6 +61,30 @@ function invalidRisk() {
   candidate.links = candidate.links.filter((l) => l.to !== 'Onboarding disruption');
   candidate.links.push({ from: 'Hire two developers', to: 'Onboarding disruption', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
   return candidate;
+}
+
+const CURRENT_DEVELOPERS = 'We have 5 developers today.';
+const ADDITIONAL_DEVELOPERS = 'We could hire 2 more developers.';
+const USER_HIRING_BRIEF = `${CURRENT_DEVELOPERS} ${ADDITIONAL_DEVELOPERS}`;
+
+function userSuppliedHiring() {
+  const c = hiring();
+  const start = USER_HIRING_BRIEF.indexOf(ADDITIONAL_DEVELOPERS);
+  const optionQuote = 'hire 2 more developers';
+  const optionStart = USER_HIRING_BRIEF.indexOf(optionQuote);
+  return {
+    ...c,
+    factors: c.factors.map(f => f.label === 'Developers'
+      ? { ...f, baseline_known: true, provenance: 'explicit', baseline_evidence: { quote: CURRENT_DEVELOPERS } } : f),
+    options: c.options.map(o => o.label === 'Hire two developers' ? {
+      ...o,
+      interventions: o.interventions.map(iv => ({ ...iv, stated_evidence: {
+        quote: ADDITIONAL_DEVELOPERS, start, end: start + ADDITIONAL_DEVELOPERS.length,
+        amount_start: USER_HIRING_BRIEF.indexOf('2 more'), option_quote: optionQuote,
+        option_start: optionStart, option_end: optionStart + optionQuote.length,
+      } })),
+    } : o),
+  };
 }
 
 describe('provisional hiring construction uses real admission and registration payload', () => {
@@ -120,7 +146,8 @@ describe('provisional hiring construction uses real admission and registration p
     expect(prepareProvisionalCandidate(c).candidate.options[1].interventions?.[0]).toMatchObject({ value: 2, provenance: 'explicit' });
     c.options[1].interventions[0].value_kind = 'additional';
     const prepared = prepareProvisionalCandidate(c).candidate;
-    expect(prepared.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'explicit' });
+    // DL RUN35: without operand receipts, 5 + 2 still computes 7 but grants no user credit.
+    expect(prepared.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'ai_proposed' });
     // S7 (disposition `unsupported_unit_conversion`): the factor is the user's declared 5 PEOPLE. No sentence is stated in this
     // fixture, and even an exact first-person receipt ("We have 5 developers today." quoted, brief supplied) is refused by the
     // verifier: a developers count is not a `people` level without a conversion (measured on this row, not assumed). So the figure
@@ -128,6 +155,27 @@ describe('provisional hiring construction uses real admission and registration p
     // arithmetic above is unchanged.
     expect(admitCandidateModel(prepared, {}).nodes.find((n) => n.label === 'Developers')?.observed_state)
       .toMatchObject({ raw_value: 5, source: 'cee_inference', user_material_unverified: true });
+  });
+
+  it('credits a people-frame total only through the public verified baseline and addition authorities', () => {
+    const c = userSuppliedHiring();
+    const factor = c.factors.find(f => f.label === 'Developers')!;
+    const option = c.options.find(o => o.label === 'Hire two developers')!;
+    // DL RUN35: label identity is already read as a count; no unit or vocabulary exception is introduced here.
+    expect(labelStandsForCountUnit('developers', factor.label, factor.unit)).toBe(true);
+    expect(verifiedFactorLevel(c, factor, USER_HIRING_BRIEF)).toBe(true);
+    expect(verifiedOptionSetting(c, option, option.interventions[0]!, USER_HIRING_BRIEF)).toBe(true);
+    const prepared = prepareProvisionalCandidate(c, USER_HIRING_BRIEF).candidate;
+    expect(prepared.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'explicit', derived_total: true });
+    expect(prepared.options[1].interventions?.[0]?.basis).toContain(CURRENT_DEVELOPERS);
+    expect(prepared.options[1].interventions?.[0]?.basis).toContain(ADDITIONAL_DEVELOPERS);
+  });
+
+  it('withholds explicit credit for the same computed total without the user brief', () => {
+    const c = userSuppliedHiring();
+    const prepared = prepareProvisionalCandidate(c).candidate;
+    expect(prepared.options[1].interventions?.[0]?.value).toBe(7);
+    expect(prepared.options[1].interventions?.[0]?.provenance).not.toBe('explicit');
   });
 
   /**

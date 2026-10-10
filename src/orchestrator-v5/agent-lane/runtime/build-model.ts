@@ -38,7 +38,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { verifiedFactorLevel, verifiedOptionSetting, verifiedOptionTotal } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -833,8 +833,9 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
         unresolved('unit_mismatch'); continue;
       }
       const total: Iv = { ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value };
-      const verifiedTotal = verifiedOptionSetting(model, option, total, brief);
-      const statedFigure = factor.baseline_value === 0 && verifiedTotal;
+      const receipt = verifiedOptionTotal(model, option, intervention, brief);
+      const verifiedTotal = receipt.verified;
+      const statedFigure = verifiedTotal && !receipt.derived;
       interventions.push({
         ...total,
         provenance: verifiedTotal ? 'explicit' : 'ai_proposed',
@@ -842,6 +843,7 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
         // stated 2% is the user's 7%, but "7%" appears nowhere as theirs, and an unrelated "Churn is 7%" was credited to it.
         // Admission marks the level (`constructedLevel`) so the not-modelled manifest never credits a brief literal to it.
         ...(statedFigure ? {} : { derived_total: true }),
+        ...(receipt.basis === undefined ? {} : { basis: receipt.basis }),
       } as Iv);
     }
     const changes = [...(option.changes ?? [])];

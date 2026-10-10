@@ -380,7 +380,7 @@ export interface WidenerAdditions {
  * type on purpose: a machine-derived level never claims user authority, and
  * only the writer, on a user's approved change, mints that stamp.
  */
-export type ConstructedLevelSource = Exclude<InterventionV3T['source'], 'user_specified'>;
+export type ConstructedLevelSource = Exclude<NonNullable<InterventionV3T['source']>, 'user_specified'>;
 export interface ConstructedLevel {
   value: number;
   source: ConstructedLevelSource;

@@ -7,7 +7,7 @@ import { parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { labelHead, LABEL_HEAD_BOUNDARY } from './label-head-unit.js';
 import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } from './same-unit.js';
 import { findLinkEffectAmounts } from './link-effect-figures.js';
-import { figureTheUserWroteForSpan, isChangeWord } from './stated-by-user.js';
+import { figureTheUserWroteForSpan, isChangeWord, linkEffectFigureNotAChange } from './stated-by-user.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -200,6 +200,36 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
     return false;
   }
 }
+/** A literal total and a verified additive derivation are distinct receipts from the same authority. */
+export function verifiedOptionTotal(model: CandidateModel, option: Option, addition: Intervention,
+  brief: string | undefined): { verified: boolean; derived: boolean; basis?: string } {
+  try {
+    const factors = model.factors.filter(f => f.label === addition.factor_label);
+    const factor = factors.length === 1 ? factors[0] : undefined;
+    if (addition.value_kind !== 'additional' || factor === undefined
+      || typeof factor.baseline_value !== 'number' || !Number.isFinite(factor.baseline_value)
+      || !Number.isFinite(addition.value) || !Number.isFinite(factor.baseline_value + addition.value)) {
+      return { verified: false, derived: true };
+    }
+    const baselineFrame = readUnitParts(factor.unit); const additionFrame = readUnitParts(addition.unit);
+    if (baselineFrame === null || additionFrame === null
+      || JSON.stringify(baselineFrame) !== JSON.stringify(additionFrame)) return { verified: false, derived: true };
+    const total = { ...addition, value_kind: 'absolute' as const, value: factor.baseline_value + addition.value };
+    if (verifiedOptionSetting(model, option, total, brief)) return { verified: true, derived: false };
+    // No percentage-of arithmetic, compound basis or implicit unit/period conversion.
+    if ((baselineFrame.kind !== 'count' && baselineFrame.kind !== 'currency')
+      || factor.baseline_known !== true || addition.basis !== undefined
+      || !verifiedFactorLevel(model, factor, brief) || !verifiedOptionSetting(model, option, addition, brief)) {
+      return { verified: false, derived: true };
+    }
+    return { verified: true, derived: true,
+      basis: `${factor.baseline_evidence!.quote} ${addition.stated_evidence!.quote} (${factor.baseline_value} + ${addition.value} = ${total.value} ${factor.unit})` };
+  } catch (err) {
+    log.warn({ event: 'agent_lane.stated_setting_unverifiable', err: err instanceof Error ? err.message : String(err) },
+      'agent-lane: a stated option setting could not be verified on a malformed draft; it stays Olumi\'s estimate');
+    return { verified: false, derived: true };
+  }
+}
 function verified(model: CandidateModel, option: Option, intervention: Intervention, brief: string | undefined): boolean {
   const e = intervention.stated_evidence;
   if (typeof brief !== 'string' || e == null) return false;
@@ -209,6 +239,11 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
   // A stated option setting is one ordinary sentence. Longer runs are refused before any per-amount reader runs, so
   // the shared binder below never sees an unbounded sentence (r2 buddy P0: 1,112 clauses scaled 10x from 5k to 20k).
   if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
+  // The existing typed change reader must not mistake a stated resulting level for an additive operand.
+  if (intervention.value_kind === 'additional' && typeof intervention.unit === 'string'
+    && linkEffectFigureNotAChange(a.text, { amount: intervention.value, amount_unit: intervention.unit,
+      per_source_change: 1, per_source_change_unit: intervention.unit },
+    { source: option.label, target: intervention.factor_label }) !== undefined) return false;
   const factors = model.factors.filter(f => f.label === intervention.factor_label);
   if (factors.length !== 1 || (option.interventions ?? []).filter(i => i.factor_label === intervention.factor_label).length !== 1) return false;
   const factor = factors[0]!;
