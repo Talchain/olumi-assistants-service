@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Ajv } from 'ajv';
-import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, framedObservedState, TODAY_LEVEL, TODAY_UNIT, type CandidateModel } from '../admit-model.js';
 import { verifiedFactorLevel } from '../verified-option-setting.js';
+import { withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, strictForTheDrafter, type CallStructuredModel } from '../runtime/build-model.js';
 import { nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { valueAuthorshipOf } from '../turn-context/guidance-signals.js';
@@ -94,9 +95,60 @@ describe('typed current-level sentence authority', () => {
     expect(n.observed_state?.source).toBe('cee_inference');
     expect(n.observed_state?.user_material_unverified).toBeUndefined();
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
-    // A builder-inferred known baseline with no evidence keeps its staging bytes ({source:'cee_inference'}, no extraction
-    // type): the native authorship read is UNKNOWN there, exactly as on staging and in the served captures.
-    expect(valueAuthorshipOf(n.observed_state)).toBe('unknown');
+    expect(n.observed_state?.extractionType).toBe('inferred');
+    expect(valueAuthorshipOf(n.observed_state)).toBe('olumi_estimate');
+  });
+  it('an inferred known starting point is an AI estimate without explicit marker leakage', () => {
+    const m = model(); m.factors[0]!.provenance = 'inferred'; m.factors[0]!.baseline_evidence = null;
+    const n = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
+    expect(n.observed_state).toMatchObject({ source: 'cee_inference', extractionType: 'inferred', raw_value: 920, unit: 'appointments/month' });
+    expect(n.observed_state?.user_material_unverified).toBeUndefined();
+    expect(valueAuthorshipOf(n.observed_state)).toBe('olumi_estimate');
+    expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
+  });
+  it('a human-named entity with an unknown baseline retains an AI-estimated level', () => {
+    const m = model(); m.factors[0]!.baseline_known = false; m.factors[0]!.baseline_evidence = null;
+    const n = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
+    expect(n.observed_state).toMatchObject({ source: 'cee_inference', extractionType: 'inferred', raw_value: 920, unit: 'appointments/month' });
+    expect(n.observed_state?.user_material_unverified).toBeUndefined();
+    expect(valueAuthorshipOf(n.observed_state)).toBe('olumi_estimate');
+    expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
+  });
+  it('a legacy absent-type numeric origin remains unknown with no validator verdict', () => {
+    const os = framedObservedState({ ...model().factors[0]!, provenance: 'ai_proposed' });
+    expect(os.source).toBe('cee_inference');
+    expect(os.extractionType).toBeUndefined();
+    expect(os.user_material_unverified).toBeUndefined();
+    expect(valueAuthorshipOf(os)).toBe('unknown');
+    expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('ai_inferred');
+  });
+  it('the trusted human formatter preserves its absent-type carrier without a validator verdict', () => {
+    const os = framedObservedState(model().factors[0]!);
+    expect(os).toStrictEqual({ value: 0.46, raw_value: 920, cap: 2000, declared_scale: 'unit_interval', unit: 'appointments/month', source: 'brief_extraction' });
+    expect(valueAuthorshipOf(os)).toBe('unknown');
+    expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('ai_inferred');
+  });
+  it('the definitional today level gains neither an AI nor an explicit extraction marker', () => {
+    const os = framedObservedState({ ...model().factors[0]!, provenance: 'ai_proposed', baseline_value: TODAY_LEVEL, unit: TODAY_UNIT }, false);
+    expect(os.source).toBeUndefined();
+    expect(os.extractionType).toBeUndefined();
+    expect(os.user_material_unverified).toBeUndefined();
+    expect(valueAuthorshipOf(os)).toBe('unknown');
+    expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('ai_inferred');
+  });
+  it('withdrawal preserves unverified claims and leaves legacy withdrawn numeric origins unknown', () => {
+    const m = model(); m.factors[0]!.baseline_evidence = null;
+    const unverified = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
+    const legacy = { kind: 'factor', label: cases[2]!.label, observed_state: framedObservedState(model().factors[0]!) };
+    const [kept, withdrawn] = withdrawUnstatedBaselineStamps([unverified, legacy], 'We are reviewing service.');
+    expect(kept).toBe(unverified);
+    expect(kept?.observed_state).toMatchObject({ source: 'cee_inference', extractionType: 'inferred', user_material_unverified: true });
+    expect(valueAuthorshipOf(kept?.observed_state)).toBe('unknown');
+    expect(nodeProvenanceDisplay(kept?.observed_state?.extractionType, kept?.observed_state)).toBe('unverified_brief');
+    expect(withdrawn?.observed_state).toMatchObject({ source: 'cee_inference' });
+    expect(withdrawn?.observed_state?.extractionType).toBeUndefined();
+    expect(valueAuthorshipOf(withdrawn?.observed_state)).toBe('unknown');
+    expect(nodeProvenanceDisplay(withdrawn?.observed_state?.extractionType, withdrawn?.observed_state)).toBe('ai_inferred');
   });
   it('valid receipt carries user credit, display and authorship with no unverified marker', () => {
     const m = model(); const n = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
