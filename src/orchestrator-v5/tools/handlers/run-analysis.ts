@@ -2229,7 +2229,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ The goal's derived level in the goal's own units (DL 58e392, 8 Oct): never "12,250.00 in its own units".
     // Science §(ad): every scored option is withheld before any licence, range or final cell projection.
     // The raw graph retains P45's tolerant attestation field, which GraphV3 currently strips.
-    response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
+    response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis, snapshot.briefText);
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 

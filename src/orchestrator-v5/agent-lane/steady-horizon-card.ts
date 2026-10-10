@@ -1,5 +1,6 @@
 import { GOAL_FIGURES_HORIZON_NOT_TESTED, GOAL_FIGURES_WITHHELD_CODES } from '../../orchestrator/context/option-result-source.js';
 import { goalHorizonVerdict, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
+import { timeClassOf } from '../goal-target/time-class.js';
 import { approvalChipIdFor } from './approval-chips.js';
 import { createProposal, type StructuredProposal } from './proposal.js';
 
@@ -31,8 +32,10 @@ function runWithheldOnlyForUntestedHorizon(result: unknown): boolean {
 export function steadyHorizonCard(input: {
   graph: unknown; graphHash: string | undefined; scenarioId: string; userId: string | null;
   runReply: boolean; runResult: unknown; approvalHeld: boolean;
+  /** The stored brief: a brief that states a timing shape the product cannot work out (`time-class.ts`) is offered no steady card. */
+  brief?: string | null;
 }): { proposal: StructuredProposal; chip: { id: string; label: string; message: string; detail: string } } | null {
-  if (!input.runReply || input.approvalHeld || !input.graphHash || !runWithheldOnlyForUntestedHorizon(input.runResult)
+  if (!input.runReply || input.approvalHeld || !input.graphHash || !timeClassOf(input.brief).supported || !runWithheldOnlyForUntestedHorizon(input.runResult)
     || input.graph === null || typeof input.graph !== 'object' || Array.isArray(input.graph)) return null;
   const graph = input.graph as { nodes?: unknown };
   if (!Array.isArray(graph.nodes)) return null;

@@ -1,4 +1,4 @@
-import { deadlineCardToIssue, firstAgentTurnAfterDraft, newestRowIsAgentAnswer, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
+import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
@@ -63,7 +63,9 @@ import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitRea
 import { applyIdentityConfirmEdit, identityConfirmReadingToken, identityPartLevelAsk, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { goalStockAccumulationOf } from '../../goal-target/goal-horizon-detail.js';
-import { proposeCeilingStock, ceilingStockRecorded } from '../ceiling-stock.js';
+import { ceilingStockRecorded } from '../ceiling-stock.js';
+import { identityReadingWithinTimeClass } from '../identity-reading.js';
+import { timeClassOf } from '../../goal-target/time-class.js';
 import { identityReceiptWords, proposeProductIdentity, type IdentityPartLevel, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { canonicaliseUnitForDisplay, ratePeriodOf, ratePeriodWord, unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -251,6 +253,7 @@ import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participat
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
 import { goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
+import { draftReferenceDate } from '../../goal-target/draft-reference.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
@@ -3149,15 +3152,16 @@ export function createAgentCapabilities(
   const identityCardFor = (_ctx: { scenario_id: string; authenticated_user_id: string | null },
     read: { readonly raw: unknown; readonly graph_hash: unknown; readonly brief_text?: string | null } | null | undefined) => {
     if (read === null || read === undefined || typeof read.graph_hash !== 'string' || read.graph_hash === '') return undefined;
-    const card = proposeProductIdentity(read.raw) ?? proposeCeilingStock(read.raw, read.brief_text);
+    const card = identityReadingWithinTimeClass(read.raw, read.brief_text);
     // An unwritable base (the writer's own check) offers no card: its Yes could not be recorded (DL 5897757819). Nor does a
     // part with no level (B1 828d87ac): the writer refuses that Yes, and the level is asked first (`identityLevelAskFor`).
     return identityCardHintFor(card !== null && identityConfirmBaseIsWritable(read.raw)
       && (card.ceiling_stock !== undefined || identityPartsWithoutLevel(read.raw, card.factor_ids).length === 0) ? card : null, false);
   };
   /** The words said instead of the card when the stored reading has a part with no level; null otherwise. */
-  const identityLevelAskFor = (raw: unknown): string | null => {
-    const card = proposeProductIdentity(raw);
+  const identityLevelAskFor = (raw: unknown, brief?: string | null): string | null => {
+    // A brief outside the time class is offered no reading (`identityReadingWithinTimeClass`), so no level is asked for one either.
+    const card = timeClassOf(brief).supported ? proposeProductIdentity(raw) : null;
     if (card === null) return null;
     const missing = identityPartsWithoutLevel(raw, card.factor_ids);
     if (missing.length === 0) return null;
@@ -4248,7 +4252,7 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'held_change_waiting',
           detail: 'A suggested change is waiting for your yes. Approve it, or change something first. Nothing was offered.' };
       }
-      let card = proposeProductIdentity(g.raw) ?? proposeCeilingStock(g.raw, g.brief_text);
+      let card = identityReadingWithinTimeClass(g.raw, g.brief_text);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
           detail: 'The model holds no reading of the goal for the user to confirm. Nothing was offered; say nothing about one.' };
@@ -4879,17 +4883,12 @@ export function createAgentCapabilities(
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
-      const timestamp = draft?.created_at;
-      const draftReference = typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp))
-        ? todayInLondon(new Date(timestamp)) : undefined;
       const typedAsOfDates = [...typed.matchAll(/(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu)].map(match => match[1]);
       const asOf = typedAsOfDates.length === 0 ? undefined : args.reference_date;
       if (asOf !== undefined && (typeof asOf !== 'string' || !typedAsOfDates.includes(asOf))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
           detail: deadlineRefusalDetail.reference_not_stated };
-      const scenarioTimestamp = g.scenario_created_at;
-      const scenarioReference = typeof scenarioTimestamp === 'string' && Number.isFinite(Date.parse(scenarioTimestamp))
-        ? todayInLondon(new Date(scenarioTimestamp)) : undefined;
-      const reference = typeof asOf === 'string' ? asOf : draftReference ?? scenarioReference;
+      // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
+      const reference = draftReferenceDate({ ...(typeof asOf === 'string' ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       return proposePlacedDeadline(ctx, args, g, words, reference);
     },
 
@@ -9554,7 +9553,7 @@ export function createAgentCapabilities(
         // ⭐ MC D1 (c): #416's ONE ask, from the graph this Run analysed (the read above), said after its reason by the route.
         ...(() => {
           // The level a waiting reading's part lacks is asked here too (B1 828d87ac): its card is not offered until it has one.
-          const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) ?? identityLevelAskFor(postRunRead.raw) : null;
+          const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) ?? identityLevelAskFor(postRunRead.raw, postRunRead.brief_text) : null;
           return say !== null ? { identity_ask_say: say } : {};
         })(),
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
@@ -9567,15 +9566,15 @@ export function createAgentCapabilities(
     ...caps,
     /** Route-only authorship entry: no model argument can select the stored-brief source. */
     async deadlineCardFromDraft(ctx, input) {
-      if (readOnly || input.start === undefined || newestRowIsAgentAnswer(input.start)) return undefined;
+      if (readOnly || input.start === undefined || moreThanOneAnswerSinceDraft(input.start)) return undefined;
       try {
         const g = await readGraph(ctx.scenario_id);
         if (!g || !firstAgentTurnAfterDraft(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
-        // The immutable reference is THIS draft's own creation time; without the construction version it stays silent
-        // (no scenario-time or clock fallback on the automatic path: buddy r1 P2).
+        // The turn that built the draft already offered a deadline card (a committed set_goal_deadline proposal), or its offers are unknown.
+        if (await buildTurnAlreadyOfferedDeadline(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
         const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
-        const stamp = draft?.created_at;
-        const reference = typeof stamp === 'string' && Number.isFinite(Date.parse(stamp)) ? todayInLondon(new Date(stamp)) : undefined;
+        // The ONE resolver (`draft-reference.ts`), shared with the model-facing door: a guest has no version, so the scenario's server stamp.
+        const reference = draftReferenceDate({ versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
         if (reference === undefined) return undefined;
         const card = deadlineCardToIssue({ ...input, graph: g.raw, storedBrief: g.brief_text, reference, priorOffer: false });
         return card === undefined ? undefined : { words: card.words,

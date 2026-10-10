@@ -2907,7 +2907,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       try {
         let latestRowId: string | null = null;
         heldAtStart = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict', onLatestRowId: id => { latestRowId = id; } })).filter(isHeldProposal);
-        if (latestRowId !== null) deadlineTurnStart = { rowId: latestRowId, rows: await store.readRecent(scenarioId, CONVERSATION_ROWS_READ) };
+        if (latestRowId !== null) deadlineTurnStart = { rowId: latestRowId, rows: await store.readRecent(scenarioId, CONVERSATION_ROWS_READ),
+          // A closed offer is silent to the user, so every UNKNOWN read of the build turn's committed offers says why (staging observability).
+          committedPending: async (turnId: string) => {
+            const closed = (reason: string, err?: unknown): void => log.warn({ event: 'agent_lane.deadline_offer_closed_unknown', reason, scenario_id: scenarioId,
+              turn_id: turnId, ...(err !== undefined ? { err: String(err) } : {}) }, 'agent-lane: the deadline offer is closed — the build turn\'s committed offers could not be read');
+            if (typeof store.readCommittedTurn !== 'function') { closed('no_committed_reader'); return undefined; }
+            try {
+              const pending = (await store.readCommittedTurn(scenarioId, turnId))?.pending_actions;
+              if (!Array.isArray(pending)) closed('committed_row_missing_or_malformed');
+              else if (pending.some(entry => entry === null || typeof entry !== 'object' || Array.isArray(entry))) closed('committed_entry_malformed');
+              return pending;
+            } catch (err) { closed('committed_read_failed', err); throw err; }
+          } };
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: held proposals unreadable at turn start — the latest row rules');
       }
@@ -4321,7 +4333,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // approval is waiting (that card is the next step) and never on an unchecked verdict.
     const startingAssumptions = approvals.length === 0 && carriedApproval.length === 0
       ? startingAssumptionsChips(readbackGraph, analysisReady) : [];
-    const steadyCard = steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId,
+    const steadyCard = steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId, brief: identityOfferBrief,
       runReply: resultFirstRunCompleted || result.tool_calls.some((c, i) => c.name === 'run_analysis' && result.tool_results[i]?.ran === true),
       runResult: analysisResult,
       approvalHeld: approvals.length + carriedApproval.length + liveHolds.length + proposals.outstanding(scenarioId, userId).length > 0 });
