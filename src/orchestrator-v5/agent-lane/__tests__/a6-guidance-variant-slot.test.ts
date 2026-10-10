@@ -6,7 +6,8 @@ import { SupabaseSessionStore } from '../../session/supabase-store.js';
 import { SessionLRUCache } from '../../session/cache.js';
 import { guidanceHistoryOf, guidanceOnAnswer, parseAnswerGuidance } from '../turn-context/guidance-history.js';
 import { guidanceWireFor } from '../turn-context/guidance-wire.js';
-import { widenTurnForReadback } from '../method-turn/widen-turn.js';
+import { widenTurnForReadback } from '../method-turn/guidance-widen-turn.js';
+import { widenTurnForReadback as currentWidenTurnForReadback } from '../method-turn/widen-turn.js';
 import { selectorSignalsOf } from '../turn-context/selector-signals.js';
 import { selectorSignalsOf as methodSignalsOf } from '../method-turn/method-turn.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
@@ -72,20 +73,25 @@ describe('A6 durable variant and slot identity', () => {
 
   it('(b) a NEW turn after reload consumes stored W4, with CURRENT model and Run', async () => {
     const history = await fresh().readGuidanceHistory(scenario);
-    const currentChoice = widenTurnForReadback('agent-next-widen', readback);
-    expect(currentChoice).toMatchObject({ kind: 'run', variant: 'W2' });
-    const next = widenTurnForReadback('agent-next-widen', readback, history);
-    expect(next).toMatchObject({ kind: 'run', variant: 'W4', raw: graph, current: [{ label: 'current option' }] });
-    if (next?.kind !== 'run') throw new Error('method must run');
-    expect(next.directive).toContain('Current goal');
-    expect(next.directive).toContain('Current factor');
-    expect(next.directive).not.toContain('Saved exact words');
-    // Both signal adapters retain identity alongside the current Run signals.
-    const signals = assembleGuidanceSignals({ request: 'method', explicitRequest: 'RC-WIDEN', offeredSpecific: [],
-      ...readback, analysisResult: undefined, guidance: history, leaderLicensed: true });
-    for (const adapt of [selectorSignalsOf, methodSignalsOf]) {
-      expect(adapt(signals, null).guidance?.['RC-WIDEN']).toMatchObject({ variant_id: 'W4', slot: 1 });
-      expect(adapt(signals, null)['run.kind']).toBe('complete_current');
+    const limitReadback = { ...readback, analysisState: { ...readback.analysisState,
+      leader_claim: { permitted: false, withheld_reason: 'every_option_likely_breaks_limit' } } };
+    for (const [currentVariant, currentReadback] of [['W2', readback], ['W1', limitReadback]] as const) {
+      const currentChoice = currentWidenTurnForReadback('agent-next-widen', currentReadback);
+      expect(currentChoice).toMatchObject({ kind: 'run', variant: currentVariant });
+      const next = widenTurnForReadback('agent-next-widen', currentReadback, history);
+      expect(next).toMatchObject({ kind: 'run', variant: 'W4', raw: graph, current: [{ label: 'current option' }] });
+      if (next?.kind !== 'run' || currentChoice?.kind !== 'run') throw new Error('method must run');
+      expect(next.directive).toBe(currentChoice.directive);
+      expect(next.directive).toContain('Current goal');
+      expect(next.directive).toContain('Current factor');
+      expect(next.directive).not.toContain('Saved exact words');
+      // Both signal adapters retain identity alongside the current Run signals.
+      const signals = assembleGuidanceSignals({ request: 'method', explicitRequest: 'RC-WIDEN', offeredSpecific: [],
+        ...currentReadback, analysisResult: undefined, guidance: history, leaderLicensed: true });
+      for (const adapt of [selectorSignalsOf, methodSignalsOf]) {
+        expect(adapt(signals, null).guidance?.['RC-WIDEN']).toMatchObject({ variant_id: 'W4', slot: 1 });
+        expect(adapt(signals, null)['run.kind']).toBe('complete_current');
+      }
     }
   });
 
