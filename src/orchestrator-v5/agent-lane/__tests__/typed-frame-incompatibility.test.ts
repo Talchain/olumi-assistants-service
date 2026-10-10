@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { verifiedFactorLevel } from '../verified-option-setting.js';
+import { valueAuthorshipOf } from '../turn-context/guidance-signals.js';
+import { nodeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
 
 type Factor = CandidateModel['factors'][number];
 const factor = (label: string, value: number | null, unit: string | null): Factor => ({
@@ -95,13 +97,15 @@ describe('typed frame incompatibility, authority unchanged', () => {
 
 describe('goal-value refusal belongs to its bound claim', () => {
   for (const quote of ['Our backlog is 0 jobs.']) {
-    it(`B another metric target of zero does not own this CURRENT quote: ${quote}`, () => {
+    // RULING B (scoping the goal-value refusal to the bound claim) is NOT taken: two protected typed-level-span rows pin that the
+    // sentence holding goal.value refuses any factor's current level. Precision wins; these stay refused.
+    it(`B the sentence holding goal.value still refuses another factor's CURRENT quote: ${quote}`, () => {
       const m = model('Backlog', 0, 'jobs', quote);
-      expect(verified({ ...m, goal: { ...m.goal, value: 0, unit: 'FTE' } })).toBe(true);
+      expect(verified({ ...m, goal: { ...m.goal, value: 0, unit: 'FTE' } })).toBe(false);
     });
-    it(`B even the same quantity at the target value needs target role: ${quote}`, () => {
+    it(`B and for the same quantity at the target value: ${quote}`, () => {
       const m = model('Backlog', 0, 'jobs', quote);
-      expect(verified({ ...m, goal: { ...m.goal, metric: 'Backlog', value: 0, unit: 'jobs' } })).toBe(true);
+      expect(verified({ ...m, goal: { ...m.goal, metric: 'Backlog', value: 0, unit: 'jobs' } })).toBe(false);
     });
   }
   // The shared cardinal grammar deliberately has no word for zero (cardinal-words.ts): "zero" is never a located amount, so
@@ -174,5 +178,42 @@ describe('verified zero survives only its affine carrier conversion', () => {
     // The goal and the factor share one quantity here, so the carrier is the goal node: either way, never a brief credit.
     const n = admitted.find(n => n.kind === 'factor') ?? admitted.find(n => n.kind === 'goal')!;
     expect(n.observed_state?.source).not.toBe('brief_extraction');
+  });
+});
+
+describe('native value authorship: a human ENTITY never makes an AI or unverified LEVEL the user\'s', () => {
+  const brief = 'Our backlog is 12 jobs.';
+  const admittedFactor = (m: CandidateModel, text = brief) => admitCandidateModel(m, {}, text).nodes.find(n => n.kind === 'factor')!;
+  it('a verified human level carries the existing explicit type: yours, from the brief', () => {
+    const m = model('Backlog', 12, 'jobs', brief); expect(verified(m)).toBe(true);
+    const n = admittedFactor(m);
+    expect(n.observed_state).toMatchObject({ source: 'brief_extraction', extractionType: 'explicit' });
+    expect(valueAuthorshipOf(n.observed_state)).toBe('yours');
+    expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('from_brief');
+  });
+  it('an AI-proposed level on a human-named entity is never yours', () => {
+    const base = model('Backlog', 12, 'jobs', brief);
+    const m = { ...base, factors: [{ ...base.factors[0]!, provenance: 'ai_proposed', baseline_evidence: null }] };
+    const n = admittedFactor(m);
+    expect(n.observed_state?.source).toBe('cee_inference');
+    expect(n.observed_state?.extractionType).not.toBe('explicit');
+    expect(valueAuthorshipOf(n.observed_state)).not.toBe('yours');
+  });
+  it('a human-claimed level with no verified quote is an unverified claim: unknown, never yours, never Olumi\'s estimate', () => {
+    const base = model('Backlog', 12, 'jobs', brief);
+    const m = { ...base, factors: [{ ...base.factors[0]!, baseline_evidence: null }] };
+    const n = admittedFactor(m);
+    expect(n.observed_state).toMatchObject({ source: 'cee_inference', user_material_unverified: true });
+    expect(n.observed_state?.extractionType).not.toBe('explicit');
+    expect(valueAuthorshipOf(n.observed_state)).toBe('unknown');
+    expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('unverified_brief');
+  });
+  it('named disposition unsupported_unit_conversion: a count written as tech leads is never credited as FTE', () => {
+    const text = 'We have two tech leads today.';
+    const m = model('Technical leadership', 2, 'FTE', text);
+    expect(verified(m)).toBe(false);
+    const n = admittedFactor(m, text);
+    expect(n.observed_state?.extractionType).not.toBe('explicit');
+    expect(valueAuthorshipOf(n.observed_state)).not.toBe('yours');
   });
 });

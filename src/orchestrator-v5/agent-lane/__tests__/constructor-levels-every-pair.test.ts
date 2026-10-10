@@ -612,11 +612,14 @@ describe('RUN9 typed unit frame keeps rival evidence outside the frame', () => {
       expect(verifiedFactorLevel(m, m.factors[0]!, text)).toBe(false);
     });
   }
-  it('a real stock versus inflow tie remains unknown', () => {
+  it('a stock count and a declared per-month inflow are provably different quantities (rival set aside); the same period stays a tie', () => {
     const text = 'We have 250 Pro subscribers.'; const base = current();
     const m = { ...base, factors: [factor('Pro subscribers today', 250, 2000, 'subscribers'), factor('New Pro subscribers per month', 20, 1000, 'subscribers/month')] };
     Object.assign(m.factors[0]!, { baseline_evidence: { quote: text } });
-    expect(verifiedFactorLevel(m, m.factors[0]!, text)).toBe(false);
+    expect(verifiedFactorLevel(m, m.factors[0]!, text)).toBe(true);
+    const sameFrame = { ...base, factors: [factor('Pro subscribers today', 250, 2000, 'subscribers'), factor('New Pro subscribers', 20, 1000, 'subscribers')] };
+    Object.assign(sameFrame.factors[0]!, { baseline_evidence: { quote: text } });
+    expect(verifiedFactorLevel(sameFrame, sameFrame.factors[0]!, text)).toBe(false);
   });
   it('a real price versus risk tie remains unknown', () => {
     const text = 'Our Pro price is £49 a month.'; const base = current(text, 'GBP/month');

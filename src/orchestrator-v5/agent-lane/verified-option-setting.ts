@@ -372,12 +372,14 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     const a = exactEvidence(brief, factor.baseline_evidence.quote, sentences);
     if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
     if (model.factors.filter(f => f.label === factor.label).length !== 1) return false;
+    // The sentence holding the goal target cannot also attest a current level, even for a differently named factor
+    // (typed-level-span "refuses the sentence holding goal.value even without goal vocabulary" / B2 pin this: kept).
+    if (typeof model.goal.value === 'number' && [...findLinkEffectAmounts(a.text).map(n => n.magnitude),
+      ...words(a.text).flatMap(w => { const n = figure(w); return n === null ? [] : [n]; })].includes(model.goal.value)) return false;
     if (model.constraints.some(c => c.value === value && metricNamesLabel(c.metric, factor.label))) return false;
     const matches = factorLevelSpans(model, factor, a.text);
     if (matches.length !== 1) return false;
     const span = matches[0]!;
-    // Numeric equality alone is not a target: this unique bound quantity and its role must also agree.
-    if (sameCurrentQuantity(model, factor) && model.goal.value === value && !currentLevelRole(a.text)) return false;
     if (!ownsFactorLevel(a.text.slice(0, span.start), factor)
       || !currentLevelRole(a.text)) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {

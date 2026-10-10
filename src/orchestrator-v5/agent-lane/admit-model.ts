@@ -798,7 +798,9 @@ export function framedObservedState(f: {
       : f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {} : { source: 'cee_inference' }),
   } : {
     ...(f.unit ? { unit: f.unit } : {}),
-    ...(verifiedCurrentLevel ? { source: 'brief_extraction' }
+    // ⭐ The native quantity read needs the EXISTING extraction type: it is written ONLY after the public verifier (or the
+    // trusted affine conversion of a verified receipt) proved this exact quantity. Everything else keeps its staging bytes.
+    ...(verifiedCurrentLevel ? { source: 'brief_extraction', extractionType: 'explicit' }
       : !userMaterialUnverified && f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {}
         : { source: 'cee_inference', ...(userMaterialUnverified ? { extractionType: 'inferred' } : {}) }),
     ...(userMaterialUnverified ? { user_material_unverified: true as const } : {}),
