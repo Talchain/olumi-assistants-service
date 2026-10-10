@@ -51,7 +51,8 @@ export async function reviewCapture(variant: Variant, decomposed = false, supply
       { edge_id: 'pro_price->monthly_pro_churn', from_id: 'pro_price', to_id: 'monthly_pro_churn', switch_probability: 0.25 },
     ] };
     s.analysis_result.enrichment.m1_coaching = { model_critiques: [
-      { type: 'anchoring', severity: 'warning', message: variant === 'flip-unavailable' ? REVIEW_ORDINARY_PROSE : REVIEW_PRODUCER_PROSE },
+      { type: 'anchoring', severity: 'warning', message: REVIEW_PRODUCER_PROSE },
+      ...(variant === 'flip-unavailable' ? [{ type: 'anchoring', severity: 'warning', message: REVIEW_ORDINARY_PROSE }] : []),
     ] };
   }
   if (variant === 'leader-withheld') {

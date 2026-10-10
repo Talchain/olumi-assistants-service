@@ -111,11 +111,23 @@ export function buildLicensedRunFacts(
   // (below); it never strips the producer's ordinary prose.
   const projected = mayNameLeader ? raw
     : readRecord(readRecord(licensedRunBlockForModel({ enrichment: raw }))?.enrichment) ?? {};
+  // Withheld flip FIGURES: when the producer's own flip data is withheld, a retained prose string that restates one of its
+  // thresholds is the same claim by another carrier. Bound to the specific withheld numbers (never to wording), so ordinary
+  // producer prose is untouched and a rephrased claim cannot slip past a phrase list.
+  const withheldFlipFigures: string[] = flipAvailable ? [] : [
+    ...(topLevel ? readTopLevelFlipRows(raw, labels, units).map(row => row.flip_value) : []),
+    ...(!topLevel ? collectFactorFlipEntries(raw as V2RunResponseEnvelope, labels, units).map(entry => entry.flip_value) : []),
+  ].filter((n): n is number => typeof n === 'number' && Number.isFinite(n)).map(n => String(n));
+  const restatesWithheldFlip = (text: string): boolean => withheldFlipFigures.some(figure =>
+    new RegExp(`(?<![\\d.])${figure.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\d]|\\.\\d)`).test(text));
   const clean = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(clean);
+    if (Array.isArray(value)) {
+      return value.flatMap(item => typeof item === 'string' && restatesWithheldFlip(item) ? [] : [clean(item)]);
+    }
     const rec = readRecord(value);
     if (rec === null) return value;
     return Object.fromEntries(Object.entries(rec).flatMap(([key, v]) => {
+      if (typeof v === 'string' && restatesWithheldFlip(v)) return [];
       if (!mayNameLeader && (key === 'win_probability' || key === 'winner' || key === 'runner_up'
         || key === 'margin' || keyNamesLeader(key))) return [];
       if (!flipAvailable && /^(?:flip_thresholds|edge_e_values|fragile_edges)$/.test(key)) return [];

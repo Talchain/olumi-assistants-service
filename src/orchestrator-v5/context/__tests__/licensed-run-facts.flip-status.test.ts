@@ -100,6 +100,20 @@ describe('flip admission follows the producer\'s own status word', () => {
     const withheld = facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'unavailable', ...critique }, HASH, false);
     expect(JSON.stringify(withheld.enrichment)).not.toContain('Check vendor reliability');
   });
+  it('a prose string that restates a WITHHELD threshold is dropped by figure, ordinary prose and other numbers are kept', () => {
+    const critiques = { m1_coaching: { model_critiques: [
+      { type: 'anchoring', severity: 'warning', message: 'Churn could flip at 4.2%.' },
+      { type: 'anchoring', severity: 'warning', message: 'Check vendor reliability' },
+      { type: 'anchoring', severity: 'warning', message: 'Churn of 14.2% would be unusual' },
+    ] } };
+    const out = JSON.stringify(facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'unavailable', ...critiques }).enrichment);
+    expect(out).not.toContain('could flip at 4.2%');
+    expect(out).toContain('Check vendor reliability');
+    expect(out).toContain('14.2%');
+    // CONTRAST: the same strings pass untouched when the producer's flip data is available.
+    const available = JSON.stringify(facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'computed', ...critiques }).enrichment);
+    expect(available).toContain('could flip at 4.2%');
+  });
   it('a Run the graph has moved past withholds the same rows (computed status does not rescue it)', () => {
     const out = facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'computed' }, OTHER_HASH);
     expect(out.current).toBe(false);

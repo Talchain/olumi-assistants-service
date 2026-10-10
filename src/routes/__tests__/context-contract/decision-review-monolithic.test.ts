@@ -158,10 +158,10 @@ describe('decision review monolithic: serialized provider contract', () => {
       expect(array(object(ready.get(variant)!.sections.ISL_RESULTS).fragile_edges), variant).toEqual([]);
     }
     expect(array(object(ready.get('leader-withheld')!.sections.ISL_RESULTS).fragile_edges)).toHaveLength(1);
-    for (const variant of ['leader-withheld', 'stale'] as const) {
+    for (const variant of ['flip-unavailable', 'leader-withheld', 'stale'] as const) {
       expect(JSON.stringify(ready.get(variant)!.calls[0]!.payloads), variant).not.toContain(REVIEW_PRODUCER_PROSE);
     }
-    // Only flip DATA is withheld when flips are unavailable: the producer's ordinary prose is not stripped with it.
+    // Only flip DATA (and prose restating its withheld threshold) goes when flips are unavailable: ordinary prose stays.
     expect(JSON.stringify(ready.get('flip-unavailable')!.calls[0]!.payloads)).toContain(REVIEW_ORDINARY_PROSE);
     expect(array(object(ready.get('stale')!.sections.ISL_RESULTS).factor_sensitivity)).toEqual([]);
   });
