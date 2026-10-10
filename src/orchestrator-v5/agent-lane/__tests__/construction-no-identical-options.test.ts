@@ -29,6 +29,8 @@ import { labelMatchesBaseline } from '../../../cee/transforms/analysis-ready.js'
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
 import { asProjectedMeanCapture, asServedBeforeOneForm } from './fixtures/one-form-levels.js';
+import { valueAuthorshipOf } from '../turn-context/guidance-signals.js';
+import { nodeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
 
 // ── the served corpus ────────────────────────────────────────────────────────
 type Level = { value: number; source?: string };
@@ -202,9 +204,41 @@ const RESTAMPED_BY_2355: Record<string, readonly (readonly [string, string])[]> 
  * captures pre-date it; it is the ONE field that differs, and the strict comparisons below still fail on any other
  * drift — or on a node that carries it without being credited, or lacks it while credited.
  */
-const withCreditedType = (n: SNode): SNode => {
+const VERIFIED_BY_CASE: Record<string, readonly string[]> = {
+  'f-20260926T020217Z': [
+    'pro_plan_price', // "Pro plan price from £49 to £59 per month"
+  ],
+  'f-20260926T022404Z': [
+    'pro_plan_price', // "Pro plan price from £49 to £59 per month"
+  ],
+  'f-20260926T001627Z': [
+    'pro_plan_price', // "Pro plan price from £49 to £59 per month"
+  ],
+  'f-20260926T022612Z': [
+    'pro_plan_price', // "Pro plan price from £49 to £59 per month"
+  ],
+};
+const exactlyTheVerifiedCase = (g: SGraph, key: string): void => {
+  const expected = VERIFIED_BY_CASE[key]!;
+  expect(g.nodes.filter(n => (n.observed_state as { extractionType?: unknown } | undefined)?.extractionType === 'explicit')
+    .map(n => n.id).sort()).toStrictEqual([...expected].sort());
+  for (const n of g.nodes.filter(n => n.kind === 'factor')) {
+    const os = n.observed_state;
+    const extractionType = (os as { extractionType?: unknown } | undefined)?.extractionType;
+    if (expected.includes(n.id)) {
+      expect(os?.source, n.id).toBe('brief_extraction');
+      expect(valueAuthorshipOf(os), n.id).toBe('yours');
+      expect(nodeProvenanceDisplay(extractionType, os), n.id).toBe('from_brief');
+    } else {
+      expect(extractionType, n.id).not.toBe('explicit');
+      expect(valueAuthorshipOf(os), n.id).not.toBe('yours');
+      expect(nodeProvenanceDisplay(extractionType, os), n.id).not.toBe('from_brief');
+    }
+  }
+};
+const withCreditedType = (n: SNode, key: string): SNode => {
   const os = n.observed_state;
-  if (n.kind !== 'factor' || os?.source !== 'brief_extraction' || typeof os.value !== 'number') return n;
+  if (!VERIFIED_BY_CASE[key]!.includes(n.id) || os === undefined) return n;
   // The registered schema orders the key after `cap` and before `declared_scale` (JSON.stringify compares below).
   const typed: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(os)) {
@@ -220,7 +254,7 @@ const after2355 = <G extends SGraph>(g: G, key: string, beforeMagnitudeSubtracti
     edges: g.edges.map((e) => ((RESTAMPED_BY_2355[key] ?? []).some(([f, t]) => e.from === f && e.to === t)
       ? { ...e, provenance: { ...e.provenance, source: 'cee_hypothesis' } } : e)),
   }, beforeMagnitudeSubtraction);
-  return { ...projected, nodes: projected.nodes.map(withCreditedType) } as G;
+  return { ...projected, nodes: projected.nodes.map(n => withCreditedType(n, key)) } as G;
 };
 /**
  * Base (cb1778b) predates the limit frame (#1919): admission now stamps each limit's `value_frame` right
@@ -234,12 +268,16 @@ const unsized = (g: SGraph): SGraph => ({ ...g, edges: subtractMagnitudeDelta(g.
  * last, as `framedObservedState` writes it); "100 % of today" keeps no author. The captures pre-date it, so it is
  * their one known node delta.
  */
-const olumisKnownLevels = (nodes: SNode[]): SNode[] => nodes.map(withCreditedType).map((n) => {
-  const os = n.observed_state;
-  if (n.kind !== 'factor' || n.provenance !== 'ai_inferred' || os === undefined || os.source !== undefined) return n;
-  if (os.unit === '% of today' && (os.raw_value ?? os.value) === 100) return n;
-  return { ...n, observed_state: { ...os, source: 'cee_inference' } };
-});
+const olumisKnownLevels = (nodes: SNode[]): SNode[] => {
+  const capturedCase = Object.entries(SERVED.runs).find(([, run]) => run.brief.draft_graph.nodes === nodes);
+  const typed = capturedCase === undefined ? nodes : nodes.map(n => withCreditedType(n, capturedCase[0]));
+  return typed.map((n) => {
+    const os = n.observed_state;
+    if (n.kind !== 'factor' || n.provenance !== 'ai_inferred' || os === undefined || os.source !== undefined) return n;
+    if (os.unit === '% of today' && (os.raw_value ?? os.value) === 100) return n;
+    return { ...n, observed_state: { ...os, source: 'cee_inference' } };
+  });
+};
 const framedBase = (g: SGraph): SGraph => ({
   ...g,
   nodes: olumisKnownLevels(g.nodes),
@@ -314,6 +352,7 @@ describe.each([
 
   it('FIDELITY: the reconstruction registers the served graph exactly, apart from the Olumi-added test option', async () => {
     const { graph: sizedGraph } = await build(draft());
+    exactlyTheVerifiedCase(sizedGraph, key);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     const graph = unsized(withoutG1(asServedBeforeOneForm(sizedGraph, run.brief.draft_graph), G1_WITH_HORIZON));
     const served = after2355(run.brief.draft_graph, key, sizedGraph);
@@ -324,6 +363,7 @@ describe.each([
 
   it('RED: everything else is byte-identical to what base registers — only the test option and its edges are gone', async () => {
     const { graph } = await build(draft());
+    exactlyTheVerifiedCase(graph, key);
     const base = after2355(baseGraph(key), key, graph);
     expect(optionIds(base)).toContain(TEST_ID);
     expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, base), G1_WITH_HORIZON)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
@@ -397,6 +437,7 @@ describe('controls — what the rule must never touch', () => {
   ])('CONTROL %s — kept; the served graph, and base\'s registration byte for byte', async (_name, key, run, olumiId) => {
     expect(run.brief.may_run).toBe(true);
     const { graph: registered, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
+    exactlyTheVerifiedCase(registered, key);
     // The construction mark (`olumi-option-marker.ts`, DL #72 5887534233): the Olumi-added £54 option, and only it, carries
     // `proposed_by: 'olumi'`. "£49 with AI release" sets the user's own £49, so it stays unmarked (the level backstop).
     // The served graph and base's registration predate the mark; everything else is compared byte for byte, as before.

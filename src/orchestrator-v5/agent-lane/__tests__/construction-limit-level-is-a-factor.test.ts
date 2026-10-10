@@ -22,6 +22,8 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
+import { valueAuthorshipOf } from '../turn-context/guidance-signals.js';
+import { nodeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
 
 type Node = Record<string, unknown> & { id: string; kind: string };
 type Edge = Record<string, unknown> & { from: string; to: string };
@@ -59,19 +61,51 @@ const withWholeLabel = (n: Node): Node => {
  * `source: 'brief_extraction'` (the native quantity read needs it). It is the ONLY field that differs from the served
  * bytes; the `exactlyTheCreditedNodesCarryIt` assertion below keeps estimates, unverified claims and legacy nodes bare.
  */
-const withVerifiedType = (n: Node): Node => {
-  const os = (n as Node & { observed_state?: Record<string, unknown> }).observed_state;
-  return n.kind === 'factor' && os !== undefined && os.source === 'brief_extraction' && typeof os.value === 'number'
-    ? { ...n, observed_state: { ...os, extractionType: 'explicit' } } as Node : n;
+const VERIFIED_BY_CASE: Record<string, readonly string[]> = {
+  'served-paul-churn-outcome-20260926T032916Z': [
+    'pro_plan_price', // "Pro plan price from £49 to £59 per month"
+  ],
+  'served-paul-churn-factor-20260926T032913Z': [
+    'pro_plan_price', // "Pro plan price from £49 to £59 per month"
+  ],
 };
-const asServedNow = (n: Node | undefined): Node | undefined =>
-  n === undefined ? n : withVerifiedType(withWholeLabel(n.kind === 'goal' ? { ...n, ...G1_HELD } : n));
+const withVerifiedType = (n: Node, key: string): Node => {
+  const os = (n as Node & { observed_state?: Record<string, unknown> }).observed_state;
+  if (!VERIFIED_BY_CASE[key]!.includes(n.id) || os === undefined) return n;
+  const typed: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(os)) {
+    if (k === 'declared_scale') typed.extractionType = 'explicit';
+    typed[k] = v;
+  }
+  if (typed.extractionType === undefined) typed.extractionType = 'explicit';
+  return { ...n, observed_state: typed } as Node;
+};
+const asServedNow = (n: Node | undefined): Node | undefined => {
+  if (n === undefined) return n;
+  const key = SERVED_FACTOR.nodes.includes(n) ? 'served-paul-churn-factor-20260926T032913Z'
+    : 'served-paul-churn-outcome-20260926T032916Z';
+  return withVerifiedType(withWholeLabel(n.kind === 'goal' ? { ...n, ...G1_HELD } : n), key);
+};
 const typedIds = (g: { nodes: Node[] }): string[] => g.nodes
   .filter((n) => (n as Node & { observed_state?: { extractionType?: unknown } }).observed_state?.extractionType === 'explicit')
   .map((n) => n.id).sort();
 const exactlyTheCreditedNodesCarryIt = (g: { nodes: Node[] }, served: { nodes: Node[] }): void => {
-  const credited = served.nodes.filter((n) => withVerifiedType(n) !== n).map((n) => n.id).sort();
+  const key = served === SERVED_FACTOR ? 'served-paul-churn-factor-20260926T032913Z'
+    : 'served-paul-churn-outcome-20260926T032916Z';
+  const credited = [...VERIFIED_BY_CASE[key]!].sort();
   expect(typedIds(g), 'only the verifier-credited quantities carry extractionType explicit').toStrictEqual(credited);
+  for (const n of g.nodes.filter(n => n.kind === 'factor')) {
+    const os = n.observed_state as Record<string, unknown> | undefined;
+    if (credited.includes(n.id)) {
+      expect(os?.source, n.id).toBe('brief_extraction');
+      expect(valueAuthorshipOf(os), n.id).toBe('yours');
+      expect(nodeProvenanceDisplay(os?.extractionType, os), n.id).toBe('from_brief');
+    } else {
+      expect(os?.extractionType, n.id).not.toBe('explicit');
+      expect(valueAuthorshipOf(os), n.id).not.toBe('yours');
+      expect(nodeProvenanceDisplay(os?.extractionType, os), n.id).not.toBe('from_brief');
+    }
+  }
 };
 
 const BRIEF =
@@ -310,6 +344,7 @@ describe('CONTROLS — what the rule must leave alone', () => {
       { metric: 'MRR', operator: '<=', value: 50, unit: '%', provenance: 'explicit', frame: 'level' },
       { metric: 'Price sensitivity', operator: '<=', value: 50, unit: '%', provenance: 'explicit', frame: 'level' },
     ] }));
+    exactlyTheCreditedNodesCarryIt(graph, SERVED_OUTCOME);
     // Read back in the served form (0.67.0's goal `unit_reading` postdates this capture; `one-form-levels.ts`).
     expect(byId(asServedBeforeOneForm(graph, SERVED_OUTCOME), 'mrr')).toStrictEqual(asServedNow(byId(SERVED_OUTCOME, 'mrr')));
     expect(byId(graph, 'price_sensitivity')).toStrictEqual(byId(SERVED_OUTCOME, 'price_sensitivity'));
