@@ -311,3 +311,69 @@ describe('run 3 bounded span corrections', () => {
     expect(verify(m, `${quote} Olumi suggested the number.`)).toBe(false);
   });
 });
+
+describe('B4 same-clause first-person ownership', () => {
+  const current = (label: string, value: number, unit: string, quote: string) => model({ label, value, unit, quote, third: '' });
+  const positives = [
+    ['subordinate prefix before the owned net rate', 'Net waiting-list change per month', -35, 'people/month', 'Once new registrations are counted we work off a net 35 people a month.'],
+    ['historical period before the owned net rate', 'Net borrower change per month', -120, 'borrowers/month', 'Over the last year we have been losing a net 120 borrowers a month.'],
+    ['coordinated named current stock', 'First check-up waiting list today', 1150, 'people', 'We see 160 patients a week, and the waiting list for a first check-up stands at 1,150 people.'],
+    ['explicit subject in a later clause', 'Registered borrowers today', 19000, 'borrowers', 'Our library service lends 14,800 items a month across five branches, and we currently have nineteen thousand registered borrowers.'],
+    ['owned scheme current count in words', 'Bikes in service', 340, 'bikes', 'Our city bike-hire scheme has three hundred and forty bikes in service and averages 2,900 hires a week.'],
+  ] as const;
+  for (const [name, label, value, unit, quote] of positives) it(`credits ${name}`, () => {
+    const m = current(label, value, unit, quote);
+    expect(verify(m, quote)).toBe(true);
+    const n = admitCandidateModel(m, {}, quote).nodes.find(n => n.kind === 'factor')!;
+    expect(n.observed_state?.source).toBe('brief_extraction');
+    expect(n.observed_state?.user_material_unverified).toBeUndefined();
+  });
+  it('distinguishes a following historical period from a following bound', () => {
+    const quote = 'We have nineteen thousand registered borrowers.';
+    const m = current('Registered borrowers today', 19000, 'borrowers', quote);
+    expect(verify(m, `${quote} Over the last year we have been losing a net 120 borrowers a month.`)).toBe(true);
+    expect(verify(m, `${quote} At most.`)).toBe(false);
+    expect(verify(m, `${quote} The county wants at least 20000 borrowers.`)).toBe(false);
+    expect(verify(m, `${quote} We have over 20000 items.`)).toBe(false);
+  });
+  for (const quote of [
+    'Our supplier claims 920 completed appointments each month.',
+    'Our clinic reports 920 completed appointments each month.',
+    'Our clinic says 920 completed appointments each month.',
+    'According to our clinic we have 920 completed appointments each month.',
+    'We have, according to our clinic, 920 completed appointments each month.',
+    'They have 920 completed appointments each month.',
+    'Our supplier’s completed appointments are 920 appointments each month.',
+    'We would like 920 completed appointments each month.',
+    'We aim for 920 completed appointments each month.',
+    'We can add roughly 920 completed appointments each month.',
+    'We plan for 920 completed appointments each month.',
+    'We forecast 920 completed appointments each month.',
+    'We have at most 920 completed appointments each month.',
+    'We have a limit of 920 completed appointments each month.',
+    'We have a target of 920 completed appointments each month.',
+    'We have 920 completed appointments each month as a ceiling.',
+    'While we complete appointments, the clinic completes 920 completed appointments each month.',
+    'Once we count appointments, they have 920 completed appointments each month.',
+    'We have completed appointments while another clinic has 920 completed appointments each month.',
+    'Our clinic completes checks, and the other clinic has 920 completed appointments each month.',
+  ]) it(`withholds credit: ${quote}`, () => {
+    const m = current('Completed appointments', 920, 'appointments/month', quote);
+    expect(verify(m, quote)).toBe(false);
+    const n = admitCandidateModel(m, {}, quote).nodes.find(n => n.kind === 'factor')!;
+    expect(n.observed_state?.source).toBe('cee_inference');
+    expect(n.observed_state?.user_material_unverified).toBe(true);
+  });
+  for (const [label, value, unit, quote] of [
+    ['Rival e-scooters in zone', 340, 'scooters', 'The rival e-scooter operator runs three hundred and forty rival e-scooters in zone.'],
+    ['Competitor monthly brewing volume', 6500, 'litres/month', 'Our nearest competitor brews six thousand five hundred litres a month.'],
+    ['Bikes in service', 340, 'bikes', 'The council wants three hundred and forty bikes in service.'],
+    ['Bikes in service', 340, 'bikes', 'Our supplier’s bikes in service are three hundred and forty bikes in service.'],
+    ['Net waiting-list change per month', -35, 'people/month', 'Once new registrations are counted we have been gaining a net 35 people a month.'],
+    ['Net borrower change per month', 120, 'borrowers/month', 'Over the last year we have been losing a net 120 borrowers a month.'],
+    ['Bikes in service', 340, 'bikes', 'Our city bike-hire scheme plans three hundred and forty bikes in service.'],
+    ['Bikes in service', 340, 'bikes', 'Our city bike-hire scheme has at most three hundred and forty bikes in service.'],
+  ] as const) it(`withholds scoped word/sign control: ${quote}`, () => {
+    expect(verify(current(label, value, unit, quote), quote)).toBe(false);
+  });
+});

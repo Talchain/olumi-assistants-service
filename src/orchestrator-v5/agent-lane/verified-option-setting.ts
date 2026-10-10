@@ -171,7 +171,7 @@ function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], lit
   return paragraph.every(s => {
     if (ATTRIBUTION.test(s.text)) return false;
     if (s === a) return true;
-    if (s === next && words(s.text).some(w => BOUNDS.has(w))) return false;
+    if (s === next && (compoundWords ? currentLevelWords(s.text) : words(s.text)).some(w => BOUNDS.has(w))) return false;
     // The same figure in another spelling ("the 4" beside "four", "four" beside "4") is the same literal.
     if (words(s.text).some(w => figure(w) === value)) return false;
     if (compoundWords && findLinkEffectAmounts(s.text).some(n => n.magnitude === Math.abs(value))) return false;
@@ -263,25 +263,48 @@ function signedCurrentFigure(factor: Factor, text: string, amount: StatedAmount)
 /** Direct reporting, rather than hearing, guessing or planning somebody else's level. */
 const STATE_VERBS = new Set(['have', 'has', 'is', 'are', 'work', 'works', 'complete', 'completes', 'run', 'runs',
   'process', 'processes', 'handle', 'handles', 'employ', 'employs', 'pay', 'pays', 'spend', 'spends', 'earn', 'earns',
-  'receive', 'receives', 'charge', 'charges', 'produce', 'produces', 'collect', 'collects']);
-const OWN_ORGANISATION = new Set(['clinic', 'team', 'company', 'organisation', 'organization', 'business']);
+  'receive', 'receives', 'charge', 'charges', 'produce', 'produces', 'collect', 'collects', 'see', 'stand', 'stands']);
+const OWN_ORGANISATION = new Set(['clinic', 'team', 'company', 'organisation', 'organization', 'business',
+  'city', 'scheme', 'library', 'service']);
+// Possessive first person does not own a supplier's or rival's figure, or a reported assertion.
+const FOREIGN_LEVEL = /\b(?:supplier|competitor|rival|council|they|their|says|claims|reports)\b|\baccording to\b/iu;
 function ownsFactorLevel(before: string, factor: Factor): boolean {
+  if (FOREIGN_LEVEL.test(before)) return false;
   const own = words(factor.label).concat(words(typeof factor.unit === 'string' ? factor.unit : ''));
   const names = (w: string): boolean => own.some(v => sameName(v, w));
   const body = (text: string): boolean => words(text).every(w => grammar(w) || w === 'off' || names(w));
-  const we = /(?:^|, )we (?:currently |now |today )?(?:(could) )?([\p{L}]{1,64})\b/iu.exec(before);
-  if (we !== null) {
+  // The last explicit subject owns only its own predicate, not a later clause's different subject.
+  const we = [...before.matchAll(/\bwe (?:currently |now |today )?(?:(could) )?(have been (?:losing|gaining)|[\p{L}]{1,64})\b/giu)].at(-1);
+  if (we !== undefined) {
     const verb = we[2]!.toLowerCase();
     // The count of additional hires is an owned model input even in a prospective staffing sentence.
-    const direct = we[1] === undefined ? STATE_VERBS.has(verb)
+    const direct = we[1] === undefined ? STATE_VERBS.has(verb) || /^have been (?:losing|gaining)$/u.test(verb)
       : readUnitParts(factor.unit)?.kind === 'count' && own.some(w => w === 'additional' || w === 'extra' || w === 'hires' || w === 'hired')
         && ['bring', 'hire', 'add'].includes(verb);
-    return direct && body(before.slice(we.index + we[0].length));
+    const tail = before.slice(we.index! + we[0].length);
+    if (direct && body(tail)) return true;
+    // An owned current report can coordinate another explicitly named current quantity.
+    // A subordinate clause or a newly introduced subject cannot inherit that ownership.
+    const coordinated = /, and (?:the )?(.+?) stands at $/iu.exec(tail);
+    return direct && we.index === 0 && coordinated !== null && body(coordinated[1]!);
   }
   if (!/^Our /iu.test(before)) return false;
   const said = words(before); const verb = said.findIndex(w => STATE_VERBS.has(w));
   return verb > 1 && said.slice(1, verb).every(w => grammar(w) || OWN_ORGANISATION.has(w) || names(w))
     && said.slice(verb + 1).every(w => grammar(w) || names(w));
+}
+
+/** Current roles use lexical tokens, not the parts of a quantity such as "check-up".
+ * A historical period before the explicit subject scopes a current net rate, not an upper bound.
+ */
+function currentLevelWords(text: string): string[] {
+  const local = text.replace(/^Over the (?:last|past) ([\p{L}]+) (?=we )/iu,
+    (all, period: string) => periodNoun(period.toLowerCase()) === null ? all : '');
+  return words(local.replace(/([\p{L}]+)-up\b/giu, '$1'));
+}
+function currentLevelRole(text: string): boolean {
+  return !FOREIGN_LEVEL.test(text) && !currentLevelWords(text).some(w => BOUNDS.has(w)
+    || ['goal', 'target', 'limit', 'plan', 'forecast', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w));
 }
 
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
@@ -325,7 +348,7 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     if (matches.length !== 1) return false;
     const span = matches[0]!;
     if (!ownsFactorLevel(a.text.slice(0, span.start), factor)
-      || words(a.text).some(w => BOUNDS.has(w) || ['goal', 'target', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w))) return false;
+      || !currentLevelRole(a.text)) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true);
   } catch (err) {
     log.warn({ event: 'agent_lane.stated_level_unverifiable', err: err instanceof Error ? err.message : String(err) },
