@@ -7,7 +7,7 @@ import { parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { labelHead } from './label-head-unit.js';
 import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } from './same-unit.js';
 import { findLinkEffectAmounts } from './link-effect-figures.js';
-import { figureTheUserWroteForSpan } from './stated-by-user.js';
+import { figureTheUserWroteForSpan, isChangeWord } from './stated-by-user.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -365,13 +365,41 @@ function factorLevelSpans(model: CandidateModel, factor: Factor, text: string, v
   return matches;
 }
 
-/** A bound on a named stock goal does not qualify a separately bound per-period net change. */
+/** A change on an independently named flow does not qualify the owned stock's current point. */
+function differentCurrentFlow(model: CandidateModel, factor: Factor, text: string): boolean {
+  const current = readUnitParts(factor.unit);
+  const qualifiers = words(text).filter(w => NOT_POINT.has(w));
+  if (text.length > MAX_ASSERTION || !currentLevelRole(text) || current === null
+    || current.kind !== 'count' || !current.noun?.length || current.period !== null
+    || current.per !== null || qualifiers.length === 0 || !qualifiers.every(isChangeWord)) return false;
+  const claims = model.factors.filter(other => {
+    const flow = readUnitParts(other.unit);
+    if (other === factor || flow === null || flow.period === null
+      || JSON.stringify(current) !== JSON.stringify({ ...flow, period: null })
+      || model.constraints.some(c => c.value === other.baseline_value && metricNamesLabel(c.metric, other.label))) return false;
+    const spans = factorLevelSpans(model, other, text);
+    if (spans.length !== 1) return false;
+    const amount = findLinkEffectAmounts(text).find(a => a.index === spans[0]!.start);
+    if (amount === undefined || !labelStandsForCountUnit(statedTailParts(text, amount)?.noun?.join(' '),
+      words(other.label).filter(w => !grammar(w)).join(' '), other.unit)) return false;
+    const before = words(text.slice(0, spans[0]!.start));
+    const names = words(other.label).concat(words(typeof other.unit === 'string' ? other.unit : ''));
+    // Every qualifier belongs before this independently bound amount, under the existing first-person subject.
+    // Retractions, later qualifiers, unknown frames and new subjects cannot be detached from the credited stock.
+    return before[0] === 'we' && before.filter(w => NOT_POINT.has(w)).length === qualifiers.length
+      && before.every(w => grammar(w) || CLAUSE.has(w) || isChangeWord(w) || names.some(n => sameName(n, w)));
+  });
+  return claims.length === 1;
+}
+
+/** Independently typed flow changes and stock-goal bounds retain their own quantity/unit/period. */
 function differentGoalBound(model: CandidateModel, factor: Factor, text: string): boolean {
+  if (differentCurrentFlow(model, factor, text)) return true;
   const goal = readUnitParts(model.goal.unit); const current = readUnitParts(factor.unit);
-  if (goal?.kind !== 'count' || current?.kind !== 'count' || goal.period !== null || current.period === null
-    || !goal.noun?.length || !current.noun?.length
-    || JSON.stringify(goal.noun) !== JSON.stringify(current.noun)
-    || goal.per !== null || current.per !== null) return false;
+  if (goal === null || current === null || (goal.kind !== 'count' && goal.kind !== 'currency')
+    || goal.period !== null || current.period === null || goal.per !== null || current.per !== null
+    || (goal.kind === 'count' && !goal.noun?.length)
+    || JSON.stringify(goal) !== JSON.stringify({ ...current, period: null })) return false;
   const amounts = findLinkEffectAmounts(text);
   const targets = amounts.filter(a => a.magnitude === model.goal.value);
   if (targets.length !== 1) return false;
