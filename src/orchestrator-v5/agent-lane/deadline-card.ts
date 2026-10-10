@@ -5,19 +5,21 @@ import type { SessionTurnWithContent } from '../session/conversation-content.js'
 import { constructionOperationId } from './runtime/build-model.js';
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
 
+// An offered date always carries its year, in any format ("10 August 2027", "August 10th, 2027", "10/08/2027", "2027-08-10").
+const CALENDAR_DATE = /\b(?:19|20)\d{2}\b/;
 /**
  * Whether an answer ASKS a question that names the deadline, in any wording or case. Sentences end at . ! ? followed by a
  * capital (so "Is your deadline 10 Aug. 2027?" stays one sentence) or at a blank line; a single newline stays inside one
  * (buddy r4 P2: "Aug." and a newline inside the question both slipped past a [^.!?\n] matcher).
  */
-// An offered date always carries its year, in any format ("10 August 2027", "August 10th, 2027", "10/08/2027", "2027-08-10").
-const CALENDAR_DATE = /\b(?:19|20)\d{2}\b/;
 export function asksAboutTheDeadline(text: string): boolean {
-  // A sentence that names the deadline AND either asks or states a calendar date is an offer of the card's date (buddy r6 P2: "The
-  // deadline is 10 August 2027. Does that work for you?" split the date from its question). The served build answer, which says
-  // "The model holds no deadline yet" and asks other questions, names no date beside the word and stays the build answer.
-  return text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence)
-    && (sentence.includes('?') || CALENDAR_DATE.test(sentence)));
+  // An answer is an offer of the card's date when it names the deadline AND (asks about it in one sentence, or carries a calendar year
+  // ANYWHERE in the answer: the date and its question may sit in separate sentences, lines or paragraphs: buddy r6-r8 P2s such as
+  // "The deadline is 10 August 2027. Does that work for you?" and "Your deadline is:\n\n10 August 2027.\n\nDoes that work for you?").
+  // The served build answer, which says "The model holds no deadline yet" and asks other questions, carries no year and stays the
+  // build answer. A broader match only closes the offer (silent), never makes a wrong one.
+  return /\bdeadline\b/i.test(text) && (CALENDAR_DATE.test(text)
+    || text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence) && sentence.includes('?')));
 }
 export interface DeadlineTurnStart {
   readonly rowId: string | null;
