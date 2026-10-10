@@ -7,7 +7,7 @@ import { parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { labelHead } from './label-head-unit.js';
 import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } from './same-unit.js';
 import { findLinkEffectAmounts } from './link-effect-figures.js';
-import { figureTheUserWroteForSpan } from './stated-by-user.js';
+import { figureTheUserWroteForSpan, isChangeWord } from './stated-by-user.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -159,7 +159,7 @@ const ATTRIBUTION = /\bOlumi\b|\byou(?:r|rs|rself|rselves)?\b|\bassistant\b/iu;
  * Olumi named in either of the two paragraphs above refuses. Third-party attribution without any of these signals
  * is ACCEPTED RESIDUAL (DL 7 Oct).
  */
-function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], literal: string, value: number, compoundWords = false, distinctClaim?: (text: string) => boolean): boolean {
+function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], literal: string, value: number, compoundWords = false, distinctClaim?: (text: string) => boolean, distinctBound?: (text: string) => boolean): boolean {
   const breaks = [...brief.matchAll(/\n[ \t]{0,4}\n/gu)].map(m => m.index!);
   const above = breaks.filter(n => n < a.start);
   const start = above.at(-1) ?? -1;
@@ -171,7 +171,10 @@ function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], lit
   return paragraph.every(s => {
     if (ATTRIBUTION.test(s.text)) return false;
     if (s === a) return true;
-    if (s === next && (compoundWords ? currentLevelWords(s.text) : words(s.text)).some(w => BOUNDS.has(w))) return false;
+    if (s === next && compoundWords && words(s.text).some(w => NOT_POINT.has(w) && !BOUNDS.has(w))
+      && distinctBound?.(s.text) !== true) return false;
+    if (s === next && (compoundWords ? currentLevelWords(s.text) : words(s.text)).some(w => BOUNDS.has(w))
+      && distinctBound?.(s.text) !== true) return false;
     const separate = distinctClaim?.(s.text) === true;
     // The same figure in another spelling ("the 4" beside "four", "four" beside "4") is the same literal.
     if (!separate && words(s.text).some(w => figure(w) === value)) return false;
@@ -362,6 +365,64 @@ function factorLevelSpans(model: CandidateModel, factor: Factor, text: string, v
   return matches;
 }
 
+/** A change on an independently named flow does not qualify the owned stock's current point. */
+function differentCurrentFlow(model: CandidateModel, factor: Factor, text: string): boolean {
+  const current = readUnitParts(factor.unit);
+  const qualifiers = words(text).filter(w => NOT_POINT.has(w));
+  if (text.length > MAX_ASSERTION || !currentLevelRole(text) || current === null
+    || current.kind !== 'count' || !current.noun?.length || current.period !== null
+    || current.per !== null || qualifiers.length === 0 || !qualifiers.every(isChangeWord)) return false;
+  const claims = model.factors.filter(other => {
+    const flow = readUnitParts(other.unit);
+    if (other === factor || flow === null || flow.period === null
+      || JSON.stringify(current) !== JSON.stringify({ ...flow, period: null })
+      || model.constraints.some(c => c.value === other.baseline_value && metricNamesLabel(c.metric, other.label))) return false;
+    const spans = factorLevelSpans(model, other, text);
+    if (spans.length !== 1) return false;
+    const amount = findLinkEffectAmounts(text).find(a => a.index === spans[0]!.start);
+    if (amount === undefined || !labelStandsForCountUnit(statedTailParts(text, amount)?.noun?.join(' '),
+      words(other.label).filter(w => !grammar(w)).join(' '), other.unit)) return false;
+    const before = words(text.slice(0, spans[0]!.start));
+    const names = words(other.label).concat(words(typeof other.unit === 'string' ? other.unit : ''));
+    // Every qualifier belongs before this independently bound amount, under the existing first-person subject.
+    // Retractions, later qualifiers, unknown frames and new subjects cannot be detached from the credited stock.
+    return before[0] === 'we' && before.filter(w => NOT_POINT.has(w)).length === qualifiers.length
+      && before.every(w => grammar(w) || CLAUSE.has(w) || isChangeWord(w) || names.some(n => sameName(n, w)));
+  });
+  return claims.length === 1;
+}
+
+/** Independently typed flow changes and stock-goal bounds retain their own quantity/unit/period. */
+function differentGoalBound(model: CandidateModel, factor: Factor, text: string): boolean {
+  if (differentCurrentFlow(model, factor, text)) return true;
+  const goal = readUnitParts(model.goal.unit); const current = readUnitParts(factor.unit);
+  if (goal === null || current === null || (goal.kind !== 'count' && goal.kind !== 'currency')
+    || goal.period !== null || current.period === null || goal.per !== null || current.per !== null
+    || (goal.kind === 'count' && !goal.noun?.length)
+    || JSON.stringify(goal) !== JSON.stringify({ ...current, period: null })) return false;
+  const amounts = findLinkEffectAmounts(text);
+  const targets = amounts.filter(a => a.magnitude === model.goal.value);
+  if (targets.length !== 1) return false;
+  const others = [...model.factors.filter(other => {
+    if (sameCurrentQuantity(model, other)) return false;
+    const unit = readUnitParts(other.unit);
+    // Unknown or compatible frames stay rivals; an explicit period is not this stock's frame.
+    return unit === null || (unit.kind === goal.kind && unit.period === goal.period);
+  }).map(other => other.label), ...model.outcomes.map(o => o.label), ...model.risks.map(r => r.label)];
+  const amount = targets[0]!;
+  const span = { start: amount.index, end: amount.index + amount.matchedText.length };
+  const written = statedTailParts(text, amount);
+  if (written?.kind !== goal.kind || written.period !== goal.period) return false;
+  const framed = sameFrame(text, span, model.goal.unit, amount);
+  // Only already-read bound/cardinal/period grammar can replace an unwritten count unit ("within nine months").
+  if (!framed && !written.noun?.every(w => grammar(w) || BOUNDS.has(w) || figure(w) !== null)) return false;
+  // A written count noun is independently typed here; keep it available to the quantity-name reader.
+  const unit = framed ? null : model.goal.unit;
+  return figureTheUserWroteForSpan(amount.magnitude, unit, text,
+    { target: [model.goal.metric], others, strict: true, requireNamed: true, at: amount.index,
+      writtenAmounts: amounts }) !== null;
+}
+
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
 export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   try {
@@ -396,7 +457,7 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
         && currentQuantityLabel(claims[0]!.label) !== currentQuantityLabel(factor.label)
         && readUnitParts(claims[0]!.unit) !== null
         && JSON.stringify(readUnitParts(claims[0]!.unit)) !== JSON.stringify(readUnitParts(factor.unit));
-    });
+    }, text => differentGoalBound(model, factor, text));
   } catch (err) {
     log.warn({ event: 'agent_lane.stated_level_unverifiable', err: err instanceof Error ? err.message : String(err) },
       'agent-lane: a stated factor level could not be verified on a malformed draft; credit is withheld');
