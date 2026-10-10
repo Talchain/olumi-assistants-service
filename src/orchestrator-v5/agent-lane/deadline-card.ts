@@ -10,7 +10,8 @@ import { registrationTurnId } from '../graph-registration/registration-identity.
  * capital (so "Is your deadline 10 Aug. 2027?" stays one sentence) or at a blank line; a single newline stays inside one
  * (buddy r4 P2: "Aug." and a newline inside the question both slipped past a [^.!?\n] matcher).
  */
-const CALENDAR_DATE = /\b(?:\d{1,2}(?:st|nd|rd|th)?\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(?:\d{1,2},?\s+)?\d{4}\b|\b\d{4}-\d{2}-\d{2}\b/i;
+// An offered date always carries its year, in any format ("10 August 2027", "August 10th, 2027", "10/08/2027", "2027-08-10").
+const CALENDAR_DATE = /\b(?:19|20)\d{2}\b/;
 export function asksAboutTheDeadline(text: string): boolean {
   // A sentence that names the deadline AND either asks or states a calendar date is an offer of the card's date (buddy r6 P2: "The
   // deadline is 10 August 2027. Does that work for you?" split the date from its question). The served build answer, which says

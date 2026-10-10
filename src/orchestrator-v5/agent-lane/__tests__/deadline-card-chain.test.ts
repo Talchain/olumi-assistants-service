@@ -388,6 +388,7 @@ describe('R6 the draft was built inside an Agent turn', () => {
     for (const asked of ['is your deadline 10 August 2027 (10 months from 10 October 2026)?', 'Here is the model.\nWould you like to set 10 August 2027 as the deadline?',
       'Is your deadline 10 Aug. 2027?', 'Is your deadline\n10 August 2027?', '**Is your deadline 10 August 2027?**',
       'The deadline is 10 August 2027. Does that work for you?', 'Your deadline is 10 August 2027.\n\nIs that correct?',
+      'The deadline is August 10th, 2027. Does that work for you?', 'Your deadline is 10/08/2027.\n\nIs that correct?', 'The deadline is 2027-08-10. Right?',
       'Is your deadline 10 August 2027? **You can change the date.**', '> Is your deadline 10 August 2027?\n\n1. Yes\n2. No, let me know.']) {
       const offer = row('agent_turn:resent', { user_message: brief, assistant_message: asked });
       expect(firstAgentTurnAfterDraft({ rowId: offer.id, rows: [offer, construction] }, sid, brief), asked).toBe(false);
