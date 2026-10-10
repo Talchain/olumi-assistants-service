@@ -1,4 +1,4 @@
-import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
+import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, draftRegistrationStamp, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
@@ -9576,7 +9576,8 @@ export function createAgentCapabilities(
         // The immutable reference is THIS draft's own creation time; without the construction version it stays silent
         // (no scenario-time or clock fallback on the automatic path: buddy r1 P2).
         const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
-        const stamp = draft?.created_at;
+        // A guest has no version history, so the registration row's own stamp is the same moment (`draftRegistrationStamp`).
+        const stamp = draft?.created_at ?? draftRegistrationStamp(input.start, ctx.scenario_id, g.brief_text ?? '');
         const reference = typeof stamp === 'string' && Number.isFinite(Date.parse(stamp)) ? todayInLondon(new Date(stamp)) : undefined;
         if (reference === undefined) return undefined;
         const card = deadlineCardToIssue({ ...input, graph: g.raw, storedBrief: g.brief_text, reference, priorOffer: false });

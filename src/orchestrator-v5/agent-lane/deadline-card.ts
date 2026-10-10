@@ -53,6 +53,20 @@ const carriesDeadlineProposal = (entry: unknown): boolean => {
   return Array.isArray(ops) && ops.some(o => record(o) && o.op === 'set_goal_deadline');
 };
 /**
+ * The draft's own creation time as the REGISTRATION ROW stamps it (DB-stamped, immutable), for a session that has no version history.
+ * Served 10 Oct staging 1bf67f90 (guest 5d5122d1): a guest has NO versions (`findConstructionVersion` is empty by design), so the
+ * automatic offer had no reference and stayed silent on every guest draft. The registration row exists for a guest too, and its
+ * `created_at` is the same moment the version would carry. Only the real registration row of THIS brief counts (never the legacy
+ * direct-answer row, never the clock, never scenario time); an unparseable stamp is no reference.
+ */
+export function draftRegistrationStamp(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): string | undefined {
+  if (!start || brief.trim() === '') return undefined;
+  const draftTurnId = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
+  const row = start.rows.find(r => r.scenario_id === scenarioId && r.turn_id === draftTurnId
+    && typeof r.request_hash === 'string' && r.request_hash.startsWith('graph_registration:'));
+  return typeof row?.created_at === 'string' && Number.isFinite(Date.parse(row.created_at)) ? row.created_at : undefined;
+}
+/**
  * ⭐ THE STRUCTURAL SIGNAL (DL github-6d, #2948 r6-r9: the free-text "did the answer offer a date?" test was a symptom-chase).
  * The turn that built the draft already OFFERED a deadline when the pending actions committed with its answer row carry a
  * `set_goal_deadline` proposal. Only that makes the next turn's route-issued card a repeat. Nothing in the reply prose decides it, so

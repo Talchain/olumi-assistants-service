@@ -25,7 +25,7 @@ import { proposalRecord } from '../proposal-object/record.js';
 import { approvalChipsFor, approvalChipIdFor, DEADLINE_CHANGE_CHIP } from '../approval-chips.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, type DeadlineIssueInput } from '../deadline-card.js';
+import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, draftRegistrationStamp, firstAgentTurnAfterDraft, type DeadlineIssueInput } from '../deadline-card.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
 type Rec = Record<string, any>;
@@ -313,13 +313,44 @@ describe('R4 durable first-Agent-turn gate', () => {
     const second = await turn({ agent_session_id: first._agent.session_id });
     expect(second._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
   });
-  it('without the construction version the automatic card is silent: no scenario-time and no clock fallback', async () => {
-    const w = world(); w.reference(null, '2026-10-09T10:00:00Z');
+  it('with no version AND no usable registration stamp the automatic card is silent: no scenario-time and no clock fallback', async () => {
+    const w = world(); w.reference(null, '2026-10-09T10:00:00Z'); (w.rows[0] as Rec).created_at = 'not-a-date';
     const input = { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } };
     expect(await w.caps.deadlineCardFromDraft(w.ctx('Run'), input)).toBeUndefined();
     w.reference(null, null); expect(await w.caps.deadlineCardFromDraft(w.ctx('Run'), input)).toBeUndefined();
     // The model-facing door keeps its own (unchanged) fallback: a typed deadline still gets a card there.
     expect(await w.caps.proposeGoalDeadline!(w.ctx('My deadline is ten months'), { deadline_words: 'ten months', rationale: '' })).toMatchObject({ ok: true });
+  });
+  /**
+   * Served 10 Oct, staging 1bf67f90, guest 5d5122d1: a GUEST has no version history (`findConstructionVersion` is empty by design),
+   * so the offer had no reference and stayed silent on every guest draft. The registration row exists for a guest and carries the
+   * same DB-stamped moment, so it is the reference when there is no version.
+   */
+  describe('R9 a guest draft has no version history: the registration row is the reference', () => {
+    it('the card is offered with R = the registration row\'s day, and the route offers the same bound card', async () => {
+      const w = world(); w.reference(null, null);
+      const input = { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } };
+      const issued = await w.caps.deadlineCardFromDraft(w.ctx('Run'), input);
+      expect(issued?.words).toBe('ten months');
+      const guest = world(); guest.reference(null, null);
+      const first = await (await route(guest))(); card(first);
+    });
+    it('a version, when there is one, still wins; an unusable stamp, a foreign scenario row and the legacy direct-answer row give no reference', async () => {
+      const w = world(); (w.rows[0] as Rec).created_at = '2026-01-01T10:00:00Z'; // the version (draft-r7 STAMP) wins over a different row stamp
+      const viaVersion = await w.caps.deadlineCardFromDraft(w.ctx('Run'), { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } });
+      expect(viaVersion).toBeDefined();
+      const sid = randomUUID(), brief = d2.brief;
+      const row = (request_hash: string, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: randomUUID(), request_hash,
+        turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, ...over });
+      const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false, created_at: STAMP });
+      expect(draftRegistrationStamp({ rowId: construction.id, rows: [construction] }, sid, brief)).toBe(STAMP);
+      expect(draftRegistrationStamp({ rowId: construction.id, rows: [{ ...construction, created_at: 'nope' }] }, sid, brief)).toBeUndefined();
+      expect(draftRegistrationStamp({ rowId: construction.id, rows: [{ ...construction, scenario_id: randomUUID() }] }, sid, brief)).toBeUndefined();
+      const legacy = row('direct_answer:legacy', { user_message: brief });
+      expect(draftRegistrationStamp({ rowId: legacy.id, rows: [legacy] }, sid, brief)).toBeUndefined();
+      expect(draftRegistrationStamp(undefined, sid, brief)).toBeUndefined();
+      expect(draftRegistrationStamp({ rowId: construction.id, rows: [construction] }, sid, '   ')).toBeUndefined();
+    });
   });
   it('Yes on the route-issued card writes byte-for-byte what Yes on the model-facing door\'s card writes', async () => {
     const viaRoute = world(), turn = await route(viaRoute), first = await turn(), { yes } = card(first);
