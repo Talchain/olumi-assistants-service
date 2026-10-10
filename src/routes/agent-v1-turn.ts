@@ -1,4 +1,6 @@
 import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
+import { loadPriorFactsWithReadState } from '../orchestrator-v5/build-turn-context.js';
+import { projectStatedObjections } from '../orchestrator-v5/context/stated-objections.js';
 import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-card.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -2798,6 +2800,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             elapsed_ms: Date.now() - startedAt,
           });
         },
+        // S8 durable human reasoning: the existing turn-window facts reader + the existing projector. No new store or query.
+        readStatedObjections: async (sid: string, rid: string) =>
+          projectStatedObjections((await loadPriorFactsWithReadState(sid, rid, store)).facts),
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid, { validation: 'strict' }) }
