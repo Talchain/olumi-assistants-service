@@ -66,7 +66,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         model_critiques: [],
       },
     });
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1', undefined, true)!;
     const dc = input.deterministic_coaching;
     expect(dc.readiness).toBe('ready');
     expect(dc.headline_type).toBe('moderate_winner');
@@ -97,7 +97,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
   });
 
   it('2. absent m1_coaching: safe defaults preserved; has_deterministic_coaching=false', () => {
-    const input = buildInvokeInputForTests(BRIEF, baseEnrichment(), 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, baseEnrichment(), 'opt-1', undefined, true)!;
     const dc = input.deterministic_coaching;
     expect(dc.readiness).toBe('unknown');
     expect(dc.headline_type).toBe('neutral');
@@ -119,7 +119,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         ],
       },
     });
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1', undefined, true)!;
     const dc = input.deterministic_coaching;
     expect((dc.evidence_gaps as unknown[]).length).toBe(2);
     expect(dc.readiness).toBe('unknown'); // fallback
@@ -138,7 +138,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         model_critiques: [],
       },
     });
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1', undefined, true)!;
     const meta = input._meta!;
     expect(meta.has_deterministic_coaching).toBe(false);
     expect(meta.evidence_gaps_dropped_count).toBe(0);
@@ -165,7 +165,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         },
       ],
     });
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1', undefined, true)!;
     const fs = input.isl_results.factor_sensitivity as ReadonlyArray<Record<string, unknown>>;
     expect(fs).toHaveLength(1);
     const f = fs[0]!;
@@ -208,7 +208,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         ],
       },
     });
-    const input = buildInvokeInputForTests(BRIEF, partialEnrichment, 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, partialEnrichment, 'opt-1', undefined, true)!;
     const dc = input.deterministic_coaching;
     const gaps = dc.evidence_gaps as ReadonlyArray<Record<string, unknown>>;
     expect(gaps).toHaveLength(1);
@@ -232,7 +232,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         // No real readiness/headline_type/model_critiques either
       },
     });
-    const allBadInput = buildInvokeInputForTests(BRIEF, allBadEnrichment, 'opt-1')!;
+    const allBadInput = buildInvokeInputForTests(BRIEF, allBadEnrichment, 'opt-1', undefined, true)!;
     const allBadDc = allBadInput.deterministic_coaching;
     expect(allBadDc.evidence_gaps).toEqual([]);
     const allBadMeta = allBadInput._meta!;
@@ -250,7 +250,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         model_critiques: [],
       },
     });
-    const paddedInput = buildInvokeInputForTests(BRIEF, paddedEnrichment, 'opt-1')!;
+    const paddedInput = buildInvokeInputForTests(BRIEF, paddedEnrichment, 'opt-1', undefined, true)!;
     const paddedDc = paddedInput.deterministic_coaching;
     expect(paddedDc.readiness).toBe('ready');
     expect(paddedDc.headline_type).toBe('moderate_winner');
@@ -265,7 +265,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         model_critiques: [],
       },
     });
-    const wsInput = buildInvokeInputForTests(BRIEF, whitespaceEnrichment, 'opt-1')!;
+    const wsInput = buildInvokeInputForTests(BRIEF, whitespaceEnrichment, 'opt-1', undefined, true)!;
     expect(wsInput.deterministic_coaching.readiness).toBe('unknown');
     expect(wsInput.deterministic_coaching.headline_type).toBe('neutral');
     expect(wsInput._meta!.has_deterministic_coaching).toBe(false);
@@ -279,7 +279,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         model_critiques: [],
       },
     });
-    const wtInput = buildInvokeInputForTests(BRIEF, wrongTypeEnrichment, 'opt-1')!;
+    const wtInput = buildInvokeInputForTests(BRIEF, wrongTypeEnrichment, 'opt-1', undefined, true)!;
     expect(wtInput.deterministic_coaching.readiness).toBe('unknown');
     expect(wtInput.deterministic_coaching.headline_type).toBe('neutral');
     expect(wtInput._meta!.has_deterministic_coaching).toBe(false);
@@ -300,7 +300,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         model_critiques: [],
       },
     });
-    const input = buildInvokeInputForTests(BRIEF, unknownEnrichment, 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, unknownEnrichment, 'opt-1', undefined, true)!;
     const dc = input.deterministic_coaching;
     // Preserved verbatim — NOT replaced with "unknown"/"neutral".
     expect(dc.readiness).toBe('ready-with-gaps');
@@ -332,7 +332,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         ],
       },
     });
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1', undefined, true)!;
     const dc = input.deterministic_coaching;
     expect((dc.model_critiques as ReadonlyArray<unknown>).length).toBe(2);
     expect((dc.model_critiques as ReadonlyArray<Record<string, unknown>>)[0]).toEqual({
@@ -358,7 +358,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         ],
       },
     });
-    const mixedInput = buildInvokeInputForTests(BRIEF, mixedEnrichment, 'opt-1')!;
+    const mixedInput = buildInvokeInputForTests(BRIEF, mixedEnrichment, 'opt-1', undefined, true)!;
     expect((mixedInput.deterministic_coaching.model_critiques as unknown[]).length).toBe(1);
     expect(mixedInput._meta!.model_critique_count).toBe(1);
   });
@@ -390,7 +390,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         ],
       },
     });
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1', undefined, true)!;
     const critiques = input.deterministic_coaching.model_critiques as ReadonlyArray<Record<string, unknown>>;
     expect(critiques).toHaveLength(1);
     expect(critiques[0]).toEqual({
@@ -417,7 +417,7 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
     const enrichment = baseEnrichment({
       m1_coaching: { evidence_gaps: [], model_critiques: manyCritiques },
     });
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1', undefined, true)!;
     const critiques = input.deterministic_coaching.model_critiques as ReadonlyArray<Record<string, unknown>>;
     // Bounded regardless of how many the upstream sends.
     expect(critiques.length).toBeLessThanOrEqual(10);

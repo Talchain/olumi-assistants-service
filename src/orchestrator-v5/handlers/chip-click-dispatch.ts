@@ -1687,6 +1687,9 @@ export async function dispatchChipClickRunAnalysis(
         // twice in this dispatcher (:1662, :1765) — this is the third reader of
         // the same fact, not a new channel.
         runGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+        // Same reasoning as the routed path (turn-executor.ts, `currentGraph`): the Run's own fresh snapshot is the freshest
+        // existing read; a later edit is marked stale at read time. No new read.
+        currentGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
         ...(timingsEnabled ? { callTelemetrySink } : {}),
         // D-ask-1 (2.11 P0-1) — P1-2: same scaffolded-placeholder
         // disclosure threading as the turn-executor decision-review block —

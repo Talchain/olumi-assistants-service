@@ -269,7 +269,7 @@ describe('prose/fact agreement is wired into the live decision_review path', () 
 
 describe('categorical evidence reaches actual prompt serialization', () => {
   function project(enrichment = liveEnrichment()) {
-    const input = buildInvokeInputForTests('Assess our sales strategy.', enrichment, '94b13741');
+    const input = buildInvokeInputForTests('Assess our sales strategy.', enrichment, '94b13741', undefined, true);
     expect(input).not.toBeNull();
     return input!;
   }
