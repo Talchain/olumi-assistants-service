@@ -54,8 +54,25 @@ const withWholeLabel = (n: Node): Node => {
   const { description: _dropped, ...rest } = n as Node & { description?: unknown };
   return { ...rest, label: description } as Node;
 };
+/**
+ * S7: a factor level the verifier credited from the brief now carries the EXISTING `extractionType: 'explicit'` beside
+ * `source: 'brief_extraction'` (the native quantity read needs it). It is the ONLY field that differs from the served
+ * bytes; the `exactlyTheCreditedNodesCarryIt` assertion below keeps estimates, unverified claims and legacy nodes bare.
+ */
+const withVerifiedType = (n: Node): Node => {
+  const os = (n as Node & { observed_state?: Record<string, unknown> }).observed_state;
+  return n.kind === 'factor' && os !== undefined && os.source === 'brief_extraction' && typeof os.value === 'number'
+    ? { ...n, observed_state: { ...os, extractionType: 'explicit' } } as Node : n;
+};
 const asServedNow = (n: Node | undefined): Node | undefined =>
-  n === undefined ? n : withWholeLabel(n.kind === 'goal' ? { ...n, ...G1_HELD } : n);
+  n === undefined ? n : withVerifiedType(withWholeLabel(n.kind === 'goal' ? { ...n, ...G1_HELD } : n));
+const typedIds = (g: { nodes: Node[] }): string[] => g.nodes
+  .filter((n) => (n as Node & { observed_state?: { extractionType?: unknown } }).observed_state?.extractionType === 'explicit')
+  .map((n) => n.id).sort();
+const exactlyTheCreditedNodesCarryIt = (g: { nodes: Node[] }, served: { nodes: Node[] }): void => {
+  const credited = served.nodes.filter((n) => withVerifiedType(n) !== n).map((n) => n.id).sort();
+  expect(typedIds(g), 'only the verifier-credited quantities carry extractionType explicit').toStrictEqual(credited);
+};
 
 const BRIEF =
   'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the '
@@ -185,6 +202,7 @@ describe('a limit the user states on a level is admitted on a factor that can ho
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_OUTCOME));
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     const asServed = asServedBeforeOneForm(graph, SERVED_OUTCOME);
+    exactlyTheCreditedNodesCarryIt(asServed, SERVED_OUTCOME);
     for (const s of SERVED_OUTCOME.nodes.filter((n) => n.id !== 'monthly_churn')) {
       expect(byId(asServed, s.id), s.id).toStrictEqual(asServedNow(s));
     }
@@ -248,6 +266,7 @@ describe('a limit the user states on a level is admitted on a factor that can ho
     expect(byId(graph, 'monthly_churn')).not.toHaveProperty('observed_state');
     expect(byId(graph, 'pro_plan_price')?.observed_state).toStrictEqual({
       value: 0.245, raw_value: 49, cap: 200, declared_scale: 'unit_interval', unit: 'GBP per month', source: 'brief_extraction',
+      extractionType: 'explicit', // S7: the verifier-credited quantity carries the existing explicit type; every figure is unchanged
     });
     expect(graph.goal_constraints?.[0]?.value).toBe(10);
   });
@@ -258,6 +277,7 @@ describe('CONTROLS — what the rule must leave alone', () => {
     const { graph } = await register(factorDraft());
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     expect(asServedBeforeOneForm(graph, SERVED_FACTOR).nodes).toStrictEqual(SERVED_FACTOR.nodes.map(asServedNow));
+    exactlyTheCreditedNodesCarryIt(asServedBeforeOneForm(graph, SERVED_FACTOR), SERVED_FACTOR);
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_FACTOR));
     expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);
   });
