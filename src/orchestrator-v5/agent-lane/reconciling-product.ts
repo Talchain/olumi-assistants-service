@@ -18,6 +18,7 @@ import type { CandidateModel } from './admit-model.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
+import { verifiedFactorLevel } from './verified-option-setting.js';
 import { sayFigure } from './say-figure.js';
 import { readCount, readMoney, readMoneyTotal, readUnitParts } from './same-unit.js';
 
@@ -214,7 +215,11 @@ export function withoutGapResidual(candidate: CandidateModel, brief: string): { 
   const factor = (label: string) => candidate.factors.find((f) => f.label === label);
   const isUsers = (label: string): boolean => {
     const f = factor(label);
-    return f !== undefined && f.baseline_known === true && f.provenance === 'explicit' && stated(f.baseline_value) && figureTheUserWrote(f.baseline_value, f.unit, brief);
+    // ⭐ S7: "the user's level" is the receipt gate's verdict (`verifiedFactorLevel`), the only construction authority. The
+    // drop is said with "on the card for you to confirm" — true only when both levels are verified, because the card
+    // refuses an unverified one. Otherwise Olumi's plug stays Olumi's and nothing claims a card that is not offered.
+    return f !== undefined && f.baseline_known === true && f.provenance === 'explicit' && stated(f.baseline_value)
+      && figureTheUserWrote(f.baseline_value, f.unit, brief) && verifiedFactorLevel(candidate, f, brief);
   };
   // The user's product beside the residual: the goal's own two user parents (m0), or ONE carrier whose declared product is
   // a user part × an unlevelled operand read at TODAY's level through its one user-levelled cause (m8).

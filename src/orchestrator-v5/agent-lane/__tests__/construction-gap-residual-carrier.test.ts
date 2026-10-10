@@ -14,8 +14,6 @@ import type { CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
-import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
-import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 type Json = Record<string, any>;
 type Graph = { nodes: Json[]; edges: Json[] };
@@ -51,33 +49,31 @@ describe('Olumi’s gap residual beside a carrier is taken out and said; the car
     expect(75000 - 49 * 1500).toBe(M8.factors.find((f: Json) => f.label === 'Other MRR').baseline_value);
   });
 
-  it('RED: the residual is taken out, and the carrier card is offered on today’s £49 × 1,500', async () => {
+  /**
+   * S7 disposition `pending_b5_neighbour_bound` (AIE quantity contract). The user's "1,500 paying subscribers" is refused by the
+   * receipt gate's next-sentence bound check ("…must stay below 5%, and we want MRR above £85k within a year": B5, split out
+   * to its follow-up PR) and "£49" is written in a question with no per-subscriber period. Neither level is VERIFIED, so
+   * Olumi's £1,500 plug stays Olumi's, no card is offered and nothing claims one: the drop is said only when the card is real.
+   * B5 restores the three rows below to their original assertions.
+   */
+  it('RED: with the levels unverified (B5) the residual stays Olumi\u2019s and no carrier card is offered', async () => {
     const { graph } = await build(m8());
-    expect(residualNode(graph)).toBeUndefined();
-    expect(labelsInto(graph, goalOf(graph).id)).toEqual(['Pro subscription MRR at month 12']);
-    const card = proposeProductIdentity(graph);
-    expect(card).not.toBeNull();
-    expect(card!.outcome_id).toBe(carrierOf(graph).id);
-    expect(card!.words.startsWith('Is “Pro subscription MRR at month 12” “Pro plan price” × “Paying subscribers at month 12”? ')).toBe(true);
-    expect(card!.words).toContain('Today that is £49 × 1,500 (your “Current paying subscribers”) = £73,500, close to your £75,000 “MRR”.');
+    expect(residualNode(graph)).toBeDefined();
+    expect(labelsInto(graph, goalOf(graph).id)).toEqual(expect.arrayContaining(['Other MRR']));
+    expect(proposeProductIdentity(graph)).toBeNull();
   });
 
-  it('RED: the drop is SAID (AIQ 5904406904), with the card’s figures', async () => {
+  it('RED: nothing says the figures are on a card that is not offered, and the plug is not said dropped', async () => {
     const { out } = await build(m8());
-    expect(JSON.stringify(out)).toContain('I had added ‘Other MRR’ of £1,500 a month so that ‘MRR’ matched your £75,000. Its size was my guess, not a figure you gave');
-    expect(JSON.stringify(out)).toContain('Your £49 × 1,500 = £73,500 is on the card for you to confirm.');
+    expect(JSON.stringify(out)).not.toContain('is on the card for you to confirm');
+    expect(JSON.stringify(out)).not.toContain('I had added ‘Other MRR’ of £1,500 a month');
   });
 
-  it('POST-YES: the real writer confirms exactly the carrier’s stored reading; the residual is not added back', async () => {
+  it('POST-YES: no card is reachable while the levels are unverified, so no reading can be recorded from the carrier', async () => {
     const { graph } = await build(m8());
-    const card = proposeProductIdentity(graph)!;
-    const r = applyIdentityConfirmEdit({ persistedGraph: graph, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
-      expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never) ?? '', reading_token: identityConfirmReadingToken(card) });
-    expect(r.kind, JSON.stringify(r)).toBe('mutated');
-    const after = (r as { mutatedGraph: Graph }).mutatedGraph;
-    expect(carrierOf(after).nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: true });
-    expect(residualNode(after)).toBeUndefined();
-    expect(labelsInto(after, goalOf(after).id)).toEqual(['Pro subscription MRR at month 12']);
+    expect(proposeProductIdentity(graph)).toBeNull();
+    expect(residualNode(graph)).toBeDefined();
+    expect(carrierOf(graph).nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: false });
   });
 
   // The carrier over the user's TWO own levels + Olumi's plug is NOT this rule's: MG's class-2 fold (goal-product-carrier.ts,
