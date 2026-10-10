@@ -56,13 +56,17 @@ export function buildLicensedRunFacts(
   const raw = result.enrichment ?? {};
   const runHash = typeof result.graph_hash_at_run === 'string' && result.graph_hash_at_run !== ''
     ? result.graph_hash_at_run : null;
-  const suppliedHash = currentGraphHash !== undefined ? currentGraphHash
-    : hashOf(currentGraph === undefined ? groundingGraph : currentGraph);
-  // No hash to compare against is not evidence of staleness: the review fires in the same request as its own Run, whose
-  // snapshot is the freshest read there is. Only a KNOWN, differing current hash makes the Run non-current.
-  const currencyHash = suppliedHash ?? runHash;
+  const suppliedGraph = currentGraph === undefined ? groundingGraph : currentGraph;
+  const suppliedHash = currentGraphHash !== undefined ? currentGraphHash : hashOf(suppliedGraph);
+  // A graph WAS given and cannot be read: currency is unknown for a reason that is not "nobody looked". Fail CLOSED
+  // (withhold the staleness-sensitive findings) rather than comparing the Run with itself.
+  const unreadable = suppliedHash === null && currentGraphHash === undefined
+    && suppliedGraph !== undefined && suppliedGraph !== null;
+  // No graph at all is not evidence of staleness: the review fires in the same request as its own Run, whose snapshot is
+  // the freshest read there is. Only a KNOWN, differing current hash makes the Run non-current.
+  const currencyHash = suppliedHash ?? (unreadable ? null : runHash);
   const canonical = selectCanonicalAnalysisState({ handlerFacts: [fact], currentGraphHash: currencyHash });
-  const current = canonical.freshness === 'fresh' || currencyHash === null;
+  const current = !unreadable && (canonical.freshness === 'fresh' || currencyHash === null);
   const mayNameLeader = current && readMayNameLeadingOptionFromResult(result);
   const state = composeAnalysisStateV1({ canonical, mayNameLeadingOption: mayNameLeader,
     rawRobustness: current ? readRawRobustnessFromResponseBody({ blocks: [{ enrichment: raw }] }) : null });
