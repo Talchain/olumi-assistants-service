@@ -232,7 +232,9 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       // S7 PR-B re-record (field-by-field vs staging cbf36b7a): only nodes 5, 6, 9 (drafter-declared explicit, no verbatim brief quote) gain
       // extractionType inferred + user_material_unverified, provenance from_brief->unverified_brief (and source brief_extraction->cee_inference where it was set).
       expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrationBase, sealed(), 'sealedR-d3'))).digest('hex'))
-        .toBe('e6e213467888242aaf6e74c98deccdea5415774ea85bae69540b5992aa9dccf7');
+        // RUN42: additionally the goal and price-change operand lack receipts; six provenance-only pointers.
+        // original raw has no receipt; credit unproved — #94 6101950357(b), 6102610518(7).
+        .toBe('1aed681534770e94784f25aa569cd64aa42f9c36c019e366b2ca87e44665872e');
       expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
       expect(eventAdmission).not.toHaveBeenCalled();
     } finally { info.mockRestore(); eventAdmission.mockRestore(); }

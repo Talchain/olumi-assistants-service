@@ -177,6 +177,8 @@ function beforeAiLevelType(a: ReturnType<typeof admitted>, raw: CandidateModel, 
 }
 // Per-row field proofs retained in run41-out/raw-field-deltas.json; original raw and baseline JSON are immutable.
 const UNRECEIPTED_RAW_DIGESTS: Readonly<Record<string, string>> = {
+  // Exactly the three RUN41 pointers: provenance, retained confidence, source — #94 6102610518(5).
+  'e63bd10a.json': '538206c77c706e0904fbd30b136d92c3405698efeef63c2109c7be4c3b856fb2',
   // original raw has no receipt; credit unproved — #94 6101950357(b)
   'ca2cc3ca.json': '84e31fbaddc03139c4dcc811d62cbed8f78eb70e6fe7c91334fb7fd1782f2b71',
   // original raw has no receipt; credit unproved — #94 6101950357(b)

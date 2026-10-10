@@ -7,7 +7,7 @@ import { parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { labelHead, LABEL_HEAD_BOUNDARY } from './label-head-unit.js';
 import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } from './same-unit.js';
 import { findLinkEffectAmounts } from './link-effect-figures.js';
-import { figureTheUserWroteForSpan, isChangeWord, afterChangeWord, figureWrittenAsAChange, linkEffectFigureNotAChange, linkEffectQuoteContextMiss } from './stated-by-user.js';
+import { figureTheUserWroteForSpan, ceilingTheUserWroteFor, isChangeWord, afterChangeWord, figureWrittenAsAChange, linkEffectFigureNotAChange, linkEffectQuoteContextMiss } from './stated-by-user.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -86,18 +86,20 @@ function namedOption(model: CandidateModel, selected: Option, clause: string, va
 }
 /** Every other clause of the sentence must be a sibling option arm: an arm verb that uniquely names ANOTHER option of
  * the model, with that option's own figure (if any). A qualifier ("at most", "or use that number as a ceiling"), an
- * elliptical or unbound alternative ("or 5", "or open for 5 sessions") or an attribution after the setting refuses.
+ * unbound alternative ("or 5", "or open for 5 sessions") or an attribution after the setting refuses.
+ * A coordinated elliptical head must independently bind its own factor and full typed frame.
  * Only a range that brackets the figure ("between 80 and 250") may directly follow it.
  */
-function onlySiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean }[], value: number): boolean {
-  return others.every(({ text, next }) => {
+function onlySiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean; bound?: boolean }[], value: number): boolean {
+  return others.every(({ text, next, bound }) => {
     const ws = words(text);
     if (next && ws.length === 4 && ws[0] === 'between' && ws[2] === 'and') {
       const low = figure(ws[1]!), high = figure(ws[3]!);
       if (low !== null && high !== null && low < value && value < high) return true;
     }
+    if (bound === false) return false;
     const arm = ws[0] === 'or' || ws[0] === 'and' || ws[0] === 'to' ? ws.slice(1) : ws;
-    if (!ARMS.has(arm[0] ?? '')) return false;
+    if (!ARMS.has(arm[0] ?? '') && bound !== true) return false;
     const figures = ws.flatMap(w => { const n = figure(w); return n === null ? [] : [n]; });
     // DL 7 Oct (iii): an arm that writes the credited figure ("instead of the 4", "treat 4 as a ceiling") refuses.
     if (figures.includes(value)) return false;
@@ -105,7 +107,7 @@ function onlySiblingArms(model: CandidateModel, selected: Option, others: readon
   });
 }
 /** An option-setting frame. Current-level ownership stays separate; history, conditions and third-party claims abstain. */
-function settingClause(a: Assertion, at: number, change = false, ownedStart?: number): { text: string; start: number; frame: string[]; others: { text: string; next: boolean }[] } | null {
+function settingClause(a: Assertion, at: number, change = false, ownedStart?: number, model?: CandidateModel, factor?: Factor): { text: string; start: number; frame: string[]; bound?: boolean; others: { text: string; next: boolean; bound?: boolean }[] } | null {
   const lead = /^(?:We (?:could|will) |Our options are to |One option is to |Decision: )/iu.exec(a.text);
   // A labelled prospective assertion is also owned, e.g. "The premium plan would attract ...".
   const prospective = /^The (?:[\p{L}]{1,64} ){1,6}would [\p{L}]{1,64} /iu.exec(a.text);
@@ -120,32 +122,74 @@ function settingClause(a: Assertion, at: number, change = false, ownedStart?: nu
   if (lead === null && prospective === null && ownedStart === undefined && proposalStart === undefined) return null;
   if (FOREIGN_LEVEL.test(a.text) || ATTRIBUTION.test(a.text)
     || linkEffectQuoteContextMiss(a.text, a.text) === 'denied'
-    || words(a.text).some(w => w === 'last' || w === 'previous' || w === 'not')) return null;
+    || words(a.text).some(w => w === 'last' || w === 'previous' || w === 'not' || w === 'if')) return null;
   const bodyStart = ownedStart ?? lead?.[0].length ?? proposalStart ?? 0;
   const body = a.text.slice(bodyStart);
+  const governing = words(body)[0] ?? '';
+  const coordinated = model !== undefined && ACTIONS.has(governing) && / (?:or|and) /iu.test(body);
+  // #94 6102610518(1): bind each coordinated action's HEAD, never a figure in its purpose.
+  // The existing span reader independently names the factor; the complete local unit frame must agree.
+  const boundHead = (part: string): string | null => {
+    if (!coordinated || model === undefined || !currentLevelRole(part)) return null;
+    const tokens = [...part.matchAll(/[\p{L}\p{N}]{1,64}/gu)];
+    const amounts = findLinkEffectAmounts(part);
+    if (amounts.length !== 1) return null;
+    const amount = amounts[0]!;
+    const ends = [part.length, ...tokens.filter(t => t.index! >= amount.index + amount.matchedText.length
+      && LABEL_HEAD_BOUNDARY.test(t[0])).map(t => t.index!)];
+    for (const end of ends) {
+      const head = part.slice(0, end).trimEnd();
+      const matches = model.factors.filter(f => {
+        const span = figureTheUserWroteForSpan(amount.magnitude, readUnitParts(f.unit)?.kind === 'count' ? null : f.unit, head, {
+          target: [f.label], others: [model.goal.metric, ...model.factors.filter(r => r !== f).map(r => r.label),
+            ...model.outcomes.map(o => o.label), ...model.risks.map(r => r.label)],
+          strict: true, requireNamed: true, at: amount.index, writtenAmounts: [amount],
+        });
+        if (span === null || !sameFrame(head, span, f.unit, amount, f.label)
+          || !sameFrame(part, span, f.unit, amount, f.label)) return false;
+        return model.options.some(o => namedOption(model, o, head, amount.magnitude)
+          && (o.interventions ?? []).some(i => i.factor_label === f.label && i.value === amount.magnitude))
+          && words(head).every(w => figure(w) !== null || grammar(w) || CLAUSE.has(w)
+            || w === governing || (w === words(part)[0] && ACTIONS.has(w)) || [...words(f.label), ...words(typeof f.unit === 'string' ? f.unit : '')]
+              .some(v => sameName(v, w)));
+      });
+      if (matches.length === 1) return head;
+    }
+    return null;
+  };
   let start = bodyStart;
-  let found: { text: string; start: number; frame: string[] } | null = null;
-  const others: { text: string; next: boolean }[] = [];
+  let found: { text: string; start: number; frame: string[]; bound?: boolean } | null = null;
+  const others: { text: string; next: boolean; bound?: boolean }[] = [];
   let before = 0;
   // Keep numeric alternatives in the clause so the point gate refuses them, rather than selecting an endpoint.
-  for (const part of body.split(/, |; | or (?=[\p{L}])/iu)) {
-    const end = start + part.length;
+  for (const original of body.split(coordinated ? /, |; | (?:or|and) (?=[\p{L}])/iu : /, |; | or (?=[\p{L}])/iu)) {
+    const head = start === bodyStart || ACTIONS.has(words(original)[0] ?? '')
+      || / (?:or|and) $/iu.test(a.text.slice(0, start)) ? boundHead(original) : null;
+    const part = head ?? original;
+    const end = start + original.length;
     if (found === null && at >= start && at < end) {
       const ws = words(part);
       const first = ws[0] === 'to' ? ws[1] : ws[0];
-      if (!(prospective !== null && start === 0) && !ACTIONS.has(first ?? '')) return null;
+      if (!(prospective !== null && start === 0) && !ACTIONS.has(first ?? '') && head === null) return null;
       if (findStatedAmounts(part).length > 1) return null;
       if (ws.some(w => NOT_POINT.has(w) && !(change && isChangeWord(w) && (!BOUNDS.has(w) || w === 'more'))) || /[+/()]|[0-9][ \t]{0,4}(?:or|and|-)[ \t]{0,4}[0-9]/iu.test(part)) return null;
       // The complete local clause supplies the setting; a numeric alternative is never a point.
       if (ws.includes('or') || ws.includes('but') || ws.includes('if')) return null;
-      found = { text: part, start, frame: prospective !== null && start === 0 ? ['would', ...words(prospective[0]).slice(-1)] : [first ?? ''] };
+      found = { text: part, start, ...(head === null ? {} : { bound: true }),
+        frame: head !== null ? [ACTIONS.has(first ?? '') ? first! : governing] : prospective !== null && start === 0 ? ['would', ...words(prospective[0]).slice(-1)] : [first ?? ''] };
     } else if (part.trim() !== '') {
       // `next` marks only the clause directly after the setting (the one place a bracketing range may stand).
-      others.push({ text: part, next: found !== null && others.length === before });
+      // A separately bound constraint is context, not an option receipt. It must not bind any action arm.
+      const constraint = coordinated && model !== undefined && head === null && model.constraints.some(c =>
+        ceilingTheUserWroteFor(c.value, c.unit, original, { target: [c.metric],
+          others: model.factors.filter(f => !metricNamesLabel(c.metric, f.label)).map(f => f.label), strict: true })
+        && factor !== undefined && !metricNamesLabel(c.metric, factor.label));
+      if (!constraint) others.push({ text: part, next: found !== null && others.length === before,
+        ...(coordinated && findLinkEffectAmounts(part).length > 0 ? { bound: head !== null } : {}) });
     }
     if (found === null) before = others.length;
-    start = a.text.indexOf(part, start) + part.length;
-    const next = a.text.slice(start).match(/^(?:, |; | or )/iu);
+    start = a.text.indexOf(original, start) + original.length;
+    const next = a.text.slice(start).match(coordinated ? /^(?:, |; | (?:or|and) )/iu : /^(?:, |; | or )/iu);
     start += next?.[0].length ?? 0;
   }
   return found === null ? null : { ...found, others };
@@ -263,10 +307,16 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
   // It must have no rival using that noun; this does not relax money or anonymous count binding.
   const unitNamesFactor = labelStandsForCountUnit(factor.unit, factor.label, factor.unit)
     && !others.some(label => words(label).some(w => words(factor.label).some(t => sameName(w, t))));
-  const span = figureTheUserWroteForSpan(intervention.value, factor.unit, a.text,
-    { target: [factor.label], others, ...(!unitNamesFactor ? { strict: true as const, requireNamed: true as const } : {}) });
-  if (span === null) return false;
-  const clause = settingClause(a, span.start);
+  const amounts = findLinkEffectAmounts(a.text).filter(n => n.magnitude === intervention.value);
+  const arm = amounts.length === 1 ? settingClause(a, amounts[0]!.index, false, undefined, model, factor) : null;
+  const bound = arm?.bound === true;
+  const text = bound ? arm.text : a.text;
+  const localSpan = figureTheUserWroteForSpan(intervention.value,
+    bound && readUnitParts(factor.unit)?.kind === 'count' ? null : factor.unit, text,
+    { target: [factor.label], others, ...(!unitNamesFactor || bound ? { strict: true as const, requireNamed: true as const } : {}) });
+  if (localSpan === null) return false;
+  const span = { start: localSpan.start + (bound ? arm.start : 0), end: localSpan.end + (bound ? arm.start : 0) };
+  const clause = bound ? arm : settingClause(a, span.start, false, undefined, model, factor);
   if (clause === null || !namedOption(model, option, clause.text, intervention.value)
     || !onlySiblingArms(model, option, clause.others, intervention.value)) return false;
   // Every word of the credited clause names the option, the factor or its unit, or is grammar of the frame: a bound
@@ -278,7 +328,7 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
   const right = words(a.text.slice(span.end)).slice(0, 2);
   const left = words(a.text.slice(clause.start, span.start))
     .filter(w => !['is', 'was', 'were', 'at', 'about', 'roughly', 'would', 'will', 'could', 'a', 'an', 'to', 'of', 'for', 'new'].includes(w));
-  if (head === undefined || (!right.some(w => sameName(head, w)) && !sameName(head, left.at(-1) ?? ''))) return false;
+  if (clause.bound !== true && (head === undefined || (!right.some(w => sameName(head, w)) && !sameName(head, left.at(-1) ?? '')))) return false;
   if (model.constraints.some(c => c.value === intervention.value && metricNamesLabel(c.metric, factor.label))) return false;
   if (!sameFrame(a.text, span, factor.unit, undefined, factor.label)) return false;
   return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), intervention.value);
@@ -307,7 +357,7 @@ function verifiedAddition(model: CandidateModel, option: Option, intervention: I
   if (amounts.length !== 1) return false;
   const written = amounts[0]!; const offset = current?.start ?? 0;
   const amount = { ...written, index: written.index + offset };
-  const clause = settingClause(a, amount.index, true, current?.start);
+  const clause = settingClause(a, amount.index, true, current?.start, model, factor);
   if (clause === null || FOREIGN_LEVEL.test(a.text) || ATTRIBUTION.test(a.text)
     || !onlySiblingArms(model, option, clause.others, intervention.value)) return false;
   // A resulting level remains a point even when the candidate calls it additional.
@@ -326,7 +376,8 @@ function verifiedAddition(model: CandidateModel, option: Option, intervention: I
   if (modifier !== undefined && !(modifier === 'more'
     || (NOT_POINT.has(modifier) && !BOUNDS.has(modifier) && isChangeWord(modifier)))) return false;
   const unmodified = a.text.slice(0, end) + tail;
-  const localUnmodified = unmodified.slice(clause.start);
+  const localUnmodified = unmodified.slice(clause.start, clause.start + clause.text.length
+    - (originalTail.length - tail.length));
   if (!currentLevelRole(localUnmodified)) return false;
   const elliptical = current !== null && afterChangeWord(a.text.slice(end)) !== a.text.slice(end)
     && /^[.!?]?$/u.test(tail.trim());
@@ -335,14 +386,17 @@ function verifiedAddition(model: CandidateModel, option: Option, intervention: I
     ...model.outcomes.map(o => o.label), ...model.risks.map(r => r.label)];
   const countNamed = expected.kind === 'count'
     && labelStandsForCountUnit(statedTailParts(unmodified, amount)?.noun?.join(' '), factor.label, factor.unit);
-  const span = figureTheUserWroteForSpan(intervention.value, countNamed || elliptical ? null : factor.unit, a.text,
-    { target: [factor.label], others, strict: true, requireNamed: true, at: amount.index, writtenAmounts: [amount] });
+  const scoped = clause.bound === true;
+  const span = figureTheUserWroteForSpan(intervention.value,
+    countNamed || elliptical || (scoped && expected.kind === 'count') ? null : factor.unit,
+    scoped ? clause.text : a.text, { target: [factor.label], others, strict: true, requireNamed: true,
+      at: scoped ? localAmount.index : amount.index, writtenAmounts: [scoped ? localAmount : amount] });
   if (span === null || !namedOption(model, option, elliptical ? a.text : clause.text, intervention.value)) return false;
   const vocab = [...words(option.label), ...words(factor.label), ...words(intervention.unit), ...clause.frame];
   if (!words(clause.text).every(w => figure(w) !== null || grammar(w) || CLAUSE.has(w) || isChangeWord(w)
     || vocab.some(v => sameName(v, w)))) return false;
   if (model.constraints.some(c => c.value === intervention.value && metricNamesLabel(c.metric, factor.label))) return false;
-  return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), intervention.value);
+  return safeNeighbours(brief, a, sentences, amount.matchedText, intervention.value);
 }
 
 /** Remove only a terminal current/date qualifier; the quantity's scope words remain. */

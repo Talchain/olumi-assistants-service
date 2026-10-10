@@ -222,7 +222,8 @@ it('Science af: flow count stores 2 with no baseline ask; stock stores user 8 + 
     const row = additionRow(stock ? 8 : 0, true, stock); const s = await replay(row);
     const option = (s.graph?.nodes as Rec[]).find(n => n.id === 'add_capacity');
     const factorId = stock ? 'team_headcount' : 'senior_hires';
-    expect((option?.interventions as Record<string, Rec>)[factorId]).toMatchObject({ raw_value: stock ? 10 : 2, source: 'brief_extraction' });
+    // Operand receipts are unproved; arithmetic and no-baseline ask stay exact — #94 6102610518(4).
+    expect((option?.interventions as Record<string, Rec>)[factorId]).toMatchObject({ raw_value: stock ? 10 : 2, source: 'cee_hypothesis' });
     expect(losses(row, s.graph, s.result)).toEqual([]);
     if (!stock) expect([...(s.result as { open_questions?: string[] }).open_questions ?? [],
       ...(s.result as { not_represented?: string[] }).not_represented ?? []]

@@ -398,7 +398,9 @@ describe('CONTRAST — everything that is not a new switch is byte-identical to 
     const expected = levels === undefined ? base.assistant_text : String(base.assistant_text).replace(named, `${named}${levels}`);
     expect(head.assistant_text).toBe(expected);
     // Science 393023 LICENCE (a): subtract only the new door-default tag; keep the full old fidelity assertion.
-    expect(JSON.stringify(beforeDoorTagsDeep({ ...head, assistant_text: undefined }, base))).toBe(JSON.stringify({ ...base, assistant_text: undefined }));
+    expect(JSON.stringify(beforeDoorTagsDeep({ ...head, assistant_text: undefined }, base,
+      // Fixed original option id; only source key order on the confirmed human cell — #94 6102610518(8).
+      levels === undefined ? undefined : { optionId: base.built.proposals[0].optionId, factorId: 'pro_plan_price' }))).toBe(JSON.stringify({ ...base, assistant_text: undefined }));
   });
 
   it('CONTRAST: a GRADED new factor ("Marketing spend", £5,000/month asked) stays valueless and asked — never 0', () => {

@@ -10,7 +10,8 @@ function setting(quote: string, additional = false): CandidateModel {
     constraints: [], factors: [{ label: 'Engineers', unit: 'engineers', baseline_known: true,
       baseline_value: 3, provenance: 'explicit', role: 'controllable', baseline_evidence: { quote } }],
     options: [{ label: 'Hire 3 engineers', provenance: 'explicit', interventions: [{ factor_label: 'Engineers',
-      value: 3, unit: 'engineers', value_kind: additional ? 'additional' : 'absolute', provenance: 'explicit', stated_evidence: { quote } }] }],
+      value: 3, unit: 'engineers', value_kind: additional ? 'additional' : 'absolute', provenance: 'explicit', stated_evidence: { quote, start: 0, end: quote.length, amount_start: quote.indexOf('3'),
+        option_quote: quote, option_start: 0, option_end: quote.length } }] }],
     outcomes: [], risks: [], links: [],
   };
 }
@@ -71,4 +72,43 @@ describe('DL #94 6101950357 shared receipt contract', () => {
     const wrong = setting(quote); wrong.options[0]!.label = 'Hire 3 contractors';
     expect(optionVerified(wrong, quote)).toBe(false);
   });
+  it('B3-d2 coordinated action heads credit their own two and four, not the purpose or ceiling', () => {
+    const bank: { brief: string; output_text: string } = JSON.parse(readFileSync(
+      new URL('../../goal-target/__tests__/fixtures/event-b3-d2-20261008.json', import.meta.url), 'utf8'));
+    const model: CandidateModel = JSON.parse(bank.output_text);
+    for (const option of model.options) for (const iv of option.interventions ?? []) {
+      if (iv.factor_label !== 'Senior engineers hired' && iv.factor_label !== 'Junior engineers hired') continue;
+      expect(verifiedOptionSetting(model, option, iv, bank.brief)).toBe(iv.stated_evidence != null);
+    }
+    const graph = admitCandidateModel(prepareProvisionalCandidate(model, bank.brief).candidate, {}, bank.brief);
+    for (const [optionId, factorId, value] of [
+      ['two_senior_engineers', 'senior_engineers_hired', 2],
+      ['four_junior_engineers', 'junior_engineers_hired', 4],
+    ] as const) expect(graph.nodes.find(n => n.id === optionId)!.interventions![factorId])
+      .toMatchObject({ raw_value: value, source: 'brief_extraction' });
+  });
+  for (const quote of [
+    'Should they hire two senior engineers or four junior engineers?',
+    'Our supplier could hire two senior engineers or four junior engineers.',
+    'Should we hire two senior engineers or four junior engineers if the launch succeeds?',
+    'Should we hire two senior engineers or four junior engineers last year?',
+    'Should we hire two senior engineers or four junior engineers at most?',
+    'Should we hire two senior engineers or four junior engineers a month?',
+    'Should we hire two senior engineers or four?',
+    'Should we hire two senior engineers or fund the platform to hire four junior engineers?',
+    'Should we hire two senior engineers or four junior engineers to treat that number as a ceiling?',
+  ]) {
+    it(`B3-d2 coordinated receipt refuses ${quote}`, () => {
+      const bank: { output_text: string } = JSON.parse(readFileSync(
+        new URL('../../goal-target/__tests__/fixtures/event-b3-d2-20261008.json', import.meta.url), 'utf8'));
+      const model: CandidateModel = JSON.parse(bank.output_text);
+      for (const option of model.options) for (const iv of option.interventions ?? []) {
+        if (iv.factor_label !== 'Senior engineers hired' && iv.factor_label !== 'Junior engineers hired') continue;
+        iv.stated_evidence = { quote, start: 0, end: quote.length, amount_start: 0,
+          option_quote: quote, option_start: 0, option_end: quote.length };
+        expect(verifiedOptionSetting(model, option, iv, quote)).toBe(false);
+      }
+    });
+  }
+
 });

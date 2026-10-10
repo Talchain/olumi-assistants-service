@@ -138,15 +138,16 @@ describe('C preserves unresolved unit and ownership evidence', () => {
   it('C a verified first-person people statement carries exactly the declared headcount', () => {
     expect(verified(model('Team headcount', 8, 'people', 'Our team has 8 people.'))).toBe(true);
   });
-  for (const [label, value, unit, quote] of [
-    ['Developers hired', 3, 'hires', 'We have three developers today.'],
-    ['Developers', 5, 'people', 'We have 5 developers.'],
-    ['Stated tech leads', 2, 'FTE', 'We have two tech leads today.'],
-    ['Team headcount', 8, 'people', 'Team headcount is 8.'],
-    ['Tech leads hired', 0, 'hires', 'We have 0 tech leads today.'],
+  for (const [label, value, unit, quote, credited] of [
+    ['Developers hired', 3, 'hires', 'We have three developers today.', false],
+    // Existing entity-count licence, RUN36 — #94 6102610518(3).
+    ['Developers', 5, 'people', 'We have 5 developers.', true],
+    ['Stated tech leads', 2, 'FTE', 'We have two tech leads today.', false],
+    ['Team headcount', 8, 'people', 'Team headcount is 8.', false],
+    ['Tech leads hired', 0, 'hires', 'We have 0 tech leads today.', false],
   ] as const) {
     it(`C no unverified conversion: ${quote} -> ${unit}`, () => {
-      expect(verified(model(label, value, unit, quote))).toBe(false);
+      expect(verified(model(label, value, unit, quote))).toBe(credited);
     });
   }
 });

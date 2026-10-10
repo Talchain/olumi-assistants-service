@@ -184,7 +184,13 @@ describe('the writer can revise a level the Agent constructed', () => {
     expect(option.interventions, 'the served shape: a level with no stated origin').toEqual({ pro_plan_price: { value: 0.295 } });
     const persisted = persistAsRegistered(served);
     expect(reviseLevel(persisted, { optionId: 'raise_with_release', factorId: 'pro_plan_price' }, 0.3))
-      .toEqual({ kind: 'refused', reason: 'invalid_existing_intervention' });
+      // Checked revision credits only the new cell — #94 6099157525 + 6102610518(2).
+      .toEqual({ kind: 'prepared', operation: {
+        op: 'update_node', path: '/nodes/raise_with_release/data/interventions/pro_plan_price',
+        value: { value: 0.3, unit: 'GBP/month', source: 'user_specified', raw_value: 60, cap: 200 },
+        old_value: null, rationale: 'Sets the effect value the user gave for Raise with release on Pro plan price.',
+        impact: 'moderate',
+      } });
   });
 
   it('a brief-stated level, constructed and registered, is PREPARED for a revised value — not refused', async () => {
