@@ -4799,9 +4799,9 @@ export function createAgentCapabilities(
       const timestamp = draft?.created_at;
       const draftReference = typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp))
         ? todayInLondon(new Date(timestamp)) : undefined;
-      const asOf = args.reference_date;
-      if (asOf !== undefined && (typeof asOf !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)
-        || !wordsTheUserWrote(asOf, ctx.user_turn_text) || !new RegExp(`as of\\s+${asOf}`, 'i').test(ctx.user_turn_text ?? ''))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
+      const typedAsOfDates = [...typed.matchAll(/(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu)].map(match => match[1]);
+      const asOf = typedAsOfDates.length === 0 ? undefined : args.reference_date;
+      if (asOf !== undefined && (typeof asOf !== 'string' || !typedAsOfDates.includes(asOf))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
           detail: deadlineRefusalDetail.reference_not_stated };
       const scenarioTimestamp = g.scenario_created_at;
       const scenarioReference = typeof scenarioTimestamp === 'string' && Number.isFinite(Date.parse(scenarioTimestamp))
