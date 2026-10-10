@@ -143,12 +143,14 @@ const restamp = (from: string, to: string, provenance: Link['provenance']) => (l
 interface Built { out: Record<string, unknown>; body: Graph; graph: Graph; calls: number; inputs: string[]; instructions: string[] }
 
 /** The REAL construction, with the drafter faked: `drafts[i]` answers call i (the last repeats). */
+const PRICE_QUOTE = 'Our Pro price is £49 a month.';
+/** The served drafter's explicit £49 carries its verbatim brief sentence (the receipt the real verifier reads). Idempotent. */
+const quoted = (m: CandidateModel): CandidateModel => ({ ...m, factors: m.factors.map((f) =>
+  f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 49
+    ? { ...f, baseline_evidence: { quote: PRICE_QUOTE } } : f) });
 async function build(...drafts: CandidateModel[]): Promise<Built> {
-  const quote = 'Our Pro price is £49 a month.';
-  drafts = drafts.map((m) => ({ ...m, factors: m.factors.map((f) =>
-    f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 49
-      ? { ...f, baseline_evidence: { quote } } : f) }));
-  const brief = `${quote}\n\n${SERVED.brief}`;
+  drafts = drafts.map(quoted);
+  const brief = `${PRICE_QUOTE}\n\n${SERVED.brief}`;
   let body: unknown = null;
   const inputs: string[] = [];
   const instructions: string[] = [];
@@ -629,7 +631,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
   });
 
   it('RED (row 1): OVERSIZED + gap + loop — the gap is asked, the loop is not, as a compaction; the compliant retry is adopted and the loop is broken by admission and said', async () => {
-    const first = extended(withGap(servedCandidate()), speculative('factors', 5));
+    const first = quoted(extended(withGap(servedCandidate()), speculative('factors', 5)));
     const { out, graph, calls, inputs, instructions } = await build(first, servedCandidate());
     expect(out.size_retried, 'PRECONDITION: the first draft was oversized').toBe(true);
     expect(calls).toBe(2);
@@ -661,7 +663,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
   });
 
   it('RED (row 1b): WITHIN the limit + gap + loop — both are asked; a retry that breaks the loop but leaves the gap is adopted (a loop asked is a reason of its own)', async () => {
-    const first = withGap(servedCandidate());
+    const first = quoted(withGap(servedCandidate()));
     const loopBroken = withGap(withLinks((ls) => [...ls.filter((l) => l !== DELAY_TO_AVAIL), L('AI release delay', 'New Pro conversions', 'negative')]));
     const { out, graph, calls, inputs, instructions } = await build(first, loopBroken);
     expect(out.size_retried).toBe(false);
