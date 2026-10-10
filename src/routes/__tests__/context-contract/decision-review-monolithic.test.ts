@@ -111,6 +111,7 @@ describe('decision review monolithic: serialized provider contract', () => {
     expect(object(edited.sections.winner)).not.toHaveProperty('win_probability');
     expect(object(edited.sections.winner)).not.toHaveProperty('id');
     expect(array(object(edited.sections.ISL_RESULTS).factor_sensitivity)).toEqual([]);
+    expect(object(edited.sections.analysis)).not.toHaveProperty('tipping_point');
     // Contrast on the SAME wiring: nothing edited (current graph is the Run's own), the licensed findings are present.
     const unedited = await reviewCapture('current', false, true, true);
     expect(array(unedited.sections.FLIP_THRESHOLD_DATA)).toHaveLength(1);
