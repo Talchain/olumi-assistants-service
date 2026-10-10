@@ -373,3 +373,26 @@ describe('R6 the draft was built inside an Agent turn', () => {
     expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [{ ...built, user_message: 'Which one?' }, construction] }, sid, brief)).toBe(false);
   });
 });
+
+/**
+ * R7 — the SERVED goal node of scenario b2ad8385 (CEE 08bbe2e): `goal_threshold_unit: "%"`, label "Riders served without
+ * being turned away". A unit with no letters named no subject, so attribution failed even once the build answer stopped
+ * closing the offer. The label names the subject then, minus function words.
+ */
+describe('R7 attribution on the served share-of-riders goal', () => {
+  const brief = 'Our bike-share scheme has 1,500 registered riders today and adds about 60 new riders a month. Our depot can handle at most 1,900 riders, '
+    + 'and we want to stay under that ceiling, without turning anyone away, over the next ten months. We could rent a second depot or add a Sunday maintenance crew. Which should we do?';
+  const served = { id: 'riders_served_without_being_turned_away', ref: 'G1', kind: 'goal', label: 'Riders served without being turned away',
+    provenance: 'ai_inferred', goal_threshold_unit: '%', goal_threshold_frame: 'level', goal_deadline_as_stated: 'ten months' };
+  const input = (over: Partial<DeadlineIssueInput> = {}): DeadlineIssueInput => ({ graph: { nodes: [served], edges: [] }, storedBrief: brief, typedNow: null,
+    reference: R, toolCalls: [], mutated: false, fastPath: 'run', proposalOffered: false, pending: [], priorOffer: false, ...over });
+  it('offers the served goal its ten months, bound to the goal id and verbatim words', () => {
+    expect(deadlineCardToIssue(input())).toEqual({ goal_id: served.id, words: 'ten months', reference: R, date: '2027-08-10' });
+  });
+  it('a label-derived subject never attributes a date through a function word ("without") or another subject', () => {
+    const other = 'Our depot can handle at most 1,900 riders. We must finish the migration without downtime in ten months.';
+    expect(deadlineCardToIssue(input({ storedBrief: other }))).toBeUndefined();
+    const noSubject = 'We want to stay under that ceiling, without turning anyone away, over the next ten months.';
+    expect(deadlineCardToIssue(input({ storedBrief: noSubject }))).toBeUndefined();
+  });
+});

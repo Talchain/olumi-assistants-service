@@ -51,8 +51,13 @@ const record = (v: unknown): v is RecordLike => typeof v === 'object' && v !== n
 /** Conservative goal attribution, separate from phrase occurrence: ownership, intent, subject and temporal scope. */
 function goalOwnsDeadline(goal: RecordLike, words: string, source: string): boolean {
   const sentences = plainOf(source).split(/[.!?\n]+/);
-  const subject = plainOf(String(goal.goal_threshold_unit ?? goal.label ?? ''));
-  const nouns = subject.match(/\p{L}+/gu)?.filter(w => !['at', 'month', 'months', 'per', 'the', 'a', 'level', 'surplus'].includes(w)) ?? [];
+  // The goal's own unit names its subject ("riders"); a unit with no letters ("%": served b2ad8385, a share-of-riders goal)
+  // names none, so the goal's label does — minus function words, which would attribute any sentence containing "without".
+  const unit = plainOf(String(goal.goal_threshold_unit ?? ''));
+  const subject = /\p{L}/u.test(unit) ? unit : plainOf(String(goal.label ?? ''));
+  const FUNCTION = ['at', 'month', 'months', 'per', 'the', 'a', 'level', 'surplus', 'without', 'being', 'within', 'under', 'over', 'about',
+    'after', 'before', 'between', 'through', 'during', 'their', 'there', 'these', 'those', 'where', 'which', 'while', 'would', 'could', 'should'];
+  const nouns = subject.match(/\p{L}+/gu)?.filter(w => !FUNCTION.includes(w) && (subject === unit || w.length >= 5)) ?? [];
   return sentences.some((sentence) => {
     if (!whole(words, sentence) || /\b(?:rival|competitor|example|e\.g|their|they|another goal|other goal)\b/.test(sentence)) return false;
     if (/\b(?:not (?:a |the |our |my )?(?:deadline|target|goal)|duration|lasts?|as an? (?:training )?course)\b/.test(sentence)) return false;
