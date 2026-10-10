@@ -114,8 +114,9 @@ describe('propose_new_option on the served E07 turn: the user\'s 1 and 2 ride th
     const junior = sentLevel(sent, 'new_junior_engineers_hired');
     expect(senior?.raw_value, JSON.stringify(sent[0]?.body)).toBe(1);
     expect(junior?.raw_value).toBe(2);
-    expect(senior?.source, 'the user\'s, not Olumi\'s estimate').toBeUndefined();
-    expect(junior?.source).toBeUndefined();
+    // DL RUN39 / #94 6099157525: checked user figures carry user_specified; absence is unattributed.
+    expect(senior?.source, 'the user\'s, not Olumi\'s estimate').toBe('user_specified');
+    expect(junior?.source).toBe('user_specified');
     void r;
   });
 
