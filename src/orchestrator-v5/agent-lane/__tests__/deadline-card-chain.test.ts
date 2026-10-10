@@ -148,6 +148,12 @@ describe('R3 deterministic authorship and placement guards', () => {
     ['same-sentence duration only', 'We keep training registered riders over ten months as a course.'],
     ['same-sentence "lasts"', 'We keep registered riders onboarded in a programme that lasts ten months.'],
   ])('%s is silent', (_name, storedBrief) => { expect(deadlineCardToIssue({ ...issueInput(), storedBrief })).toBeUndefined(); });
+  it.each([
+    'Of course, we want to keep registered riders under the ceiling over the next ten months.',
+    'We want to keep registered riders under the ceiling over the next ten months while training takes place.',
+  ])('ordinary wording is not a duration: %s', storedBrief => {
+    expect(deadlineCardToIssue({ ...issueInput(), storedBrief })).toEqual(expect.objectContaining({ words: 'ten months', date: '2027-08-10' }));
+  });
   it('whole words: 6 months cannot come from 16 months', () => {
     const g = structuredClone(d2.graph); goal(g).goal_deadline_as_stated = '6 months';
     expect(deadlineCardToIssue({ ...issueInput(g), storedBrief: 'We want to keep registered riders under the ceiling over the next 16 months.' })).toBeUndefined();
@@ -273,6 +279,30 @@ describe('R4 durable first-Agent-turn gate', () => {
     expect(firstAgentTurnAfterDraft({ rowId: prior.id, rows: [prior, draft] }, w.sid, d2.brief)).toBe(false);
     expect(firstAgentTurnAfterDraft({ rowId: draft.id, rows: [draft, prior] }, w.sid, d2.brief)).toBe(true);
     expect(firstAgentTurnAfterDraft({ rowId: prior.id, rows: [prior] }, w.sid, d2.brief)).toBe(false);
+  });
+  it('an Agent answer carrying the same brief text never stands in for the construction row (declined card stays closed)', () => {
+    const sid = randomUUID(), brief = d2.brief;
+    const row = (request_hash: string, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: randomUUID(), request_hash,
+      turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, ...over });
+    const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false });
+    const offer = row('agent_turn:offer'), decline = row('agent_turn:decline'), retry = row('agent_turn:retry', { user_message: brief });
+    const system = row('sha256:system-event');
+    const rows = [system, retry, decline, offer, construction];
+    expect(firstAgentTurnAfterDraft({ rowId: system.id, rows }, sid, brief)).toBe(false);
+    expect(firstAgentTurnAfterDraft({ rowId: system.id, rows: [system, construction] }, sid, brief)).toBe(true);
+  });
+  it('a throwing shared tail returns the door\'s own refusal and never takes the turn down', async () => {
+    const w = world(), input = { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } };
+    const issuer = await w.caps.deadlineCardFromDraft(w.ctx('Run'), input); expect(issuer).toBeDefined();
+    vi.spyOn(w.proposals, 'put').mockImplementation(() => { throw new Error('proposal store down'); });
+    const out = await issuer!.issue(w.ctx('Run'), { deadline_words: issuer!.words, rationale: '' }) as Rec;
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'deadline_not_placed' });
+  });
+  it('without a turn-start snapshot nothing is read and nothing is offered', async () => {
+    const w = world(); let reads = 0;
+    const counting = createAgentCapabilities(async path => { reads += 1; return { status: 200, json: path.endsWith('/versions') ? w.versions() : w.graphWire() }; }, new ProposalStore());
+    expect(await counting.deadlineCardFromDraft(w.ctx('Run'), { ...issueInput(), start: undefined })).toBeUndefined();
+    expect(reads).toBe(0);
   });
   it('a pre-draft Agent conversation still gets the first post-draft offer, and the second turn never repeats it', async () => {
     const w = world(); w.rows.push(makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_class: 'direct_answer', handler_id: null,

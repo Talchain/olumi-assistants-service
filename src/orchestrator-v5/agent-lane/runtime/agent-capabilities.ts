@@ -9567,7 +9567,7 @@ export function createAgentCapabilities(
     ...caps,
     /** Route-only authorship entry: no model argument can select the stored-brief source. */
     async deadlineCardFromDraft(ctx, input) {
-      if (readOnly || newestRowIsAgentAnswer(input.start)) return undefined;
+      if (readOnly || input.start === undefined || newestRowIsAgentAnswer(input.start)) return undefined;
       try {
         const g = await readGraph(ctx.scenario_id);
         if (!g || !firstAgentTurnAfterDraft(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
@@ -9579,7 +9579,12 @@ export function createAgentCapabilities(
         if (reference === undefined) return undefined;
         const card = deadlineCardToIssue({ ...input, graph: g.raw, storedBrief: g.brief_text, reference, priorOffer: false });
         return card === undefined ? undefined : { words: card.words,
-          issue: (subject, args) => proposePlacedDeadline(subject, args, g, card.words, card.reference) };
+          // A throw in the shared tail never takes the turn down: the same refusal the door already says.
+          issue: async (subject, args) => {
+            try { return await proposePlacedDeadline(subject, args, g, card.words, card.reference); } catch {
+              return { ok: false, mutated: false, refusal: 'deadline_not_placed', detail: deadlineRefusalDetail.horizon_not_modelled };
+            }
+          } };
       } catch { return undefined; }
     },
     // The approval guard's writer: every return path of `authoriseChange`, one place.

@@ -21,7 +21,8 @@ export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, s
   const draftTurnId = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
   const at = rows.findIndex(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string'
     && (r.turn_id === draftTurnId && r.request_hash.startsWith('graph_registration:')
-      || r.turn_class === 'direct_answer' && r.handler_id === null && r.response_emitted === true && r.user_message === brief));
+      || r.turn_class === 'direct_answer' && r.handler_id === null && r.response_emitted === true && r.user_message === brief
+        && !r.request_hash.startsWith('agent_turn:')));
   return at >= 0 && rows.slice(0, at).every(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string'
     && !r.request_hash.startsWith('agent_turn:'));
 }
@@ -43,7 +44,7 @@ function goalOwnsDeadline(goal: RecordLike, words: string, source: string): bool
   const nouns = subject.match(/\p{L}+/gu)?.filter(w => !['at', 'month', 'months', 'per', 'the', 'a', 'level', 'surplus'].includes(w)) ?? [];
   return sentences.some((sentence) => {
     if (!whole(words, sentence) || /\b(?:rival|competitor|example|e\.g|their|they|another goal|other goal)\b/.test(sentence)) return false;
-    if (/\b(?:not (?:a |the |our |my )?(?:deadline|target|goal)|duration|lasts?|takes?|course)\b/.test(sentence)) return false;
+    if (/\b(?:not (?:a |the |our |my )?(?:deadline|target|goal)|duration|lasts?|as an? (?:training )?course)\b/.test(sentence)) return false;
     if (/\b(?:goal|target)\b/.test(sentence) && !nouns.some(noun => whole(noun, sentence))) return false;
     const before = sentence.slice(0, sentence.indexOf(plainOf(words)));
     if (!/\b(?:we|i|us|our|my)\b/.test(before)
