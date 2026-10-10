@@ -10,6 +10,9 @@ import { runOptionSetForCopy, type RecordedRunOptionSet, type StoredOptionPartic
 
 export interface SavedRunContextFactsRead {
   readonly graph_hash?: string;
+  /** The canonical read's selected Run occurrence, including stale/unknown reads. */
+  readonly run_revision?: number | null;
+  readonly run_revision_source?: 'recorded' | 'legacy_unknown';
   readonly analysis_state?: unknown;
   readonly analysis_result?: unknown;
   readonly raw?: unknown;
@@ -32,10 +35,13 @@ export function savedRunContextFacts(
   read: SavedRunContextFactsRead,
   permissions: unknown,
 ): Record<string, unknown> {
+  const revision = read.run_revision_source === undefined ? {} : {
+    selected_run_revision: read.run_revision ?? null, selected_run_revision_source: read.run_revision_source,
+  };
   const selected = runExplanationChip(scenarioId, {
     graphHash: read.graph_hash, analysisState: read.analysis_state, analysisResult: read.analysis_result,
   });
-  if (selected === null) return {};
+  if (selected === null) return revision;
   const projected = analysisResultForAgent(read.analysis_result, undefined, true, read.raw) as Record<string, unknown>;
   const verdict = asVerdictState(read.constraint_verdict_state);
   const checks = !runToolOutputLicensesLeader({ claim_permissions: permissions })
@@ -43,6 +49,7 @@ export function savedRunContextFacts(
       new Set((read.run_option_set ?? runOptionSetForCopy(undefined, read.option_participation, read.raw)).leftOut
         .map(o => o.option_id))) : undefined;
   return {
+    ...revision,
     selected_run_reference: selected.id,
     ...(projected.goal_chance_driver_availability !== undefined
       ? { goal_chance_driver_availability: projected.goal_chance_driver_availability } : {}),
@@ -68,9 +75,12 @@ export function runExplanationContextFacts(
   scenarioId: string, read: SavedRunContextFactsRead,
   analysis: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
+  const revision = read.run_revision_source === undefined || analysis?.selected_run_revision_source !== undefined ? {} : {
+    selected_run_revision: read.run_revision ?? null, selected_run_revision_source: read.run_revision_source,
+  };
   if (analysis === undefined || runExplanationChip(scenarioId, {
     graphHash: read.graph_hash, analysisState: read.analysis_state, analysisResult: read.analysis_result,
-  }) === null) return {};
+  }) === null) return revision;
   const projected = analysisResultForAgent(read.analysis_result, read.raw, true) as Record<string, unknown>;
   const warnings = (projected.enrichment as { inference_warnings?: unknown } | undefined)?.inference_warnings;
   const rows = Array.isArray(warnings) ? warnings.filter((v): v is Record<string, unknown> =>
@@ -78,6 +88,7 @@ export function runExplanationContextFacts(
   const target = rows.find(w => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
   const leaderId = (read.analysis_result as { leading_option_id?: unknown } | undefined)?.leading_option_id;
   return {
+    ...revision,
     claim_permissions: analysis.claim_permissions,
     ...(runToolOutputLicensesLeader(analysis) && (leaderId === null || typeof leaderId === 'string')
       ? { leading_option_id: leaderId } : {}),

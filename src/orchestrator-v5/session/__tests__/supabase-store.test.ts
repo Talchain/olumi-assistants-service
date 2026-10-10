@@ -1285,6 +1285,7 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
         expect.objectContaining({
           fact_row_id: runAnalysisRow.id,
           fact_created_at: runAnalysisRow.created_at,
+          evaluated_scenario_revision: null,
           fact: expect.objectContaining({
             fact_type: 'run_analysis',
             noop: false,
@@ -1299,7 +1300,7 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
     expect(selectCalls[0]).toMatchObject({
       table: 'v5_handler_facts',
       cols:
-        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
+        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at, evaluated_scenario_revision',
       options: { count: 'exact' },
     });
     const filters = selectCalls[0]!.filters as Record<string, unknown>;

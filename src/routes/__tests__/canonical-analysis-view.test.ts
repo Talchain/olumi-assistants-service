@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence } from '../../orchestrator-v5/types/handler-fact.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
@@ -127,4 +128,25 @@ describe('canonical analysis view — one stored Run and the existing licences',
     expect(view.options).toEqual([]);
     expect(view.staleness.stale).toBeNull();
   });
+});
+
+
+it('C2 projection refuses another row’s provenance even when its recorded number matches', async () => {
+  const selected = fact(); const foreign = fact();
+  bindRunAnalysisOccurrence({ fact: selected, fact_row_id: 'selected-row', evaluated_scenario_revision: 7 });
+  bindRunAnalysisOccurrence({ fact: foreign, fact_row_id: 'foreign-row', evaluated_scenario_revision: 7 });
+  const derivation = deriveAnalysisFreshness([foreign], foreign.result.graph_hash_at_run!);
+  const view = await project(input({ runFact: selected, derivation }));
+  expect(view.staleness).toMatchObject({ run_revision: null, run_revision_source: 'legacy_unknown' });
+});
+
+it('C2 mismatched selected row with the same revision cannot supply revision provenance or basis', async () => {
+  const args = input();
+  bindRunAnalysisOccurrence({ fact: args.runFact, fact_row_id: 'view-run-row', evaluated_scenario_revision: 7 });
+  args.derivation = { ...args.derivation, selected_fact_row_id: 'other-selected-row',
+    run_revision: { value: 7, source: 'recorded' }, basis: 'recorded_run_revision' };
+  const view = await project(args);
+  expect(view.staleness.run_revision).toBeNull();
+  expect(view.staleness.run_revision_source).toBe('legacy_unknown');
+  expect(view.staleness.basis).toBe('analysis_graph_hash_interim');
 });

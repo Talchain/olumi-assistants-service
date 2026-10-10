@@ -92,7 +92,7 @@ export function fixture(variant: Variant): Seed {
   // Known execution ids and hashes remain the prior run1/run2 capture values.
   s.selected_run_id = seed.captured_execution_run_id;
   s.scenario_revision = expected.synthetic_scenario_revision;
-  s.selected_run_revision = expected.synthetic_run_revision;
+
   s.selected_goal_id = expected.goal_id;
   if (variant === 'withheld') {
     const licence = array(e.inference_warnings).map(object).find(w => w.code === 'GOAL_CHANCE_LICENSED');
@@ -141,6 +141,15 @@ export function fixture(variant: Variant): Seed {
     const ready = object(s.current_read.analysis_ready);
     s.current_read = { ...s.current_read, analysis_ready: { ...ready, freshness: 'stale', freshness_reason: 'graph_changed' } };
   }
+  // Synthetic revision probes now use the product's canonical read carrier.
+  // The trusted read still describes this selected captured Run; no DB fact is fabricated.
+  s.canonical_analysis_view = { schema: 'canonical_analysis_view.v1',
+    run: { run_id: seed.captured_execution_run_id, graph_hash_at_run: seed.revision, computed_at: seed.computed_at },
+    staleness: { stale: variant === 'stale', revision: s.scenario_revision,
+      run_revision: expected.synthetic_run_revision, run_revision_source: 'recorded',
+      basis: 'analysis_graph_hash_interim', reason: variant === 'stale' ? 'graph_hash_diverged' : 'graph_hash_match',
+      limitation: 'Hash equality cannot detect brief, framing or stage changes.' },
+  };
   return seed;
 }
 

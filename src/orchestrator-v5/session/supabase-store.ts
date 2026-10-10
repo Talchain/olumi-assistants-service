@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 import { toTypedRunRows, type TypedRunRows, type TypedRunOptionRow } from '../runs/typed-run-rows.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
@@ -2395,7 +2396,7 @@ export class SupabaseSessionStore implements SessionStore {
     // for the current workload.
     let query = this.client
       .from('v5_handler_facts')
-      .select('id, payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at')
+      .select('id, payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at, evaluated_scenario_revision')
       .in('v5_conversation_turn_id', conversationTurnRowIds as string[])
       .order('created_at', { ascending: false })
       .order('id', { ascending: false });
@@ -2432,6 +2433,7 @@ export class SupabaseSessionStore implements SessionStore {
       noop?: unknown;
       v5_conversation_turn_id?: unknown;
       created_at?: unknown;
+      evaluated_scenario_revision?: unknown;
     }>) {
       const payloadObj =
         row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
@@ -2456,12 +2458,16 @@ export class SupabaseSessionStore implements SessionStore {
         : '';
       const factRowId = typeof row.id === 'string' ? row.id : '';
       const createdAt = typeof row.created_at === 'string' ? row.created_at : '';
-      out.push({
+      const entry: HandlerFactWithTurn = {
         fact: parsed.data,
         fact_row_id: factRowId,
         turn_id: turnId,
         fact_created_at: createdAt,
-      });
+        ...(parsed.data.fact_type === 'run_analysis'
+          ? { evaluated_scenario_revision: validatedScenarioRevision(row.evaluated_scenario_revision) } : {}),
+      };
+      bindRunAnalysisOccurrence(entry);
+      out.push(entry);
     }
     return out;
   }
@@ -2612,7 +2618,7 @@ export class SupabaseSessionStore implements SessionStore {
     const { data, error, count } = await abortableAnalysisRead(this.client
       .from('v5_handler_facts')
       .select(
-        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
+        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at, evaluated_scenario_revision',
         { count: 'exact' },
       )
       .eq('scenario_id', scenarioId)
@@ -3223,6 +3229,7 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handl
     action_type?: unknown;
     noop?: unknown;
     created_at?: unknown;
+    evaluated_scenario_revision?: unknown;
   }>) {
     if (
       typeof row.id !== 'string' ||
@@ -3274,11 +3281,15 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handl
         { code: 'analysis_fact_corrupt' },
       );
     }
-    facts.push({
+    const entry: IdentifiedHandlerFact = {
       fact: parsed.data,
       fact_row_id: row.id,
       fact_created_at: row.created_at,
-    });
+      ...(parsed.data.fact_type === 'run_analysis'
+        ? { evaluated_scenario_revision: validatedScenarioRevision(row.evaluated_scenario_revision) } : {}),
+    };
+    bindRunAnalysisOccurrence(entry);
+    facts.push(entry);
   }
   return facts;
 }

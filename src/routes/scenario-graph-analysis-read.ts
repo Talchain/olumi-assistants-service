@@ -1,3 +1,4 @@
+import { preserveRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
 import { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { readGoalScopeClaimInput, type GoalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
@@ -389,7 +390,7 @@ export async function readScenarioAnalysis(
     const facts = storedFacts.map(fact => {
       if (fact.fact_type !== 'run_analysis') return fact;
       const result = withReadTimeHorizonGate(fact.result, params.graph, fact.result.enrichment);
-      return result === fact.result ? fact : { ...fact, result };
+      return result === fact.result ? fact : preserveRunAnalysisOccurrence(fact, { ...fact, result });
     });
     const factsReadOk = factSet.status === 'complete';
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
@@ -398,6 +399,7 @@ export async function readScenarioAnalysis(
       priorFactsWithTurn,
       legacyEditFacts: legacyEditFactsForFreshness(factSet),
       currentGraph: params.graph,
+      currentScenarioRevision: params.revision,
     });
 
     // The result block first, so the verdict's `leader_claim` can be composed
@@ -465,6 +467,7 @@ export async function readScenarioAnalysis(
           priorFacts: facts,
           currentGraphHash,
           currentGraph: params.graph,
+          currentScenarioRevision: params.revision,
           ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
           priorFactsReadOk: factsReadOk,
           analysisInvalidatedAt,
@@ -477,6 +480,7 @@ export async function readScenarioAnalysis(
           runFactBinding: {
             scenarioId: params.scenarioId,
             selectedResult: historical.fact.result,
+            selectedFact: historical.fact,
           },
         }),
         // ⚠ NOT hardcoded `false`. The entitlement is read from the SELECTED

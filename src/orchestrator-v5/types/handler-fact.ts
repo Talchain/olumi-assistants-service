@@ -45,6 +45,7 @@ export interface HandlerFactWithTurn {
    * cannot establish cross-snapshot receipt identity.
    */
   readonly fact_row_id?: string;
+  readonly evaluated_scenario_revision?: number | null;
   readonly turn_id: string;
   /**
    * The fact row's own `created_at` (DB-stamped). Equivalent to the
@@ -62,6 +63,7 @@ export interface HandlerFactWithTurn {
 export interface IdentifiedHandlerFact {
   readonly fact: HandlerFact;
   readonly fact_row_id: string;
+  readonly evaluated_scenario_revision?: number | null;
   readonly fact_created_at: string;
   /** Optional exact parent linkage from the durable, scenario-scoped read. */
   readonly committed_turn_ref?: CommittedMutationTurnRef;
@@ -75,4 +77,44 @@ export interface LegacyAnalysisEditFacts {
   readonly facts: readonly IdentifiedHandlerFact[];
   readonly readOk: boolean;
   readonly total_count: number | null;
+}
+
+
+/** Database occurrence metadata stays outside the strict HandlerFact payload. */
+interface RunAnalysisOccurrence {
+  readonly fact_row_id: string;
+  readonly run_id: string | null;
+  readonly evaluated_scenario_revision: number | null;
+}
+const RUN_ANALYSIS_OCCURRENCES = new WeakMap<HandlerFact, RunAnalysisOccurrence>();
+
+export function validatedScenarioRevision(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+/** Bind only this wrapper's row, while its fact is still attached to it. */
+export function bindRunAnalysisOccurrence(entry: Pick<HandlerFactWithTurn,
+  'fact' | 'fact_row_id' | 'evaluated_scenario_revision'>): void {
+  if (entry.fact.fact_type !== 'run_analysis' || !entry.fact_row_id) return;
+  RUN_ANALYSIS_OCCURRENCES.set(entry.fact, Object.freeze({
+    fact_row_id: entry.fact_row_id,
+    run_id: entry.fact.result.run_id ?? null,
+    evaluated_scenario_revision: validatedScenarioRevision(entry.evaluated_scenario_revision),
+  }));
+}
+
+export function readRunAnalysisOccurrence(fact: HandlerFact): RunAnalysisOccurrence | undefined {
+  const occurrence = RUN_ANALYSIS_OCCURRENCES.get(fact);
+  return fact.fact_type === 'run_analysis' && occurrence?.run_id === (fact.result.run_id ?? null)
+    ? occurrence : undefined;
+}
+
+/** A read-time replacement retains the exact original occurrence, never an array position. */
+export function preserveRunAnalysisOccurrence(original: HandlerFact, replacement: HandlerFact): HandlerFact {
+  const occurrence = readRunAnalysisOccurrence(original);
+  if (occurrence !== undefined && replacement.fact_type === 'run_analysis'
+    && occurrence.run_id === (replacement.result.run_id ?? null)) {
+    RUN_ANALYSIS_OCCURRENCES.set(replacement, occurrence);
+  }
+  return replacement;
 }

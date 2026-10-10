@@ -988,6 +988,9 @@ const deadlineRefusalDetail = {
 } as const;
 
 interface GraphRead {
+  readonly scenario_revision?: number;
+  readonly run_revision?: number | null;
+  readonly run_revision_source?: 'recorded' | 'legacy_unknown';
   readonly graph_hash: string;
   /** Stored user brief from the SAME canonical graph read, never model arguments or conversation guesses. */
   readonly brief_text?: string | null;
@@ -2235,6 +2238,8 @@ export function createAgentCapabilities(
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
+    const view = isPlainRecord(r.json.canonical_analysis_view) ? r.json.canonical_analysis_view : undefined;
+    const staleness = isPlainRecord(view?.staleness) ? view.staleness : undefined;
     const notModelled = notModelledOfRead(r.json.not_modelled);
     const identityEvaluated = readEvaluatedIdentityNodeIds(r.json.analysis_identity_evaluated_node_ids);
     const limitVerdicts = readLimitVerdicts(r.json.analysis_limit_verdicts);
@@ -2261,6 +2266,20 @@ export function createAgentCapabilities(
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
+      ...(typeof staleness?.revision === 'number' && Number.isSafeInteger(staleness.revision) && staleness.revision >= 0
+        ? { scenario_revision: staleness.revision } : {}),
+      ...(() => {
+        if (staleness === undefined) return {};
+        const value = staleness.run_revision;
+        if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+          && staleness.run_revision_source === 'recorded') {
+          return { run_revision: value, run_revision_source: 'recorded' as const };
+        }
+        if (value === null && staleness.run_revision_source === 'legacy_unknown') {
+          return { run_revision: null, run_revision_source: 'legacy_unknown' as const };
+        }
+        return {};
+      })(),
       ...(section === 'run_explanation' ? { run_explanation_admission:
         (r.json.analysis_ready as { analysis_admission?: unknown } | undefined)?.analysis_admission } : {}),
       ...(() => {
@@ -3660,6 +3679,7 @@ export function createAgentCapabilities(
         ...(permissions.total_goal_claims_allowed === false ? { claim_permissions: permissions } : {}),
         ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
         graph_revision: g.graph_hash,
+        ...(g.scenario_revision === undefined ? {} : { scenario_revision: g.scenario_revision }),
         empty: g.nodes.length === 0,
         entities: g.nodes.map((n) => {
           // What each option already sets, as stored (RCA D1): quote these, never your own earlier arguments.
