@@ -13,13 +13,14 @@ const CALENDAR_DATE = /\b(?:19|20)\d{2}\b/;
  * (buddy r4 P2: "Aug." and a newline inside the question both slipped past a [^.!?\n] matcher).
  */
 export function asksAboutTheDeadline(text: string): boolean {
-  // An answer is an offer of the card's date when it names the deadline AND (asks about it in one sentence, or carries a calendar year
-  // ANYWHERE in the answer: the date and its question may sit in separate sentences, lines or paragraphs: buddy r6-r8 P2s such as
-  // "The deadline is 10 August 2027. Does that work for you?" and "Your deadline is:\n\n10 August 2027.\n\nDoes that work for you?").
-  // The served build answer, which says "The model holds no deadline yet" and asks other questions, carries no year and stays the
-  // build answer. A broader match only closes the offer (silent), never makes a wrong one.
-  return /\bdeadline\b/i.test(text) && (CALENDAR_DATE.test(text)
-    || text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence) && sentence.includes('?')));
+  // An answer is an offer of the card's date when it carries a calendar year ANYWHERE (the product's own card always says the date WITH
+  // its year, and the answer may call it a deadline, due date, target date or end date, in one sentence, line or paragraph: buddy
+  // r6-r9 P2s such as "The deadline is 10 August 2027. Does that work for you?", "Your deadline is:\n\n10 August 2027.\n\nDoes that work
+  // for you?" and "Would you like to use 10 August 2027 as your due date?"), or when one sentence names the deadline and asks.
+  // The served build answer ("The model holds no deadline yet … What calendar date marks the end of …?") carries no year and stays the
+  // build answer. This only ever CLOSES the offer (silent, e.g. an answer that merely mentions a year), never opens a wrong one.
+  return CALENDAR_DATE.test(text)
+    || text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence) && sentence.includes('?'));
 }
 export interface DeadlineTurnStart {
   readonly rowId: string | null;
