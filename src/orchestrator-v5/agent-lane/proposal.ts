@@ -287,6 +287,31 @@ export class ProposalStore {
   /** Proposals whose own write landed only in part, with what landed and the revision it left. */
   private readonly partial = new Map<string, PartialProgress>();
   private order: string[] = [];
+  /** Single-flight only. This does not establish durable exactly-once. Unknown writes stay blocked. */
+  private readonly executions = new Map<string, Promise<boolean>>();
+
+  async executeApproved<T>(
+    p: StructuredProposal, turnId: string, execute: () => Promise<T>,
+    confirmed: (result: T) => boolean, reconcile: () => Promise<T>,
+  ): Promise<T> {
+    const key = approvedOperationKey(p, turnId);
+    const prior = this.executions.get(key);
+    if (prior !== undefined) {
+      if (!await prior) return reconcile();
+      return execute(); // the existing applied-receipt arm answers without a write
+    }
+    let close!: (known: boolean) => void;
+    this.executions.set(key, new Promise<boolean>(resolve => { close = resolve; }));
+    try {
+      const result = await execute();
+      close(confirmed(result));
+      return result;
+    } catch (err) {
+      close(false);
+      throw err;
+    }
+  }
+
 
   put(p: StructuredProposal): StructuredProposal {
     if (this.items.size >= MAX_PROPOSALS && !this.items.has(p.proposal_id)) {
@@ -398,4 +423,11 @@ export class ProposalStore {
   size(): number {
     return this.items.size;
   }
+}
+
+/** The host turn and approved content bind dedupe; provider tool-call ids cannot affect it. */
+export function approvedOperationKey(p: StructuredProposal, turnId: string): string {
+  return createHash('sha256').update(JSON.stringify(sortedKeysDeep([
+    p.scenario_id, turnId, p.proposal_id, p.operations, p.base_graph_identity_hash,
+  ]))).digest('hex');
 }
