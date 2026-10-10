@@ -347,7 +347,7 @@ describe('R4 durable first-Agent-turn gate', () => {
  */
 describe('R6 the draft was built inside an Agent turn', () => {
   const buildAnswer = (w: ReturnType<typeof world>, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_id: randomUUID(),
-    request_hash: 'agent_turn:build', turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: d2.brief, ...over });
+    request_hash: 'agent_turn:build', turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: d2.brief, assistant_message: 'Here is the model.', ...over });
   it('the first turn after the build turn offers exactly one bound card; the turn after that never repeats it', async () => {
     const w = world(), before = w.read(); w.rows.unshift(buildAnswer(w));
     const turn = await route(w), first = await turn(), { call, yes } = card(first);
@@ -367,7 +367,7 @@ describe('R6 the draft was built inside an Agent turn', () => {
     const row = (request_hash: string, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: randomUUID(), request_hash,
       turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, ...over });
     const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false });
-    const built = row('agent_turn:build', { user_message: brief }), resent = row('agent_turn:resent', { user_message: brief });
+    const built = row('agent_turn:build', { user_message: brief, assistant_message: 'Here is the model.' }), resent = row('agent_turn:resent', { user_message: brief, assistant_message: 'Here is the model.' });
     expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [built, construction] }, sid, brief)).toBe(true);
     expect(firstAgentTurnAfterDraft({ rowId: resent.id, rows: [resent, built, construction] }, sid, brief)).toBe(false);
     expect(firstAgentTurnAfterDraft({ rowId: built.id, rows: [{ ...built, user_message: 'Which one?' }, construction] }, sid, brief)).toBe(false);
@@ -379,6 +379,12 @@ describe('R6 the draft was built inside an Agent turn', () => {
     const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false });
     const spaced = row('agent_turn:build', { user_message: ` ${brief}\n`, assistant_message: 'Here is the model.' });
     expect(firstAgentTurnAfterDraft({ rowId: spaced.id, rows: [spaced, construction] }, sid, brief)).toBe(true);
+    // The answer content must be readable: null/blank cannot show it was not the offer, so it fails closed (buddy r2 P2). Prose that
+    // merely says "is your deadline" is not the card question and still counts as the build answer (buddy r2 P3).
+    const unreadable = row('agent_turn:build', { user_message: brief, assistant_message: null });
+    expect(firstAgentTurnAfterDraft({ rowId: unreadable.id, rows: [unreadable, construction] }, sid, brief)).toBe(false);
+    const prose = row('agent_turn:build', { user_message: brief, assistant_message: 'Here is the model. The main constraint is your deadline of ten months.' });
+    expect(firstAgentTurnAfterDraft({ rowId: prose.id, rows: [prose, construction] }, sid, brief)).toBe(true);
     // Construction committed, build answer never recorded; the user re-sent the brief, was offered the card, declined next turn.
     const offer = row('agent_turn:resent', { user_message: brief, assistant_message: 'Is your deadline 10 August 2027 (10 months from 10 October 2026)?' });
     expect(firstAgentTurnAfterDraft({ rowId: offer.id, rows: [offer, construction] }, sid, brief)).toBe(false);
@@ -405,5 +411,14 @@ describe('R7 attribution on the served share-of-riders goal', () => {
     expect(deadlineCardToIssue(input({ storedBrief: other }))).toBeUndefined();
     const noSubject = 'We want to stay under that ceiling, without turning anyone away, over the next ten months.';
     expect(deadlineCardToIssue(input({ storedBrief: noSubject }))).toBeUndefined();
+  });
+  it('one shared label word never attributes another quantity\'s date or a duration (buddy r2 P2)', () => {
+    for (const text of ['We want to increase customers served to 500 in ten months.', 'We must finish the survey of riders in ten months.',
+      'We keep riders enrolled in the survey over ten months.']) expect(deadlineCardToIssue(input({ storedBrief: text })), text).toBeUndefined();
+  });
+  it('the unit-with-letters path is unchanged: "under" is still a subject word there (buddy r2 P3)', () => {
+    const goal = { id: 'under_65_population', kind: 'goal', label: 'Under-65 population', goal_threshold_unit: 'people under 65', goal_deadline_as_stated: 'ten months' };
+    expect(deadlineCardToIssue(input({ graph: { nodes: [goal], edges: [] }, storedBrief: 'We want to increase our under-65 population to 500 in ten months.' })))
+      .toEqual({ goal_id: 'under_65_population', words: 'ten months', reference: R, date: '2027-08-10' });
   });
 });

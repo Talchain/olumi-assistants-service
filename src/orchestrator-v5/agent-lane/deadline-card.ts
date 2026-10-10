@@ -33,8 +33,11 @@ export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, s
   // The stored brief is trimmed, the answer row keeps the message as typed (buddy r1 P2: " "+brief+"\n" never matched). An
   // answer that itself ASKS the deadline question is an offer, not the build answer (buddy r1 P2: a resent brief whose answer
   // carried the card, declined next turn, would otherwise look like the build answer and re-offer).
+  // The answer content must be READ to be judged: a null/blank/malformed assistant message cannot show it was not the offer, so
+  // it fails closed (buddy r2 P2). The marker is the card's own question ("Is your deadline <date> (<n> months from …)?"), not
+  // prose that merely says "is your deadline" (buddy r2 P3).
   const builtTheDraft = (r: SessionTurnWithContent): boolean => typeof r.user_message === 'string' && r.user_message.trim() === brief.trim()
-    && !/\bis your deadline\b/i.test(r.assistant_message ?? '');
+    && typeof r.assistant_message === 'string' && r.assistant_message.trim() !== '' && !/\bIs your deadline [^?\n]*\?/.test(r.assistant_message);
   return answers.length === 0 || (answers.length === 1 && builtTheDraft(answers[0]!));
 }
 /**
@@ -56,17 +59,24 @@ const record = (v: unknown): v is RecordLike => typeof v === 'object' && v !== n
 /** Conservative goal attribution, separate from phrase occurrence: ownership, intent, subject and temporal scope. */
 function goalOwnsDeadline(goal: RecordLike, words: string, source: string): boolean {
   const sentences = plainOf(source).split(/[.!?\n]+/);
-  // The goal's own unit names its subject ("riders"); a unit with no letters ("%": served b2ad8385, a share-of-riders goal)
-  // names none, so the goal's label does — minus function words, which would attribute any sentence containing "without".
+  // The goal's own unit names its subject ("riders") — byte-for-byte the earlier rule. A unit with no letters ("%": served
+  // b2ad8385, a share-of-riders goal) names none, so the goal's LABEL does, and only when the date's sentence carries TWO of
+  // the label's distinct content words (4-letter stems: riders+turning for "Riders served without being turned away"), so one
+  // shared word ("customers served", "the survey of riders") never attributes another quantity's date (buddy r2 P2).
   const unit = plainOf(String(goal.goal_threshold_unit ?? ''));
-  const subject = /\p{L}/u.test(unit) ? unit : plainOf(String(goal.label ?? ''));
-  const FUNCTION = ['at', 'month', 'months', 'per', 'the', 'a', 'level', 'surplus', 'without', 'being', 'within', 'under', 'over', 'about',
-    'after', 'before', 'between', 'through', 'during', 'their', 'there', 'these', 'those', 'where', 'which', 'while', 'would', 'could', 'should'];
-  const nouns = subject.match(/\p{L}+/gu)?.filter(w => !FUNCTION.includes(w) && (subject === unit || w.length >= 5)) ?? [];
+  const unitHasLetters = /\p{L}/u.test(unit);
+  const subject = unitHasLetters ? unit : plainOf(String(goal.label ?? ''));
+  const nouns = subject.match(/\p{L}+/gu)?.filter(w => !['at', 'month', 'months', 'per', 'the', 'a', 'level', 'surplus'].includes(w)) ?? [];
+  const FUNCTION = ['without', 'being', 'within', 'under', 'over', 'about', 'after', 'before', 'between', 'through', 'during', 'their',
+    'there', 'these', 'those', 'where', 'which', 'while', 'would', 'could', 'should'];
+  const stemsOf = (text: string): string[] => [...new Set((text.match(/\p{L}+/gu) ?? []).filter(w => w.length >= 5).map(w => w.slice(0, 4)))];
+  const labelStems = unitHasLetters ? [] : stemsOf(nouns.filter(w => !FUNCTION.includes(w)).join(' '));
+  const ownsSubject = (sentence: string): boolean => unitHasLetters ? nouns.some(noun => whole(noun, sentence))
+    : labelStems.length > 0 && labelStems.filter(stem => stemsOf(sentence).includes(stem)).length >= Math.min(2, labelStems.length);
   return sentences.some((sentence) => {
     if (!whole(words, sentence) || /\b(?:rival|competitor|example|e\.g|their|they|another goal|other goal)\b/.test(sentence)) return false;
     if (/\b(?:not (?:a |the |our |my )?(?:deadline|target|goal)|duration|lasts?|as an? (?:training )?course)\b/.test(sentence)) return false;
-    if (/\b(?:goal|target)\b/.test(sentence) && !nouns.some(noun => whole(noun, sentence))) return false;
+    if (/\b(?:goal|target)\b/.test(sentence) && !ownsSubject(sentence)) return false;
     const before = sentence.slice(0, sentence.indexOf(plainOf(words)));
     if (!/\b(?:we|i|us|our|my)\b/.test(before)
       || !/\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline|deliver|finish|complete)\b/.test(before)
@@ -74,7 +84,7 @@ function goalOwnsDeadline(goal: RecordLike, words: string, source: string): bool
     // A bare owned deadline refers to the sole goal. Otherwise its subject must occur in THIS goal-intent sentence: a
     // noun of the previous sentence never attributes a date to this goal (buddy r1 P1: "We have registered riders. We
     // must reach revenue of £10,000 in ten months." is revenue's date). The d2 ceiling sentence names its riders itself.
-    return /\b(?:our|my) deadline\b/.test(before) || nouns.some(noun => whole(noun, sentence));
+    return /\b(?:our|my) deadline\b/.test(before) || ownsSubject(sentence);
   });
 }
 export interface DeadlineIssueInput {
