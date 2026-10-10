@@ -1,5 +1,6 @@
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
+import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
@@ -2122,12 +2123,15 @@ export async function buildModelFromBrief(
     // ⭐ CEE #4 (Science goals §(v)): a stock worked out to the goal's deadline is carried only on the HELD deadline
     // (`goal_horizon_months`, set above where the brief attests it), so it is admitted here, after the hold. Each refusal
     // is said; a model with no accumulation declared is byte-identical.
-    const accumulation = admitAccumulationIdentities(goalNodes, admitted.edges, candidate.identities);
+    // THE TIME CLASS (`goal-target/time-class.ts`): a brief that states a timing shape the carrier cannot hold ("starting in month 3")
+    // is carried no stock reading at all, declared or structural; the Run then withholds the at-H chance and says why. Withhold only.
+    const inTimeClass = timeClassOf(brief).supported;
+    const accumulation = admitAccumulationIdentities(goalNodes, admitted.edges, inTimeClass ? candidate.identities : undefined);
     if (accumulation.loss.length > 0) {
       admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
     }
     const declaredAccumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
-    const accumulated = admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges);
+    const accumulated = inTimeClass ? admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges) : declaredAccumulated;
     const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).

@@ -4333,7 +4333,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // approval is waiting (that card is the next step) and never on an unchecked verdict.
     const startingAssumptions = approvals.length === 0 && carriedApproval.length === 0
       ? startingAssumptionsChips(readbackGraph, analysisReady) : [];
-    const steadyCard = steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId,
+    const steadyCard = steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId, brief: identityOfferBrief,
       runReply: resultFirstRunCompleted || result.tool_calls.some((c, i) => c.name === 'run_analysis' && result.tool_results[i]?.ran === true),
       runResult: analysisResult,
       approvalHeld: approvals.length + carriedApproval.length + liveHolds.length + proposals.outstanding(scenarioId, userId).length > 0 });

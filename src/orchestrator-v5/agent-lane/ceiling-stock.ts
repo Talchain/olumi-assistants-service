@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
+import { timeClassOf } from '../goal-target/time-class.js';
 import { readCount, readUnitParts, statedTailParts, words } from './same-unit.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { ceilingTheUserWroteFor, figureTheUserWroteForSpan, hasApproximateFigureQualifier, countsInWords } from './stated-by-user.js';
@@ -73,6 +74,9 @@ export { isConfirmedCeilingStockCarrier, confirmedCeilingStockOf } from './ceili
 /** The existing amount authority binds the value; this separate recogniser reads CURRENT/LIMIT/net roles. */
 export function recogniseCeilingStock(graph: unknown, brief: string | null | undefined): CeilingStockPending | null {
   if (!rec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || typeof brief !== 'string') return null;
+  // THE TIME CLASS (`time-class.ts`): a brief that states a timing shape this fixed month-H reading cannot hold ("starting in
+  // month 3", a lift that begins later) offers no card. This can only withhold; it never recognises more than before.
+  if (!timeClassOf(brief).supported) return null;
   const nodes: Rec[] = graph.nodes.filter(rec), goals = nodes.filter(n => n.kind === 'goal');
   const goal = goals[0], h = goal && readGoalRecord(graph, goal.id)?.horizon?.months;
   if (goals.length !== 1 || goal.nonlinear_identity != null || goal.goal_stock_reading === 'one_off'
