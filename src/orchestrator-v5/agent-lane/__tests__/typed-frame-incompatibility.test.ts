@@ -7,7 +7,7 @@ const factor = (label: string, value: number | null, unit: string | null): Facto
   label, baseline_value: value, unit, baseline_known: true, provenance: 'explicit', role: 'observable', plausible_max: 10000,
 });
 const model = (label: string, value: number, unit: string, quote: string, rivals: Factor[] = []): CandidateModel => ({
-  goal: { metric: 'Outcome', value: 100, unit: 'GBP', operator: '>=', provenance: 'explicit' },
+  goal: { metric: 'Outcome', value: 100, unit: 'GBP', operator: '>=', horizon_months: null, provenance: 'explicit' },
   constraints: [], options: [], factors: [{ ...factor(label, value, unit), baseline_evidence: { quote } }, ...rivals],
   outcomes: [], risks: [], links: [],
 });
