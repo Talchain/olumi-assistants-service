@@ -38,7 +38,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedOptionSetting } from '../verified-option-setting.js';
+import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -1627,7 +1627,7 @@ export async function buildModelFromBrief(
     // first and waits for the user's Yes like the mint's, or dropped (and said) when its units don't compose.
     const { model: c1, dropped } = unconfirmGoalProducts(c0, brief);
     // ⛔ Olumi's gap residual beside the user's two parts is taken out first (and said), so the reading and card apply.
-    const gap = withoutGapResidual(c1, brief);
+    const gap = withoutGapResidual(c1, brief, (f) => verifiedFactorLevel(c1, f, brief));
     const c = gap?.model ?? c1;
     const residual = gap?.residual ?? null;
     // (A) A rate × count drawn as two added links into an outcome is Olumi's product of the two (Science 6008551439 (A)).
