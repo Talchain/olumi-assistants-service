@@ -1341,7 +1341,7 @@ const CHANGE_STATED = /\b(?:ris(?:e|es|ing)|rose|rais(?:e|es|ed|ing)|increas(?:e
 const CHANGE_BEFORE_ALONE = /^(?:every|each|per|by)$/i;
 /** A figure written AS a change: a change word straight after it (the binder's `CHANGE_AFTER`), or `CHANGE_BEFORE_ALONE`
  * before it (hedges skipped). */
-function figureWrittenAsAChange(q: string, figure: StatedAmount): boolean {
+export function figureWrittenAsAChange(q: string, figure: StatedAmount): boolean {
   if (CHANGE_AFTER.test(q.slice(figure.index + figure.matchedText.length))) return true;
   const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
   const words = [...(q.slice(0, start).split(/[,;:.!?]/).pop() ?? '').matchAll(/[\p{L}]+/gu)].map(m => m[0]);

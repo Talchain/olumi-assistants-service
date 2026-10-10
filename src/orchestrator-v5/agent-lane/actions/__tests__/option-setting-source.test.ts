@@ -17,7 +17,7 @@ import * as census from '../../olumi-estimates-feeding-result.js';
 import { actionFactsOf, type ActionRead } from '../state.js';
 import { admitCandidateModel, type CandidateModel } from '../../admit-model.js';
 import { verifiedFactorLevel, verifiedOptionSetting, verifiedOptionTotal } from '../../verified-option-setting.js';
-import { prepareProvisionalCandidate } from '../../runtime/build-model.js';
+import { buildModelFromBrief, prepareProvisionalCandidate } from '../../runtime/build-model.js';
 
 function graph(source?: string) {
   return {
@@ -274,10 +274,104 @@ describe('same authority verifies each operand before user-derived addition', ()
     };
     expect(totalReceipt(model, `${baseline} ${quote}`).verified).toBe(false);
   });
-  it('RUN32 developers-count receipt cannot verify a people-frame baseline', () => {
+  it('RUN36 label-named developers count verifies the declared people-frame baseline', () => {
     const initial = operandCandidate(); const baseline = 'We have 5 developers today.';
     const factor = { ...initial.factors[0]!, label: 'Developers', unit: 'people', baseline_evidence: { quote: baseline } };
     const model: CandidateModel = { ...initial, factors: [factor] };
-    expect(verifiedFactorLevel(model, factor, baseline)).toBe(false);
+    // DL RUN36: the existing labelStandsForCountUnit identity licenses this count frame.
+    expect(verifiedFactorLevel(model, factor, baseline)).toBe(true);
+  });
+});
+
+const PEOPLE_CLAIM = 'We have 5 developers and will hire 2 more.';
+function peopleCandidate(quote = PEOPLE_CLAIM): CandidateModel {
+  const initial = operandCandidate();
+  return { ...initial,
+    factors: [{ ...initial.factors[0]!, label: 'Developers', unit: 'people', plausible_max: 20,
+      baseline_evidence: { quote } }],
+    options: [{ ...initial.options[0]!, label: 'Hire developers', interventions: [{
+      ...initial.options[0]!.interventions![0]!, factor_label: 'Developers', unit: 'people',
+      stated_evidence: { ...initial.options[0]!.interventions![0]!.stated_evidence!, quote },
+    }] }],
+  };
+}
+describe('RUN36 typed count identity and additive claim role', () => {
+  it('the owned people-frame claim verifies current five, additive two, and user-derived seven', () => {
+    const model = peopleCandidate(); const option = model.options[0]!;
+    expect(verifiedFactorLevel(model, model.factors[0]!, PEOPLE_CLAIM)).toBe(true);
+    expect(verifiedOptionSetting(model, option, option.interventions![0]!, PEOPLE_CLAIM)).toBe(true);
+    expect(totalReceipt(model, PEOPLE_CLAIM)).toStrictEqual({ verified: true, derived: true,
+      basis: `${PEOPLE_CLAIM} ${PEOPLE_CLAIM} (5 + 2 = 7 people)` });
+    const prepared = prepareProvisionalCandidate(model, PEOPLE_CLAIM).candidate;
+    expect(prepared.options[0]!.interventions![0]).toMatchObject({ value: 7, provenance: 'explicit', derived_total: true });
+    const cold = GraphV3.parse(JSON.parse(JSON.stringify(projectGraphForPersistence(admitCandidateModel(prepared, {}, PEOPLE_CLAIM)))));
+    expect(cold.nodes.find(n => n.id === 'developers')!.observed_state).toMatchObject({ raw_value: 5, source: 'brief_extraction' });
+    expect(cold.nodes.find(n => n.kind === 'option')!.interventions!.developers).toMatchObject({
+      raw_value: 7, source: 'brief_extraction', value_confidence: 'medium', basis: `${PEOPLE_CLAIM} ${PEOPLE_CLAIM} (5 + 2 = 7 people)` });
+  });
+  it('a different counted entity does not license a developers baseline', () => {
+    const quote = 'We have 5 contractors and will hire 2 more.';
+    const model = peopleCandidate(quote);
+    expect(verifiedFactorLevel(model, model.factors[0]!, quote)).toBe(false);
+    expect(totalReceipt(model, quote).verified).toBe(false);
+  });
+  it.each([
+    ['bound', 'We have 5 developers and will hire more than 2 developers.'],
+    ['third party', 'We have 5 developers and they will hire 2 more.'],
+    ['percent of', 'We have 5 developers and will hire 2% of the team.'],
+    ['retraction', 'We have 5 developers and will hire 2 more, not really.'],
+    ['upper bound', 'We could hire up to 2 developers.'],
+    ['opposite direction', 'We could hire 2 fewer developers.'],
+    ['target', 'We could hire 2 more developers as our target.'],
+  ])('%s cannot license an additive receipt', (_name, quote) => {
+    const model = peopleCandidate(quote!);
+    expect(verifiedOptionSetting(model, model.options[0]!, model.options[0]!.interventions![0]!, quote)).toBe(false);
+    expect(totalReceipt(model, quote).verified).toBe(false);
+  });
+  it('the point gate still refuses more on an absolute intervention', () => {
+    const quote = 'We could hire 2 more developers.'; const model = peopleCandidate(quote);
+    expect(verifiedOptionSetting(model, model.options[0]!, { ...model.options[0]!.interventions![0]!, value_kind: 'absolute' }, quote)).toBe(false);
+  });
+  it('separate current and additive receipts keep their own role under the neighbour guard', () => {
+    const baseline = 'We have 5 developers today.'; const addition = 'We could hire 2 more developers.';
+    const initial = peopleCandidate(addition); const model: CandidateModel = { ...initial,
+      factors: [{ ...initial.factors[0]!, baseline_evidence: { quote: baseline } }],
+    };
+    const brief = `${baseline} ${addition}`;
+    expect(verifiedFactorLevel(model, model.factors[0]!, brief)).toBe(true);
+    expect(verifiedOptionSetting(model, model.options[0]!, model.options[0]!.interventions![0]!, brief)).toBe(true);
+    expect(totalReceipt(model, brief)).toMatchObject({ verified: true, derived: true });
+  });
+  it.each(['people/month', 'FTE', 'thousand people'])('count identity cannot discard the declared %s frame', unit => {
+    const quote = 'We have 5 developers.'; const initial = peopleCandidate(quote);
+    const model: CandidateModel = { ...initial, factors: [{ ...initial.factors[0]!, unit }] };
+    expect(verifiedFactorLevel(model, model.factors[0]!, quote)).toBe(false);
+  });
+  it('an unquoted current or additive operand never becomes user-derived', () => {
+    const model = peopleCandidate();
+    expect(totalReceipt({ ...model, factors: [{ ...model.factors[0]!, baseline_evidence: null }] }, PEOPLE_CLAIM).verified).toBe(false);
+    expect(totalReceipt({ ...model, options: [{ ...model.options[0]!, interventions: [{ ...model.options[0]!.interventions![0]!, stated_evidence: null }] }] }, PEOPLE_CLAIM).verified).toBe(false);
+  });
+  it('the direct zero-provider producer registers the same verified current and derived total', async () => {
+    const initial = peopleCandidate();
+    const model: CandidateModel = { ...initial,
+      options: [...initial.options, { label: 'Maintain staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] }],
+      links: [{ from: 'Developers', to: 'Productivity', direction: 'positive', provenance: 'ai_proposed',
+        effect_amount: null, effect_per_source_change: null, effect_provenance: null }],
+    };
+    let registered: ReturnType<typeof GraphV3.parse> | undefined; let retainedCallbacks = 0;
+    const result = await buildModelFromBrief('33333333-3333-4333-8333-333333333333', PEOPLE_CLAIM,
+      async (path, body) => {
+        if (path.endsWith('/graph/register') && typeof body === 'object' && body !== null && 'graph' in body) {
+          registered = GraphV3.parse(body.graph);
+        }
+        return { status: 200, json: { graph: { nodes: [], edges: [] } } };
+      }, async () => { retainedCallbacks += 1; return { text: JSON.stringify(model) }; });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(retainedCallbacks).toBe(1);
+    expect(registered!.nodes.find(n => n.id === 'developers')!.observed_state).toMatchObject({ raw_value: 5, source: 'brief_extraction' });
+    expect(registered!.nodes.find(n => n.label === 'Hire developers')!.interventions!.developers).toMatchObject({
+      raw_value: 7, source: 'brief_extraction', value_confidence: 'medium' });
+    expect(registered!.nodes.find(n => n.label === 'Hire developers')!.interventions!.developers.basis).toContain('(5 + 2 = 7 people)');
   });
 });
