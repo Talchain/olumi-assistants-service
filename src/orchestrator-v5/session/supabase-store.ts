@@ -2014,7 +2014,7 @@ export class SupabaseSessionStore implements SessionStore {
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
     const { data, error } = await this.client
       .from('v5_conversation_turns')
-      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions')
+      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance')
       .eq('scenario_id', scenarioId)
       .eq('turn_id', turnId)
       .limit(1);
@@ -2023,7 +2023,10 @@ export class SupabaseSessionStore implements SessionStore {
     if (error) throw new Error(`readCommittedTurn failed: ${error.message ?? String(error)}`);
     const row = ((data as Array<Record<string, unknown>> | null) ?? [])[0];
     if (!row || typeof row.id !== 'string') return null;
+    const guidance = row.agent_guidance == null ? undefined : parseAnswerGuidance(row.agent_guidance);
+    if (guidance === null) throw new SessionReadError('Committed turn guidance malformed');
     return {
+      ...(guidance !== undefined ? { agent_guidance: guidance } : {}),
       id: row.id,
       request_hash: String(row.request_hash ?? ''),
       assistant_message: typeof row.assistant_message === 'string' ? row.assistant_message : null,

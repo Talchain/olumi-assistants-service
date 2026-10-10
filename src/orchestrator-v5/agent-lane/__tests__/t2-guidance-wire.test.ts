@@ -228,7 +228,7 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     const saved = [...rows.entries()].find(([k]) => k.startsWith(`${SCENARIO}:`))![1];
     expect(saved.assistant_message).toBe(b.assistant_text);
     expect(saved.agent_guidance).toEqual({ version: 1, entries: { [key]: {
-      status: 'offered', state_key_hash: (b.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash,
+      status: 'offered', variant_id: 'S1', slot: 1, state_key_hash: (b.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash,
     } } });
     expect(JSON.stringify(saved.agent_guidance)).not.toContain(AI.from);
     expect((await turn({ message: 'What next?' })).guidance).toEqual(b.guidance); // offered is not settled
