@@ -19,7 +19,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, BUILD_INSTRUCTIONS, prepareProvisionalCandidate, type CallStructuredModel } from '../runtime/build-model.js';
-import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, slugId, type CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import { assessConstructionSize, COMPACT_LIMITS } from '../construction-size-gate.js';
@@ -218,6 +218,24 @@ const VERIFIED_BY_CASE: Record<string, readonly string[]> = {
     'pro_plan_price', // "Pro plan price from £49 to £59 per month"
   ],
 };
+// Original Phased £54 candidate: known zero binary availability, ai_proposed (candidateFromServed).
+const AI_LEVELS_BY_CASE: Record<string, readonly string[]> = {
+  'f-20260926T001627Z': ['ai_feature_release_availability'],
+};
+const exactlyTheAiCase = (g: SGraph, candidate: CandidateModel, key: string): void => {
+  for (const id of AI_LEVELS_BY_CASE[key] ?? []) {
+    const f = candidate.factors.find(f => slugId(f.label) === id)!;
+    expect(f.baseline_known, id).toBe(true);
+    expect(f.provenance, id).toBe('ai_proposed');
+    const os = g.nodes.find(n => n.id === id)!.observed_state;
+    expect(os?.source, id).toBe('cee_inference');
+    expect((os as { extractionType?: unknown }).extractionType, id).toBe('inferred');
+    expect(valueAuthorshipOf(os), id).toBe('olumi_estimate');
+    expect(nodeProvenanceDisplay((os as { extractionType?: unknown }).extractionType, os), id).toBe('ai_inferred');
+    const { extractionType: _type, ...legacy } = os as Record<string, unknown>;
+    expect(valueAuthorshipOf(legacy), id).toBe('unknown');
+  }
+};
 const exactlyTheVerifiedCase = (g: SGraph, key: string): void => {
   const expected = VERIFIED_BY_CASE[key]!;
   expect(g.nodes.filter(n => (n.observed_state as { extractionType?: unknown } | undefined)?.extractionType === 'explicit')
@@ -238,14 +256,16 @@ const exactlyTheVerifiedCase = (g: SGraph, key: string): void => {
 };
 const withCreditedType = (n: SNode, key: string): SNode => {
   const os = n.observed_state;
-  if (!VERIFIED_BY_CASE[key]!.includes(n.id) || os === undefined) return n;
+  const type = VERIFIED_BY_CASE[key]!.includes(n.id) ? 'explicit'
+    : (AI_LEVELS_BY_CASE[key] ?? []).includes(n.id) ? 'inferred' : undefined;
+  if (type === undefined || os === undefined || (type === 'inferred' && os.source === undefined)) return n;
   // The registered schema orders the key after `cap` and before `declared_scale` (JSON.stringify compares below).
   const typed: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(os)) {
-    if (k === 'declared_scale') typed.extractionType = 'explicit';
+    if (k === 'declared_scale') typed.extractionType = type;
     typed[k] = v;
   }
-  if (typed.extractionType === undefined) typed.extractionType = 'explicit';
+  if (typed.extractionType === undefined) typed.extractionType = type;
   return { ...n, observed_state: typed } as SNode;
 };
 const after2355 = <G extends SGraph>(g: G, key: string, beforeMagnitudeSubtraction: SGraph): G => {
@@ -268,19 +288,20 @@ const unsized = (g: SGraph): SGraph => ({ ...g, edges: subtractMagnitudeDelta(g.
  * last, as `framedObservedState` writes it); "100 % of today" keeps no author. The captures pre-date it, so it is
  * their one known node delta.
  */
-const olumisKnownLevels = (nodes: SNode[]): SNode[] => {
+const olumisKnownLevels = (nodes: SNode[], key?: string): SNode[] => {
   const capturedCase = Object.entries(SERVED.runs).find(([, run]) => run.brief.draft_graph.nodes === nodes);
   const typed = capturedCase === undefined ? nodes : nodes.map(n => withCreditedType(n, capturedCase[0]));
   return typed.map((n) => {
     const os = n.observed_state;
     if (n.kind !== 'factor' || n.provenance !== 'ai_inferred' || os === undefined || os.source !== undefined) return n;
     if (os.unit === '% of today' && (os.raw_value ?? os.value) === 100) return n;
-    return { ...n, observed_state: { ...os, source: 'cee_inference' } };
+    const inferred = (AI_LEVELS_BY_CASE[capturedCase?.[0] ?? key ?? ''] ?? []).includes(n.id);
+    return { ...n, observed_state: { ...os, source: 'cee_inference', ...(inferred ? { extractionType: 'inferred' } : {}) } };
   });
 };
-const framedBase = (g: SGraph): SGraph => ({
+const framedBase = (g: SGraph, key?: string): SGraph => ({
   ...g,
-  nodes: olumisKnownLevels(g.nodes),
+  nodes: olumisKnownLevels(g.nodes, key),
   ...(g.goal_constraints === undefined ? {} : {
     goal_constraints: g.goal_constraints.map((c) => Object.fromEntries(Object.entries(c).flatMap(([k, v]) =>
       (k === 'provenance' ? [[k, v], ['value_frame', 'level']] : [[k, v]]))) as SConstraint),
@@ -436,7 +457,9 @@ describe('controls — what the rule must never touch', () => {
     ['£49 with AI release (f-20260926T022612Z, CEE cb1778b): its price equals today and its AI level equals £59\'s, yet no option matches it on both', 'f-20260926T022612Z', AT_49, '49_with_ai_release'],
   ])('CONTROL %s — kept; the served graph, and base\'s registration byte for byte', async (_name, key, run, olumiId) => {
     expect(run.brief.may_run).toBe(true);
-    const { graph: registered, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
+    const candidate = candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null });
+    const { graph: registered, out } = await build(candidate);
+    exactlyTheAiCase(registered, candidate, key);
     exactlyTheVerifiedCase(registered, key);
     // The construction mark (`olumi-option-marker.ts`, DL #72 5887534233): the Olumi-added £54 option, and only it, carries
     // `proposed_by: 'olumi'`. "£49 with AI release" sets the user's own £49, so it stays unmarked (the level backstop).
@@ -448,7 +471,7 @@ describe('controls — what the rule must never touch', () => {
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
     expect(unsized(graph).edges).toEqual(after2355(run.brief.draft_graph, key, graph).edges);
-    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, after2355(baseGraph(key), key, graph)), G1_NO_HORIZON_WORDS)))).toBe(JSON.stringify(framedBase(after2355(baseGraph(key), key, graph))));
+    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, after2355(baseGraph(key), key, graph)), G1_NO_HORIZON_WORDS)))).toBe(JSON.stringify(framedBase(after2355(baseGraph(key), key, graph), key)));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });
