@@ -10,8 +10,13 @@ import { registrationTurnId } from '../graph-registration/registration-identity.
  * capital (so "Is your deadline 10 Aug. 2027?" stays one sentence) or at a blank line; a single newline stays inside one
  * (buddy r4 P2: "Aug." and a newline inside the question both slipped past a [^.!?\n] matcher).
  */
+const CALENDAR_DATE = /\b(?:\d{1,2}(?:st|nd|rd|th)?\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(?:\d{1,2},?\s+)?\d{4}\b|\b\d{4}-\d{2}-\d{2}\b/i;
 export function asksAboutTheDeadline(text: string): boolean {
-  return text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence) && sentence.includes('?'));
+  // A sentence that names the deadline AND either asks or states a calendar date is an offer of the card's date (buddy r6 P2: "The
+  // deadline is 10 August 2027. Does that work for you?" split the date from its question). The served build answer, which says
+  // "The model holds no deadline yet" and asks other questions, names no date beside the word and stays the build answer.
+  return text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence)
+    && (sentence.includes('?') || CALENDAR_DATE.test(sentence)));
 }
 export interface DeadlineTurnStart {
   readonly rowId: string | null;
@@ -92,14 +97,19 @@ function goalOwnsDeadline(goal: RecordLike, words: string, source: string): bool
     const intent = unitHasLetters ? /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline|deliver|finish|complete)\b/
       : /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline)\b/;
     if (!unitHasLetters) {
-      // The clause immediately before the date owns it (split on , ; and). On this path it must be a BARE time adverbial ("over the
-      // next", "within the next"): any clause with other content — a verb, a count, even the goal's own words ("…, and refurbish
-      // the depot serving our riders in ten months") — owns its own date, so it is refused. A comma-free "…keep riders served in ten
-      // months" is refused too (closed = silent, never a wrong offer; the unit-with-letters path covers the common goals).
-      const ownClause = before.split(/[,;]|\band\b/).pop() ?? '';
-      const TIMEWORDS = ['over', 'the', 'next', 'within', 'in', 'for', 'by', 'end', 'of', 'during', 'about', 'around', 'roughly', 'approximately',
-        'another', 'coming', 'then', 'so', 'is', 'are', 'to', 'be', 'a', 'an', 'at', 'least', 'most', 'than', 'less', 'more', 'later', 'from', 'now', 'today'];
-      if (!(ownClause.match(/\p{L}+/gu) ?? []).every(w => TIMEWORDS.includes(w)) || /\d/.test(ownClause)) return false;
+      // The clause that owns the date (since the last "and" or ";", across its commas) may hold ONLY words of a level stance on this
+      // goal: the speaker, a want/need, a stance verb, a ceiling/target word, time words, the label's own words, and "without anyone
+      // …". ANY other word ("survey", "responses", "renovate", "depot", a number) means the clause has its own subject, so it owns its
+      // own date and is refused (closed = silent, never a wrong offer; the unit-with-letters path covers the common goals).
+      const ownClause = before.split(/;|\band\b/).pop() ?? '';
+      const ALLOWED = new Set(['we', 'i', 'us', 'our', 'my', 'want', 'wants', 'need', 'needs', 'must', 'should', 'will', 'would', 'to', 'that', 'this', 'it', 'them',
+        'stay', 'keep', 'reach', 'achieve', 'grow', 'reduce', 'increase', 'under', 'below', 'above', 'without', 'anyone', 'no', 'one', 'any', 'not',
+        'ceiling', 'cap', 'limit', 'target', 'level', 'threshold', 'maximum', 'minimum', 'at', 'most', 'least',
+        'over', 'the', 'next', 'within', 'in', 'for', 'by', 'end', 'of', 'during', 'about', 'around', 'roughly', 'approximately', 'another', 'coming',
+        'then', 'so', 'is', 'are', 'be', 'a', 'an', 'than', 'less', 'more', 'later', 'from', 'now', 'today']);
+      const words = ownClause.match(/\p{L}+/gu) ?? [];
+      const labelWords = new Set(nouns.map(w => w.slice(0, 4)));
+      if (/\d/.test(ownClause) || !words.every(w => ALLOWED.has(w) || labelWords.has(w.slice(0, 4)))) return false;
     }
     if (!/\b(?:we|i|us|our|my)\b/.test(before)
       || !intent.test(before)
