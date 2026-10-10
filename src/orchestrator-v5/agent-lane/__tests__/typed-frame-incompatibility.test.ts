@@ -208,6 +208,29 @@ describe('native value authorship: a human ENTITY never makes an AI or unverifie
     expect(valueAuthorshipOf(n.observed_state)).toBe('unknown');
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('unverified_brief');
   });
+  it('quotesBrief: an ESTIMATE whose cited sentence WRITES the figure stays the user\'s unverified claim — never Olumi\'s', () => {
+    // The drafter tagged it an estimate but cited "Capacity today is 40 story points." (no first-person owner: not verifiable).
+    const text = 'Capacity today is 40 story points.';
+    const base = model('Engineering delivery capacity', 40, 'story points', text);
+    const m = { ...base, factors: [{ ...base.factors[0]!, baseline_known: false, provenance: 'ai_proposed' }] };
+    expect(verified(m)).toBe(false);
+    const n = admittedFactor(m, text);
+    expect(n.observed_state).toMatchObject({ raw_value: 40, source: 'cee_inference', user_material_unverified: true });
+    expect(valueAuthorshipOf(n.observed_state)).toBe('unknown');
+    expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('unverified_brief');
+  });
+  it('quotesBrief CONTROL: an AI figure that merely CITES context (the quote writes no such figure) stays Olumi\'s, staging bytes', () => {
+    // Retained R4 shape: "Staff capacity" 100 % of current team, cited "Staffing is fixed, so any option must work with the current team."
+    const text = 'Staffing is fixed, so any option must work with the current team.';
+    const base = model('Staff capacity', 100, '% of current team', text);
+    const m = { ...base, factors: [{ ...base.factors[0]!, provenance: 'inferred' }] };
+    const n = admittedFactor(m, text);
+    expect(n.observed_state).toMatchObject({ raw_value: 100, source: 'cee_inference' });
+    expect(n.observed_state).not.toHaveProperty('user_material_unverified');
+    expect(n.observed_state?.extractionType).not.toBe('explicit');
+    expect(valueAuthorshipOf(n.observed_state)).not.toBe('yours');
+    expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
+  });
   it('named disposition unsupported_unit_conversion: a count written as tech leads is never credited as FTE', () => {
     const text = 'We have two tech leads today.';
     const m = model('Technical leadership', 2, 'FTE', text);
