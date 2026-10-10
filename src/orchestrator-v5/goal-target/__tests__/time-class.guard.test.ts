@@ -94,6 +94,7 @@ describe('every issuer of a time-bearing card or held-month chance is behind the
     expect(recogniser.indexOf('timeClassOf(brief)')).toBeGreaterThan(0);
     expect(recogniser.indexOf('timeClassOf(brief)')).toBeLessThan(recogniser.indexOf('goal.nonlinear_identity'));
     const build = codeOf(readFileSync(join(SRC, 'orchestrator-v5/agent-lane/runtime/build-model.ts'), 'utf8'));
+    expect(build).toMatch(/const inTimeClass\s*=\s*timeClassOf\(brief\)\.supported;/);
     expect(build).toMatch(/inTimeClass\s*\?\s*candidate\.identities\s*:\s*undefined/);
     expect(build).toMatch(/inTimeClass\s*\?\s*admitStructuralGoalAccumulation\(/);
   });
