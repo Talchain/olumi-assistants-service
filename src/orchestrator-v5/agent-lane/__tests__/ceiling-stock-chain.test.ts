@@ -423,8 +423,7 @@ describe('typed ceiling-stock confirmation chain', () => {
       : controlBrief.replace('at most 1,900', `${literal} 1,900`);
     expect(proposeCeilingStock(held(), strict)).toBeNull();
   });
-  it.each(['if', 'unless', 'when', 'once', 'would', 'could', 'might', 'may', 'unknown', 'unclear', 'proposed', 'planned', 'forecast', 'expect', 'hope', 'aim', 'target'])
-    ('R6C trailing hedge refuses: %s on ceiling and flow', hedge => {
+  it.each(['if', 'unless', 'when', 'once', 'would', 'could', 'might', 'may', 'unknown', 'unclear', 'proposed', 'planned', 'forecast', 'expect', 'hope', 'aim', 'target'])('R6C trailing hedge refuses: %s on ceiling and flow', hedge => {
       for (const sentence of ['Our depot can service at most 1,900 riders over ten months', 'We are gaining a net 30 riders every month']) {
         expect(proposeCeilingStock(held(), controlBrief)).not.toBeNull();
         expect(proposeCeilingStock(held(), controlBrief.replace(sentence + '.', sentence + `, ${hedge} we change the scheme.`))).toBeNull();
@@ -441,8 +440,7 @@ describe('typed ceiling-stock confirmation chain', () => {
     expect(proposeCeilingStock(held(), controlBrief)).not.toBeNull();
     expect(proposeCeilingStock(held(), change(controlBrief))).toBeNull();
   });
-  it.each(['sign-ups and people leaving', 'signups', 'joiners', 'new riders', 'members and customers', 'leavers and cancellations', 'people joining'])
-    ('R6C neutral counting control: %s', prefix => {
+  it.each(['sign-ups and people leaving', 'signups', 'joiners', 'new riders', 'members and customers', 'leavers and cancellations', 'people joining'])('R6C neutral counting control: %s', prefix => {
       expect(proposeCeilingStock(held(), controlBrief.replace('We are gaining', `Counting ${prefix}, we are gaining`))).not.toBeNull();
     });
   it.each(['stock', 'ceiling', 'flow'] as const)('R6C label cannot legitimise extra tail: %s', role => {
@@ -463,8 +461,7 @@ describe('typed ceiling-stock confirmation chain', () => {
     expect(proposeCeilingStock(held(), controlBrief.replace('1,900 riders', '1,900 registered riders'))).not.toBeNull();
     expect(proposeCeilingStock(held(), controlBrief.replace('30 riders', '30 registered riders'))).not.toBeNull();
   });
-  it.each(['over nine months', 'over ten months forecast', 'without breaking its maintenance targets if we expand'])
-    ('R6C comma continuation is consumed: %s', continuation => {
+  it.each(['over nine months', 'over ten months forecast', 'without breaking its maintenance targets if we expand'])('R6C comma continuation is consumed: %s', continuation => {
       expect(proposeCeilingStock(held(), controlBrief.replace('over ten months.', `over ten months, ${continuation}.`))).toBeNull();
     });
   it.each([':', ';', '('])('R6C stock tail consumes punctuation: %s', punctuation => {
