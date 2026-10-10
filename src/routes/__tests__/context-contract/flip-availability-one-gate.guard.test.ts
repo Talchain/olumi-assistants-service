@@ -7,13 +7,15 @@
  * decision review. Source-only AST scan: no typecheck, filesystem writes or network. In-memory mutants (m-a..m-d) run the
  * same scan over the real sources with the gate removed, so the guard cannot go green by looking at nothing.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import ts from 'typescript';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, relative } from 'node:path';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
+// Each scan reads the real runtime sources; the runner is slower than a laptop (the first CI run timed out at 5 s).
+vi.setConfig({ testTimeout: 60_000 });
 const OWNER = 'src/orchestrator-v5/context/flip-threshold-rows.ts';
 const GATE = 'flipThresholdsAvailable';
 const READER = 'readTopLevelFlipRows';
@@ -59,6 +61,8 @@ function scan(input: Sources): Scan {
   const ungated: string[] = [];
   for (const [file, text] of input) {
     if (file === OWNER) continue;
+    // Text prefilter: only a file naming the parser or the status word can hold a violation, so parse only those.
+    if (!text.includes(READER) && !text.includes(STATUS)) continue;
     const ast = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     const visit = (n: ts.Node): void => {
       if (ts.isTypeNode(n)) return;
