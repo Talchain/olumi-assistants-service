@@ -1,3 +1,4 @@
+import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
 import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-card.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -2900,10 +2901,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * answer row can carry each one until it is approved or declined — an inner row this turn writes (a new hold, a
      * confirm) never drops another hold silently (D-08). A failed read holds nothing back: the latest row still rules.
      */
+    let deadlineTurnStart: DeadlineTurnStart | undefined;
     let heldAtStart: readonly PendingAction[] = [];
     if (typeof store.readMostRecentPendingActions === 'function') {
       try {
-        heldAtStart = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' })).filter(isHeldProposal);
+        let latestRowId: string | null = null;
+        heldAtStart = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict', onLatestRowId: id => { latestRowId = id; } })).filter(isHeldProposal);
+        if (latestRowId !== null) deadlineTurnStart = { rowId: latestRowId, rows: await store.readRecent(scenarioId, CONVERSATION_ROWS_READ) };
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: held proposals unreadable at turn start — the latest row rules');
       }
@@ -4163,6 +4167,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (`identityCardToIssue`): the SAME tool, once; it writes nothing, and `approvalChipsFor` offers its button.
     // …and RE-OFFERED on a turn that asks for the reading but proposed nothing (R3 5910559613: a typed "Run the analysis."
     // before confirming got the question and no button, `identityCardToReoffer`), read off the STORED model.
+    let automaticDeadlineLabel: string | undefined;
+    const deadlineIssuer = mode === 'full' && retainedScopeIssues.length === 0 ? await capabilities.deadlineCardFromDraft(toolCtx, {
+      start: deadlineTurnStart, typedNow, toolCalls: result.tool_calls, mutated: result.mutated, fastPath,
+      proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, pending: liveHolds,
+    }) : undefined;
+    if (deadlineIssuer !== undefined) {
+      const issued = await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: deadlineIssuer.words, rationale: '' }),
+        toolCtx, { ...capabilities, proposeGoalDeadline: deadlineIssuer.issue }, mode);
+      if (issued.ok === true && typeof issued.public_label === 'string') automaticDeadlineLabel = issued.public_label;
+      result = { ...result,
+        tool_calls: [...result.tool_calls, { name: 'propose_goal_deadline', ok: issued.ok === true, mutated: false,
+          ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
+        tool_results: [...result.tool_results, issued] };
+    }
     const identityOfferRead = readbackGraph == null ? undefined
       : await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {}).catch(() => undefined);
     const identityOfferBrief = typeof identityOfferRead?.json.brief_text === 'string' ? identityOfferRead.json.brief_text : null;
@@ -5023,7 +5041,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
-      let reply = withCellHorizon(typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
+      // A route-issued deadline card says its own question (the door's public_label, nothing added) as this turn's text:
+      // it enters the ONE composer and the egress gate like every other reply, so nothing below writes it again.
+      let reply = withCellHorizon(automaticDeadlineLabel !== undefined ? automaticDeadlineLabel
+        : typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from

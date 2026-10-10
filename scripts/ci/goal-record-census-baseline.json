@@ -1,5 +1,5 @@
 {
-  "source_sha": "3ace48693cba1a03e6f36b490d442fc12d3cfc48",
+  "source_sha": "67c270defbadb971b030aa0b3a82288084a34893",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -153,6 +153,7 @@
       "src/validators/structural-reconciliation.ts": 4
     },
     "goal_deadline_as_stated": {
+      "src/orchestrator-v5/agent-lane/deadline-card.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 2,
       "src/orchestrator-v5/goal-target/goal-record.ts": 5,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
@@ -628,6 +629,7 @@
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 3,
       "src/orchestrator-v5/agent-lane/current-level-answer.ts": 2,
       "src/orchestrator-v5/agent-lane/current-level-ask-carry.ts": 1,
+      "src/orchestrator-v5/agent-lane/deadline-card.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-certainty.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 17,
@@ -798,7 +800,7 @@
     "goalKindOf": 21,
     "goalUnitOf": 5,
     "goal_constraints": 439,
-    "goal_deadline_as_stated": 9,
+    "goal_deadline_as_stated": 11,
     "goal_direction": 97,
     "goal_horizon": 52,
     "goal_horizon_months": 42,
@@ -813,7 +815,7 @@
     "goal_threshold_cap_provenance": 36,
     "goal_threshold_frame": 136,
     "goal_threshold_raw": 240,
-    "goal_threshold_unit": 219,
+    "goal_threshold_unit": 220,
     "pickGoalThresholdTrio": 18,
     "quantity_frame": 12,
     "readHeldGoalComparator": 20,
@@ -826,7 +828,7 @@
     "threshold_source": 36,
     "unit_reading": 79
   },
-  "total_references": 2379,
+  "total_references": 2382,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
