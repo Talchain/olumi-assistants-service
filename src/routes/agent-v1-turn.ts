@@ -150,9 +150,10 @@ import { premortemProducerDirective, readPremortemProduction, premortemWorksheet
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
   constructionRegistrationTurnId, settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, thinDraftOffer, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
-  widenPassingArgs, widenTargetOf, widenTurnForReadback, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
+  widenPassingArgs, widenTargetOf, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
+import { widenTurnForReadback } from '../orchestrator-v5/agent-lane/method-turn/guidance-widen-turn.js';
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
@@ -3566,7 +3567,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const widenTarget = widenTargetOf(pressedChipId, message);
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTarget !== null) {
       const rb = await readBackState(readingDispatch, scenarioId);
-      widenTurn = widenTarget === 'risks' ? risksTurnForReadback(rb, toolCtx.user_text ?? '') : widenTurnForReadback(pressedChipId, rb);
+      if (widenTarget === 'risks') {
+        widenTurn = risksTurnForReadback(rb, toolCtx.user_text ?? '');
+      } else {
+        await readTurnGuidanceHistory();
+        widenTurn = widenTurnForReadback(pressedChipId, rb, guidanceHistory);
+      }
       if (widenTurn !== null) fastPath = 'method';
       if (widenTurn !== null && widenTurn.kind === 'unavailable') {
         result = {
