@@ -95,7 +95,7 @@ describe('decision-review enricher — constraint-infeasible winner (config-gate
     // `false` is what the production caller passes on a withheld turn.
     const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium', undefined, false);
     expect(input).not.toBeNull();
-    expect(input!.winner.id).toBe('opt_premium');
+    expect(input!.winner).not.toHaveProperty('id');
     expect(input!.winner.constraint_infeasible).toBe(true);
     expect(input!.winner.recommendation_suppressed).toBe(true);
   });
@@ -110,7 +110,7 @@ describe('decision-review enricher — constraint-infeasible winner (config-gate
     // not, and must not, reach it.
     const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium', undefined, false);
     expect(input).not.toBeNull();
-    expect(input!.winner.id).toBe('opt_premium');
+    expect(input!.winner).not.toHaveProperty('id');
     expect(input!.winner.constraint_infeasible).toBeUndefined();
     expect(input!.winner.recommendation_suppressed).toBe(true);
   });

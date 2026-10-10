@@ -225,10 +225,10 @@ export function extractGroundedNumbers(input: ReviewInputForGrounding): number[]
   };
 
   // Structured numeric fields
-  push(input.winner.win_probability);
-  push(input.winner.outcome_mean);
+  push(input.winner?.win_probability);
+  push(input.winner?.outcome_mean);
   // Label-embedded numbers from winner
-  nums.push(...extractNumbersFromLabel(input.winner.label));
+  nums.push(...extractNumbersFromLabel(input.winner?.label));
 
   if (input.runner_up) {
     push(input.runner_up.win_probability);
