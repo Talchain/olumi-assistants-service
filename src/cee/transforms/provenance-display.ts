@@ -11,7 +11,6 @@
  * displays, never computes).
  */
 import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
-import { extractionTypeForSource } from "../decision-review/value-source-extraction-type.js";
 
 export type ProvenanceDisplay = "from_brief" | "ai_inferred" | "user_set" | "unverified_brief";
 
@@ -31,13 +30,7 @@ export function isUnverifiedUserMaterial(observed: unknown): boolean {
  */
 export function nodeProvenanceDisplay(extractionType: unknown, observed?: unknown): ProvenanceDisplay {
   if (isUnverifiedUserMaterial(observed)) return "unverified_brief";
-  if (typeof extractionType !== "string") {
-    // A value-free/retracted carrier cannot acquire brief credit through a residual source stamp.
-    const os = typeof observed === "object" && observed !== null
-      ? observed as { source?: unknown; value?: unknown } : undefined;
-    return os?.source === "brief_extraction" && typeof os.value === "number" && Number.isFinite(os.value)
-      && extractionTypeForSource(os.source) === "explicit" ? "from_brief" : "ai_inferred";
-  }
+  if (typeof extractionType !== "string") return "ai_inferred";
   if (extractionType === "explicit" || extractionType === "observed") return "from_brief";
   if (extractionType === "inferred" || extractionType === "range") return "ai_inferred";
   return "ai_inferred";
