@@ -5,6 +5,14 @@ import type { SessionTurnWithContent } from '../session/conversation-content.js'
 import { constructionOperationId } from './runtime/build-model.js';
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
 
+/**
+ * Whether an answer ASKS a question that names the deadline, in any wording or case. Sentences end at . ! ? followed by a
+ * capital (so "Is your deadline 10 Aug. 2027?" stays one sentence) or at a blank line; a single newline stays inside one
+ * (buddy r4 P2: "Aug." and a newline inside the question both slipped past a [^.!?\n] matcher).
+ */
+export function asksAboutTheDeadline(text: string): boolean {
+  return text.split(/(?<=[.!?])\s+(?=[A-Z\u201C"\u2018(])|\n\s*\n/).some(sentence => /\bdeadline\b/i.test(sentence) && sentence.trim().endsWith('?'));
+}
 export interface DeadlineTurnStart {
   readonly rowId: string | null;
   readonly rows: readonly SessionTurnWithContent[];
@@ -38,7 +46,7 @@ export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, s
   // wording: the card's own "Is your deadline <date> (<n> months from …)?" and a model's own "Is your deadline …?"), not prose that
   // merely says "is your deadline of ten months." (buddy r2 P3, r3 P2).
   const builtTheDraft = (r: SessionTurnWithContent): boolean => typeof r.user_message === 'string' && r.user_message.trim() === brief.trim()
-    && typeof r.assistant_message === 'string' && r.assistant_message.trim() !== '' && !/[^.!?\n]*\bdeadline\b[^.!?\n]*\?/i.test(r.assistant_message);
+    && typeof r.assistant_message === 'string' && r.assistant_message.trim() !== '' && !asksAboutTheDeadline(r.assistant_message);
   return answers.length === 0 || (answers.length === 1 && builtTheDraft(answers[0]!));
 }
 /**
@@ -83,11 +91,18 @@ function goalOwnsDeadline(goal: RecordLike, words: string, source: string): bool
     // clause ("…, and finish our depot renovation in ten months") carries a verb but none of the label's words belongs to that clause.
     const intent = unitHasLetters ? /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline|deliver|finish|complete)\b/
       : /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline)\b/;
-    const ownClause = before.split(/[,;]|\band\b/).pop() ?? '';
-    if (!unitHasLetters && /\b(?:stay|keep|reach|achieve|grow|reduce|increase|finish|complete|deliver|launch|build|open)\b/.test(ownClause)
-      && !labelStems.some(stem => stemsOf(ownClause).includes(stem))) return false;
-    // …and a number in the date's own clause is that clause's quantity (a count target), never a goal that holds no number.
-    if (!unitHasLetters && /\d/.test(ownClause)) return false;
+    if (!unitHasLetters) {
+      // The clause immediately before the date owns it (split on , ; and). It may not hold its own number (digits or written-out:
+      // that clause's quantity is a count target, never a goal that holds none), and it must be either about the goal (a label stem) or
+      // a bare time adverbial ("over the next"). ANY other clause — whatever its verb ("finish/renovate/refurbish …") — owns its own date.
+      const ownClause = before.split(/[,;]|\band\b/).pop() ?? '';
+      const ownWords = ownClause.match(/\p{L}+/gu) ?? [];
+      const TIMEWORDS = ['over', 'the', 'next', 'within', 'in', 'for', 'by', 'end', 'of', 'during', 'about', 'around', 'roughly', 'approximately',
+        'another', 'coming', 'then', 'so', 'is', 'are', 'to', 'be', 'a', 'an', 'at', 'least', 'most', 'than', 'less', 'more', 'later', 'from', 'now', 'today'];
+      const NUMBERWORDS = /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|dozen)\b/;
+      if (/\d/.test(ownClause) || NUMBERWORDS.test(ownClause)) return false;
+      if (!labelStems.some(stem => stemsOf(ownClause).includes(stem)) && !ownWords.every(w => TIMEWORDS.includes(w))) return false;
+    }
     if (!/\b(?:we|i|us|our|my)\b/.test(before)
       || !intent.test(before)
       || !/\b(?:by|within|over|next|deadline|before|until|in)\b/.test(before)) return false;

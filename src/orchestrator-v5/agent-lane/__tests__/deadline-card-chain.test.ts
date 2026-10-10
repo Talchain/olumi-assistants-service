@@ -385,7 +385,8 @@ describe('R6 the draft was built inside an Agent turn', () => {
     expect(firstAgentTurnAfterDraft({ rowId: unreadable.id, rows: [unreadable, construction] }, sid, brief)).toBe(false);
     // Any question that names the deadline is an offer, in any case or wording (buddy r3 P2); a question that does not (the served
     // build answer asks "What calendar date marks the end of …?") is not.
-    for (const asked of ['is your deadline 10 August 2027 (10 months from 10 October 2026)?', 'Here is the model.\nWould you like to set 10 August 2027 as the deadline?']) {
+    for (const asked of ['is your deadline 10 August 2027 (10 months from 10 October 2026)?', 'Here is the model.\nWould you like to set 10 August 2027 as the deadline?',
+      'Is your deadline 10 Aug. 2027?', 'Is your deadline\n10 August 2027?']) {
       const offer = row('agent_turn:resent', { user_message: brief, assistant_message: asked });
       expect(firstAgentTurnAfterDraft({ rowId: offer.id, rows: [offer, construction] }, sid, brief), asked).toBe(false);
     }
@@ -424,7 +425,10 @@ describe('R7 attribution on the served share-of-riders goal', () => {
     for (const text of ['We want to increase customers served to 500 in ten months.', 'We must finish the survey of riders in ten months.',
       'We keep riders enrolled in the survey over ten months.', 'We must finish the survey of riders served in ten months.',
       'We want to keep riders served without turning anyone away indefinitely, and finish our depot renovation in ten months.',
-      'We want to increase survey responses from riders served to 500 in ten months.'])
+      'We want to increase survey responses from riders served to 500 in ten months.',
+      'We want to keep riders served without turning anyone away indefinitely, and renovate our depot in ten months.',
+      'We want to keep riders served without turning anyone away indefinitely, and refurbish our depot in ten months.',
+      'We want to increase survey responses from riders served to five hundred in ten months.'])
       expect(deadlineCardToIssue(input({ storedBrief: text })), text).toBeUndefined();
     // The served sentence (its date in a bare "over the next ten months" clause) and a comma-free level stance still qualify.
     expect(deadlineCardToIssue(input())).toMatchObject({ date: '2027-08-10' });
