@@ -1,3 +1,4 @@
+import { confirmedCeilingStockOf } from '../agent-lane/ceiling-stock-carrier.js';
 import { linkList } from '../agent-lane/unsized-path-cause.js';
 import { evaluatedIdentityCarriers, exactIdentityOperandLinks, identityCanCarryExactLinks } from './identity-evaluations.js';
 /**
@@ -265,12 +266,15 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const byId = new Map(nodes.map(n => [n.id, n] as const));
   const goalId = scoredGoalIdOf(graph, scoredGoalId);
+  const ceilingStock = confirmedCeilingStockOf(graph);
+  // A confirmed unary stock reading defines the entire goal. Retained surplus parents do not alter its calculation.
+  const goalEdges = ceilingStock !== null && ceilingStock.goalId === goalId ? edges.filter(e => e.to !== goalId || String(e.from) === ceilingStock.carrierId) : edges;
   const ids = optionIds;
   const walkable = (id: unknown): boolean => byId.get(id)?.kind !== 'option' && byId.get(id)?.kind !== 'decision';
   const toGoal = new Set<unknown>(goalId === undefined ? [] : [goalId]);
   for (let grew = true; grew;) {
     grew = false;
-    for (const e of edges) if (toGoal.has(e.to) && walkable(e.from) && walkable(e.to) && !toGoal.has(e.from)) {
+    for (const e of goalEdges) if (toGoal.has(e.to) && walkable(e.from) && walkable(e.to) && !toGoal.has(e.from)) {
       toGoal.add(e.from); grew = true;
     }
   }
@@ -287,7 +291,7 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
       }
     }
     for (const id of seen) reached.add(id);
-    return { option_id, links: edges.filter(e => seen.has(e.from) && seen.has(e.to) && walkable(e.from)
+    return { option_id, links: goalEdges.filter(e => seen.has(e.from) && seen.has(e.to) && walkable(e.from)
       && walkable(e.to) && toGoal.has(e.to)) };
   });
   return { reached, paths, exactLinks };
@@ -366,7 +370,8 @@ export function targetTestabilityOf(
     const labelOf = new Map(nodes.map((n) => [n.id, typeof n.label === 'string' && n.label.trim() !== '' ? n.label.trim() : String(n.id)] as const));
     const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
     const optionIds = nodes.filter(n => n.kind === 'option' && typeof n.id === 'string').map(n => n.id as string);
-    const { reached } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])), identityEvaluations, goalId);
+    const { reached, paths } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])), identityEvaluations, goalId);
+    const goalPaths = new Set(paths.flatMap(path => path.links));
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
@@ -384,7 +389,8 @@ export function targetTestabilityOf(
     // subscribers-at-12-months) that does not hold by definition: B6's ONE test (`olumiGuessedLink`), so the goal and a
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
-    const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
+    const stockReading = confirmedCeilingStockOf(graph) !== null;
+    const guesses = edges.filter((e) => (!stockReading || goalPaths.has(e)) && reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
       && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf) && !convertingOlumiEstimate(e, graph, goalId, identityEvaluations));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');

@@ -3443,6 +3443,7 @@ export type CommitOptionLevelsInput = {
    * `reason: 'identity_<reason>'`; nothing is written.
    */
   readonly identity_confirm?: {
+    readonly ceiling_stock?: import('../agent-lane/ceiling-stock.js').CeilingStockPending;
     readonly choice?: 'one_off';
     readonly outcome_id: string;
     readonly factor_ids: readonly string[];
@@ -3558,6 +3559,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(effect.link_selected === true ? { link_selected: true as const } : {}),
       ...(effect.unit_readings !== undefined ? { unit_readings: effect.unit_readings } : {}) })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
+      ceiling_stock: input.identity_confirm.ceiling_stock,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
       reading_token: input.identity_confirm.reading_token, choice: input.identity_confirm.choice,
       ...(input.identity_confirm.part_levels !== undefined ? { part_levels: input.identity_confirm.part_levels } : {}) } } : {}),

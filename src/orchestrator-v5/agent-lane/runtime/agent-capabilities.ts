@@ -62,6 +62,7 @@ import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitRea
 import { applyIdentityConfirmEdit, identityConfirmReadingToken, identityPartLevelAsk, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { goalStockAccumulationOf } from '../../goal-target/goal-horizon-detail.js';
+import { proposeCeilingStock, ceilingStockRecorded } from '../ceiling-stock.js';
 import { identityReceiptWords, proposeProductIdentity, type IdentityPartLevel, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { canonicaliseUnitForDisplay, ratePeriodOf, ratePeriodWord, unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -3130,6 +3131,7 @@ export function createAgentCapabilities(
       base_graph_identity_hash: graphHash,
       operations: [{ op: CONFIRM_IDENTITY_OP, path: card.outcome_id,
         value: { outcome_id: card.outcome_id, operation: card.operation, factor_ids: [...card.factor_ids], words: card.words,
+          ...(card.ceiling_stock !== undefined ? { ceiling_stock: card.ceiling_stock } : {}),
           ...(card.one_off_words !== undefined ? { one_off_words: card.one_off_words } : {}),
           ...(card.part_levels !== undefined ? { part_levels: card.part_levels } : {}) } }],
       provenance: { authored_by: 'user_stated', basis: card.words },
@@ -3142,13 +3144,13 @@ export function createAgentCapabilities(
    * "hasn't been confirmed" and no button). The same revision and words give the same proposal id (`put` is idempotent).
    */
   const identityCardFor = (_ctx: { scenario_id: string; authenticated_user_id: string | null },
-    read: { readonly raw: unknown; readonly graph_hash: unknown } | null | undefined) => {
+    read: { readonly raw: unknown; readonly graph_hash: unknown; readonly brief_text?: string | null } | null | undefined) => {
     if (read === null || read === undefined || typeof read.graph_hash !== 'string' || read.graph_hash === '') return undefined;
-    const card = proposeProductIdentity(read.raw);
+    const card = proposeProductIdentity(read.raw) ?? proposeCeilingStock(read.raw, read.brief_text);
     // An unwritable base (the writer's own check) offers no card: its Yes could not be recorded (DL 5897757819). Nor does a
     // part with no level (B1 828d87ac): the writer refuses that Yes, and the level is asked first (`identityLevelAskFor`).
     return identityCardHintFor(card !== null && identityConfirmBaseIsWritable(read.raw)
-      && identityPartsWithoutLevel(read.raw, card.factor_ids).length === 0 ? card : null, false);
+      && (card.ceiling_stock !== undefined || identityPartsWithoutLevel(read.raw, card.factor_ids).length === 0) ? card : null, false);
   };
   /** The words said instead of the card when the stored reading has a part with no level; null otherwise. */
   const identityLevelAskFor = (raw: unknown): string | null => {
@@ -3203,6 +3205,7 @@ export function createAgentCapabilities(
       levels: [],
       // Canonical 5888513620: the token of the words the pressed card SHOWED (checked above), recomputed from the stored proposal.
       identity_confirm: { outcome_id: reading.outcome_id, factor_ids: [...reading.factor_ids], words: reading.words,
+        ...(reading.ceiling_stock !== undefined ? { ceiling_stock: reading.ceiling_stock } : {}),
         ...(reading.part_levels !== undefined ? { part_levels: reading.part_levels } : {}),
         choice, reading_token: identityConfirmReadingToken({ ...reading, choice }) },
     });
@@ -3239,7 +3242,7 @@ export function createAgentCapabilities(
     const stock = reading.operation === 'sum' ? goalStockAccumulationOf(check?.raw) : null;
     const holdsZero = reading.operation !== 'sum' || (stock !== null
       && (stock.netZero === null || (stock.netZero.observed_state as Record<string, unknown>).source === 'user_confirmed'));
-    if (!holds || !holdsFigure || !holdsZero) {
+    if (!holds || !holdsFigure || !holdsZero || (reading.ceiling_stock !== undefined && !ceilingStockRecorded(check?.raw, reading.ceiling_stock))) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         detail: 'This reading was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
     }
@@ -4186,7 +4189,7 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'held_change_waiting',
           detail: 'A suggested change is waiting for your yes. Approve it, or change something first. Nothing was offered.' };
       }
-      let card = proposeProductIdentity(g.raw);
+      let card = proposeProductIdentity(g.raw) ?? proposeCeilingStock(g.raw, g.brief_text);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
           detail: 'The model holds no reading of the goal for the user to confirm. Nothing was offered; say nothing about one.' };
@@ -4232,6 +4235,7 @@ export function createAgentCapabilities(
             + 'cannot be confirmed now and nothing was offered. Say that plainly; never offer a card or ask the user to confirm it.' };
       }
       const dry = applyIdentityConfirmEdit({ persistedGraph: g.raw, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
+        ceiling_stock: card.ceiling_stock, brief_text: g.brief_text,
         part_levels: card.part_levels,
         expected_graph_hash: g.graph_hash, reading_token: identityConfirmReadingToken(card) });
       if (dry.kind === 'refused') {
@@ -7936,7 +7940,7 @@ export function createAgentCapabilities(
             readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result, read.graph),
           ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
           // The read route's own model and revision (the same read as the permission): `graph` / `graph_hash`.
-          ...withIdentityCard(identityCardFor(ctx, { raw: read.graph, graph_hash: read.graph_hash })) };
+          ...withIdentityCard(identityCardFor(ctx, { raw: read.graph, graph_hash: read.graph_hash, brief_text: typeof read.brief_text === 'string' ? read.brief_text : null })) };
         }
         if (outcome.ran) {
           firstAnalysisThisRequest = {

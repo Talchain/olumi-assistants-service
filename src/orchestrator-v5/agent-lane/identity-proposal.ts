@@ -37,6 +37,7 @@ export interface IdentityPartLevel {
 }
 
 interface IdentityProposalBase {
+  readonly ceiling_stock?: import('./ceiling-stock.js').CeilingStockPending;
   readonly outcome_id: string;
   /** The card's exact reading; legacy cards also show the user's stored arithmetic. */
   readonly words: string;

@@ -22,6 +22,7 @@ import { identityPartsWithoutLevel } from '../system-events/identity-confirm-edi
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { countsInWords, figureTheUserWroteForSpan, moneyUnitScale } from './stated-by-user.js';
 import { countedNoun } from './counted-nouns.js';
+import { CeilingStockPendingSchema } from './ceiling-stock.js';
 
 /** The proposal operation that carries a reading to confirm. `path` is the goal's id. */
 export const CONFIRM_IDENTITY_OP = 'confirm_identity' as const;
@@ -29,11 +30,14 @@ export const CONFIRM_IDENTITY_OP = 'confirm_identity' as const;
 /** The stored reading a `confirm_identity` proposal carries, or `undefined` for any other proposal. */
 export function identityReadingOf(proposal: StructuredProposal): IdentityProposal | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === CONFIRM_IDENTITY_OP ? proposal.operations[0]! : undefined;
-  const v = (op?.value ?? {}) as { outcome_id?: unknown; operation?: unknown; factor_ids?: unknown; words?: unknown; part_levels?: unknown; one_off_words?: unknown };
+  const v = (op?.value ?? {}) as { outcome_id?: unknown; operation?: unknown; factor_ids?: unknown; words?: unknown; part_levels?: unknown; one_off_words?: unknown; ceiling_stock?: unknown };
   if (op === undefined || typeof v.outcome_id !== 'string' || v.outcome_id !== op.path || (v.operation !== 'product' && v.operation !== 'sum')
     || !Array.isArray(v.factor_ids) || v.factor_ids.length !== (v.operation === 'sum' ? 1 : 2) || !v.factor_ids.every((f) => typeof f === 'string' && f !== '')
     || typeof v.words !== 'string' || v.words.trim() === '') return undefined;
   const levels = v.part_levels;
+  const ceiling = v.ceiling_stock === undefined ? undefined : CeilingStockPendingSchema.safeParse(v.ceiling_stock);
+  if (ceiling !== undefined && (!ceiling.success || v.operation !== 'sum' || levels !== undefined || v.one_off_words !== undefined
+    || ceiling.data.goal_id !== v.outcome_id || ceiling.data.transformation.carrier_id !== v.factor_ids[0])) return undefined;
   if (levels !== undefined && !Array.isArray(levels)) return undefined;
   const parts: IdentityPartLevel[] = [];
   for (const level of levels ?? []) {
@@ -46,6 +50,7 @@ export function identityReadingOf(proposal: StructuredProposal): IdentityProposa
   }
   return { outcome_id: v.outcome_id, ...(v.operation === 'sum' ? { operation: 'sum' as const, factor_ids: [v.factor_ids[0] as string] as const }
       : { operation: 'product' as const, factor_ids: [v.factor_ids[0] as string, v.factor_ids[1] as string] as const }), words: v.words,
+    ...(ceiling?.success ? { ceiling_stock: ceiling.data } : {}),
     ...(typeof v.one_off_words === 'string' ? { one_off_words: v.one_off_words } : {}),
     ...(levels !== undefined ? { part_levels: parts } : {}) };
 }
