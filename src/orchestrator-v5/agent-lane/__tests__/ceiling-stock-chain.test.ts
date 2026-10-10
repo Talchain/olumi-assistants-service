@@ -53,6 +53,7 @@ import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minima
 import { admitAccumulationIdentities, withAdmittedAccumulations } from '../accumulation-identity.js';
 import { sayFigureAsWritten } from '../say-figure.js';
 import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
+import { timeClassOf, unsupportedTimeSentence } from '../../goal-target/time-class.js';
 
 type Rec = Record<string, any>;
 const SID = '550e8400-e29b-41d4-a716-4466554400c6';
@@ -98,6 +99,14 @@ function world(initial = held(), brief = fixture.brief, scenarioId = SID) {
   return { scenarioId, store, read, writes, proposals, offer, confirm, replace: (g: Rec) => { bytes = JSON.stringify(g); } };
 }
 describe('typed ceiling-stock confirmation chain', () => {
+  it('CONTRAST (S4 time class): the ORIGINAL recorded T3 brief, with "starting in month 3", is refused the ceiling card honestly, in the user\'s own words', async () => {
+    expect(recordedFixture.brief).toContain(ONSET_CLAUSE);
+    expect(proposeCeilingStock(held(), fixture.brief)).not.toBeNull(); // positive control: the same brief without the clause IS offered
+    expect(proposeCeilingStock(held(), recordedFixture.brief)).toBeNull();
+    expect(await world(held(), recordedFixture.brief).offer()).toMatchObject({ ok: false, mutated: false, refusal: 'no_reading_to_confirm' });
+    expect(unsupportedTimeSentence(timeClassOf(recordedFixture.brief).shapes[0]!, 10))
+      .toBe("You said ‘starting in month 3’. Olumi can't yet model when a change starts, so it won't give a chance for month 10.");
+  });
   it('T3: offers on held H, preserves the derived goal until Yes, atomically records stock ≤ stated ceiling, and reloads', async () => {
     const w = world(); const before = w.read();
     const offered = await w.offer() as Rec;

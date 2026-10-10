@@ -25,6 +25,7 @@ import { proposalRecord } from '../proposal-object/record.js';
 import { approvalChipsFor, approvalChipIdFor, DEADLINE_CHANGE_CHIP } from '../approval-chips.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { timeClassOf } from '../../goal-target/time-class.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, type DeadlineIssueInput } from '../deadline-card.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
@@ -184,6 +185,14 @@ describe('R3 deterministic authorship and placement guards', () => {
   });
 });
 describe('R2 Run → deadline Yes → existing reading, with exact unrelated-byte scope', () => {
+  it.each([['d2', d2], ['d1', d1]] as const)('CONTRAST (S4 time class) %s: the ORIGINAL recorded brief, with "starting in month 3", still gets the deadline card but is refused the reading card, honestly', async (_name, fixture) => {
+    expect(fixture.brief).toContain('starting in month 3');
+    const w = world(fixture), turn = await route(w), first = await turn(), { yes } = card(first);
+    await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: first._agent.session_id });
+    expect(goal(w.read())).toMatchObject({ goal_horizon: { deadline: '2027-08-10' } });
+    expect(await w.caps.proposeIdentity!(w.ctx('Confirm the reading'))).toMatchObject({ ok: false, mutated: false, refusal: 'no_reading_to_confirm' });
+    expect(timeClassOf(fixture.brief).shapes).toEqual([{ kind: 'scheduled_start', words: 'starting in month 3' }]);
+  });
   it.each([['d2 structural', d2], ['d1 ceiling', d1]] as const)('%s', async (shape, fixture) => {
     // S4 time class (#2952): both recorded briefs state a month-3 start the product cannot yet work out, so the FULL brief is refused a
     // reading card (time-class.test.ts pins that). This chain tests the existing reading path on the same brief without that clause.
