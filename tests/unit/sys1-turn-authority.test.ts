@@ -12,7 +12,10 @@ import { narrateWriteOutcome } from '../../src/orchestrator-v5/agent-lane/write-
 import { RUN_INTERPRETATION_FORMAT } from '../../src/orchestrator-v5/agent-lane/provisional-view.js';
 const sha = (v: string) => createHash('sha256').update(v).digest('hex');
 const jsonSha = (v: unknown) => sha(JSON.stringify(v));
-const evidence = 'acceptance-evidence/sys1-run1';
+// Golden baselines captured before the production edit (SYS1-RUN1); evidence dumps write only when SYS1_EVIDENCE is set.
+const golden = 'tests/fixtures/sys1';
+const evidence = process.env.SYS1_EVIDENCE;
+const dump = (name: string, body: string): void => { if (evidence) writeFileSync(`${evidence}/${name}`, body); };
 const scenario = '11111111-1111-4111-8111-111111111111';
 const ctx = { scenario_id: scenario, authenticated_user_id: null, request_id: 'request-a', turn_id: 'turn-a', user_text: 'Competitor discounts strongly raise churn.', user_turn_text: 'Competitor discounts strongly raise churn.' };
 const nodes = [{ id: 'competitive_pricing', kind: 'factor', label: 'Competitive pricing' }, { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn' }];
@@ -116,16 +119,16 @@ describe('SYS1 ordinary-turn authority', () => {
   });
   it('RED positive: existing successful writer payload is byte identical', async () => {
     const w = writer(); await w.prepare(); const r = await w.approve();
-    if (process.env.SYS1_CAPTURE_BASELINE) writeFileSync(`${evidence}/writer-before.json`, JSON.stringify(r));
-    expect(JSON.stringify(r)).toBe(readFileSync(`${evidence}/writer-before.json`, 'utf8')); expect(w.writes()).toBe(1);
-    writeFileSync(`${evidence}/writer-after.json`, JSON.stringify(r));
+    if (process.env.SYS1_CAPTURE_BASELINE) writeFileSync(`${golden}/writer-before.json`, JSON.stringify(r));
+    expect(JSON.stringify(r)).toBe(readFileSync(`${golden}/writer-before.json`, 'utf8')); expect(w.writes()).toBe(1);
+    dump('writer-after.json', JSON.stringify(r));
   });
   it('RED structural: production calls outside the adapter match a shrink-only file:symbol list', () => {
     expect(jsonSha(BASELINE), 'Frozen baseline cannot grow; only EXEMPTIONS may shrink').toBe('50c353ecf1b4d819e17e2ea5f1187d7ed2f0cf90e42cd5df6b153ea03a3f9772');
     expect(EXEMPTIONS.every(e => BASELINE.includes(e))).toBe(true);
     const hits = files('src').flatMap(f => scan(f, readFileSync(f, 'utf8')));
     expect(hits.filter(h => !EXEMPTIONS.includes(h))).toEqual([]);
-    writeFileSync(`${evidence}/bypass-after.json`, JSON.stringify(hits, null, 2));
+    dump('bypass-after.json', JSON.stringify(hits, null, 2));
   });
   it('key: every approved identity component matters and canonical key order does not', () => {
     const content: ProposalContent = { scenario_id: scenario, user_id: null, base_graph_identity_hash: 'h0', operations: [{ op: 'add_edge', path: 'a::b', value: { from: 'a', to: 'b' } }], provenance: { authored_by: 'user_stated' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Add the link' };
@@ -166,9 +169,9 @@ describe('SYS1 ordinary Responses transport', () => {
     const proof = bodies.map(b => ({ body: sha(JSON.stringify(b)), instructions: sha(b.instructions ?? b.input?.[0]?.content?.[0]?.text ?? ''), tools: jsonSha(b.tools ?? null), schema: jsonSha(b.text?.format?.schema ?? null) }));
     // Baseline is retained BEFORE any production edits, not manufactured from the candidate.
     const result = { proof, assistant_text: res.json().assistant_text };
-    if (process.env.SYS1_CAPTURE_BASELINE) { writeFileSync(`${evidence}/llm-before.json`, JSON.stringify(result, null, 2)); writeFileSync(`${evidence}/requests-before.json`, JSON.stringify(bodies, null, 2)); }
-    expect(result).toEqual(JSON.parse(readFileSync(`${evidence}/llm-before.json`, 'utf8')));
-    writeFileSync(`${evidence}/llm-after.json`, JSON.stringify(result, null, 2));
+    if (process.env.SYS1_CAPTURE_BASELINE) { writeFileSync(`${golden}/llm-before.json`, JSON.stringify(result, null, 2)); dump('requests-before.json', JSON.stringify(bodies, null, 2)); }
+    expect(result).toEqual(JSON.parse(readFileSync(`${golden}/llm-before.json`, 'utf8')));
+    dump('llm-after.json', JSON.stringify(result, null, 2));
   });
   it('RED schema: the existing interpretation schema and adapter success payload retain their bytes', async () => {
     expect(jsonSha(RUN_INTERPRETATION_FORMAT.schema)).toBe('3539e2bc2bf7963a295ae854719e99354383cbc93880efc1c7938f46f7c9bf83');
@@ -179,7 +182,7 @@ describe('SYS1 ordinary Responses transport', () => {
     });
     expect(sent[0]).toBe(JSON.stringify(body)); expect(rows[0].usage?.raw).toEqual(payload.usage); expect(rows[0].schema_sha256).toBe(jsonSha(RUN_INTERPRETATION_FORMAT.schema));
     expect(rows[0].prompt_sha256).toBe(sha(body.instructions)); expect(rows[0]).toMatchObject({ request_id: 'request-schema', scenario_id: scenario, turn_id: 'turn-schema' });
-    writeFileSync(`${evidence}/schema-proof.json`, JSON.stringify({ source_sha256_before: 'd1c490845b861860f03843c9d4e53b6f7a18dfc10cdcd411d500a8c0cac2edbf', source_sha256_after: sha(readFileSync('src/orchestrator-v5/agent-lane/provisional-view.ts', 'utf8')), schema_sha256: jsonSha(RUN_INTERPRETATION_FORMAT.schema) }, null, 2));
+    dump('schema-proof.json', JSON.stringify({ source_sha256_before: 'd1c490845b861860f03843c9d4e53b6f7a18dfc10cdcd411d500a8c0cac2edbf', source_sha256_after: sha(readFileSync('src/orchestrator-v5/agent-lane/provisional-view.ts', 'utf8')), schema_sha256: jsonSha(RUN_INTERPRETATION_FORMAT.schema) }, null, 2));
   });
   it('RED receipt: route records every retry, settings, usage and result under request identity', async () => {
     script = [new TypeError('fetch failed')]; const res = await turn(); expect(res.statusCode).toBe(200); const rows = res.json()._provider_calls;
@@ -189,7 +192,7 @@ describe('SYS1 ordinary Responses transport', () => {
     expect(rows[0].request_id).toBe(rows[1].request_id); expect(typeof rows[0].request_id).toBe('string'); expect(rows[0].scenario_id).toBe(scenario);
     const b = JSON.parse(sent[1]); expect(rows[1].model).toBe(b.model); expect(rows[1].tools_sha256).toBe(jsonSha(b.tools)); expect(rows[1].settings).toEqual({ reasoning: b.reasoning, max_output_tokens: b.max_output_tokens });
     expect(sent[0]).toBe(sent[1]);
-    writeFileSync(`${evidence}/receipt-example.json`, JSON.stringify(rows, null, 2));
+    dump('receipt-example.json', JSON.stringify(rows, null, 2));
   });
   it.each(['AbortError', 'TimeoutError', '429', '503', 'malformed'])('RED receipt: %s is recorded without retry', async kind => {
     const error = new Error('cancelled'); error.name = kind;
