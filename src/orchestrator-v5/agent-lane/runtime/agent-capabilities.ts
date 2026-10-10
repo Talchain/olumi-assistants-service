@@ -6058,6 +6058,14 @@ export function createAgentCapabilities(
         };
       }
 
+      // Preserve the existing validation/card refusals before the ordinary-turn consent fence.
+      // These card writers check the same host-bound identity before any write of their own.
+      if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
+        if (ops.some(o => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
+        if (ops.some(o => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
+        return { ok: false, mutated: false, refusal: 'approval_required' };
+      }
+
       /**
        * ⭐ A LINK'S STRENGTH, AS THE USER STATED IT — ONE typed `edge_strength_edit`, the product's own link writer
        * (the inspector's canonical D1 path, with its expected-before tuple). Reported as applied ONLY when this
@@ -9590,9 +9598,10 @@ export function createAgentCapabilities(
     },
     // The approval guard's writer: every return path of `authoriseChange`, one place.
     async authoriseChange(ctx, args): Promise<ToolResult> {
-      // The ordinary provider turn cannot grant itself consent by emitting a tool call.
+      // Run existing validation and card-specific refusals unchanged. The inner writer's
+      // consent fence refuses an otherwise executable ordinary proposal before any write.
       if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
-        return { ok: false, mutated: false, refusal: 'approval_required' };
+        return caps.authoriseChange(ctx, args);
       }
       if (opts.turnAuthority === true && !ctx.turn_id) {
         return { ok: false, mutated: false, refusal: 'turn_identity_required' };

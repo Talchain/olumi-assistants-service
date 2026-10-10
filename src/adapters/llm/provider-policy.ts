@@ -313,9 +313,10 @@ export function assertProviderAllowed(
       model: detail?.model ?? 'unknown',
       purpose: detail?.purpose ?? site ?? 'unspecified',
       outcome: allowed ? 'allowed' : 'refused_before_network',
-      ...(policy.request_id !== undefined ? { request_id: policy.request_id } : {}),
-      ...(policy.scenario_id !== undefined ? { scenario_id: policy.scenario_id } : {}),
-      ...(policy.turn_id !== undefined ? { turn_id: policy.turn_id } : {}),
+      // Only the migrated Responses site opts into host receipts; nested legacy rows keep their shape.
+      ...(site === 'agent-v1-turn.callModel' && policy.request_id !== undefined ? { request_id: policy.request_id } : {}),
+      ...(site === 'agent-v1-turn.callModel' && policy.scenario_id !== undefined ? { scenario_id: policy.scenario_id } : {}),
+      ...(site === 'agent-v1-turn.callModel' && policy.turn_id !== undefined ? { turn_id: policy.turn_id } : {}),
       // Additive: a caller that passes no identity gets a row with NONE of these keys, byte for byte as before.
       ...Object.fromEntries(IDENTITY_FIELDS.filter((k) => detail?.[k] !== undefined).map((k) => [k, detail![k]])),
     });

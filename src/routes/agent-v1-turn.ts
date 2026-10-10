@@ -2929,7 +2929,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? { typed_approval_of: approvedProposal,
         ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
-    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    // A composer's explicit approval is bound here, before the model sees this turn, to ONE
+    // previously offered structural-link proposal. Card-only readings/holds still need their card.
+    let composerApproval: string | undefined;
+    if (approvedProposal === undefined && typedNow !== null
+      && /^yes[,!\s]+(?:apply (?:it|that)|add (?:it|that)|record (?:it|that)|make that change|go ahead with that)\s*(?:[.!]|$)/i.test(typedNow.trim())) {
+      const waiting = proposals.outstanding(scenarioId, userId);
+      const offered = lastApproveOffer.get(approveKey) ?? carriedProposals.get(approveKey)?.chip;
+      const id = offered === undefined ? undefined : typedApprovalOf({ chip: { id: offered.id } });
+      const proposal = id === undefined ? undefined : proposals.get(id);
+      if (waiting.length === 1 && waiting[0]?.proposal_id === id && proposal !== undefined
+        && proposal.operations.length > 0 && proposal.operations.every(op => op.op === 'add_edge' || op.op === 'update_edge')) {
+        composerApproval = id;
+      }
+    }
+    // Client turn_id controls durable replay when supplied. Every request also has a host
+    // identity for the writer, including valid approvals from clients that omit turn_id.
+    const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
     // Publishing typed words to in-memory session history is not a durable save, but "Nothing was saved" can't cover it.
     if (typedNow !== null) recordUnsavableEffect();

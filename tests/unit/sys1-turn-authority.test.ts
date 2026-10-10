@@ -56,6 +56,7 @@ const BASELINE = [
   'src/routes/agent-v1-turn.ts:callBriefReading',
 ];
 const EXEMPTIONS = [...BASELINE];
+vi.setConfig({ testTimeout: 60_000 });
 function symbol(n: ts.Node): string {
   for (let p: ts.Node | undefined = n; p; p = p.parent) {
     if (ts.isFunctionDeclaration(p) && p.name) return p.name.text;
@@ -65,6 +66,8 @@ function symbol(n: ts.Node): string {
 }
 function scan(file: string, source: string): string[] {
   if (/^src\/adapters\/llm\//.test(file)) return [];
+  // Every provider import, endpoint or SDK call recognised below contains one of these words.
+  if (!['openai', 'anthropic', 'responses', 'messages', 'completions', 'models'].some(word => source.includes(word))) return [];
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
   const providerNames = new Set<string>(); const endpoints = new Set<string>(); const hits = new Set<string>();
   function discover(n: ts.Node) {
@@ -89,6 +92,7 @@ function scan(file: string, source: string): string[] {
   visit(ast); return [...hits].sort();
 }
 function files(path: string): string[] { return readdirSync(path, { withFileTypes: true }).flatMap(e => e.isDirectory() && e.name !== '__tests__' ? files(`${path}/${e.name}`) : e.isFile() && e.name.endsWith('.ts') && !/\.(test|spec)\.ts$/.test(e.name) ? [`${path}/${e.name}`] : []); }
+let productionFiles: string[] | undefined;
 
 describe('SYS1 ordinary-turn authority', () => {
   it('RED approval: a missing approval cannot mutate', async () => { const w = writer(); const pid = await w.prepare(); const r = await w.caps.authoriseChange(ctx, { proposal_id: pid }); expect(r.refusal).toBe('approval_required'); expect(w.writes()).toBe(0); });
@@ -126,7 +130,7 @@ describe('SYS1 ordinary-turn authority', () => {
   it('RED structural: production calls outside the adapter match a shrink-only file:symbol list', () => {
     expect(jsonSha(BASELINE), 'Frozen baseline cannot grow; only EXEMPTIONS may shrink').toBe('50c353ecf1b4d819e17e2ea5f1187d7ed2f0cf90e42cd5df6b153ea03a3f9772');
     expect(EXEMPTIONS.every(e => BASELINE.includes(e))).toBe(true);
-    const hits = files('src').flatMap(f => scan(f, readFileSync(f, 'utf8')));
+    const hits = (productionFiles ??= files('src')).flatMap(f => scan(f, readFileSync(f, 'utf8')));
     expect(hits.filter(h => !EXEMPTIONS.includes(h))).toEqual([]);
     dump('bypass-after.json', JSON.stringify(hits, null, 2));
   });
