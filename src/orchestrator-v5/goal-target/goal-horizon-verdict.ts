@@ -75,7 +75,9 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
  */
 export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unknown, brief?: string | null): E {
   const verdict = goalHorizonVerdict(graph, response);
-  const outsideTheClass = verdict === 'computed_at_h' && timeClassOf(brief).shapes.length > 0;
+  // Both licences at a held month (a carrier computed it; the user attested the goal steady) are WITHHELD when the brief states a timing
+  // shape the product cannot work out: neither knows of it, so either chance would be manufactured certainty. Only a withhold is added.
+  const outsideTheClass = (verdict === 'computed_at_h' || verdict === 'steady_attested') && timeClassOf(brief).shapes.length > 0;
   return verdict === 'withhold' || outsideTheClass ? withholdUntestedHorizonFigures(response, graph, brief) : response;
 }
 

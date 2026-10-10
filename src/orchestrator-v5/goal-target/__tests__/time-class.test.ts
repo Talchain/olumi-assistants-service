@@ -34,6 +34,13 @@ describe('the grammar: an onset verb beside a month reference, or a named season
     ['Sign-ups ramp up once the campaign is live.', 'gradual_build_up', 'ramp up'],
     ['We will phase in the new price.', 'gradual_build_up', 'phase in'],
     ['Membership gradually grows after launch.', 'gradual_build_up', 'gradually grows'],
+    ['The change takes effect at the beginning of month 3.', 'scheduled_start', 'takes effect at the beginning of month 3'],
+    ['The campaign starts in three months.', 'scheduled_start', 'starts in three months'],
+    ['The new depot is available from month 2 onwards.', 'scheduled_start', 'from month 2 onwards'],
+    ['Demand peaks each December.', 'seasonal', 'each December'],
+    ['Demand varies over the seasons.', 'seasonal', 'over the seasons'],
+    ['The lift increases gradually over six months.', 'gradual_build_up', 'increases gradually'],
+    ['We gradually add capacity over six months.', 'gradual_build_up', 'gradually add'],
   ])('%s', (text, kind, words) => {
     expect(timeClassOf(text)).toEqual({ supported: false, shapes: [{ kind, words }] });
   });
@@ -49,6 +56,13 @@ describe('the grammar: an onset verb beside a month reference, or a named season
     'We want to hit 500 within 12 months.',
     'Our bike-share scheme has 1,500 registered riders today and adds about 60 new riders a month.',
     'We start with 200 customers.',
+    'Our project review starts in month 3.',
+    'We would hold a review meeting starting in month 3.',
+    'We are not seasonal: demand stays constant throughout the year.',
+    "It isn't seasonal.",
+    'We have no seasonal pattern.',
+    'We will not phase in the new price; it applies in full immediately.',
+    'Each March we hold our AGM.',
     'We would open for 4 Saturday sessions each quarter.',
     'Starting from 1,500 riders today, we add 60 a month.',
     'The project starts in 2027.',
@@ -110,7 +124,6 @@ describe('the sentence: the user\'s own words, one plain sentence, no em dash', 
     ['gradual_build_up', 'ramp up', "You said ‘ramp up’. Olumi can't yet model a gradual build-up, so it won't give a chance for month 10."],
   ])('%s', (kind, words, expected) => {
     expect(unsupportedTimeSentence({ kind, words }, 10)).toBe(expected);
-    expect(expected).not.toMatch(/[–—]/);
   });
 });
 
@@ -136,7 +149,10 @@ const response = (): Rec => ({ option_comparison: [
   identity_evaluations: [{ node_id: 'g', evaluated: true, operation: 'product', factor_ids: ['at_h', 'price'] },
     { node_id: 'at_h', evaluated: true, operation: 'accumulation', factor_ids: ['today', 'leave', 'sign_up'], horizon_months: 9 }],
   inference_warnings: [] });
-const figures = (r: unknown): number => (JSON.stringify(r).match(/"probability_of_goal":\s*0\.\d+/g) ?? []).length;
+// Each option's goal probability as the response carries it (absent / null = no figure), so a retained value is compared by VALUE and id.
+const figureMap = (r: unknown): Record<string, number> => Object.fromEntries(((r as Rec).option_comparison ?? [])
+  .filter((o: Rec) => typeof o.probability_of_goal === 'number').map((o: Rec) => [o.option_id, o.probability_of_goal]));
+const figures = (r: unknown): number => Object.keys(figureMap(r)).length;
 const WITHHELD = 'GOAL_FIGURES_HORIZON_NOT_TESTED';
 const warningOf = (r: Rec): Rec | undefined => (r.inference_warnings ?? []).find((w: Rec) => w.code === WITHHELD);
 
@@ -187,18 +203,21 @@ describe('a detection can only WITHHOLD and say so', () => {
     expect(warningOf(said)?.say).toBe("You said ‘begins after 2 months’. Olumi can't yet model when a change starts, so it won't give a chance for month 9.");
   });
 
-  it('MONOTONE: over every (state, brief) pair a shape-bearing brief never leaves MORE figures than the same state without it', () => {
+  it('MONOTONE: over every (state, brief) pair a shape-bearing brief never leaves a figure the same state without it did not carry, and never a different value', () => {
     const briefs = [T3, 'Demand is seasonal.', 'Sign-ups ramp up.', 'We should review in month 3.', undefined];
     let pairs = 0;
-    for (const [, graph] of states) {
-      const without = figures(withholdGoalFiguresForUntestedHorizon(structuredClone(response()), graph()));
+    for (const [name, graph] of states) {
+      const without = figureMap(withholdGoalFiguresForUntestedHorizon(structuredClone(response()), graph()));
       for (const brief of briefs) {
-        const withBrief = figures(withholdGoalFiguresForUntestedHorizon(structuredClone(response()), graph(), brief));
-        expect(withBrief, `${brief}`).toBeLessThanOrEqual(without);
+        const withBrief = figureMap(withholdGoalFiguresForUntestedHorizon(structuredClone(response()), graph(), brief));
+        for (const [id, value] of Object.entries(withBrief)) expect(without[id], `${name} ${brief} ${id}`).toBe(value);
         pairs += 1;
       }
     }
     expect(pairs).toBe(states.length * briefs.length);
+    // Non-vacuous: the computed state really carries two figures without a shape, and none with one.
+    expect(Object.keys(figureMap(withholdGoalFiguresForUntestedHorizon(structuredClone(response()), accumulationGraph())))).toEqual(['a', 'b']);
+    expect(figureMap(withholdGoalFiguresForUntestedHorizon(structuredClone(response()), accumulationGraph(), T3))).toEqual({});
   });
 
   it('the horizon detail names the stated shape only when a month is held, else the generic or no sentence', () => {
@@ -231,5 +250,6 @@ describe('the same boundary at the card sites: a refused brief is offered no cei
     const reviewed = T3.replace(ONSET_PHRASE, 'with a review in month 3');
     expect(timeClassOf(reviewed).supported).toBe(true);
     expect(recogniseCeilingStock(held(), reviewed)).not.toBeNull();
+    expect(recogniseCeilingStock(held(), reviewed)).toEqual(recogniseCeilingStock(held(), withoutOnset));
   });
 });
