@@ -1,3 +1,4 @@
+import { deadlineCardToIssue, firstAgentTurnAfterDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
@@ -2181,7 +2182,9 @@ export function createAgentCapabilities(
     /** The clock a deadline is counted from (S-E GOALS; `deadline-date.ts` reads Europe/London's day of it). Absent ⇒ now. */
     readonly now?: () => Date;
   } = {},
-): AgentCapabilities {
+): AgentCapabilities & {
+  deadlineCardFromDraft(ctx: AgentToolContext, input: Omit<DeadlineIssueInput, 'graph' | 'storedBrief' | 'reference' | 'priorOffer'> & { start: DeadlineTurnStart | undefined }): Promise<{ words: string; issue: NonNullable<AgentCapabilities['proposeGoalDeadline']> } | undefined>;
+} {
   const readOnly = mode === 'preview';
   const refuseReadOnly = (): ToolResult => ({
     ok: false, mutated: false, refusal: 'read_only_preview',
@@ -3640,6 +3643,62 @@ export function createAgentCapabilities(
     }
   };
 
+  const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown }, g: GraphRead, words: string, reference: string | undefined): Promise<ToolResult> => {
+      // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
+      const stated = readStatedDeadline(words, reference ?? todayInLondon((opts.now ?? (() => new Date()))()));
+      if (stated === null) {
+        return { ok: false, mutated: false, refusal: 'deadline_not_placed',
+          detail: `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
+            + 'Ask the user which date they mean, and never offer a date of your own.' };
+      }
+      const goals = g.nodes.filter((n) => n.kind === 'goal');
+      if (goals.length !== 1) {
+        return { ok: false, mutated: false, refusal: 'goal_not_resolved',
+          detail: goals.length === 0
+            ? 'The model has no goal to set a deadline on, so nothing was prepared. Tell the user plainly.'
+            : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this deadline is for. Ask the user which goal they mean.` };
+      }
+      const goal = goals[0]!;
+      const held = goalDeadlineFromRecord(g.raw, goal.id);
+      const date = sayDate(stated.date);
+      if (held === stated.date) {
+        return { ok: false, mutated: false, refusal: 'already_held',
+          detail: `The goal "${goal.label}" already holds ${date} as its deadline, so nothing was prepared. Tell the user it is already recorded.` };
+      }
+      const approved = { goal_id: goal.id, deadline: stated.date, expected_deadline: held ?? null, reference_date: reference,
+        ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) };
+      const dry = applyGoalHorizonEdit(g.raw, approved);
+      if (dry.kind === 'refused') return { ok: false, mutated: false, refusal: dry.reason,
+        detail: deadlineRefusalDetail.horizon_not_modelled };
+      const fromToday = reference === undefined ? sayDeadlineFromToday(stated)
+        : sayDeadlineFromToday(stated).replace('from today', `from ${sayDate(reference)}`);
+      const question = `Is your deadline ${date} (${fromToday})?`;
+      const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: 'set_goal_deadline', path: goal.id,
+          value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words,
+            ...(reference !== undefined ? { reference } : {}),
+            ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
+        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `${question}${replaces}`,
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        deadline: { goal: goal.label, date, words: stated.words, from_today: fromToday },
+        note: `Nothing has changed yet. Ask the user exactly: "${question}"${replaces === '' ? '' : ` and say it replaces ${sayDate(held!)}`} — never the id, `
+          + 'never a date of your own — and call authorise_change with this proposal_id once they say yes. If they give another date, '
+          + 'call propose_goal_deadline again with their new words.',
+      };
+  };
+
   const caps: AgentCapabilities = {
     async getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id, options?.section);
@@ -4831,59 +4890,7 @@ export function createAgentCapabilities(
       const scenarioReference = typeof scenarioTimestamp === 'string' && Number.isFinite(Date.parse(scenarioTimestamp))
         ? todayInLondon(new Date(scenarioTimestamp)) : undefined;
       const reference = typeof asOf === 'string' ? asOf : draftReference ?? scenarioReference;
-      // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
-      const stated = readStatedDeadline(words, reference ?? todayInLondon((opts.now ?? (() => new Date()))()));
-      if (stated === null) {
-        return { ok: false, mutated: false, refusal: 'deadline_not_placed',
-          detail: `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
-            + 'Ask the user which date they mean, and never offer a date of your own.' };
-      }
-      const goals = g.nodes.filter((n) => n.kind === 'goal');
-      if (goals.length !== 1) {
-        return { ok: false, mutated: false, refusal: 'goal_not_resolved',
-          detail: goals.length === 0
-            ? 'The model has no goal to set a deadline on, so nothing was prepared. Tell the user plainly.'
-            : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this deadline is for. Ask the user which goal they mean.` };
-      }
-      const goal = goals[0]!;
-      const held = goalDeadlineFromRecord(g.raw, goal.id);
-      const date = sayDate(stated.date);
-      if (held === stated.date) {
-        return { ok: false, mutated: false, refusal: 'already_held',
-          detail: `The goal "${goal.label}" already holds ${date} as its deadline, so nothing was prepared. Tell the user it is already recorded.` };
-      }
-      const approved = { goal_id: goal.id, deadline: stated.date, expected_deadline: held ?? null, reference_date: reference,
-        ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) };
-      const dry = applyGoalHorizonEdit(g.raw, approved);
-      if (dry.kind === 'refused') return { ok: false, mutated: false, refusal: dry.reason,
-        detail: deadlineRefusalDetail.horizon_not_modelled };
-      const fromToday = reference === undefined ? sayDeadlineFromToday(stated)
-        : sayDeadlineFromToday(stated).replace('from today', `from ${sayDate(reference)}`);
-      const question = `Is your deadline ${date} (${fromToday})?`;
-      const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
-      const proposal = createProposal({
-        scenario_id: ctx.scenario_id,
-        user_id: ctx.authenticated_user_id,
-        base_graph_identity_hash: g.graph_hash,
-        operations: [{ op: 'set_goal_deadline', path: goal.id,
-          value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words,
-            ...(reference !== undefined ? { reference } : {}),
-            ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
-        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
-        validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${question}${replaces}`,
-      });
-      proposals.put(proposal);
-      return {
-        ok: true, mutated: false,
-        proposal_id: proposal.proposal_id,
-        public_label: proposal.public_label,
-        base_revision: g.graph_hash,
-        deadline: { goal: goal.label, date, words: stated.words, from_today: fromToday },
-        note: `Nothing has changed yet. Ask the user exactly: "${question}"${replaces === '' ? '' : ` and say it replaces ${sayDate(held!)}`} — never the id, `
-          + 'never a date of your own — and call authorise_change with this proposal_id once they say yes. If they give another date, '
-          + 'call propose_goal_deadline again with their new words.',
-      };
+      return proposePlacedDeadline(ctx, args, g, words, reference);
     },
 
     async proposeModelChange(ctx, args): Promise<ToolResult> {
@@ -9558,6 +9565,20 @@ export function createAgentCapabilities(
   };
   return {
     ...caps,
+    /** Route-only authorship entry: no model argument can select the stored-brief source. */
+    async deadlineCardFromDraft(ctx, input) {
+      if (readOnly) return undefined;
+      try {
+        const g = await readGraph(ctx.scenario_id);
+        if (!g || !firstAgentTurnAfterDraft(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
+        const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
+        const stamp = [draft?.created_at, g.scenario_created_at].find(t => typeof t === 'string' && Number.isFinite(Date.parse(t)));
+        const reference = typeof stamp === 'string' ? todayInLondon(new Date(stamp)) : undefined;
+        const card = deadlineCardToIssue({ ...input, graph: g.raw, storedBrief: g.brief_text, reference, priorOffer: false });
+        return card === undefined ? undefined : { words: card.words,
+          issue: (subject, args) => proposePlacedDeadline(subject, args, g, card.words, card.reference) };
+      } catch { return undefined; }
+    },
     // The approval guard's writer: every return path of `authoriseChange`, one place.
     async authoriseChange(ctx, args): Promise<ToolResult> {
       const r = await caps.authoriseChange(ctx, args);

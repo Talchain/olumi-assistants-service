@@ -1,0 +1,559 @@
+{
+  "evidence_sha256": "8ba15f830dc3309462676b1230e7303296b3d8a45d3a576dfd03250a8d7c571a",
+  "graph": {
+    "edges": [
+      {
+        "to": "rent_second_depot",
+        "from": "which_choice_keeps_us_under_the_ceiling",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "sunday_maintenance_crew",
+        "from": "which_choice_keeps_us_under_the_ceiling",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "carry_on_as_now",
+        "from": "which_choice_keeps_us_under_the_ceiling",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "serviceable_rider_ceiling",
+        "from": "rent_second_depot",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "extra_spending_per_month",
+        "from": "rent_second_depot",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "extra_people_recruited",
+        "from": "sunday_maintenance_crew",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "extra_spending_per_month",
+        "from": "sunday_maintenance_crew",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "serviceable_rider_ceiling",
+        "from": "carry_on_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "extra_spending_per_month",
+        "from": "carry_on_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "extra_people_recruited",
+        "from": "carry_on_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "registered_riders",
+        "from": "registered_riders_today",
+        "strength": {
+          "std": 0.4,
+          "mean": 0.8
+        },
+        "provenance": {
+          "basis": "The rider total at month 10 includes every rider registered today.",
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_estimate",
+          "natural_effect": {
+            "amount": 1,
+            "amount_unit": "riders",
+            "strength_mean": 0.8,
+            "per_source_change": 1,
+            "strength_mean_frame": "edge_strength",
+            "per_source_change_unit": "riders"
+          }
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "registered_riders",
+        "from": "net_rider_gain_per_month",
+        "strength": {
+          "std": 0.3,
+          "mean": 0.6
+        },
+        "provenance": {
+          "basis": "A net gain of one rider per month adds ten riders over the ten-month horizon.",
+          "source": "brief_extraction",
+          "magnitude": "olumi_estimate",
+          "natural_effect": {
+            "amount": 10,
+            "amount_unit": "riders",
+            "strength_mean": 0.6,
+            "per_source_change": 1,
+            "strength_mean_frame": "edge_strength",
+            "per_source_change_unit": "riders/month"
+          }
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "serviceable_rider_ceiling",
+        "from": "extra_people_recruited",
+        "strength": {
+          "std": 0.15,
+          "mean": 0.3
+        },
+        "defaulted": true,
+        "provenance": {
+          "basis": "Provisionally, one Sunday maintenance recruit supplies the stated 150-rider capacity increase.",
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_estimate",
+          "natural_effect": {
+            "amount": 150,
+            "amount_unit": "riders",
+            "strength_mean": 0.3,
+            "per_source_change": 1,
+            "strength_mean_frame": "edge_strength",
+            "per_source_change_unit": "people"
+          }
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "rider_refusals",
+        "from": "serviceable_rider_ceiling",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "registered_riders",
+        "from": "rider_refusals",
+        "strength": {
+          "std": 0.059375,
+          "mean": -0.2375
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      }
+    ],
+    "nodes": [
+      {
+        "id": "which_choice_keeps_us_under_the_ceiling",
+        "ref": "D1",
+        "kind": "decision",
+        "label": "Which choice keeps us under the ceiling.",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "registered_riders",
+        "ref": "G1",
+        "kind": "goal",
+        "label": "registered riders",
+        "provenance": "from_brief",
+        "goal_threshold": 0.38,
+        "threshold_source": "brief_extraction",
+        "goal_threshold_cap": 5000,
+        "goal_threshold_raw": 1900,
+        "goal_threshold_unit": "riders",
+        "goal_threshold_frame": "level",
+        "goal_deadline_as_stated": "ten months",
+        "goal_threshold_cap_provenance": "stated_effect_fit"
+      },
+      {
+        "id": "rent_second_depot",
+        "ref": "O1",
+        "kind": "option",
+        "label": "Rent second depot",
+        "provenance": "from_brief",
+        "interventions": {
+          "extra_spending_per_month": {
+            "unit": "£/month",
+            "value": 0.24,
+            "source": "brief_extraction",
+            "raw_value": 2400,
+            "target_match": {
+              "node_id": "extra_spending_per_month",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "serviceable_rider_ceiling": {
+            "unit": "riders",
+            "value": 0.5,
+            "source": "brief_extraction",
+            "raw_value": 2500,
+            "target_match": {
+              "node_id": "serviceable_rider_ceiling",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "medium"
+          }
+        }
+      },
+      {
+        "id": "sunday_maintenance_crew",
+        "ref": "O2",
+        "kind": "option",
+        "label": "Sunday maintenance crew",
+        "provenance": "from_brief",
+        "interventions": {
+          "extra_people_recruited": {
+            "unit": "people",
+            "value": 0.1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "target_match": {
+              "node_id": "extra_people_recruited",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "extra_spending_per_month": {
+            "unit": "£/month",
+            "value": 0.07,
+            "source": "brief_extraction",
+            "raw_value": 700,
+            "target_match": {
+              "node_id": "extra_spending_per_month",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "carry_on_as_now",
+        "ref": "O3",
+        "kind": "option",
+        "label": "Carry on as now",
+        "provenance": "from_brief",
+        "is_baseline": true
+      },
+      {
+        "id": "registered_riders_today",
+        "ref": "F1",
+        "kind": "factor",
+        "label": "Registered riders today",
+        "category": "observable",
+        "provenance": "from_brief",
+        "observed_state": {
+          "cap": 4000,
+          "unit": "riders",
+          "value": 0.35,
+          "source": "brief_extraction",
+          "raw_value": 1400,
+          "declared_scale": "unit_interval"
+        }
+      },
+      {
+        "id": "net_rider_gain_per_month",
+        "ref": "F2",
+        "kind": "factor",
+        "label": "Net rider gain per month",
+        "category": "observable",
+        "provenance": "from_brief",
+        "observed_state": {
+          "cap": 300,
+          "unit": "riders/month",
+          "value": 0.1,
+          "source": "brief_extraction",
+          "raw_value": 30,
+          "declared_scale": "unit_interval"
+        }
+      },
+      {
+        "id": "serviceable_rider_ceiling",
+        "ref": "F3",
+        "kind": "factor",
+        "label": "Serviceable rider ceiling",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "observed_state": {
+          "cap": 5000,
+          "unit": "riders",
+          "value": 0.38,
+          "source": "brief_extraction",
+          "raw_value": 1900,
+          "declared_scale": "unit_interval"
+        }
+      },
+      {
+        "id": "extra_spending_per_month",
+        "ref": "F4",
+        "kind": "factor",
+        "label": "Extra spending per month",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "observed_state": {
+          "cap": 10000,
+          "unit": "£/month",
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "declared_scale": "unit_interval"
+        }
+      },
+      {
+        "id": "extra_people_recruited",
+        "ref": "F5",
+        "kind": "factor",
+        "label": "Extra people recruited",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "observed_state": {
+          "cap": 10,
+          "unit": "people",
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "declared_scale": "unit_interval"
+        }
+      },
+      {
+        "id": "rider_refusals",
+        "ref": "R1",
+        "kind": "risk",
+        "label": "Rider refusals",
+        "provenance": "from_brief",
+        "scale_frame": 1000
+      },
+      {
+        "id": "depot_opening_delay",
+        "ref": "R2",
+        "kind": "risk",
+        "label": "Depot opening delay",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "rent_second_depot",
+            "kind": "option",
+            "label": "Rent second depot"
+          },
+          "affects": {
+            "id": "registered_riders",
+            "label": "registered riders",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "serviceable_rider_ceiling",
+            "label": "Serviceable rider ceiling",
+            "direction": "positive"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "Rent second depot access by month three",
+          "watch_for": "Lease or fit-out slips",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "sunday_recruit_unavailable",
+        "ref": "R3",
+        "kind": "risk",
+        "label": "Sunday recruit unavailable",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "sunday_maintenance_crew",
+            "kind": "option",
+            "label": "Sunday maintenance crew"
+          },
+          "affects": {
+            "id": "registered_riders",
+            "label": "registered riders",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "extra_people_recruited",
+            "label": "Extra people recruited",
+            "direction": "positive"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "Sunday maintenance crew recruit accepting Sunday shifts",
+          "watch_for": "No suitable applicants",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "depot_costs_exceed_allowance",
+        "ref": "R4",
+        "kind": "risk",
+        "label": "Depot costs exceed allowance",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "rent_second_depot",
+            "kind": "option",
+            "label": "Rent second depot"
+          },
+          "affects": {
+            "id": "registered_riders",
+            "label": "registered riders",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "extra_spending_per_month",
+            "label": "Extra spending per month",
+            "direction": "positive"
+          },
+          "mechanism": "drives",
+          "relies_on": "Depot charges staying within grant allowance",
+          "watch_for": "Quoted charges rise",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      }
+    ],
+    "ref_high_water": {
+      "D": 1,
+      "F": 5,
+      "G": 1,
+      "O": 3,
+      "R": 4
+    },
+    "goal_constraints": [
+      {
+        "unit": "riders",
+        "label": "registered riders",
+        "value": 1900,
+        "node_id": "registered_riders",
+        "operator": "<=",
+        "provenance": "explicit",
+        "value_frame": "level",
+        "constraint_id": "agent-lane:registered_riders:<="
+      },
+      {
+        "unit": "£/month",
+        "label": "Extra spending per month",
+        "value": 3000,
+        "node_id": "extra_spending_per_month",
+        "operator": "<=",
+        "provenance": "explicit",
+        "value_frame": "level",
+        "constraint_id": "agent-lane:extra_spending_per_month:<="
+      },
+      {
+        "unit": "people",
+        "label": "Extra people recruited",
+        "value": 1,
+        "node_id": "extra_people_recruited",
+        "operator": "<=",
+        "provenance": "explicit",
+        "value_frame": "level",
+        "constraint_id": "agent-lane:extra_people_recruited:<="
+      }
+    ]
+  },
+  "brief": "We run a community bike-share scheme. At the moment we have 1,400 registered riders. Counting sign-ups and people leaving, we are gaining a net 30 riders every month. Our depot can service at most 1,900 riders without breaking its maintenance targets, and the council wants us to stay under that ceiling, without turning anyone away, over the next ten months. We could rent a second depot for £2,400 a month, starting in month 3, which would lift the ceiling by about 600 riders, or add a Sunday maintenance crew for £700 a month, which would lift it by about 150. We could also carry on as we are. Our grant limits extra spending to £3,000 a month, and we cannot recruit more than one extra person. I'd like to know which choice keeps us under the ceiling.",
+  "scenario_created_at": "2026-10-10T00:35:48.393294+00:00"
+}
