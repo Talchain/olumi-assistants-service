@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 import { toTypedRunRows, type TypedRunRows, type TypedRunOptionRow } from '../runs/typed-run-rows.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
@@ -239,6 +240,7 @@ export interface AnalysisRunDerivationPort {
   storeTypedAnalysisRun(args: {
     p_fact_id: string; p_run: Omit<TypedRunRows, 'options'>; p_options: readonly TypedRunOptionRow[];
   }): AnalysisRunRpcResult;
+  markAnalysisFactUnattributable(args: { p_fact_id: string; p_reason: 'run_id_absent' }): AnalysisRunRpcResult;
   quarantineAnalysisFact(args: { p_fact_id: string; p_reason: string; p_detail: string | null }): AnalysisRunRpcResult;
   recordAnalysisRunFailure(args: { p_fact_id: string; p_error_code: string; p_detail: string }): AnalysisRunRpcResult;
   finishAnalysisRunSweep(args: { p_lease_id: string }): AnalysisRunRpcResult;
@@ -295,6 +297,7 @@ let conditionalAppendMissingLogged = false;
 export interface AnalysisRunDrainResult {
   derived: number;
   quarantined: number;
+  unattributable: number;
   skipped: number;
   failed: number;
   attempts: number;
@@ -474,7 +477,7 @@ export class SupabaseSessionStore implements SessionStore {
   /** Sanctioned write door; single-flight across interval, nudges and operator calls. */
   async deriveAnalysisRuns(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' } = { sweepLimit: 20 }): Promise<AnalysisRunDrainResult> {
     if (!this.options.analysisRunDerivation || this.analysisSweeperClosed) {
-      return { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0, depthEstimate: null, oldestPendingAgeSeconds: null };
+      return { derived: 0, quarantined: 0, unattributable: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0, depthEstimate: null, oldestPendingAgeSeconds: null };
     }
     const mode = opts.mode ?? 'sweep';
     if (this.analysisSweepFlight) {
@@ -491,10 +494,21 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   private async performAnalysisRunSweep(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' }): Promise<AnalysisRunDrainResult> {
-    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0,
+    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, unattributable: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0,
       depthEstimate: null, oldestPendingAgeSeconds: null };
     const port = this.options.analysisRunDerivation!;
     let leaseId: string | undefined;
+    let rpcUnavailableLogged = false;
+    const reportRpcUnavailable = (error: unknown): void => {
+      if (rpcUnavailableLogged) return;
+      rpcUnavailableLogged = true;
+      // Infrastructure failure, once per sweep; the operator stops rather than
+      // spinning on the same window. No fact consumes a durable poison attempt.
+      counts.failed += 1;
+      log.warn({ event: 'analysis_run.rpc_unavailable', rpc_code: errCode(error), mode: opts.mode ?? 'sweep' },
+        'Analysis Run RPC unavailable; apply the migration before draining');
+    };
+    const missingRpc = (error: unknown): boolean => errCode(error) === 'PGRST202' || errCode(error) === '42883';
     try {
       const limit = Number.isSafeInteger(opts.sweepLimit) && opts.sweepLimit > 0 ? Math.min(opts.sweepLimit, 20) : 20;
       const { data, error } = opts.mode === 'reconcile'
@@ -512,7 +526,9 @@ export class SupabaseSessionStore implements SessionStore {
         counts.attempts += 1;
         try {
           if (!row || typeof row.fact_id !== 'string' || typeof row.scenario_id !== 'string') throw new Error('Invalid claimed fact identity');
-          const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, { scenarioId: row.scenario_id });
+          const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, {
+            scenarioId: row.scenario_id, evaluatedScenarioRevision: row.evaluated_scenario_revision,
+          });
           if ('ok' in mapped) {
             const { options, ...run } = mapped.ok;
             const stored = await port.storeTypedAnalysisRun({ p_fact_id: row.fact_id, p_run: run, p_options: options });
@@ -526,15 +542,25 @@ export class SupabaseSessionStore implements SessionStore {
               else counts.skipped += 1;
             } else if (stored.data === true) counts.derived += 1;
             else counts.skipped += 1;
+          } else if ('unattributable' in mapped) {
+            const marked = await port.markAnalysisFactUnattributable({ p_fact_id: row.fact_id, p_reason: mapped.unattributable });
+            if (marked.error) throw marked.error;
+            if (marked.data === true) counts.unattributable += 1;
+            else counts.skipped += 1;
           } else {
-            const skipped = !('quarantine' in mapped);
-            const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal' in mapped ? 'skipped_refusal' : 'skipped_legacy';
+            const skipped = 'skipped_refusal' in mapped;
+            const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal';
             const quarantined = await port.quarantineAnalysisFact({ p_fact_id: row.fact_id, p_reason: reason, p_detail: null });
             if (quarantined.error) throw quarantined.error;
             if (skipped || quarantined.data !== true) counts.skipped += 1;
             else counts.quarantined += 1;
           }
         } catch (error) {
+          if (missingRpc(error)) {
+            counts.skipped += 1;
+            reportRpcUnavailable(error);
+            continue;
+          }
           counts.failed += 1;
           if (typeof row?.fact_id === 'string' && errCode(error) !== '23505') {
             try {
@@ -544,31 +570,39 @@ export class SupabaseSessionStore implements SessionStore {
               if (recorded.error) throw recorded.error;
               if (recorded.data === true) counts.quarantined += 1;
             } catch (recordError) {
-              log.warn({ event: 'analysis_run.attempt_record_failed', fact_id: row.fact_id, rpc_code: errCode(recordError) }, 'Attempt persistence unavailable');
+              if (missingRpc(recordError)) reportRpcUnavailable(recordError);
+              else log.warn({ event: 'analysis_run.attempt_record_failed', fact_id: row.fact_id, rpc_code: errCode(recordError) }, 'Attempt persistence unavailable');
             }
           }
         }
       }
     } catch (error) {
-      counts.failed += 1;
-      log.warn({ event: 'analysis_run.claim_failed', rpc_code: errCode(error) }, 'Analysis sweep unavailable; committed turns unchanged');
+      if (missingRpc(error)) reportRpcUnavailable(error);
+      else {
+        counts.failed += 1;
+        log.warn({ event: 'analysis_run.claim_failed', rpc_code: errCode(error) }, 'Analysis sweep unavailable; committed turns unchanged');
+      }
     } finally {
       if (leaseId) {
         try {
           const finished = await port.finishAnalysisRunSweep({ p_lease_id: leaseId });
-          if (finished.error) {
+          if (finished.error && missingRpc(finished.error)) reportRpcUnavailable(finished.error);
+          else if (finished.error) {
             counts.failed += 1;
             log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(finished.error) }, 'Watermark retained; lease expiry permits recovery');
           }
         } catch (error) {
-          counts.failed += 1;
-          log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(error) }, 'Watermark retained; lease expiry permits recovery');
+          if (missingRpc(error)) reportRpcUnavailable(error);
+          else {
+            counts.failed += 1;
+            log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(error) }, 'Watermark retained; lease expiry permits recovery');
+          }
         }
       }
     }
     log.info({ event: 'analysis_run.drain', mode: opts.mode ?? 'sweep', depth_estimate: counts.depthEstimate,
       oldest_pending_age_seconds: counts.oldestPendingAgeSeconds, attempts: counts.attempts, scanned: counts.scanned,
-      derived: counts.derived, quarantined: counts.quarantined, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
+      derived: counts.derived, quarantined: counts.quarantined, unattributable: counts.unattributable, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
     return counts;
   }
 
@@ -660,7 +694,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_response_emitted: write.response_emitted,
       p_llm_calls_used: write.llm_calls_used,
       p_duration_ms: write.duration_ms,
-      p_handler_facts: serialiseHandlerFacts(write.handler_facts),
+      p_handler_facts: serialiseHandlerFacts(write.handler_facts, write.run_evaluated_revisions),
       p_graph: write.graph ?? null,
       p_brief_text: write.briefText ?? null,
       p_pending_actions: write.pending_actions ?? [],
@@ -1980,7 +2014,7 @@ export class SupabaseSessionStore implements SessionStore {
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
     const { data, error } = await this.client
       .from('v5_conversation_turns')
-      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions')
+      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance')
       .eq('scenario_id', scenarioId)
       .eq('turn_id', turnId)
       .limit(1);
@@ -1989,7 +2023,10 @@ export class SupabaseSessionStore implements SessionStore {
     if (error) throw new Error(`readCommittedTurn failed: ${error.message ?? String(error)}`);
     const row = ((data as Array<Record<string, unknown>> | null) ?? [])[0];
     if (!row || typeof row.id !== 'string') return null;
+    const guidance = row.agent_guidance == null ? undefined : parseAnswerGuidance(row.agent_guidance);
+    if (guidance === null) throw new SessionReadError('Committed turn guidance malformed');
     return {
+      ...(guidance !== undefined ? { agent_guidance: guidance } : {}),
       id: row.id,
       request_hash: String(row.request_hash ?? ''),
       assistant_message: typeof row.assistant_message === 'string' ? row.assistant_message : null,
@@ -2362,7 +2399,7 @@ export class SupabaseSessionStore implements SessionStore {
     // for the current workload.
     let query = this.client
       .from('v5_handler_facts')
-      .select('id, payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at')
+      .select('id, payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at, evaluated_scenario_revision')
       .in('v5_conversation_turn_id', conversationTurnRowIds as string[])
       .order('created_at', { ascending: false })
       .order('id', { ascending: false });
@@ -2399,6 +2436,7 @@ export class SupabaseSessionStore implements SessionStore {
       noop?: unknown;
       v5_conversation_turn_id?: unknown;
       created_at?: unknown;
+      evaluated_scenario_revision?: unknown;
     }>) {
       const payloadObj =
         row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
@@ -2423,12 +2461,16 @@ export class SupabaseSessionStore implements SessionStore {
         : '';
       const factRowId = typeof row.id === 'string' ? row.id : '';
       const createdAt = typeof row.created_at === 'string' ? row.created_at : '';
-      out.push({
+      const entry: HandlerFactWithTurn = {
         fact: parsed.data,
         fact_row_id: factRowId,
         turn_id: turnId,
         fact_created_at: createdAt,
-      });
+        ...(parsed.data.fact_type === 'run_analysis'
+          ? { evaluated_scenario_revision: validatedScenarioRevision(row.evaluated_scenario_revision) } : {}),
+      };
+      bindRunAnalysisOccurrence(entry);
+      out.push(entry);
     }
     return out;
   }
@@ -2579,7 +2621,7 @@ export class SupabaseSessionStore implements SessionStore {
     const { data, error, count } = await abortableAnalysisRead(this.client
       .from('v5_handler_facts')
       .select(
-        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
+        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at, evaluated_scenario_revision',
         { count: 'exact' },
       )
       .eq('scenario_id', scenarioId)
@@ -2789,12 +2831,13 @@ export class SupabaseSessionStore implements SessionStore {
   async readExistingScenario(scenarioId: string) {
     const { data, error } = await abortableAnalysisRead(this.client
       .from('scenarios')
-      .select('id, user_id, graph, brief_text, analysis_invalidated_at, revision')
+      .select('id, user_id, graph, brief_text, analysis_invalidated_at, revision, created_at')
       .eq('id', scenarioId)
       .maybeSingle());
     if (error) throw new SessionReadError('Existing scenario read failed', { cause: error, code: errCode(error) });
     if (data === null) return null;
-    return { ...parseExistingScenarioRow(data, scenarioId), revision: isScenarioRevision(data.revision) ? data.revision : undefined };
+    return { ...parseExistingScenarioRow(data, scenarioId), revision: isScenarioRevision(data.revision) ? data.revision : undefined,
+      createdAt: typeof data.created_at === 'string' && Number.isFinite(Date.parse(data.created_at)) ? data.created_at : null };
   }
 
   /** Read actual capture rows; no process-local status and no capped history lookup. */
@@ -3160,13 +3203,21 @@ export class SupabaseSessionStore implements SessionStore {
  */
 function serialiseHandlerFacts(
   facts: readonly HandlerFact[],
-): Array<{ handler_id: string; action_type: string; noop: boolean; payload: unknown }> {
-  return facts.map((f) => ({
-    handler_id: f.fact_type,
-    action_type: f.fact_type,
-    noop: f.noop,
-    payload: { fact_type: f.fact_type, fact_version: f.fact_version, result: f.result },
-  }));
+  runEvaluatedRevisions?: Readonly<Record<string, number>>,
+): Array<{ handler_id: string; action_type: string; noop: boolean; payload: unknown; evaluated_scenario_revision?: number }> {
+  return facts.map((f) => {
+    const runId = f.fact_type === 'run_analysis' ? f.result.run_id : undefined;
+    const revision = typeof runId === 'string' && runEvaluatedRevisions !== undefined
+      && Object.hasOwn(runEvaluatedRevisions, runId) ? runEvaluatedRevisions[runId] : undefined;
+    return {
+      handler_id: f.fact_type,
+      action_type: f.fact_type,
+      noop: f.noop,
+      payload: { fact_type: f.fact_type, fact_version: f.fact_version, result: f.result },
+      ...(typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0
+        ? { evaluated_scenario_revision: revision } : {}),
+    };
+  });
 }
 
 /** Shared strict parser for the durable page and the bounded currentness read. */
@@ -3181,6 +3232,7 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handl
     action_type?: unknown;
     noop?: unknown;
     created_at?: unknown;
+    evaluated_scenario_revision?: unknown;
   }>) {
     if (
       typeof row.id !== 'string' ||
@@ -3232,11 +3284,15 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handl
         { code: 'analysis_fact_corrupt' },
       );
     }
-    facts.push({
+    const entry: IdentifiedHandlerFact = {
       fact: parsed.data,
       fact_row_id: row.id,
       fact_created_at: row.created_at,
-    });
+      ...(parsed.data.fact_type === 'run_analysis'
+        ? { evaluated_scenario_revision: validatedScenarioRevision(row.evaluated_scenario_revision) } : {}),
+    };
+    bindRunAnalysisOccurrence(entry);
+    facts.push(entry);
   }
   return facts;
 }

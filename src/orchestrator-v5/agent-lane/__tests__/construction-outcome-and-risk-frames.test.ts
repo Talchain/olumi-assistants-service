@@ -207,6 +207,9 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     const goal = (back.properties as Record<string, { required: string[] }>).goal!;
     goal.required = goal.required.filter((k) => k !== 'kind' && k !== 'deliverable');
     items(back, 'options').required = items(back, 'options').required.filter((k) => k !== 'added_capacity');
+    // S4 time cut (Science §(ai) Q2): the accumulation `reading` (net|gross) is optional in the contract and required when
+    // sent (strict output), exactly as `added_capacity` is.
+    items(back, 'identities').required = items(back, 'identities').required.filter((k) => k !== 'reading');
     expect(JSON.stringify(back)).toBe(JSON.stringify(contract));
   });
 

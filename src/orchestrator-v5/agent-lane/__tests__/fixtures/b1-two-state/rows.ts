@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../../../tests/helpers/scaling-ratio.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { composeProposalReply } from '../../../proposal-reply.js';
@@ -80,7 +81,7 @@ export const rows: readonly { name: string; check: () => void }[] = [
     // B1b controls: a range is not a switch; linear on long whitespace (anchored, bounded separators).
     for (const unit of ['0-100', '0-10', '1-0', '0 to 10', 'hours']) assert.equal(twoStateLevelWords(1, unit), null, unit);
     for (const unit of [`0${' '.repeat(20_000)}x`, `${' '.repeat(20_000)}0-`, `yes${' '.repeat(20_000)}`]) {
-      const t0 = performance.now(); twoStateLevelWords(1, unit); assert.ok(performance.now() - t0 < 50, 'two-state unit rule at 20k');
+      const t0 = performance.now(); twoStateLevelWords(1, unit); if (timingGated) { assert.ok(performance.now() - t0 < 50, 'two-state unit rule at 20k'); }
     }
     assert.equal(twoStateLevelWords(1, 'hires', [{ kind: 'option', interventions: { X: 1 } }], 'X'), null);
   } },

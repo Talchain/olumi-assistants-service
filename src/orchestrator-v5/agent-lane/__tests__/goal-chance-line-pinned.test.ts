@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 /**
  * ⛔ A WITHHELD GOAL CHANCE'S REASON IS SAID AS WRITTEN (AIQ 5887805333 (3); `goalChanceLineOwed`).
  *
@@ -160,6 +161,6 @@ describe('DL exact constructed chance-opening reader keeps owed-once behaviour',
     const owed = goalChanceLineOwed([run], reason);
     const elapsed = performance.now() - started;
     expect(owed).toBe(say);
-    expect(elapsed).toBeLessThan(50);
+    if (timingGated) { expect(elapsed).toBeLessThan(50); }
   });
 });

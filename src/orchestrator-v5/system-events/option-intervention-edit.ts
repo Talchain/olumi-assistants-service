@@ -589,6 +589,8 @@ export interface ApprovedLinkEffect {
  * on is the batch's own base (`expectedGraphHash`).
  */
 export interface ApprovedIdentityConfirm {
+  readonly ceiling_stock?: import('../agent-lane/ceiling-stock.js').CeilingStockPending;
+  readonly choice?: 'one_off';
   readonly outcome_id: string;
   readonly factor_ids: readonly string[];
   /** The card's displayed sentence, bound into `reading_token`. */
@@ -903,11 +905,12 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     return { kind: 'refused', reason: 'option_gaps_not_alone_with_identity_or_links' };
   }
   let before: unknown;
+  let identityBrief: string | null | undefined;
   let expectedRevision: number | undefined;
   let pendings: Awaited<ReturnType<OptionInterventionStore['readMostRecentPendingActions']>>;
   try {
-    if (useAppendV6()) {
-      ({ graph: before, revision: expectedRevision } = await store.loadGraphAndBriefText(input.scenarioId));
+    if (useAppendV6() || input.identityConfirm?.ceiling_stock !== undefined) {
+      ({ graph: before, revision: expectedRevision, briefText: identityBrief } = await store.loadGraphAndBriefText(input.scenarioId));
     } else {
       before = await store.loadGraph(input.scenarioId);
     }
@@ -1145,11 +1148,11 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyIdentityConfirmEdit({ persistedGraph: before, outcome_id: identityConfirm.outcome_id,
       factor_ids: identityConfirm.factor_ids, words: identityConfirm.words, reading_token: identityConfirm.reading_token,
-      part_levels: identityConfirm.part_levels,
+      part_levels: identityConfirm.part_levels, choice: identityConfirm.choice, ceiling_stock: identityConfirm.ceiling_stock, brief_text: identityBrief,
       expected_graph_hash: input.expectedGraphHash });
     if (written.kind === 'refused') return { kind: 'refused', reason: `identity_${written.reason}` };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !identityConfirmPostimageIsScoped(before, graph, identityConfirm.outcome_id, identityConfirm.part_levels)) {
+    if (!isEditableGraph(graph) || !identityConfirmPostimageIsScoped(before, graph, identityConfirm.outcome_id, identityConfirm.part_levels, identityConfirm.ceiling_stock, identityBrief)) {
       return { kind: 'refused', reason: 'identity_scope_mismatch' };
     }
     const appliedHash = computeAnalysisAffectingGraphHash(graph);
@@ -1160,7 +1163,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = written.handlerFacts;
     // AIQ 5887805333 (a): the committed row keeps the card's own words and that they were confirmed on the card — the
     // audit truth that the identity was not in the brief (the `edit_graph` receipt is strict and carries no words).
-    valueConfirmations = [`Recorded as yours: "${labelOfBefore(identityConfirm.outcome_id)}" is ${
+    valueConfirmations = identityConfirm.choice === 'one_off' ? ['Recorded the one-off reading. Run the analysis again.'] : [`Recorded as yours: "${labelOfBefore(identityConfirm.outcome_id)}" is ${
       identityConfirm.factor_ids.map(id => `"${labelOfBefore(id)}"`).join(' times ')}, as you confirmed on the card: “${
       identityConfirm.words.trim()}”`];
   }
@@ -1186,7 +1189,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     // A retry of a write that landed: the date is already held, so the batch is a verified no-op (`unchanged` below).
     if (written.kind === 'unchanged') return { kind: 'unchanged' };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id, goalHorizon.reference_date)
+    if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id, goalHorizon.reference_date ?? null, goalHorizon.stated_months)
       || goalDeadlineFromRecord(graph, goalHorizon.goal_id) !== goalHorizon.deadline) {
       return { kind: 'refused', reason: 'deadline_scope_mismatch' };
     }

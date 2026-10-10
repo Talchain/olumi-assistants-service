@@ -1,0 +1,32 @@
+{
+ "_note": "Files under src/ (non-test) containing an LLM provider transport call. A NEW file here must be classified against ASSEMBLERS before merge. Edits inside listed files do not trip the ratchet.",
+ "transport_files": [
+  "src/adapters/llm/caching.ts",
+  "src/adapters/llm/failover.ts",
+  "src/adapters/llm/openai.ts",
+  "src/adapters/llm/usage-tracking.ts",
+  "src/cee/decision-review/invoke.ts",
+  "src/cee/draft-quality/judge.ts",
+  "src/cee/dual-draft/m2-review.ts",
+  "src/cee/unified-pipeline/stages/coaching-pass.ts",
+  "src/cee/validation-pipeline/validate-graph.ts",
+  "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
+  "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts",
+  "src/orchestrator-v5/replacement/agent-loop.ts",
+  "src/orchestrator-v5/routing/open-frame-intake.ts",
+  "src/orchestrator-v5/routing/route-with-tool-use.ts",
+  "src/orchestrator/tools/edit-graph.ts",
+  "src/routes/agent-v1-turn.ts",
+  "src/routes/assist.v1.decision-review.ts"
+ ],
+ "infrastructure": [
+  "src/adapters/llm/caching.ts",
+  "src/adapters/llm/failover.ts",
+  "src/adapters/llm/openai.ts",
+  "src/adapters/llm/usage-tracking.ts"
+ ],
+ "unclassified_census_gap": [
+  "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts",
+  "src/orchestrator-v5/routing/open-frame-intake.ts"
+ ]
+}

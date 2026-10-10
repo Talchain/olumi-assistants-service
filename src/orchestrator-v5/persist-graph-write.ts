@@ -111,6 +111,7 @@ import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshS
 import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
 import { assertDoorProvenance } from './goal-target/horizon-basis-provenance.js';
 import { log } from '../utils/telemetry.js';
+import { assertUntouchedLevelQuantities } from './untouched-level-invariant.js';
 import { assertDoorOwnership } from './ownership/door-ownership.js';
 
 import {
@@ -391,6 +392,9 @@ export async function appendCheckedGraphWrite(
   params: CheckedGraphAppendParams,
 ): Promise<SessionAppendOutcome> {
   const { store, writesGraph, source } = params;
+  if (writesGraph && params.baseGraphForInvariants === undefined) {
+    log.warn({ event: 'door.untouched_level_check_skipped', reason: 'no_base_supplied', source });
+  }
   await assertDoorOwnership(store, params.write.scenario_id, source);
   for (let attempt = 0; ; attempt += 1) {
     // Always reconcile the ORIGINAL request against each fresh row. Reusing the
@@ -441,7 +445,10 @@ export async function appendCheckedGraphWrite(
       }
       if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap);
     }
-    if (writesGraph) assertNoScopedIdentityConflict(write.graph);
+    if (writesGraph) {
+      assertNoScopedIdentityConflict(write.graph);
+      assertUntouchedLevelQuantities(params.baseGraphForInvariants, write.graph);
+    }
 
     // The check runs on `write.graph` — the same object handed to `store.append`
     // on the last line of this function, with nothing between them.

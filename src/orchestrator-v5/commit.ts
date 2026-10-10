@@ -104,6 +104,7 @@ export interface CommitMetadata {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  readonly run_evaluated_revisions?: Readonly<Record<string, number>>;
   /**
    * Draft graph to persist atomically with the turn insert via
    * append_turn_atomic(p_graph). Both the graph write and the turn row commit
@@ -1661,6 +1662,8 @@ export async function commitDirectAnswer(
       llm_calls_used: metadata.llm_calls_used,
       duration_ms: metadata.duration_ms,
       handler_facts: metadata.handler_facts,
+      ...(metadata.run_evaluated_revisions !== undefined
+        ? { run_evaluated_revisions: metadata.run_evaluated_revisions } : {}),
       graph: graphForStore,
       briefText: metadata.briefText,
       pending_actions: finalPendings,

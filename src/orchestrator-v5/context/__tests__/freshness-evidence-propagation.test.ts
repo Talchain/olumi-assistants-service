@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence } from '../../types/handler-fact.js';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
@@ -78,14 +79,21 @@ describe('complete freshness evidence at every dispatch/recovery derivation', ()
       const facts = scenario === 'db-chronology' ? [selected, editResult] : scenario === 'unusable-rerun' ? [unusable, editResult, selected] : visible ? [editResult, selected] : [selected];
       const factSet = { status: 'complete', source: 'scenario', facts: [selected], total_count: 1, legacy_edit_facts: legacyEdits };
       const context = { prior_facts: facts, prior_facts_read_ok: true, analysis_invalidated_at: null,
-        prior_facts_with_turn: priorFactsWithTurn, scenario_analysis_fact_set: factSet };
-      const options = { priorFactsReadOk: true, analysisInvalidatedAt: null, priorFactsWithTurn, legacyEditFacts: legacyEdits };
+        prior_facts_with_turn: priorFactsWithTurn, scenario_analysis_fact_set: factSet,
+        persistedGraph: graph, persistedRevision: 7 };
+      // Graph-only writer doors cannot supply a current revision. Other sites
+      // use their existing graph/revision snapshot, without an extra read.
+      const graphOnlyWriter = site.source === writers;
+      const currentScenarioRevision = graphOnlyWriter ? undefined : 7;
+      const options = { currentScenarioRevision, priorFactsReadOk: true, analysisInvalidatedAt: null, priorFactsWithTurn, legacyEditFacts: legacyEdits };
       const scope: Record<string, unknown> = {
         deriveAnalysisFreshness, legacyEditFactsForFreshness, config: { cee: { optionIdentityFreshnessGuard: false } },
         turnContext: context, context, currentGraphHash: hash, addOptionGraphHash: hash, textGraphHash: hash,
         persistedPostEditGraph: graph, addOptionFrameGraph: graph, textFrameGraph: graph, gmFrameBase: graph,
         gmCurrentHash: hash, unchangedHash: hash, withheldCurrentHash: hash, priorFactsForRecovery: facts,
-        freshnessReadOptionsForRecovery: options, cachedSnapshot: { rawPersistedGraph: graph }, postDispatchFacts: facts,
+        freshnessReadOptionsForRecovery: options, cachedSnapshot: { rawPersistedGraph: graph, evaluatedScenarioRevision: 7 }, postDispatchFacts: facts,
+        // These are real lexical inputs used by the source expressions after C2.
+        editBase: { graph, revision: 7 }, currentScenarioRevision,
         read: { factSet: { ...factSet, facts }, hotWindow: { status: 'ok', facts }, analysisInvalidatedAt: null, priorFactsWithTurn },
         allowLegacyWindowAbsence: false,
         durableAuthority: true, persistedAnalysisGraphHash: hash, currentGraph: graph,
@@ -101,10 +109,13 @@ describe('complete freshness evidence at every dispatch/recovery derivation', ()
       scope.freshnessReadOptionsForRecovery = expression(edit, assignment!, scope);
       scope.deriveChipClickFreshness = (_snapshot: unknown, prior: Parameters<typeof deriveAnalysisFreshness>[0], readOk?: boolean,
         invalidated?: string | null, chronology?: DeriveAnalysisFreshnessOptions) => expression(chip, calls(chip, 'deriveAnalysisFreshness')[0]!, {
-          deriveAnalysisFreshness, config: scope.config, cachedSnapshot: scope.cachedSnapshot, currentGraphHash: hash,
+          deriveAnalysisFreshness, config: scope.config, cachedSnapshot: _snapshot, currentGraphHash: scope.currentGraphHash,
           facts: prior, priorFactsReadOk: readOk, analysisInvalidatedAt: invalidated, chronology,
         });
       const result = expression(site.source, site.node, scope) as FreshnessDerivation;
+      expect(result.selected_fact_row_id).toBeNull();
+      expect(result.run_revision).toEqual({ value: null, source: 'legacy_unknown' });
+      expect(result.basis).toBe('analysis_graph_hash_interim');
       const stale = scenario === 'hot-edit' || scenario === 'db-chronology' || scenario === 'unusable-rerun'
         || (kind === 'legacy' && ['failed', 'capped', 'durable-edit'].includes(scenario));
       expect(result).toMatchObject({ freshness: stale ? 'stale' : 'fresh', graph_hash_at_run: hash, computed_at: AT });
@@ -112,6 +123,74 @@ describe('complete freshness evidence at every dispatch/recovery derivation', ()
       // The same selected identity with FULL inputs must agree at each consumer.
       expect(result).toEqual(deriveAnalysisFreshness(facts as never, hash, undefined, { ...options, currentGraph: graph } as never));
       expect(selected.result).toMatchObject({ run_id: 'legacy-original', graph_hash_at_run: hash, computed_at: AT, scenario_id: SCENARIO });
+      if (kind === 'stamped' && scenario === 'healthy') {
+        // Make revision threading consequential; equal hashes alone could hide
+        // an omitted current revision in any of these real source expressions.
+        const recorded = structuredClone(selected);
+        delete recorded.result.graph_hash_at_run;
+        bindRunAnalysisOccurrence({ fact: recorded, fact_row_id: 'evaluated-run-row', evaluated_scenario_revision: 7 });
+        context.prior_facts = [recorded]; factSet.facts = [recorded];
+        scope.priorFactsForRecovery = [recorded]; scope.postDispatchFacts = [recorded];
+        scope.read = { factSet, hotWindow: { status: 'ok', facts: [recorded] },
+          analysisInvalidatedAt: null, priorFactsWithTurn };
+        // Neither a candidate edit nor a graph-only writer has a current
+        // persisted revision available to authorise the no-hash fallback.
+        const candidate = site.node.getText(site.source).includes('currentGraph: persistedPostEditGraph');
+        const revisionUnavailable = candidate || graphOnlyWriter;
+        expect(expression(site.source, site.node, scope)).toEqual({
+          selected_fact_row_id: 'evaluated-run-row', run_revision: { value: 7, source: 'recorded' },
+          basis: revisionUnavailable ? 'analysis_graph_hash_interim' : 'recorded_run_revision',
+          freshness: revisionUnavailable ? 'unknown' : 'fresh', reason: 'legacy_fact_missing_hash', selected_fact_index: 0,
+          graph_hash_at_run: null, current_graph_hash: hash, computed_at: AT,
+        });
+        if (graphOnlyWriter) {
+          // The same helper also serves writes whose existing v6 snapshot or
+          // commit result supplies a revision. Keep that threading decisive.
+          scope.currentScenarioRevision = 7;
+          expect(expression(site.source, site.node, scope)).toEqual({
+            selected_fact_row_id: 'evaluated-run-row', run_revision: { value: 7, source: 'recorded' },
+            basis: 'recorded_run_revision', freshness: 'fresh', reason: 'legacy_fact_missing_hash', selected_fact_index: 0,
+            graph_hash_at_run: null, current_graph_hash: hash, computed_at: AT,
+          });
+          scope.currentScenarioRevision = undefined;
+        }
+        // A real analysis-affecting edit is stale with equal revisions, and
+        // remains stale on graph-only doors with no current revision.
+        const edited = legacyGraph('node', []);
+        edited.nodes[0]!.observed_state = { value: 0.5 };
+        const editedHash = computeAnalysisAffectingGraphHash(edited)!;
+        expect(editedHash).not.toBe(hash);
+        recorded.result.graph_hash_at_run = hash;
+        context.persistedGraph = edited;
+        for (const key of ['currentGraphHash', 'addOptionGraphHash', 'textGraphHash', 'gmCurrentHash',
+          'unchangedHash', 'withheldCurrentHash', 'persistedAnalysisGraphHash']) scope[key] = editedHash;
+        for (const key of ['persistedPostEditGraph', 'addOptionFrameGraph', 'textFrameGraph', 'gmFrameBase', 'currentGraph']) scope[key] = edited;
+        scope.editBase = { graph: edited, revision: 7 };
+        scope.cachedSnapshot = { rawPersistedGraph: edited, evaluatedScenarioRevision: 7 };
+        expect(expression(site.source, site.node, scope)).toEqual({
+          selected_fact_row_id: 'evaluated-run-row', run_revision: { value: 7, source: 'recorded' },
+          basis: 'analysis_graph_hash_interim', freshness: 'stale', reason: 'graph_hash_diverged', selected_fact_index: 0,
+          graph_hash_at_run: hash, current_graph_hash: editedHash, computed_at: AT,
+        });
+      }
     });
   }
+});
+
+it('goal-direction guard still overrides an equal hash for the served Run that sent no direction', () => {
+  const currentGraph = JSON.parse(readFileSync(new URL(
+    '../../agent-lane/__tests__/fixtures/served-rt10-churn-below-2pct.json', import.meta.url), 'utf8'))
+    .captures.staging_91656b1b.graph;
+  const currentHash = computeAnalysisAffectingGraphHash(currentGraph);
+  expect(currentHash).not.toBeNull();
+  const selected = legacyRun('node', false, true);
+  selected.result.graph_hash_at_run = currentHash!;
+  selected.result.enrichment = stampRunAnalysisProjection(selected.result.enrichment!);
+  selected.result.input_snapshot = { ...selected.result.input_snapshot!, goal: { node_id: 'monthly_churn', label: 'monthly churn',
+    target_raw: 2, unit: '%', operator: '<', frame: 'level' } };
+  expect(deriveAnalysisFreshness([selected], currentHash, undefined, { currentGraph })).toEqual({
+    selected_fact_row_id: null, run_revision: { value: null, source: 'legacy_unknown' },
+    basis: 'analysis_graph_hash_interim', freshness: 'stale', reason: 'goal_direction_changed',
+    selected_fact_index: 0, graph_hash_at_run: currentHash, current_graph_hash: currentHash, computed_at: AT,
+  });
 });

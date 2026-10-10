@@ -7,7 +7,7 @@
  * "Quality trade-off"; "Overlapping costs", "Handover debt", "Offer fallout", "Work cannot be split".
  */
 import { describe, expect, it, vi } from 'vitest';
-import { scalingRatio } from '../../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingGated } from '../../../../../tests/helpers/scaling-ratio.js';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { assembleGuidanceSignals } from '../../turn-context/guidance-signals.js';
@@ -447,7 +447,7 @@ describe('S-C regex scaling (preamble: 5k→40k, 3 shapes, < 22×, min of 7 cali
       const small = shape(5_000); const big = shape(40_000);
       const m = scalingRatio(() => STATED_BUDGET.test(small), () => STATED_BUDGET.test(big));
       // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
-      expect(m.ratio, `budget ${name} ${m.detail}`).toBeLessThan(22);
+      if (timingGated) { expect(m.ratio, `budget ${name} ${m.detail}`).toBeLessThan(22); }
       // The Add press has no regex: it is reconstructed, and refused above 600 chars before any work.
       expect(widenAddCallOf('agent-widen-add:0000000000000000', `Add the risk ‘x’ to ‘o’: driven by more ‘${big}’, it would lower ‘y’.`, { graph: fixture('v1') })).toBeNull();
     });

@@ -67,10 +67,12 @@ export const TYPED_RUN_PAYLOAD_PATHS = [
 
 export interface TypedRunRowsContext {
   readonly scenarioId: string;
-  /** Refusal markers without identity are not Runs; other absent identity quarantines live and skips backfill. */
+  /** Refusal markers without identity are not Runs; other absent identity is unattributable in both modes. */
   readonly mode?: 'live' | 'backfill';
   /** Only the identity of the graph this frozen Run evaluated, when attested by the caller. */
   readonly graphIdentityHash?: string | null;
+  /** Frozen fact-element metadata, outside the strict-parsed payload. Absence is legacy. */
+  readonly evaluatedScenarioRevision?: unknown;
 }
 
 export interface TypedRunOptionRow {
@@ -88,9 +90,8 @@ export interface TypedRunOptionRow {
 /** The ONE mapping; storage RPCs add source identity and insertion metadata. */
 export interface TypedRunRows {
   readonly run_id: string;
-  /** No evaluated revision exists in RunAnalysisResultSchema yet (commit B owns stamping it). */
-  readonly scenario_revision: null;
-  readonly revision_source: 'legacy_unknown';
+  readonly scenario_revision: number | null;
+  readonly revision_source: 'recorded' | 'legacy_unknown';
   /** producer verdict at Run time; compose applies further remove-only gates; NOT the final permission */
   readonly leading_option_id: string | null;
   readonly constraint_may_name_leading_option: boolean | null;
@@ -105,11 +106,11 @@ export interface TypedRunRows {
 export type TypedRunRowsResult = { readonly ok: TypedRunRows }
   | { readonly quarantine: string }
   | { readonly skipped_refusal: true }
-  | { readonly skipped_legacy: true };
+  | { readonly unattributable: 'run_id_absent' };
 
 /**
  * Maps ONE persisted fact. Refusal markers without a run_id derive nothing. Malformed facts quarantine
- * individually; backfill skips other pre-run-identity facts.
+ * individually; other pre-run-identity facts are unattributable in both modes.
  * Inputs are never rebuilt from the current graph. The canonical hash is the snapshot's sent_digest (the schema's
  * SHA-256 of the actual PLoT request, request ID excluded). graph_hash_at_run is an analysis-affecting currentness
  * hash, so it is deliberately NOT relabelled as graph_identity_hash.
@@ -128,6 +129,11 @@ export function toTypedRunRows(fact: unknown, ctx: TypedRunRowsContext): TypedRu
 }
 
 function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult {
+  const evaluatedRevision = ctx.evaluatedScenarioRevision ?? null;
+  if (evaluatedRevision !== null && (typeof evaluatedRevision !== 'number'
+    || !Number.isSafeInteger(evaluatedRevision) || evaluatedRevision < 0)) {
+    return { quarantine: 'evaluated_scenario_revision_invalid' };
+  }
   const source = recordOf(fact);
   const sourceResult = recordOf(source?.result);
   // Class refusal_not_a_run: a refusal attempt computed nothing. Match the shared predicate before
@@ -148,7 +154,7 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
   if (source?.fact_type === 'run_analysis' && source.fact_version === 1 && source.noop === false) {
     if (sourceResult === undefined) return { quarantine: 'result_shape' };
     if (!Object.hasOwn(sourceResult, 'run_id') || sourceResult.run_id === null) {
-      return ctx.mode === 'backfill' ? { skipped_legacy: true } : { quarantine: 'run_id_absent' };
+      return { unattributable: 'run_id_absent' };
     }
     if (!nonEmpty(sourceResult.run_id)) return { quarantine: 'run_id_invalid' };
     if (!nonEmpty(ctx.scenarioId) || sourceResult.scenario_id !== ctx.scenarioId) {
@@ -273,7 +279,7 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
   }
   return { ok: {
     run_id: result.run_id,
-    scenario_revision: null, revision_source: 'legacy_unknown',
+    scenario_revision: evaluatedRevision, revision_source: evaluatedRevision === null ? 'legacy_unknown' : 'recorded',
     leading_option_id: result.leading_option_id,
     constraint_may_name_leading_option: producerPermission,
     canonical_request_hash: result.input_snapshot.sent_digest,

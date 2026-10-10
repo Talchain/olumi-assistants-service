@@ -181,6 +181,8 @@ export interface SessionTurnWrite {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  /** Frozen Run snapshot revisions, carried outside strict fact payloads (B2). */
+  readonly run_evaluated_revisions?: Readonly<Record<string, number>>;
   /** Scenario revision from the turn-start server read; v6 requires it. */
   readonly expectedRevision?: number;
   /**
@@ -300,6 +302,7 @@ export interface SessionTurnWrite {
 
 /** What {@link SessionStore.readCommittedTurn} returns — the durable facts a replay is answered from. */
 export interface CommittedTurnRecord {
+  readonly agent_guidance?: AnswerGuidance;
   readonly id: string;
   readonly request_hash: string;
   readonly assistant_message: string | null;
@@ -690,6 +693,8 @@ export interface SessionStore {
     readonly graph: unknown | null;
     readonly briefText: string | null;
     readonly analysisInvalidatedAt: string | null;
+    /** Server scenario creation timestamp, read beside graph and brief. */
+    readonly createdAt?: string | null;
     /** Same uncached SELECT as graph; not a revision-at-Run claim. */
     readonly revision?: number;
   } | null>;

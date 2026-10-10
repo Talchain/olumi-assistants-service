@@ -1,3 +1,4 @@
+import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
 import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-card.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -80,7 +81,7 @@ import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/gr
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { declinedProposalOf, declineChipIdFor, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt, PLAIN_APPROVAL_SUPERSEDED } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
@@ -150,9 +151,10 @@ import { premortemProducerDirective, readPremortemProduction, premortemWorksheet
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
   constructionRegistrationTurnId, settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, thinDraftOffer, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
-  widenPassingArgs, widenTargetOf, widenTurnForReadback, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
+  widenPassingArgs, widenTargetOf, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
+import { widenTurnForReadback } from '../orchestrator-v5/agent-lane/method-turn/guidance-widen-turn.js';
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
@@ -160,7 +162,7 @@ import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, struc
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn, type DecisionReviewRead } from '../orchestrator-v5/agent-lane/decision-review-press.js';
-import { guidanceRequestOf, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
+import { eligibleInterventionFor, ELIGIBLE_INTERVENTION_INSTRUCTION, selectTurnGuidance, guidanceRequestOf, type EligibleIntervention, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { nextStepOffersForTurn, SUGGEST_RISKS_CHIP } from '../orchestrator-v5/agent-lane/next-steps-from-guidance.js';
 import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { actionFactsOf, type ActionFacts } from '../orchestrator-v5/agent-lane/actions/state.js';
@@ -2498,7 +2500,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...widenedRunWordsOf(state.graph, replayChanceCells),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
-          ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}) });
+          ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}),
+          analysisResult: state.analysisResult });
       const parityReplayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       // Ordinary replay is the durable answer, including its canonical presentation grammar. No cache is needed.
@@ -2898,10 +2901,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * answer row can carry each one until it is approved or declined — an inner row this turn writes (a new hold, a
      * confirm) never drops another hold silently (D-08). A failed read holds nothing back: the latest row still rules.
      */
+    let deadlineTurnStart: DeadlineTurnStart | undefined;
     let heldAtStart: readonly PendingAction[] = [];
     if (typeof store.readMostRecentPendingActions === 'function') {
       try {
-        heldAtStart = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' })).filter(isHeldProposal);
+        let latestRowId: string | null = null;
+        heldAtStart = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict', onLatestRowId: id => { latestRowId = id; } })).filter(isHeldProposal);
+        if (latestRowId !== null) deadlineTurnStart = { rowId: latestRowId, rows: await store.readRecent(scenarioId, CONVERSATION_ROWS_READ) };
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: held proposals unreadable at turn start — the latest row rules');
       }
@@ -2939,6 +2945,32 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * calls, no implicit analysis. Words alone never take this path.
      */
     let fastPath: 'approve' | 'run' | 'explain' | 'research' | 'strengthen' | 'method' | undefined;
+    let guidanceHistory: Awaited<ReturnType<NonNullable<typeof store.readGuidanceHistory>>> | null = null;
+    let guidanceHistoryRead = false;
+    const readTurnGuidanceHistory = async (): Promise<void> => {
+      if (guidanceHistoryRead) return;
+      guidanceHistoryRead = true;
+      if (typeof store.readGuidanceHistory === 'function') {
+        try { guidanceHistory = await store.readGuidanceHistory(scenarioId); }
+        catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
+      }
+    };
+    let preReplySelection: { wire: GuidanceWire | undefined } | undefined;
+    let eligibleIntervention: EligibleIntervention | undefined;
+    // Converse and Explain carry the same selection from the same canonical read.
+    const interventionForModel = async (read: Awaited<ReturnType<typeof readBackState>>, request: ReturnType<typeof guidanceRequestOf>) => {
+      await readTurnGuidanceHistory();
+      preReplySelection = { wire: selectTurnGuidance({
+        request,
+        offeredSpecific: executableWaitingProposalIds(scenarioId, userId, read.graphHash, read.graph).map(id => ({ id: approvalChipIdFor(id) })),
+        licence: leaderLicenceFromState(read.analysisState, read.analysisReady), guidance: guidanceHistory,
+        runKey: runExplanationChip(scenarioId, read)?.id.slice(RUN_EXPLANATION_PREFIX.length),
+        state: read,
+      }) };
+      eligibleIntervention = eligibleInterventionFor(preReplySelection.wire);
+      return eligibleIntervention === undefined ? {} : { eligible_intervention: eligibleIntervention };
+    };
+
     let handledGuidancePress: HandledGuidancePress | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
@@ -3138,7 +3170,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
       ];
       // The same completed canonical assembly the ordinary Agent reads: no stored result/enrichment packet.
-      const canonicalAfterRun = await capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' });
+      const canonicalAfterRun: Awaited<ReturnType<typeof capabilities.getCanonicalState>> = { ...await capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' }),
+        ...await interventionForModel(st, 'narration') };
       // A refused canonical read follows the same early refusal as an unmatched Explain control.
       if (canonicalAfterRun.ok !== true) matches = false;
       const selectedRun = canonicalAfterRun.analysis as Record<string, unknown> | undefined;
@@ -3196,7 +3229,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -3538,7 +3571,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const widenTarget = widenTargetOf(pressedChipId, message);
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTarget !== null) {
       const rb = await readBackState(readingDispatch, scenarioId);
-      widenTurn = widenTarget === 'risks' ? risksTurnForReadback(rb, toolCtx.user_text ?? '') : widenTurnForReadback(pressedChipId, rb);
+      if (widenTarget === 'risks') {
+        widenTurn = risksTurnForReadback(rb, toolCtx.user_text ?? '');
+      } else {
+        await readTurnGuidanceHistory();
+        widenTurn = widenTurnForReadback(pressedChipId, rb, guidanceHistory);
+      }
       if (widenTurn !== null) fastPath = 'method';
       if (widenTurn !== null && widenTurn.kind === 'unavailable') {
         result = {
@@ -3652,6 +3690,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     /** RT-1: set only on the path that runs the Agent with the selection; absent ⇒ no `_grounded_selection`. */
     let selectionContext: AgentSelectionContext | null | undefined;
+    await readTurnGuidanceHistory();
     if (result === undefined) try {
       /**
        * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
@@ -3684,8 +3723,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (packetRevision !== undefined) {
           const secret = contextBindingSecret();
           const subject = { scenario_id: scenarioId, authenticated_user_id: userId ?? '', graph_revision: packetRevision };
+          // The existing epoch cache supplies the same raw inputs as the post-reply wire, without another read.
+          const read = await readBackState(readingDispatch, scenarioId);
+          const intervention = await interventionForModel(read, guidanceRequestOf(fastPath, explanationId, METHOD_PRESS_IDS));
           canonicalContext = {
-            packet: issueContextPacket({ ...subject, captured_at_turn: 0, state: st }, secret),
+            packet: issueContextPacket({ ...subject, captured_at_turn: 0, state: { ...st, ...intervention } }, secret),
             expectation: { ...subject, current_turn: 0, binding_secret: secret },
           };
         }
@@ -3771,7 +3813,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             message,
             instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
               : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
-              : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}` : AGENT_INSTRUCTIONS,
+              : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}`
+              : eligibleIntervention === undefined ? AGENT_INSTRUCTIONS : `${AGENT_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`,
             maxOutputTokens: budget.max_output_tokens,
             mode,
             // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
@@ -4124,16 +4167,62 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (`identityCardToIssue`): the SAME tool, once; it writes nothing, and `approvalChipsFor` offers its button.
     // …and RE-OFFERED on a turn that asks for the reading but proposed nothing (R3 5910559613: a typed "Run the analysis."
     // before confirming got the question and no button, `identityCardToReoffer`), read off the STORED model.
+    let automaticDeadlineLabel: string | undefined;
+    const deadlineIssuer = mode === 'full' && retainedScopeIssues.length === 0 ? await capabilities.deadlineCardFromDraft(toolCtx, {
+      start: deadlineTurnStart, typedNow, toolCalls: result.tool_calls, mutated: result.mutated, fastPath,
+      proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, pending: liveHolds,
+    }) : undefined;
+    if (deadlineIssuer !== undefined) {
+      const issued = await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: deadlineIssuer.words, rationale: '' }),
+        toolCtx, { ...capabilities, proposeGoalDeadline: deadlineIssuer.issue }, mode);
+      if (issued.ok === true && typeof issued.public_label === 'string') automaticDeadlineLabel = issued.public_label;
+      result = { ...result,
+        tool_calls: [...result.tool_calls, { name: 'propose_goal_deadline', ok: issued.ok === true, mutated: false,
+          ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
+        tool_results: [...result.tool_results, issued] };
+    }
+    const identityOfferRead = readbackGraph == null ? undefined
+      : await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {}).catch(() => undefined);
+    const identityOfferBrief = typeof identityOfferRead?.json.brief_text === 'string' ? identityOfferRead.json.brief_text : null;
+    let ceilingAnswerSettled = false;
+    // Only the new ceiling branch needs this historical check; preserve the legacy re-offer's predicate. It runs only
+    // on a turn that could issue the card (nothing held or proposed, not the approve press), bounded in time, and
+    // fails closed: a slow or unreadable history never authorises another question (buddy r3 P2 3).
+    if (readbackGraph != null && liveHolds.length === 0 && fastPath !== 'approve'
+      && proposalsAwaitingApproval(result.tool_calls).size === 0
+      && !identityCardOfferable(readbackGraph)
+      && identityCardOfferable(readbackGraph, undefined, undefined, identityOfferBrief)) {
+      const history = async (): Promise<boolean> => {
+        const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
+        for (let i = 0; i < rows.length; i++) {
+          const committed = await store.readCommittedTurn?.(scenarioId, rows[i]!.turn_id);
+          for (const held of committed?.pending_actions ?? []) {
+            const parsed = parsePendingAction(held), proposal = parsed === null ? undefined : agentProposalOf(parsed);
+            const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
+            if (proposal?.scenario_id !== scenarioId || proposal.user_id !== userId || reading?.ceiling_stock === undefined
+              || !identityCardOfferable(readbackGraph, undefined, reading, identityOfferBrief)) continue;
+            const declineSuffix = withChipOperation('', chipOperationOf({ chip: { id: declineChipIdFor(proposal.proposal_id) } }));
+            if (rows.slice(0, i).some(row => row.request_hash.endsWith(declineSuffix))) return true;
+          }
+        }
+        return false;
+      };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        ceilingAnswerSettled = await Promise.race([history(),
+          new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(true), 2_000); })]);
+      } catch { ceilingAnswerSettled = true; } finally { if (timer !== undefined) clearTimeout(timer); }
+    }
     const reoffer = identityCardToReoffer({
       toolCalls: result.tool_calls, mutated: result.mutated, fastPath,
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
-      readingWaiting: readbackGraph != null && identityCardOfferable(readbackGraph),
+      readingWaiting: !ceilingAnswerSettled && readbackGraph != null && identityCardOfferable(readbackGraph, undefined, undefined, identityOfferBrief),
     });
     let automaticIdentityProposalId: string | undefined;
     const partFigures = identityPartFiguresToIssue({ graph: readbackGraph, userText: typedNow,
       toolCalls: result.tool_calls, mutated: result.mutated,
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, pending: liveHolds });
-    if (partFigures !== undefined || identityAutoIssueAllowed({ issue: identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
+    if (partFigures !== undefined || identityAutoIssueAllowed({ issue: !ceilingAnswerSettled && identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
       const issued = await dispatchTool('propose_identity', JSON.stringify(partFigures ?? {}), toolCtx, capabilities, mode);
       if (issued.ok === true && typeof issued.proposal_id === 'string') automaticIdentityProposalId = issued.proposal_id;
       result = {
@@ -4283,11 +4372,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // control the final egress would ship is offered, and so remembered as pressable.
       ...researchOffered.filter((chip) => controlSurvivesLeaderGate(chip, leaderGate)),
     ]);
-    let guidanceHistory: Awaited<ReturnType<NonNullable<typeof store.readGuidanceHistory>>> | null = null;
-    if (typeof store.readGuidanceHistory === 'function') {
-      try { guidanceHistory = await store.readGuidanceHistory(scenarioId); }
-      catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
-    }
     // Select once from the same readback, before fixing the pills. Specific controls and waiting cards win.
     const guidanceWaitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash, readbackGraph);
     const guidanceWaiting = guidanceWaitingIds.map((id) => ({ id: approvalChipIdFor(id) }));
@@ -4298,6 +4382,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       request: guidanceRequestOf(fastPath, (body['chip'] as { id?: unknown } | null | undefined)?.id, METHOD_PRESS_IDS),
       offeredSpecific: firstOfEachId([...offeredSpecific, ...guidanceWaiting]),
       assistantText: text,
+      ...(preReplySelection === undefined ? {} : { preReplySelection }),
       licence: leaderLicenceFromState(analysisState, analysisReady),
       guidance: guidanceHistory,
       ...(guidanceRunKey !== undefined ? { runKey: guidanceRunKey } : {}),
@@ -4956,7 +5041,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
-      let reply = withCellHorizon(typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
+      // A route-issued deadline card says its own question (the door's public_label, nothing added) as this turn's text:
+      // it enters the ONE composer and the egress gate like every other reply, so nothing below writes it again.
+      let reply = withCellHorizon(automaticDeadlineLabel !== undefined ? automaticDeadlineLabel
+        : typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
@@ -5076,7 +5164,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (typeof question === 'string' && controlsOnReply.some((action) => action.id === pending.chip_id)) typedControlQuestions.push(question);
       }
       const composedReply = composeReplyShape({
+        analysisResult,
         text: reply,
+        // A host-only answer did not consume the carrier and keeps its existing bytes.
+        ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label }),
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
         ...(widenReceipt === null ? {} : { widenedLine: widenReceipt }),

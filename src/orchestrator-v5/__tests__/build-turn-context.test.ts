@@ -665,7 +665,10 @@ describe('buildTurnContext — coaching_state freshness agreement (Stage 2A)', (
 
     // Same verdict as the routing/pre-dispatch selector on the same inputs…
     expect(ctx.persisted_analysis_freshness).toEqual(
-      deriveAnalysisFreshness([matchFact], expectedHash),
+      { ...deriveAnalysisFreshness([matchFact], expectedHash, undefined, {
+        currentGraph: STAGE1_GRAPH, currentScenarioRevision: ctx.persistedRevision,
+      }), selected_fact_row_id: 'noop-fact-0',
+        run_revision: { value: null, source: 'legacy_unknown' }, basis: 'analysis_graph_hash_interim' },
     );
     // …and it is the PERSISTED graph's hash, which is what makes it safe for a
     // graph-less exit to describe what the user is looking at.

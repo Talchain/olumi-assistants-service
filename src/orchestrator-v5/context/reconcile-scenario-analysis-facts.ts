@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 /**
  * Reconcile the ordinary bounded turn-window facts with one uncached,
  * scenario-scoped read of the durable `run_analysis` fact set.
@@ -263,7 +264,7 @@ export function reconcileScenarioAnalysisFacts(
       return freezeCapped(
         // Contract validation proves a capped page has exactly LOOKAHEAD rows,
         // sorted newest-first. The window is the newest CAP of them.
-        durableContract.map((entry) => entry.fact),
+        durableContract,
         durable.total_count,
         input.scenarioId,
         validateLegacyEditFacts(durable.legacy_edit_facts),
@@ -271,7 +272,7 @@ export function reconcileScenarioAnalysisFacts(
     }
 
     return freezeComplete(
-      durableContract.map((entry) => entry.fact),
+      durableContract,
       'scenario',
       durable.total_count,
       input.scenarioId,
@@ -483,6 +484,7 @@ function parseIdentifiedRunAnalysisFact(
     fact,
     fact_row_id: factRowId,
     fact_created_at: factCreatedAt,
+    evaluated_scenario_revision: validatedScenarioRevision(record.evaluated_scenario_revision),
   });
 }
 
@@ -588,14 +590,18 @@ function parseEligibleRunAnalysisFact(
 }
 
 function freezeComplete(
-  facts: readonly HandlerFact[],
+  facts: readonly IdentifiedHandlerFact[],
   source: 'scenario',
   totalCount: number,
   scenarioId: string,
   legacyEdits?: LegacyAnalysisEditFacts,
 ): ScenarioAnalysisFactSet {
   const immutableFacts = Object.freeze(
-    facts.map((fact) => cloneAndFreezeJson(fact)),
+    facts.map((entry) => {
+      const fact = cloneAndFreezeJson(entry.fact);
+      bindRunAnalysisOccurrence({ ...entry, fact });
+      return fact;
+    }),
   );
   return attestReconciled(
     Object.freeze({
@@ -619,7 +625,7 @@ function freezeComplete(
  * shape as `reconcile-recent-mutation-facts.ts` `freezeResult`.
  */
 function freezeCapped(
-  facts: readonly HandlerFact[],
+  facts: readonly IdentifiedHandlerFact[],
   totalCount: number,
   scenarioId: string,
   legacyEdits?: LegacyAnalysisEditFacts,
@@ -627,7 +633,11 @@ function freezeCapped(
   const immutableFacts = Object.freeze(
     facts
       .slice(0, SCENARIO_ANALYSIS_FACT_CAP)
-      .map((fact) => cloneAndFreezeJson(fact)),
+      .map((entry) => {
+      const fact = cloneAndFreezeJson(entry.fact);
+      bindRunAnalysisOccurrence({ ...entry, fact });
+      return fact;
+    }),
   );
   return attestReconciled(
     Object.freeze({

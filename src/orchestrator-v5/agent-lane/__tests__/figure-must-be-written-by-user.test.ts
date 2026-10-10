@@ -251,6 +251,6 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // Item 3 (Canvas, 7 Oct; DL D1): the drawn-link press's ONE forced call is a dispatch site on the SAME typed carrier.
     expect(route).toContain('result = await drawnLinkPress(');
     expect(route).toContain('{ ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS,');
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read').toBe(18);
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier)').toBe(20);
   });
 });

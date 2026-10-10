@@ -22,7 +22,7 @@ import { chanceGoalDeadlineAsk, chanceGoalSentence } from '../../../goal-target/
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { scalingRatio } from '../../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../../tests/helpers/scaling-ratio.js';
 import {
   composeReplyShape, shapeFromDerivedAnswerText, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
   HORIZON_MARKER, ROBUSTNESS_MARKER, WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE,
@@ -896,7 +896,7 @@ describe('timing: every regex on the path scales linearly (20k -> 160k, min of 7
     ['terminators', (n) => `${'.'.repeat(n)} A${'?'.repeat(n)}`],
     ['sentences and bullets', (n) => Array.from({ length: Math.ceil(n / 20) }, (_, i) => (i % 3 === 0 ? `- Point ${i} is here.` : `Sentence ${i} is here.`)).join('\n')],
   ];
-  it.each(shapes)('%s', (_name, make) => {
+  timingIt.each(shapes)('%s', (_name, make) => {
     const small = make(20_000);
     const large = make(160_000);
     expect(large.length).toBeGreaterThanOrEqual(small.length * 3);

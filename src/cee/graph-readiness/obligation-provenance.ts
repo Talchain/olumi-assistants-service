@@ -546,6 +546,7 @@ export function structureProvenance(element: unknown, graph?: unknown): Structur
   const data = asRecord(node.data);
   const observed = asRecord(node.observed_state) ?? asRecord(data?.observed_state);
   if (observed) {
+    if (observed.user_material_unverified === true) return 'unattributed';
     const fromSource = classifyValueSource(observed.source);
     if (fromSource !== 'unattributed') return fromSource;
     const fromExtraction = classifyValueSource(observed.extractionType);

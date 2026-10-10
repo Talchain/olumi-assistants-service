@@ -239,6 +239,9 @@ export interface CanonicalAnalysisState {
   /** Structural readiness status, or null when no readiness was supplied. */
   readonly status: AnalysisReadyStatusT | null;
   /** Freshness verdict from `deriveAnalysisFreshness`. */
+  readonly selected_fact_row_id?: string | null;
+  readonly run_revision?: FreshnessDerivation['run_revision'];
+  readonly basis?: FreshnessDerivation['basis'];
   readonly freshness: AnalysisFreshnessT;
   /** Stable reason code from `deriveAnalysisFreshness`. */
   readonly freshness_reason: FreshnessReason;
@@ -322,6 +325,7 @@ export interface SelectCanonicalAnalysisStateInput {
   readonly currentGraphHash: string | null;
   /** Same current graph as the hash, for the selected Run's goal-unit snapshot. */
   readonly currentGraph?: unknown;
+  readonly currentScenarioRevision?: number | null;
   /**
    * Current graph's option IDs for the option-identity freshness guard. Only
    * threaded by callers when `cee.optionIdentityFreshnessGuard` is on; left
@@ -392,11 +396,12 @@ export function selectCanonicalAnalysisState(
     // could not be read". Absent => pre-fix behaviour, by construction.
     // The restore marker rides the same options object; absent => unchanged.
     input.priorFactsReadOk === undefined && input.analysisInvalidatedAt === undefined
-      && input.currentGraph === undefined && input.priorFactsWithTurn === undefined && input.legacyEditFacts === undefined
+      && input.currentScenarioRevision === undefined && input.currentGraph === undefined && input.priorFactsWithTurn === undefined && input.legacyEditFacts === undefined
       ? undefined
       : {
           ...(input.priorFactsReadOk === undefined ? {} : { priorFactsReadOk: input.priorFactsReadOk }),
           ...(input.analysisInvalidatedAt === undefined ? {} : { analysisInvalidatedAt: input.analysisInvalidatedAt }),
+          currentScenarioRevision: input.currentScenarioRevision,
           ...(input.currentGraph === undefined ? {} : { currentGraph: input.currentGraph }),
           ...(input.priorFactsWithTurn === undefined ? {} : { priorFactsWithTurn: input.priorFactsWithTurn }),
           ...(input.legacyEditFacts === undefined ? {} : { legacyEditFacts: input.legacyEditFacts }),
@@ -576,6 +581,9 @@ function assembleCanonicalState(params: AssembleCanonicalStateParams): Canonical
   return {
     version: CANONICAL_ANALYSIS_STATE_VERSION,
     status,
+    selected_fact_row_id: derivation.selected_fact_row_id,
+    run_revision: derivation.run_revision,
+    basis: derivation.basis,
     freshness: derivation.freshness,
     freshness_reason: derivation.reason,
     selected_fact_index: derivation.selected_fact_index,

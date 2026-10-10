@@ -60,6 +60,10 @@ import {
   loadScenarioAnalysisFactsForRead,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { UntouchedLevelRescaledError } from '../untouched-level-invariant.js';
+import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
+import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
+import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { getSessionStore } from '../session/index.js';
 import { useAppendV6 } from '../append-v6-flag.js';
 import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
@@ -144,6 +148,7 @@ function deriveWriteReplyFreshness(
   persistedAnalysisGraphHash: string | null,
   currentGraph: unknown,
   allowLegacyWindowAbsence = false,
+  currentScenarioRevision?: number,
 ): FreshnessDerivation {
   const durableAuthority = isScenarioAnalysisReasoningAuthority(read.factSet);
   const derived = deriveAnalysisFreshness(
@@ -156,7 +161,7 @@ function deriveWriteReplyFreshness(
         || (allowLegacyWindowAbsence && read.factSet.status === 'degraded'
           && read.factSet.reason === 'durable_unavailable' && read.hotWindow.status === 'ok'),
       analysisInvalidatedAt: read.analysisInvalidatedAt,
-      currentGraph, priorFactsWithTurn: read.priorFactsWithTurn,
+      currentGraph, currentScenarioRevision, priorFactsWithTurn: read.priorFactsWithTurn,
       legacyEditFacts: legacyEditFactsForFreshness(read.factSet) },
   );
   // ⛔ AN UNREAD RESTORE MARKER NEVER BECOMES A POSITIVE `fresh`. The marker can
@@ -166,7 +171,7 @@ function deriveWriteReplyFreshness(
   // (no fact-bound hashes: `unknown` only where data is genuinely missing, its
   // invariant 3). Independent pre-review 5828334202 on #1892.
   if (!read.analysisInvalidatedAtReadOk && derived.freshness === 'fresh') {
-    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false, currentGraph });
+    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false, currentGraph, currentScenarioRevision });
   }
   return derived;
 }
@@ -593,6 +598,7 @@ function replyForAttemptThatWroteNothing(args: {
   readonly requestId: string;
   readonly committedResponse: OlumiResponse;
   readonly persistedGraphBytes: unknown;
+  readonly persistedScenarioRevision?: number;
   readonly persistedAnalysisGraphHash: string | null;
   /**
    * The writer's own analysis read — the durable record, the hot window and the
@@ -682,7 +688,7 @@ function replyForAttemptThatWroteNothing(args: {
   }
   // The shared rule, against the SNAPSHOT's hash: the durable record when it is
   // authority, the restore marker, and `unknown` when the marker is unread.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash, persistedGraphBytes, false, args.persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -1177,6 +1183,8 @@ export async function dispatchSystemEvent(
   // the presentation graph may have lost fields that participate in the hash.
   try {
     return await withAnalysisReadDeadline(async () => {
+      // This existing graph-only read supplies no revision. Freshness must not
+      // expand its read surface just to enable the legacy no-hash fallback.
       const persistedGraph = await loadPersistedGraphStrict(params.payload.scenario_id);
       const parsed = GraphV3.safeParse(persistedGraph);
       if (!parsed.success) return result;
@@ -1186,7 +1194,7 @@ export async function dispatchSystemEvent(
       );
       return { ...result, graph: parsed.data,
         analysisReady: result.analysisReady ?? buildCanonicalAnalysisReadyFromGraph(persistedGraph),
-        freshness: deriveWriteReplyFreshness(analysisInputs, hash, persistedGraph) };
+        freshness: deriveWriteReplyFreshness(analysisInputs, hash, persistedGraph, false, undefined) };
     });
   } catch (error) {
     // Observational only: a failed reread cannot suppress the user's answer or
@@ -1740,6 +1748,7 @@ async function dispatchEdgeStrengthEdit(
 
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   // `null` until the commit resolves. See `replyForAttemptThatWroteNothing`.
   let thisAttemptWrote: boolean | null = null;
@@ -1793,6 +1802,7 @@ async function dispatchEdgeStrengthEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -1856,6 +1866,7 @@ async function dispatchEdgeStrengthEdit(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The edit is in the model iff the unique (from, to) edge carries what the
@@ -1936,7 +1947,7 @@ async function dispatchEdgeStrengthEdit(
     return { response: result.response, commitPerformed: false, graph: null };
   }
   const graphForReadiness = committedParse.data;
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   // The exact graph this commit projected and handed to the atomic store is
   // the UI's authoritative readback. It is load-bearing for confirm_current:
   // graph_patch honestly stays `noop` for the unchanged scientific tuple,
@@ -2212,6 +2223,7 @@ async function dispatchStructuralDelete(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   // `null` until the commit resolves. See `replyForAttemptThatWroteNothing`.
   let thisAttemptWrote: boolean | null = null;
@@ -2280,6 +2292,7 @@ async function dispatchStructuralDelete(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -2343,6 +2356,7 @@ async function dispatchStructuralDelete(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The removal is in the model iff every removed id and edge pair is ABSENT
@@ -2437,7 +2451,7 @@ async function dispatchStructuralDelete(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -2566,7 +2580,7 @@ async function dispatchFactorValueEdit(
       },
       commitPerformed: false,
       commitSkippedReason: 'verified_no_op', graph: result.baseGraph as GraphV3T,
-      freshness: deriveWriteReplyFreshness(analysisInputs, graphHash, result.baseGraph),
+      freshness: deriveWriteReplyFreshness(analysisInputs, graphHash, result.baseGraph, false, persistedGraph != null ? expectedRevision : undefined),
     };
   }
   if (event.kind === 'prior_range_edit' && (result.kind === 'refused' || rangeFactParse?.success !== true)) {
@@ -2587,9 +2601,9 @@ async function dispatchFactorValueEdit(
   // this it passed none, and an above-cap value silently wiped every live hold
   // (#1947 review, non-blocking 1).
   const factorPriorPendings = await readPriorPendingsForMutation(payload.scenario_id, requestId, event.kind);
-  if (result.kind === 'refused') {
+  async function commitRefusal(refusal: { response: OlumiResponse; reason: string; pendingActions: readonly PendingAction[] }): Promise<DispatchSystemEventResult> {
     try {
-      await commitDirectAnswer(result.response, {
+      await commitDirectAnswer(refusal.response, {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
         turn_class: 'direct_answer',
@@ -2605,8 +2619,8 @@ async function dispatchFactorValueEdit(
         // encode — deriving it from the chip set would lose the cap, which is the
         // whole point of the consent. Omitted entirely when empty so the normal
         // derivation still runs for every other refusal.
-        ...(result.pendingActions.length > 0
-          ? { pending_actions: result.pendingActions }
+        ...(refusal.pendingActions.length > 0
+          ? { pending_actions: refusal.pendingActions }
           : {}),
         coaching_state: null,
       });
@@ -2616,29 +2630,32 @@ async function dispatchFactorValueEdit(
           request_id: requestId,
           event_kind: event.kind,
           scenario_id: payload.scenario_id,
-          refusal_reason: result.reason,
+          refusal_reason: refusal.reason,
           err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
         },
         'V5 factor_value_edit — refusal commit failed',
       );
-      return { response: result.response, commitPerformed: false, graph: null };
+      return { response: refusal.response, commitPerformed: false, graph: null };
     }
     log.info(
       {
         request_id: requestId,
         event_kind: event.kind,
         scenario_id: payload.scenario_id,
-        refusal_reason: result.reason,
-        rescale_pendings_persisted: result.pendingActions.length,
+        refusal_reason: refusal.reason,
+        rescale_pendings_persisted: refusal.pendingActions.length,
       },
       'V5 factor_value_edit refused — committed honestly, no graph written',
     );
-    return { response: result.response, commitPerformed: true, graph: null };
+    return { response: refusal.response, commitPerformed: true, graph: null };
   }
+
+  if (result.kind === 'refused') return commitRefusal(result);
 
   // ── the mutation path ────────────────────────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let committedResponse: OlumiResponse = result.response;
   try {
     const mutationPriorPendings = factorPriorPendings;
@@ -2690,8 +2707,18 @@ async function dispatchFactorValueEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     committedResponse = commitResult.response;
   } catch (err) {
+    if (event.kind === 'factor_value_edit' && err instanceof UntouchedLevelRescaledError) {
+      // Reuse the handler invariant refusal verbatim. The door saved no graph;
+      // the existing refusal path records only that refusal in the transcript.
+      const composed = composeRecoverableHandlerResponse(new HandlerInvocationFailedError(err.message, {
+        cause_kind: 'graph_invariant_violated', retryable: false,
+        details: { handler_id: 'set_factor_value', reason: err.reason }, cause: err,
+      }), { handlerRegistry: HANDLER_VALIDATION_REGISTRY }, payload.stage);
+      return commitRefusal({ response: composed.response, reason: err.reason, pendingActions: [] });
+    }
     // ⭐ ANOTHER WRITER COMMITTED AFTER THIS EDIT'S BASE READ. The atomic CAS
     // refused the write, so nothing of this edit landed. That is a KNOWN
     // outcome, not an unconfirmed one, so it gets the typed conflict the
@@ -2840,7 +2867,7 @@ async function dispatchFactorValueEdit(
   const freshness: FreshnessDerivation = deriveWriteReplyFreshness(
     analysisInputs,
     persistedAnalysisGraphHash,
-    persistedGraphBytes,
+    persistedGraphBytes, false, persistedScenarioRevision,
   );
   emitFreshnessTelemetry(
     freshness,
@@ -2987,8 +3014,9 @@ function preWriteRefereeFreshness(
   read: WriteReplyAnalysisInputs,
   baseGraphHash: string,
   currentGraph: unknown,
+  currentScenarioRevision?: number,
 ): FrameFreshness {
-  return deriveWriteReplyFreshness(read, baseGraphHash, currentGraph, true).freshness;
+  return deriveWriteReplyFreshness(read, baseGraphHash, currentGraph, true, currentScenarioRevision).freshness;
 }
 
 /**
@@ -3137,7 +3165,7 @@ export async function dispatchOptionLevelsBatch(
     // original fact projection; the pre-write referee is unchanged.
     // Reread after every commit: even byte-identical graphs can have newer edit facts.
     const freshnessAfterCommit = deriveWriteReplyFreshness(
-      await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId), outcome.analysisGraphHash, outcome.graph, true,
+      await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId), outcome.analysisGraphHash, outcome.graph, true, undefined,
     );
     emitFreshnessTelemetry(
       freshnessAfterCommit,
@@ -3415,6 +3443,8 @@ export type CommitOptionLevelsInput = {
    * `reason: 'identity_<reason>'`; nothing is written.
    */
   readonly identity_confirm?: {
+    readonly ceiling_stock?: import('../agent-lane/ceiling-stock.js').CeilingStockPending;
+    readonly choice?: 'one_off';
     readonly outcome_id: string;
     readonly factor_ids: readonly string[];
     /** The card's displayed sentence. */
@@ -3430,7 +3460,7 @@ export type CommitOptionLevelsInput = {
    * outside the analysis hash, so it is the writer's own stale gate. A refusal comes back as `refused` with
    * `reason: 'deadline_<reason>'`; nothing is written.
    */
-  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string };
+  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string; readonly stated_months?: number };
   readonly goal_steady?: ApprovedGoalSteady;
   readonly team_time?: ApprovedTeamTime;
 };
@@ -3529,13 +3559,14 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(effect.link_selected === true ? { link_selected: true as const } : {}),
       ...(effect.unit_readings !== undefined ? { unit_readings: effect.unit_readings } : {}) })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
+      ceiling_stock: input.identity_confirm.ceiling_stock,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
-      reading_token: input.identity_confirm.reading_token,
+      reading_token: input.identity_confirm.reading_token, choice: input.identity_confirm.choice,
       ...(input.identity_confirm.part_levels !== undefined ? { part_levels: input.identity_confirm.part_levels } : {}) } } : {}),
     ...(input.goal_steady !== undefined ? { goalSteady: input.goal_steady } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
-      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date } } : {}),
+      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) {
     rethrowRevisionConflict(r.graphConflict);
@@ -3664,7 +3695,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
   // Freshness for the referee's frame gate, exactly as the option-level door reads it (a failed read is 'unknown').
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph);
+    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, undefined);
   } catch {
     freshness = 'unknown';
   }
@@ -3791,7 +3822,7 @@ export async function holdAddFactorInProcess(input: HoldAddFactorInput, requestI
 
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph);
+    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, undefined);
   } catch {
     freshness = 'unknown';
   }
@@ -4166,6 +4197,7 @@ async function dispatchStructuralRename(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   let thisAttemptWrote: boolean | null = null;
   let committedResponse: OlumiResponse = result.response;
@@ -4211,6 +4243,7 @@ async function dispatchStructuralRename(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -4280,6 +4313,7 @@ async function dispatchStructuralRename(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The rename is in the model iff the node carries the new label.
@@ -4357,7 +4391,7 @@ async function dispatchStructuralRename(
     },
     'V5 structural_rename committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
   );
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -4536,6 +4570,7 @@ async function dispatchOptionStatusEdit(
 
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   let thisAttemptWrote: boolean | null = null;
   // The commit's own typed account of the version mint (`CommitResult.modelVersionReceipt`: null = no version minted).
@@ -4571,6 +4606,7 @@ async function dispatchOptionStatusEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     versionMinted = commitResult.modelVersionReceipt !== null;
@@ -4629,6 +4665,7 @@ async function dispatchOptionStatusEdit(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       requestedChangeVisibleIn: (snapshot) => optionStatusHolds(snapshot, result.optionId, result.status),
@@ -4687,7 +4724,7 @@ async function dispatchOptionStatusEdit(
     },
     'V5 option_status_edit committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
   );
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -4918,6 +4955,7 @@ async function dispatchStructuralAdd(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   // `null` until the commit resolves. See the no-write branch below.
   let thisAttemptWrote: boolean | null = null;
@@ -4961,6 +4999,7 @@ async function dispatchStructuralAdd(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -5028,6 +5067,7 @@ async function dispatchStructuralAdd(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The add is in the model iff the requested node id is.
@@ -5098,7 +5138,7 @@ async function dispatchStructuralAdd(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -5297,6 +5337,7 @@ async function dispatchStructuralAddEdge(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   let thisAttemptWrote: boolean | null = null;
   let committedResponse: OlumiResponse = result.response;
@@ -5334,6 +5375,7 @@ async function dispatchStructuralAddEdge(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -5398,6 +5440,7 @@ async function dispatchStructuralAddEdge(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The connection is in the model iff an edge between the endpoints carries
@@ -5453,7 +5496,7 @@ async function dispatchStructuralAddEdge(
     draft_graph: buildAppliedGraphWireField(graphForReadiness),
   };
 
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -5649,6 +5692,7 @@ async function dispatchAddConstraintEdit(
   // ── the mutation path: ONE atomic commit, exactly as fve commits ─────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
@@ -5683,6 +5727,7 @@ async function dispatchAddConstraintEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     committedResponse = commitResult.response;
   } catch (err) {
     // The store refused before writing: nothing was saved, so this is never "commit failed, may have been saved".
@@ -5745,7 +5790,7 @@ async function dispatchAddConstraintEdit(
       ? { draft_graph: buildAppliedGraphWireField(committedParse.data) }
       : {}),
   };
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(freshness, {
     request_id: requestId,
     scenario_id: payload.scenario_id,

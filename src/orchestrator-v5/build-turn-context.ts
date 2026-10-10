@@ -615,6 +615,8 @@ export interface BuildTurnContextOptions {
 }
 
 export interface RunAnalysisScenarioSnapshot {
+  /** Scenario revision from the same persisted read as the analysed graph (B2). */
+  readonly evaluatedScenarioRevision?: number;
   readonly goalScopeClaimInput: GoalScopeClaimInput;
   readonly graph: GraphV3T;
   readonly options: Array<{
@@ -1047,6 +1049,7 @@ export async function buildTurnContext(
     // Threading the read state makes the degraded case `'unknown' /
     // derivation_failed`, which maps to an `unavailable` signal instead.
     { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph,
+      currentScenarioRevision: scenarioState.read.status === 'ok_present' ? scenarioState.revision : undefined,
       analysisInvalidatedAt: analysisInvalidatedAtRead, priorFactsWithTurn,
       legacyEditFacts: legacyEditFactsForFreshness(scenarioAnalysisFactSet) },
   );
@@ -1940,7 +1943,7 @@ async function fetchPersistedScenarioState(
         : { status: 'ok_absent' };
     return {
       graph: result.graph, briefText: result.briefText, read,
-      ...(result.revision !== undefined ? { revision: result.revision } : {}),
+      ...(read.status === 'ok_present' && result.revision !== undefined ? { revision: result.revision } : {}),
     };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
@@ -2878,7 +2881,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // delegated to loadGraphAndBriefText and discarded the brief), so the snapshot
   // can surface it for the flag-gated run_analysis → PLoT brief leg with no extra
   // DB traffic and identical error semantics.
-  const { graph: persistedGraph, briefText } = await loadPersistedScenarioStateStrict(
+  const { graph: persistedGraph, briefText, revision } = await loadPersistedScenarioStateStrict(
     scenarioId,
     sessionStore,
   );
@@ -3128,6 +3131,8 @@ export async function loadScenarioSnapshotForRunAnalysis(
 
   return {
     goalScopeClaimInput: scopeInput,
+    ...(typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0
+      ? { evaluatedScenarioRevision: revision } : {}),
     graph: parsedGraph.data,
     options,
     goal_node_id: readiness.goal_node_id,

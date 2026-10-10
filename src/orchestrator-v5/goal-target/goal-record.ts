@@ -13,6 +13,7 @@ export type GoalRecord = Readonly<{
   label: NodeV3T['label'];
   target: Readonly<{
     raw?: NodeV3T['goal_threshold_raw'];
+    cap?: NodeV3T['goal_threshold_cap'];
     unit?: NodeV3T['goal_threshold_unit'];
     frame?: NodeV3T['goal_threshold_frame'];
     comparator?: NodeV3T['goal_direction'];
@@ -47,6 +48,7 @@ export const GOAL_RECORD_PRECEDENCE = {
   goal_id: ['nodes[kind=goal,id=goalId].id'],
   label: ['selected goal.label'],
   raw: ['goal_threshold_raw', 'own target row.value'],
+  cap: ['goal_threshold_cap (finite and positive)'],
   unit: ['goal_threshold_unit (nonblank)', 'observed_state.unit (nonblank)', 'own target row.unit (nonblank)'],
   frame: ['goal_threshold_frame (when raw exists)', 'own target row.value_frame (only when raw absent)'],
   comparator: ['goal_direction', 'own target row.operator_as_stated (compatible strict twin)', 'own target row.operator'],
@@ -97,6 +99,7 @@ export function readGoalRecord(graph: unknown, goalId: string): GoalRecord | nul
     const frame = GoalThresholdFrame.safeParse(stated?.frame).data;
     const target = {
       ...(stated !== null ? { raw: stated.value } : {}),
+      ...(finite(goal.goal_threshold_cap) && goal.goal_threshold_cap > 0 ? { cap: goal.goal_threshold_cap } : {}),
       ...(unit !== undefined ? { unit } : {}),
       ...(frame !== undefined ? { frame } : {}),
       ...(held !== undefined ? { comparator: held, comparator_source: comparatorSource } : {}),
@@ -105,8 +108,12 @@ export function readGoalRecord(graph: unknown, goalId: string): GoalRecord | nul
     const approvedHorizon = GoalHorizonSchema.safeParse(goal.goal_horizon).data;
     const months = finite(goal.goal_horizon_months) && Number.isInteger(goal.goal_horizon_months)
       && goal.goal_horizon_months > 0 ? goal.goal_horizon_months : undefined;
+    // A schema months arm needs a separately held H; then its approved count keeps precedence.
+    // A deadline arm can coexist with that H, but a months-only schema arm supplies no deadline.
+    const heldMonths = months !== undefined && approvedHorizon !== undefined && 'months' in approvedHorizon ? approvedHorizon.months : months;
     const horizon = {
-      ...(approvedHorizon ?? (months !== undefined ? { months } : {})),
+      ...(approvedHorizon !== undefined && 'deadline' in approvedHorizon ? { deadline: approvedHorizon.deadline } : {}),
+      ...(heldMonths !== undefined ? { months: heldMonths } : {}),
       ...(text(goal.goal_deadline_as_stated) && goal.goal_deadline_as_stated.length <= 60 ? { as_stated: goal.goal_deadline_as_stated } : {}),
     };
     const basis = Object.hasOwn(goal, 'horizon_basis') && isRec(goal.horizon_basis) ? goal.horizon_basis : undefined;
@@ -119,7 +126,8 @@ export function readGoalRecord(graph: unknown, goalId: string): GoalRecord | nul
       goal_id: goalId,
       label: typeof goal.label === 'string' ? goal.label : '',
       target: Object.keys(target).length > 0 ? target : null,
-      horizon: Object.keys(horizon).length > 0 ? horizon : null,
+      // Preserve a valid schema arm as a projection even when it supplies no held count or calendar date.
+      horizon: approvedHorizon !== undefined || Object.keys(horizon).length > 0 ? horizon : null,
       ...(horizonBasis !== undefined ? { horizon_basis: horizonBasis } : {}),
       ...(provenance !== undefined ? { provenance } : {}),
     };

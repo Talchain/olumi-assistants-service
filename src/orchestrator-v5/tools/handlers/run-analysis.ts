@@ -57,6 +57,7 @@ import { sayDate } from '../../goal-target/deadline-date.js';
 import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
+import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
@@ -336,6 +337,7 @@ function withholdStatedOperator<C>(goalConstraints: C): C {
  * The reader produces them; PLoT consumes them; the handler is the conduit.
  */
 export interface RunAnalysisScenarioSnapshot {
+  readonly evaluatedScenarioRevision?: number;
   /** Production reader attests current scope; a failed pending read throws before PLoT. */
   readonly goalScopeClaimInput?: GoalScopeClaimInput;
   /** The current graph (PLoT consumes as-is). */
@@ -597,6 +599,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // Freeze the read-B identity before dispatch; never consult the store for this Run again (B2).
+    const evaluatedScenarioRevision = snapshot.evaluatedScenarioRevision;
+    const frozenRevision = typeof evaluatedScenarioRevision === 'number'
+      && Number.isSafeInteger(evaluatedScenarioRevision) && evaluatedScenarioRevision >= 0
+      ? evaluatedScenarioRevision : undefined;
     const shareChanceBlocked = shareChanceRunBlock(snapshot.rawPersistedGraph ?? snapshot.graph);
     if (shareChanceBlocked !== null) {
       throw new HandlerInvocationFailedError('The deadline chance needs a usable stated range and date', {
@@ -3145,7 +3152,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       .map(option => option.cell);
     factCandidate.result.enrichment = withShortHorizonBesideChance(
       withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells, accumulationDrift.warnings.length > 0),
-      horizonGraph, chanceCells, accumulationDrift.warnings.length > 0);
+      horizonGraph, chanceCells, accumulationDrift.warnings.length > 0, submittedOptionsForMethod(factCandidate.result));
 
     // --- 7. Zod-validate the fact ----------------------------------------
     //
@@ -3216,6 +3223,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     return {
       assistant_text: summary,
       handler_facts: [parsed.data],
+      ...(frozenRevision !== undefined
+        ? { __run_evaluated_revision: { run_id: runId, revision: frozenRevision } } : {}),
       llm_calls_used: 0,
       ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),
       // Internal channel (never the wire envelope directly) — the

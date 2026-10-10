@@ -27,7 +27,21 @@ const json = (name: string): Rec => JSON.parse(bytes(name).toString('utf8'));
 const RUN = json('run.json');
 const WIRE = json('read-graph-1791489457020.json');
 const READ = WIRE.j;
-const STAGING_CONTROL = json('starter-point-staging.json');
+// The captured control predates occurrence provenance. Extend only its strict
+// expected staleness shape; the captured bytes and every result/cell stay pinned.
+const STAGING_CONTROL_CAPTURE = json('starter-point-staging.json');
+const STAGING_CONTROL: Rec = { ...STAGING_CONTROL_CAPTURE, canonical_view: {
+  ...STAGING_CONTROL_CAPTURE.canonical_view,
+  staleness: {
+    stale: STAGING_CONTROL_CAPTURE.canonical_view.staleness.stale,
+    revision: STAGING_CONTROL_CAPTURE.canonical_view.staleness.revision,
+    run_revision: STAGING_CONTROL_CAPTURE.canonical_view.staleness.run_revision,
+    run_revision_source: 'legacy_unknown',
+    basis: STAGING_CONTROL_CAPTURE.canonical_view.staleness.basis,
+    reason: STAGING_CONTROL_CAPTURE.canonical_view.staleness.reason,
+    limitation: STAGING_CONTROL_CAPTURE.canonical_view.staleness.limitation,
+  },
+} };
 const GOAL = 'monthly_recurring_revenue';
 const KEEP = 'keep_current_pricing';
 const STARTER = 'launch_starter_tier';

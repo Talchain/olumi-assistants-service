@@ -294,7 +294,7 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 56 sites, 40 findings, 20 OPEN, 20 accepted", () => {
+  it("the first cut is an ENUMERATION: 57 sites, 41 findings, 20 OPEN, 21 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
@@ -329,14 +329,22 @@ describe("the live value-bearing contract, adjudicated", () => {
     // is a user-stated integer equal to `goal_horizon_months`, minted only by the user's press, with no model figure.
     // ACCEPTED: its REQUIRED `source: user_stated` warrants the sole number in the attestation object; no finding
     // needs a ledger entry (adding one would fail the stale-decision rule). The explicit decision is pinned below.
-    expect(SITES.length).toBe(56);
-    expect(FINDINGS.length).toBe(40);
+    // +1 LEVEL_SHARED site / +1 ACCEPTED (S4): approved literal goal_horizon_stated_months, like goal_horizon_months.
+    expect(SITES.length).toBe(57);
+    expect(FINDINGS.length).toBe(41);
     expect(report.open.length).toBe(20);
-    expect(report.accepted.length).toBe(20);
+    expect(report.accepted.length).toBe(21);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(9);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(7);
-    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(15);
+    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(16);
     expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(25);
+  });
+
+  it("S4 stated months has the same duration classification as held horizon months", () => {
+    const stated = site("cee.NodeV3::goal_horizon_stated_months");
+    expect(stated.verdict).toBe(site("cee.NodeV3::goal_horizon_months").verdict);
+    expect(stated.verdict).toBe("LEVEL_SHARED");
+    expect(report.accepted.some(f => f.id === `scope-ambiguous:${stated.id}`)).toBe(true);
   });
 
   it("S5 2b — ACCEPTED: the user-stated bound months already carries its own source warrant", () => {

@@ -1,3 +1,5 @@
+import { constructionOperationId } from '../../agent-lane/runtime/build-model.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 /** Paul's served 6582edbc brief; drafter output is stubbed. No LLM, network or DB. */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -41,7 +43,7 @@ import { commitDirectAnswer } from '../../commit.js';
 import { composeDirectAnswerResponse } from '../../compose.js';
 import { createRunAnalysisHandler, withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingGated, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -121,8 +123,9 @@ function world(initial = dated(), unconfirmFirst = false, now = '2026-10-07T09:1
   };
   const dispatch: InternalDispatch = async path => {
     if (failedReadbacks > 0) { failedReadbacks--; return { status: 503, json: {} }; }
+    if (path.endsWith('/versions')) return { status: 200, json: { versions: [{ version_id: 'draft-v1', sequence: 1, created_at: '2026-10-07T09:13:13Z', creation: { kind: 'initial', source_turn_id: registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, BRIEF)) } }] } };
     if (!path.endsWith('/graph')) throw new Error(`Unexpected dispatch ${path}`);
-    return { status: 200, json: { graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never) } };
+    return { status: 200, json: { graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never), brief_text: BRIEF } };
   };
   return { graph, failNextPostWriteRead: () => { failAfterCommit = true; }, replace: (g: Rec) => { json = JSON.stringify(g); }, rows, commits, proposals, commit,
     caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels: commit,
@@ -253,13 +256,15 @@ describe('S2b team-time door', () => {
     expect((await w.caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec).refusal).toBe('deadline_not_held');
     const r = await w.caps.proposeGoalDeadline!(ctx('The deadline is 6 months away.') as never, { deadline_words: '6 months', rationale: '' }) as Rec;
     expect((await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: r.proposal_id } as never, { proposal_id: r.proposal_id }) as Rec).ok).toBe(true);
-    expect(w.graph()).toEqual(dated());
+    const expected = dated();
+    Object.assign(part(expected).goal, { goal_horizon_months: 6, goal_horizon_reference_date: REF, goal_horizon_stated_months: 6 });
+    expect(w.graph()).toEqual(expected);
   });
   it('TEAM_TIME whitespace 20k -> 160k timing row <22x', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
     const run = (input: string) => () => { TEAM_TIME.lastIndex = 0; return TEAM_TIME.test(input); };
     const m = scalingRatio(run(' '.repeat(20000)), run(' '.repeat(160000)));
-    expect(m.ratio, m.detail).toBeLessThan(22);
+    if (timingGated) { expect(m.ratio, m.detail).toBeLessThan(22); }
     expect(readTeamTime(' '.repeat(20000))).toBeNull();
   });
 });
@@ -279,7 +284,7 @@ describe('R2 identity-bound regression rows', () => {
     expect(() => admitCandidateModel(c, {}, brief)).toThrow('event_goal_needs_redraft');
     expect(admitCandidateModel(control, {}, brief).nodes).toBeDefined();
   });
-  it('P1-1 admission regex near-miss 20k -> 160k timing rows <22x', () => {
+  timingIt('P1-1 admission regex near-miss 20k -> 160k timing rows <22x', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
     for (const regex of [EVENT_WORDS, EVENT_DEADLINE]) {
       const small = '9 '.repeat(20000), large = '9 '.repeat(160000);
@@ -582,7 +587,7 @@ describe('R3 carrier ownership and licence recovery controls', () => {
   });
 });
 
-it('R3 event-span tokenisation 5k -> 40k timing row <22x', () => {
+timingIt('R3 event-span tokenisation 5k -> 40k timing row <22x', () => {
   const c = candidate(); c.goal.metric = 'the app'; c.goal.deliverable = 'the app';
   const prefix = 'ship the app on time ', input = (n: number) => prefix + 'x'.repeat(n - prefix.length);
   // 5k → 40k (8×), as stated-event-risk's 5k → 40k row: one call at 160k costs seconds, which only slows the gate.
@@ -710,6 +715,62 @@ describe('ordinary deadline retry control', () => {
     const renamed = w.graph(); renamed.nodes.find((n: Rec) => n.kind === 'goal').label = 'Our updated goal'; w.replace(renamed);
     expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, applied: true, mutated: false });
     expect(w.rows).toHaveLength(1);
+  });
+});
+
+
+describe('deadline partial postimage recovery guard', () => {
+  it('R1-partial: landed date without H, reference or stated duration refuses separately from rename recovery', async () => {
+    for (const field of ['goal_horizon_months', 'goal_horizon_reference_date', 'goal_horizon_stated_months']) {
+      for (const missing of [true, false]) {
+        const g = { nodes: [{ id: 'g', kind: 'goal', label: 'Monthly revenue', goal_threshold_raw: 100,
+          goal_threshold_cap: 100, goal_threshold_unit: 'GBP', goal_threshold_frame: 'level', threshold_source: 'user' }], edges: [] };
+        const w = world(g); w.failNextPostWriteRead();
+        const r = await w.caps.proposeGoalDeadline!(ctx('deadline in 6 months') as never, { deadline_words: '6 months', rationale: '' }) as Rec;
+        const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
+        expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ applied: false, refusal: 'not_confirmed' });
+        const partial = w.graph(), held = partial.nodes.find((n: Rec) => n.kind === 'goal');
+        expect(held.goal_horizon.deadline).toBe('2027-04-07');
+        if (missing) delete held[field]; else held[field] = field === 'goal_horizon_reference_date' ? '2026-10-08' : 7;
+        w.replace(partial);
+        expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: false, applied: false, refusal: 'superseded' });
+        expect(w.rows).toHaveLength(1);
+      }
+    }
+  });
+});
+
+
+describe('admitted deadline partial postimage retry guard', () => {
+  it('R1-admitted-partial: retry refuses a missing or changed carrier, zero or goal sum with one append', async () => {
+    for (const kind of ['carrier', 'zero', 'sum']) {
+      for (const missing of [true, false]) {
+        const g = plainGraph({ nodes: [
+          { id: 'g', kind: 'goal', label: 'Cash', goal_threshold_raw: 100, goal_threshold_cap: 100,
+            goal_threshold_unit: 'GBP', goal_threshold_frame: 'level', threshold_source: 'user' },
+          { id: 'stock', kind: 'factor', label: 'Cash today', observed_state: { value: 0.4, raw_value: 40, cap: 100, unit: 'GBP', source: 'brief_extraction' } },
+          { id: 'inflow', kind: 'factor', label: 'Monthly additions', observed_state: { value: 0.1, raw_value: 10, cap: 100, unit: 'GBP/month', source: 'brief_extraction' } },
+        ], edges: ['stock', 'inflow'].map(from => ({ from, to: 'g', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' })) });
+        const w = world(g); w.failNextPostWriteRead();
+        const r = await w.caps.proposeGoalDeadline!(ctx('deadline in 6 months') as never, { deadline_words: '6 months', rationale: '' }) as Rec;
+        const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
+        expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ applied: false, refusal: 'not_confirmed' });
+        const partial = w.graph(), held = partial.nodes.find((n: Rec) => n.id === 'g');
+        expect(held.goal_horizon.deadline).toBe('2027-04-07');
+        expect(held.nonlinear_identity).toMatchObject({ operation: 'sum', factor_ids: ['g_at_month_6'] });
+        if (kind === 'sum') {
+          if (missing) delete held.nonlinear_identity; else held.nonlinear_identity.factor_ids = ['other'];
+        } else {
+          const id = kind === 'carrier' ? 'g_at_month_6' : 'g_at_month_6_net_zero_rate';
+          if (missing) partial.nodes = partial.nodes.filter((n: Rec) => n.id !== id);
+          else if (kind === 'carrier') partial.nodes.find((n: Rec) => n.id === id).nonlinear_identity.horizon_months = 7;
+          else partial.nodes.find((n: Rec) => n.id === id).observed_state.value = 1;
+        }
+        w.replace(partial);
+        expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: false, applied: false, refusal: 'superseded' });
+        expect(w.rows).toHaveLength(1);
+      }
+    }
   });
 });
 

@@ -375,7 +375,7 @@ export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.n
   const held = agentProposalOf(pa);
   if (isRec(graph) && Array.isArray(graph.nodes) && held !== undefined && held.operations.some((o) => o.op === 'confirm_identity')) {
     const reading = identityReadingOf(held);
-    if (reading === undefined || !identityCardOfferable(graph, reading.part_levels)) return undefined;
+    if (reading === undefined || !identityCardOfferable(graph, reading.part_levels, reading)) return undefined;
   }
   return productHoldRecord(pa, graph, nowMs) ?? agentProposalRecord(pa, graph, nowMs);
 }

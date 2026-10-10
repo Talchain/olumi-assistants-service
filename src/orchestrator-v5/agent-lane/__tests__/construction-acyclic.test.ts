@@ -143,7 +143,14 @@ const restamp = (from: string, to: string, provenance: Link['provenance']) => (l
 interface Built { out: Record<string, unknown>; body: Graph; graph: Graph; calls: number; inputs: string[]; instructions: string[] }
 
 /** The REAL construction, with the drafter faked: `drafts[i]` answers call i (the last repeats). */
+const PRICE_QUOTE = 'Our Pro price is £49 a month.';
+/** The served drafter's explicit £49 carries its verbatim brief sentence (the receipt the real verifier reads). Idempotent. */
+const quoted = (m: CandidateModel): CandidateModel => ({ ...m, factors: m.factors.map((f) =>
+  f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 49
+    ? { ...f, baseline_evidence: { quote: PRICE_QUOTE } } : f) });
 async function build(...drafts: CandidateModel[]): Promise<Built> {
+  drafts = drafts.map(quoted);
+  const brief = `${PRICE_QUOTE}\n\n${SERVED.brief}`;
   let body: unknown = null;
   const inputs: string[] = [];
   const instructions: string[] = [];
@@ -159,7 +166,7 @@ async function build(...drafts: CandidateModel[]): Promise<Built> {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', SERVED.brief, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
   return { out, body: body as Graph, graph: GraphV3.parse(body) as unknown as Graph, calls: inputs.length, inputs, instructions };
 }
@@ -188,8 +195,18 @@ function reaches(g: Graph, from: string, to: string): boolean {
  * GOAL is compared with exactly these three added, by value; every other node stays byte for byte.
  */
 const G1_HELD = { threshold_source: 'brief_extraction', goal_direction: '>=', goal_horizon_months: 12 } as const;
-const asServedNow = (n: unknown): unknown =>
-  (n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal' ? { ...n, ...G1_HELD } : n);
+/**
+ * S7 (AIE quantity contract): a factor level the verifier credited from the brief carries the EXISTING
+ * `extractionType: 'explicit'` beside `source: 'brief_extraction'`; the served bytes predate it. The comparison is by
+ * content (`canon`), so a node that carried it without being credited — or lacked it while credited — still fails.
+ */
+const withCreditedType = (n: unknown): unknown => {
+  const x = n as { kind?: unknown; observed_state?: { source?: unknown; value?: unknown } } | null;
+  return x !== null && typeof x === 'object' && x.kind === 'factor' && x.observed_state?.source === 'brief_extraction'
+    && typeof x.observed_state.value === 'number' ? { ...x, observed_state: { ...x.observed_state, extractionType: 'explicit' } } : n;
+};
+const asServedNow = (n: unknown): unknown => withCreditedType(
+  n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal' ? { ...n, ...G1_HELD } : n);
 
 /** Sorted-key JSON, so the served bytes and ours compare by content, not key order. */
 const canon = (v: unknown): string => JSON.stringify(v, (_k, x) =>
@@ -624,7 +641,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
   });
 
   it('RED (row 1): OVERSIZED + gap + loop — the gap is asked, the loop is not, as a compaction; the compliant retry is adopted and the loop is broken by admission and said', async () => {
-    const first = extended(withGap(servedCandidate()), speculative('factors', 5));
+    const first = quoted(extended(withGap(servedCandidate()), speculative('factors', 5)));
     const { out, graph, calls, inputs, instructions } = await build(first, servedCandidate());
     expect(out.size_retried, 'PRECONDITION: the first draft was oversized').toBe(true);
     expect(calls).toBe(2);
@@ -656,7 +673,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
   });
 
   it('RED (row 1b): WITHIN the limit + gap + loop — both are asked; a retry that breaks the loop but leaves the gap is adopted (a loop asked is a reason of its own)', async () => {
-    const first = withGap(servedCandidate());
+    const first = quoted(withGap(servedCandidate()));
     const loopBroken = withGap(withLinks((ls) => [...ls.filter((l) => l !== DELAY_TO_AVAIL), L('AI release delay', 'New Pro conversions', 'negative')]));
     const { out, graph, calls, inputs, instructions } = await build(first, loopBroken);
     expect(out.size_retried).toBe(false);

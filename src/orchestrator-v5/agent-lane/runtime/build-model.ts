@@ -38,7 +38,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedOptionSetting } from '../verified-option-setting.js';
+import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -63,14 +63,14 @@ import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js'
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
 import { withRateCountProducts } from '../rate-count-product.js';
-import { admitAccumulationIdentities, withAccumulationCarriers } from '../accumulation-identity.js';
+import { admitAccumulationIdentities, withAdmittedAccumulations, admitStructuralGoalAccumulation } from '../accumulation-identity.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { clampForPersist, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
-import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote } from '../stated-by-user.js';
 import { heldEventRiskLine, holdStatedEventRisks, refusedEventRiskLine } from '../stated-event-risk-draft.js';
 import { sameUnit } from '../same-unit.js';
 import { admitInterventionRange } from '../../intervention-range.js';
@@ -143,7 +143,7 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
     if (out['type'] === 'object' && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
       for (const name of Object.keys(properties)) {
-        if (!providerBoundary && name === 'stated_evidence') continue;
+        if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence')) continue;
         if (!required.includes(name)) required.push(name);
       }
       out['required'] = required;
@@ -266,6 +266,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // lets admission restate a signed change as "% of today" (restateSignedPercentChanges, rows 4a/4b); the restated
       // factor carries no source, so no authority is claimed for the zero.
       baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false. EXCEPTION: a factor measured as a CHANGE FROM TODAY (e.g. "% change from the current price", "extra hires") is 0 today by definition: baseline_known true, baseline_value 0.' },
+      baseline_evidence: { anyOf: [{ type: 'null' }, obj({ quote: { type: 'string' } }, ['quote'])], description: 'Complete verbatim brief sentence stating this factor’s current level; null otherwise.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'The unit of baseline_value, as the brief writes it ("%", a count such as "subscribers", "<currency>/<period>"). ONLY a money amount charged, paid or earned PER ITEM names that item: "<currency> per <item> per <period>", where <item> is what another factor counts.' }, provenance,
       plausible_max: { type: 'number',
@@ -312,12 +313,13 @@ export function buildCandidateSchema(): Record<string, unknown> {
      * marks whether its sign is provable. REQUIRED so "none" is an empty list, never an omission.
      */
     identities: { type: 'array', description:
-      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (accumulation) a stock worked out month by month to the goal\u2019s deadline. Empty when none.',
+      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (accumulation) a stock worked out month by month to the goal\u2019s deadline, including the goal itself. Empty when none.',
       items: obj({
         outcome: { type: 'string', description: 'The EXACT label of the quantity that is the product, or the stock at the deadline.' },
         operation: { type: 'string', enum: ['product', 'accumulation'] },
-        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied; for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month.' },
+        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied; for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month; for a stated net change EXACTLY two: the level today, the net amount added per month.' },
         provenance,
+        reading: { anyOf: [{ type: 'string', enum: ['net', 'gross'] }, { type: 'null' }] },
       }, ['outcome', 'operation', 'factors', 'provenance']) },
     unknowns: { type: 'array', items: { type: 'string' } },
     // ⭐ THE QUESTION CARD'S TITLE (Paul, 27 Sep: served "Decision: MRR"). COPIED, never written: admission takes it only
@@ -331,6 +333,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
 export const BUILD_INSTRUCTIONS = [
   'For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. Ask for the date first, then how long today’s team takes, then when new people start. Never ask today’s level of the event goal.',
   'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
+  'For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership.',
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
   'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',
@@ -419,6 +422,7 @@ export const BUILD_INSTRUCTIONS = [
   // deadline, which a model of today's levels cannot see. Admission (`accumulation-identity.ts`) refuses any shape below
   // that does not hold, and says why.
   'A STOCK AT THE DEADLINE IS WORKED OUT, NEVER GUESSED. Only when the goal states a deadline in months AND the goal depends on a stock that loses a share each month and gains an amount each month (paying subscribers with monthly churn and new sign-ups): add an outcome labelled with the stock and the deadline (e.g. "Pro subscribers at month 12"), link the stock today, its monthly churn and its monthly new additions each DIRECTLY to that outcome, and add one entry to `identities` with `operation` "accumulation", `outcome` that label, and `factors` EXACTLY [the stock today, the churn as a percentage per month (unit "%"), the amount added per month], in that order. Each of the three needs today\u2019s level. Whenever an accumulation is declared, the goal\u2019s PRODUCT in `identities` over [the price-like part, "<stock> at month N"] is REQUIRED; link both parts directly to the goal. Never use it for a churn stated per year, or without a stated deadline.',
+  'When the brief states the goal’s level today and its monthly change, the accumulation outcome may be the GOAL itself, with no product required. Use TWO factors [the level today, the net amount added per month] and reading "net" ONLY for a stated net change or an amount it "grows by"; a gross inflow with no stated losses has reading "gross" and is refused without assuming losses.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
   'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"); "change_abs" when they limit a CHANGE from today in the quantity\u2019s own unit ("churn no more than 2 points higher than now"); "change_rel" when they limit a PERCENTAGE change from today ("cost no more than 10% above today", "cut spend by at least 15%"): give `value` as that signed percentage (10, or -15) and `unit` "%". When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound and a floor such as a minimum margin is a lower bound; never add the opposite bound to the same limit. Type the comparator the user wrote: "<" for "under", "below" or "less than"; "<=" for "at most", "no more than" or "up to"; ">" for "over", "above" or "more than"; ">=" for "at least" or "no less than".',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
@@ -504,6 +508,7 @@ export function constructionOperationId(scenarioId: string, brief: string): stri
 export interface ConstructionVersion {
   readonly version_id: string;
   readonly version_number: number;
+  readonly created_at?: string;
   readonly mutation_id: string | null;
   readonly creation_kind: string;
   readonly source_turn_id: string;
@@ -547,6 +552,7 @@ export async function findConstructionVersion(
       return {
         version_id: String(hit.version_id),
         version_number: Number(hit.sequence),
+        ...(typeof hit.created_at === 'string' ? { created_at: hit.created_at } : {}),
         mutation_id: typeof creation.mutation_id === 'string' ? creation.mutation_id : null,
         creation_kind: String(creation.kind),
         // The id the ROW carries, not the one we searched for: equal under a
@@ -1603,8 +1609,7 @@ export async function buildModelFromBrief(
     const named = new Set(ids.flatMap((i) => [canonicalLabel(i.outcome), ...i.factors.map(canonicalLabel)]));
     return (label: string): boolean => named.has(canonicalLabel(label));
   };
-  // ⛔ A level the brief states for a factor is the user's, whatever the drafter tagged it (R3 5896630173 (2)).
-  candidate = creditStatedFactorLevels(apart.model, brief);
+  candidate = apart.model;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
   // A link size is the user's only where the brief writes it ABOUT THIS LINK (AIQ #2383 5916497454; P0 PARTNER #2389): the
@@ -1622,7 +1627,7 @@ export async function buildModelFromBrief(
     // first and waits for the user's Yes like the mint's, or dropped (and said) when its units don't compose.
     const { model: c1, dropped } = unconfirmGoalProducts(c0, brief);
     // ⛔ Olumi's gap residual beside the user's two parts is taken out first (and said), so the reading and card apply.
-    const gap = withoutGapResidual(c1, brief);
+    const gap = withoutGapResidual(c1, brief, (f) => verifiedFactorLevel(c1, f, brief));
     const c = gap?.model ?? c1;
     const residual = gap?.residual ?? null;
     // (A) A rate × count drawn as two added links into an outcome is Olumi's product of the two (Science 6008551439 (A)).
@@ -1827,7 +1832,7 @@ export async function buildModelFromBrief(
         const retryUnsupported = cutApplies ? withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model))
           : { model: retryHeld.model, mechanisms: [], costs: [] };
         const retryRaw = keepLimitedQuantityAuthor(
-          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryUnsupported.model, brief), firstCandidate, preparation.baseline_gaps),
+          neverTheLimitAsTodaysLevel(retryUnsupported.model, firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
@@ -1967,7 +1972,7 @@ export async function buildModelFromBrief(
   /**
    * ⭐ THE GOAL'S STATED TARGET SOURCE, DIRECTION AND DEADLINE ARE HELD ON THE GOAL NODE, WHEN THE BRIEF STATES THEM
    * (G1; `holdStatedGoalAttributes`). A factor named in the brief is not a baseline the brief states (DL #70
-   * 5851742282): `withdrawUnstatedBaselineStamps`. What the node now holds is no longer a loss, so its ledger line —
+   * 5851742282): admission now verifies its level with `verifiedFactorLevel`; no second text reader changes that verdict. What the node now holds is no longer a loss, so its ledger line —
    * "GraphV3 has nowhere to put it" / "a consumer cannot tell a floor from a ceiling" — would be false, and goes.
    * What is NOT held keeps its line, exactly as before.
    */
@@ -2043,7 +2048,7 @@ export async function buildModelFromBrief(
         } as AdmittedModel['loss'][number]])],
       };
     }
-    let heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+    let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief);
     // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
     const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
     if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {
@@ -2121,11 +2126,13 @@ export async function buildModelFromBrief(
     if (accumulation.loss.length > 0) {
       admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
     }
+    const declaredAccumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
+    const accumulated = admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges);
     const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
-      nodes: markOlumiOptions(withAccumulationCarriers(goalNodes, accumulation.carriers), candidate, brief),
-      edges: admitted.edges,
+      nodes: markOlumiOptions(accumulated.nodes, candidate, brief),
+      edges: accumulated.edges,
       ...(admitted.goal_constraints.length > 0
         ? { goal_constraints: admitted.goal_constraints }
         : {}),
@@ -2195,7 +2202,9 @@ export async function buildModelFromBrief(
      * owes no duplicate question here: decision-input-ask.ts supplies the shared present-number horizon qualification
      * to the draft/Run reply and the Run's typed warning.
      */
-    const horizon = candidate.goal?.horizon_months;
+    const claimedHorizon = candidate.goal?.horizon_months;
+    const horizon = typeof claimedHorizon === 'number' && claimedHorizon > 0
+      ? statedGoal.horizon.proposed_months ?? claimedHorizon : claimedHorizon;
     // ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
     // ("by Q3" needs a year and a fiscal calendar) is asked in the brief's OWN words, in this same first slot. Before, the
     // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
@@ -2203,7 +2212,7 @@ export async function buildModelFromBrief(
     // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
     if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
       openQuestions.unshift(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
-    } else if (statedGoal.horizon.status === 'unresolved') {
+    } else if (statedGoal.horizon.status === 'unresolved' && statedGoal.horizon.proposed_months === undefined) {
       const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
       openQuestions.unshift(deadlineHeld
         ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`

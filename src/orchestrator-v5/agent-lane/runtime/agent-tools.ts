@@ -504,11 +504,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record the DEADLINE the user has stated for their goal ("we have a deadline in 6 months", "by Q2", "by the end of March", '
       + '"7 April 2027"), as a date on the goal. Call it in the SAME turn the user states it, even beside another change they ask for. '
       + 'Give deadline_words EXACTLY as the user wrote the deadline phrase (for example "a deadline in 6 months"): Olumi works out the '
-      + 'calendar date itself, from today, and the card asks the user to confirm it ("Is your deadline 7 April 2027 (6 months from '
-      + 'today)?"). Never compute or state a date yourself, and never pass a duration that is not the deadline (for example how long '
+      + 'calendar date itself, from the brief’s recorded creation date, and the card asks the user to confirm it ("Is your deadline 7 April 2027 (6 months from '
+      + '7 October 2026)?"). Never compute or state a date yourself, and never pass a duration that is not the deadline (for example how long '
       + 'recruitment takes). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
       + 'authorise_change once the user agrees; never show the id.',
     parameters: obj({
+      reference_date: { type: 'string', description: 'Only an explicit YYYY-MM-DD the user typed as “as of”; the deadline card will ask them to confirm that reference. Otherwise omit it and use the recorded draft date.' },
       deadline_words: { type: 'string', maxLength: 80, description: 'The user\u2019s own words for the deadline, verbatim (for example "a deadline in 6 months" or "end of Q2").' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
     }, ['deadline_words', 'rationale']),
@@ -927,7 +928,7 @@ export interface AgentCapabilities {
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { low_months: number; high_months: number }): Promise<ToolResult>;
   /** S-E GOALS: the user's stated deadline as a date on the goal, proposed for approval. */
-  proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string }): Promise<ToolResult>;
+  proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string; reference_date?: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
   proposeOptionStatus?(ctx: AgentToolContext, args: {
     option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;

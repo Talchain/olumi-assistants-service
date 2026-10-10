@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 import { identityConflictsWithScope, nodesOf } from './goal-scope.js';
 /**
  * ⭐ AX1 — WHEN THE ANALYSIS CANNOT RANK A PRICE × VOLUME GOAL, THE ARITHMETIC STILL ANSWERS (DL #70 5850280205:
@@ -120,6 +121,7 @@ export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): B
   const volume = byId.get(volumeId);
   const pos = price?.observed_state;
   const vos = volume?.observed_state;
+  if (isUnverifiedUserMaterial(pos) || isUnverifiedUserMaterial(vos)) return null;
   const cap = typeof pos?.cap === 'number' && pos.cap > 0 ? pos.cap : undefined;
   const p0 = exactRaw(pos, cap);
   const v0 = exactRaw(vos, undefined);

@@ -129,6 +129,8 @@ export const ObservedStateV3 = z.object({
    *  couldn't save that change." Derived BY EXECUTION at this tip, with a
    *  `user_override` positive control, before this line was written. */
   source: z.enum(OBSERVED_STATE_SOURCE_LITERALS).optional(),
+  /** Drafter claimed user material, but current-level quote validation refused credit. */
+  user_material_unverified: z.literal(true).optional(),
   /** Raw value before normalization (preserves original extraction) */
   raw_value: z.number().optional(),
   /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
@@ -303,6 +305,10 @@ export const NodeV3 = z.object({
    */
   goal_period: GoalPeriod.optional().catch(undefined),
   goal_horizon: GoalHorizonSchema.optional().catch(undefined),
+  /** S4: the recorded draft reference and count reading, retained through reload. */
+  goal_horizon_reference_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined),
+  goal_horizon_stated_months: z.number().int().positive().optional().catch(undefined),
+  goal_stock_reading: z.literal('one_off').optional().catch(undefined),
   goal_stated_as: z.array(GoalStatedAsSchema).min(1).max(20).optional().catch(undefined),
   option_status: OptionStatus.optional().catch(undefined),
   count_noun: CountNounSchema.optional().catch(undefined),
@@ -546,7 +552,7 @@ export const NodeV3 = z.object({
    *  RESPONSE-ONLY: recomputed deterministically by `transformResponseToV3`
    *  on every response. Not read by analysis, repair, or PLoT pipelines.
    *  Safe to ignore on round-tripped graphs — value is regenerated. */
-  provenance: z.enum(["from_brief", "ai_inferred", "user_set"]).optional(),
+  provenance: z.enum(["from_brief", "ai_inferred", "user_set", "unverified_brief"]).optional(),
   /** ⭐⭐ THE USER'S EXACT WORDS, for the inspector and the hover surface.
    *
    *  Present only on nodes projected from a stated record, carrying that
@@ -671,6 +677,12 @@ export const NodeV3 = z.object({
         operation: z.literal('sum'),
         factor_ids: z.array(z.string().min(1)).min(2),
         stated_in_brief: z.literal(false),
+      }).strict(),
+      // S4 Q1: graph-level validation below restricts this arm to a goal's accumulation carrier.
+      z.object({
+        operation: z.literal('sum'),
+        factor_ids: z.tuple([z.string().min(1)]),
+        stated_in_brief: z.boolean(),
       }).strict(),
       // ⭐ `accumulation` (Science goals §(v); contract: programme-docs design/ACCUMULATION-CARRIER-CONTRACT-20261008.md):
       // a STOCK at the goal's horizon, worked out without time-stepping, S_T = S₀(1−c)^T + inflow·(1−(1−c)^T)/c, on a
@@ -1089,7 +1101,17 @@ export type ValidationWarningV3T = z.infer<typeof ValidationWarningV3>;
  */
 export const GraphV3 = z.object({
   /** Graph nodes */
-  nodes: z.array(NodeV3),
+  nodes: z.array(NodeV3).transform((nodes): NodeV3T[] => nodes.map(node => {
+    const identity = node.nonlinear_identity;
+    if (identity?.operation !== 'sum' || identity.factor_ids.length !== 1) return node;
+    const operand = nodes.find(n => n.id === identity.factor_ids[0]);
+    const carrier = operand?.nonlinear_identity;
+    if (node.kind === 'goal' && operand?.kind === 'outcome' && carrier?.operation === 'accumulation'
+      && carrier.horizon_months === node.goal_horizon_months && typeof operand.scale_frame === 'number'
+      && operand.scale_frame > 0) return node;
+    const { nonlinear_identity: _invalid, ...withoutIdentity } = node;
+    return withoutIdentity;
+  })),
   /** Graph edges */
   edges: z.array(EdgeV3),
   /**

@@ -1880,6 +1880,7 @@ function buildLifecycleBlocksFromPrior(
   if (selectCanonicalAnalysisState({
     priorFacts,
     currentGraphHash: freshness.current_graph_hash,
+    currentScenarioRevision: undefined,
   }).contradictions.includes('fact_status_success_but_degraded_newer')) {
     emitLifecycle(lifecycle, {
       lifecycle_state: 'skipped_shadowed',

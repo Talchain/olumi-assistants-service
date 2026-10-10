@@ -2280,6 +2280,7 @@ export async function runTurnExecutor(
   let contextPackPromptCanonical: CanonicalAnalysisState | null = null;
   let proposedHandlerIdForOutcome: string | null = null;
   let currentAnalysisGraphHashForTurn: string | null = null;
+  let currentScenarioRevisionForTurn: number | undefined;
   // The RAW graph object the freshness hash was computed from. Canonical state,
   // served readiness, and Run-chip admission all derive from this SAME graph
   // authority — the persisted/canonical
@@ -2324,6 +2325,7 @@ export async function runTurnExecutor(
               ),
               currentGraphHash: currentAnalysisGraphHashForTurn,
               currentGraph: canonicalReadinessGraphForRun,
+              currentScenarioRevision: currentScenarioRevisionForTurn,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -2369,6 +2371,7 @@ export async function runTurnExecutor(
               ),
               currentGraphHash: currentAnalysisGraphHashForTurn,
               currentGraph: canonicalReadinessGraphForRun,
+              currentScenarioRevision: currentScenarioRevisionForTurn,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -2702,6 +2705,7 @@ export async function runTurnExecutor(
    * source that is not request-supplied.
    */
   let handlerFactsForCommit: readonly HandlerFact[] = [];
+  let runEvaluatedRevisionForCommit: HandlerOutcome['__run_evaluated_revision'];
   /**
    * THE POST-DISPATCH FACT WINDOW, HOISTED SO `finalizeRun` CAN READ THE
    * BINDING RATHER THAN RETYPE THE LITERAL.
@@ -2952,6 +2956,8 @@ export async function runTurnExecutor(
     // the same representation. Provisional graphs are already validated at the
     // request boundary. Absent/unavailable selections yield no hash/readiness;
     // they never reconstruct authority from request or transcript state.
+    currentScenarioRevisionForTurn = contextGraphSelection.status === 'canonical'
+      ? context.persistedRevision : undefined;
     const selectedGraphForFreshness: unknown =
       contextGraphSelection.status === 'canonical' && contextGraphForReasoning !== null
         ? canonicaliseForAnalysis(contextGraphForReasoning)
@@ -3009,6 +3015,7 @@ export async function runTurnExecutor(
       // append never sets the restore marker.
       {
         currentGraph: canonicalReadinessGraphForRun,
+        currentScenarioRevision: currentScenarioRevisionForTurn,
         ...(context.prior_facts_read_ok === undefined
           ? {}
           : { priorFactsReadOk: context.prior_facts_read_ok }),
@@ -3025,6 +3032,7 @@ export async function runTurnExecutor(
       currentGraphOptionIdsForTurn,
       {
         currentGraph: canonicalReadinessGraphForRun,
+        currentScenarioRevision: currentScenarioRevisionForTurn,
         priorFactsReadOk: scenarioAnalysisFactsReadOk,
         // Same marker, same turn, same read — see the routing derivation above.
         ...(context.analysis_invalidated_at === undefined
@@ -3460,6 +3468,7 @@ export async function runTurnExecutor(
         ...(context.prior_facts_read_ok === undefined
           ? {}
           : { priorFactsReadOk: context.prior_facts_read_ok }),
+        currentScenarioRevision: currentScenarioRevisionForTurn,
         analysisInvalidatedAt: context.analysis_invalidated_at,
         priorFactsWithTurn: context.prior_facts_with_turn,
         legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -4223,6 +4232,7 @@ export async function runTurnExecutor(
           // This is also the canonical frame returned by finalisation; wire,
           // Run admission and diagnostics therefore read one record.
           currentAnalysisGraphHashForTurn = postApplyHash;
+          currentScenarioRevisionForTurn = committed.persistedGraph != null ? committed.revision : undefined;
           canonicalReadinessGraphForRun = committed.persistedGraph;
           // Invalidate the pre-repair memo, then reuse the already-approved
           // per-turn canonical assembly seam. Adding another direct selector
@@ -4232,6 +4242,9 @@ export async function runTurnExecutor(
           freshness = {
             freshness: canonicalStateForRun.freshness,
             reason: canonicalStateForRun.freshness_reason,
+            selected_fact_row_id: canonicalStateForRun.selected_fact_row_id,
+            run_revision: canonicalStateForRun.run_revision,
+            basis: canonicalStateForRun.basis,
             selected_fact_index: canonicalStateForRun.selected_fact_index,
             computed_at: canonicalStateForRun.computed_at,
             graph_hash_at_run: canonicalStateForRun.graph_hash_at_run,
@@ -4560,12 +4573,16 @@ export async function runTurnExecutor(
           // Same canonical-state reuse as the readiness-repair sibling: one
           // record for wire, Run admission and diagnostics.
           currentAnalysisGraphHashForTurn = postApplyHash;
+          currentScenarioRevisionForTurn = committed.persistedGraph != null ? committed.revision : undefined;
           canonicalReadinessGraphForRun = committed.persistedGraph;
           nonExecuteCanonicalMemo = undefined;
           canonicalStateForRun = canonicalStateForNonExecute()!;
           freshness = {
             freshness: canonicalStateForRun.freshness,
             reason: canonicalStateForRun.freshness_reason,
+            selected_fact_row_id: canonicalStateForRun.selected_fact_row_id,
+            run_revision: canonicalStateForRun.run_revision,
+            basis: canonicalStateForRun.basis,
             selected_fact_index: canonicalStateForRun.selected_fact_index,
             computed_at: canonicalStateForRun.computed_at,
             graph_hash_at_run: canonicalStateForRun.graph_hash_at_run,
@@ -4854,7 +4871,7 @@ export async function runTurnExecutor(
           const postApplyHash = ((): string | null => {
             try {
               return computeAnalysisAffectingGraphHash(
-                outcome.mutatedGraph as GraphStateIngress | null | undefined,
+                committed.persistedGraph as GraphStateIngress | null | undefined,
               );
             } catch {
               return null;
@@ -4864,12 +4881,13 @@ export async function runTurnExecutor(
             context.prior_facts,
             postApplyHash,
             config.cee.optionIdentityFreshnessGuard
-              ? extractGraphOptionIds(outcome.mutatedGraph)
+              ? extractGraphOptionIds(committed.persistedGraph)
               : undefined,
           
             // PR #981 review P1b: same flag, same question (see routingFreshness).
             {
-              currentGraph: outcome.mutatedGraph,
+              currentGraph: committed.persistedGraph,
+              currentScenarioRevision: committed.persistedGraph != null ? committed.revision : undefined,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -5139,7 +5157,7 @@ export async function runTurnExecutor(
           const postApplyHash = ((): string | null => {
             try {
               return computeAnalysisAffectingGraphHash(
-                lastExecuted!.mutatedGraph as GraphStateIngress | null | undefined,
+                committed.persistedGraph as GraphStateIngress | null | undefined,
               );
             } catch {
               return null;
@@ -5149,12 +5167,13 @@ export async function runTurnExecutor(
             context.prior_facts,
             postApplyHash,
             config.cee.optionIdentityFreshnessGuard
-              ? extractGraphOptionIds(lastExecuted.mutatedGraph)
+              ? extractGraphOptionIds(committed.persistedGraph)
               : undefined,
           
             // PR #981 review P1b: same flag, same question (see routingFreshness).
             {
-              currentGraph: lastExecuted.mutatedGraph,
+              currentGraph: committed.persistedGraph,
+              currentScenarioRevision: committed.persistedGraph != null ? committed.revision : undefined,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -12382,6 +12401,7 @@ export async function runTurnExecutor(
         stagesCompleted.push('execute');
         handlerIdForCommit = proposedHandlerId;
         handlerFactsForCommit = handlerOutcome.handler_facts;
+        runEvaluatedRevisionForCommit = handlerOutcome.__run_evaluated_revision;
         // P0 V5 golden-path repair (follow-up): record graph-mutation
         // observation for turn_outcome.graph_mutated. Any non-null
         // `mutated_graph` on the handler outcome counts — handler-id
@@ -13229,6 +13249,8 @@ export async function runTurnExecutor(
       // onto the ingress shape so the comparison is apples-to-apples
       // with how `graph_hash_at_run` was originally computed.
       let currentGraphForPostHandlerFreshness = canonicalReadinessGraphForRun;
+      const currentRevisionForPostHandlerFreshness = handlerOutcome.mutated_graph === undefined
+        ? currentScenarioRevisionForTurn : undefined;
       const hashForPostHandlerFreshness = ((): string | null => {
         if (handlerOutcome.mutated_graph === undefined) {
           return currentAnalysisGraphHashForTurn;
@@ -13287,6 +13309,7 @@ export async function runTurnExecutor(
         // read degraded, where 'none' would again be an unsupported claim.
         {
           currentGraph: currentGraphForPostHandlerFreshness,
+          currentScenarioRevision: currentRevisionForPostHandlerFreshness,
           analysisInvalidatedAt: context.analysis_invalidated_at,
           priorFactsWithTurn: context.prior_facts_with_turn,
           legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -13395,6 +13418,7 @@ export async function runTurnExecutor(
         readiness: canonicalReadinessForRun,
         currentGraphHash: hashForPostHandlerFreshness,
         currentGraph: currentGraphForPostHandlerFreshness,
+        currentScenarioRevision: currentRevisionForPostHandlerFreshness,
         analysisInvalidatedAt: context.analysis_invalidated_at,
         priorFactsWithTurn: context.prior_facts_with_turn,
         legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -15229,6 +15253,10 @@ export async function runTurnExecutor(
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
+        ...(runEvaluatedRevisionForCommit !== undefined && handlerFactsForCommit.some(f =>
+          f.fact_type === 'run_analysis' && f.result.run_id === runEvaluatedRevisionForCommit?.run_id)
+          ? { run_evaluated_revisions: { [runEvaluatedRevisionForCommit.run_id]: runEvaluatedRevisionForCommit.revision } }
+          : {}),
         graph: graphForCommit,
         briefText: context.scenarioBriefText ?? undefined,
         ...(Array.isArray(pendingForCommit) && pendingForCommit.length > 0
