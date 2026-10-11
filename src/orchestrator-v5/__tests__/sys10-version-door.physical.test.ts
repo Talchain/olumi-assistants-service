@@ -282,5 +282,6 @@ describe('SYS10 real door → real service → real adapter; storage transport d
     expect(result.diagnostics).toEqual([]);
   }, 120_000);
 
-  it.skip('UNRUN A/B real-DB concurrency, partial transaction rollback/retry and durable reload: no DB/network authorised', () => {});
+  // Real transaction/concurrency/rollback/reload bodies live in the existing
+  // env-gated tests/integration/slice-b-concurrent-writes.test.ts suite.
 });

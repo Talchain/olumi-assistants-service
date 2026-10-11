@@ -33,6 +33,7 @@ vi.mock('@supabase/supabase-js', async (importOriginal) => ({
 
 import versionsRoute from '../assist.v1.scenario-versions.js';
 import { SupabaseCollabStore } from '../../collab/store.js';
+import { bindWriteCaller } from '../../orchestrator-v5/ownership/door-ownership.js';
 import { mintRound } from '../../collab/rounds-service.js';
 import { resetModelManagementServiceForTests } from '../../orchestrator-v5/model-management/index.js';
 import { resetSessionStoreForTests } from '../../orchestrator-v5/session/index.js';
@@ -186,10 +187,10 @@ async function http(method: 'GET' | 'POST', suffix: string, payload?: Row) {
   } finally { await app.close(); }
 }
 
-const mint = () => mintRound(new SupabaseCollabStore(boundary.client!), {
+const mint = () => bindWriteCaller({ userId: OWNER, verified: true }, () => mintRound(new SupabaseCollabStore(boundary.client!), {
   scenario_id: SCENARIO, actor: { kind: 'owner', user_id: OWNER }, context_note: null,
   target_manifest: [{ target: { kind: 'factor', id: 'n1' }, label: 'Working model', description: null, unit: null }],
-});
+}));
 
 describe('S1-E read-to-write base through the real commit doors', () => {
   for (const writer of ['save', 'mint'] as const) {
