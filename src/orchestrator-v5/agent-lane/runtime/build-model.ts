@@ -687,7 +687,7 @@ export interface AdditionWithoutTotal {
   readonly reason: 'baseline_unknown' | 'unit_mismatch' | 'factor_unknown' | 'factor_ambiguous' | 'value_kind_unknown';
   readonly factor_unit?: string;
 }
-export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number }
+export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number; readonly unit?: string }
 /**
  * ⛔ A LIMIT THE USER STATED IS NEVER DROPPED UNSEEN.
  *
@@ -2453,6 +2453,25 @@ export async function buildModelFromBrief(
   const replayed = (reg.json as { replayed?: unknown }).replayed === true;
   // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated.
   const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link');
+  // RUN58: a refused claimed-user self-setting is not an AI figure. The invalid self-target cannot
+  // reach analysis, but its original amount/unit remain in the existing demotion/disclosure carrier.
+  for (const withheld of admitted.withheld) {
+    if (withheld.reason !== 'loop_closing_link' || withheld.from !== withheld.to) continue;
+    const node = admitted.nodes.find(n => n.id === withheld.from);
+    if (node === undefined || node.interventions?.[withheld.to] !== undefined) continue;
+    const originals = candidate.options.filter(o => canonicalLabel(o.label) === canonicalLabel(node.description ?? node.label));
+    if (originals.length !== 1) continue;
+    const option = originals[0]!;
+    for (const iv of option.interventions ?? []) {
+      if (canonicalLabel(iv.factor_label) !== canonicalLabel(option.label) || iv.provenance !== 'explicit'
+        || verifiedOptionSetting(candidate, option, iv, brief)) continue;
+      if (!preparation.provenance_demoted.some(d => d.option === option.label && d.factor === iv.factor_label && d.value === iv.value)) {
+        preparation.provenance_demoted.push({ option: option.label, factor: iv.factor_label, value: iv.value,
+          ...(iv.unit === undefined ? {} : { unit: iv.unit }) });
+      }
+    }
+  }
+
 
   return {
     ok: true,

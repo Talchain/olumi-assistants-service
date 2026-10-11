@@ -147,6 +147,13 @@ function optionRoleRefused(text: string, factor?: Factor): boolean {
     && !ws.slice(0, state).includes('would')) return true;
   // A comparison to another entity is not a receipt for this option's own quantity.
   if (ws.includes('like')) return true;
+  // #94 6105226165: a quantity in an action's purpose is not its controlled setting.
+  // Reuse the existing action and head-boundary readers as a negative role check.
+  const tokensInClause = [...text.matchAll(/[\p{L}\p{N}]{1,64}/gu)];
+  if (tokensInClause.some((token, i) => token[0].toLowerCase() === 'to' && LABEL_HEAD_BOUNDARY.test(token[0])
+    && ARMS.has(tokensInClause[i + 1]?.[0].toLowerCase() ?? '')
+    && tokensInClause.slice(0, i).some(head => ARMS.has(head[0].toLowerCase()))
+    && findLinkEffectAmounts(text).some(amount => amount.index > token.index!))) return true;
   return false;
 }
 
@@ -170,7 +177,15 @@ function settingClause(a: Assertion, at: number, change = false, ownedStart?: nu
       if (optionRoleRefused(part, factor)) return null;
       if (factor === undefined ? findStatedAmounts(part).length > 1
         : findLinkEffectAmounts(part).filter(n => sameFrame(part, { start: n.index, end: n.index + n.matchedText.length }, factor.unit, n, factor.label)).length > 1) return null;
-      if (ws.some(w => NOT_POINT.has(w) && !(change && isChangeWord(w) && (!BOUNDS.has(w) || w === 'more'))) || /[+/()]|[0-9][ \t]{0,4}(?:or|and|-)[ \t]{0,4}[0-9]/iu.test(part)) return null;
+      // RUN58b: a change modifier in a later purpose is not a modifier on the preceding point.
+      // Bounds/denial/conditional markers retain their whole-arm refusal; only that misplaced change gate is scoped.
+      const tokens = [...part.matchAll(/[\p{L}\p{N}]{1,64}/gu)];
+      const purpose = tokens.find(t => t.index! > at - start && t[0].toLowerCase() === 'to' && LABEL_HEAD_BOUNDARY.test(t[0]));
+      if (tokens.some(t => {
+        const w = t[0].toLowerCase();
+        return NOT_POINT.has(w) && !(change && isChangeWord(w) && (!BOUNDS.has(w) || w === 'more'))
+          && !(purpose !== undefined && t.index! > purpose.index! && isChangeWord(w) && !BOUNDS.has(w));
+      }) || /[+/()]|[0-9][ \t]{0,4}(?:or|and|-)[ \t]{0,4}[0-9]/iu.test(part)) return null;
       // The complete local clause supplies the setting; a numeric alternative is never a point.
       if (ws.includes('or') || ws.includes('but') || ws.includes('if')) return null;
       found = { text: part, start, frame: [first ?? ''] };
@@ -255,7 +270,15 @@ function coordinatedSettingClause(a: Assertion, at: number, change = false, owne
       if (optionRoleRefused(part, factor)) return null;
       if (factor === undefined ? findStatedAmounts(part).length > 1
         : findLinkEffectAmounts(part).filter(n => sameFrame(part, { start: n.index, end: n.index + n.matchedText.length }, factor.unit, n, factor.label)).length > 1) return null;
-      if (ws.some(w => NOT_POINT.has(w) && !(change && isChangeWord(w) && (!BOUNDS.has(w) || w === 'more'))) || /[+/()]|[0-9][ \t]{0,4}(?:or|and|-)[ \t]{0,4}[0-9]/iu.test(part)) return null;
+      // RUN58b: a change modifier in a later purpose is not a modifier on the preceding point.
+      // Bounds/denial/conditional markers retain their whole-arm refusal; only that misplaced change gate is scoped.
+      const tokens = [...part.matchAll(/[\p{L}\p{N}]{1,64}/gu)];
+      const purpose = tokens.find(t => t.index! > at - start && t[0].toLowerCase() === 'to' && LABEL_HEAD_BOUNDARY.test(t[0]));
+      if (tokens.some(t => {
+        const w = t[0].toLowerCase();
+        return NOT_POINT.has(w) && !(change && isChangeWord(w) && (!BOUNDS.has(w) || w === 'more'))
+          && !(purpose !== undefined && t.index! > purpose.index! && isChangeWord(w) && !BOUNDS.has(w));
+      }) || /[+/()]|[0-9][ \t]{0,4}(?:or|and|-)[ \t]{0,4}[0-9]/iu.test(part)) return null;
       // The complete local clause supplies the setting; a numeric alternative is never a point.
       if (ws.includes('or') || ws.includes('but') || ws.includes('if')) return null;
       found = { text: part, start, ...(head === null ? {} : { bound: true }),

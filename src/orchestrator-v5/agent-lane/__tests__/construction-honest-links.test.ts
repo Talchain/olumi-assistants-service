@@ -243,18 +243,18 @@ describe('⛔ the kept option -> factor edge carries the user’s authorship of 
 
   it('an EXPLICIT restatement’s authorship moves onto the kept edge; an ai_proposed one confers none', () => {
     const a = admitCandidateModel(BANKED, {});
-    expect(source(a, 'hire_two_developers', 'developers_hired')).toBe('brief_extraction');
-    expect(source(a, 'hire_a_tech_lead', 'tech_leads_hired')).toBe('brief_extraction');
+    // #94 6105226165 safe withholding: unreceipted restatement; the edge and quantity are retained.
+    expect(source(a, 'hire_two_developers', 'developers_hired')).toBe('cee_hypothesis');
+    // #94 6105226165 safe withholding: unreceipted restatement; the edge and quantity are retained.
+    expect(source(a, 'hire_a_tech_lead', 'tech_leads_hired')).toBe('cee_hypothesis');
     // CONTRAST, same admission: an `ai_proposed` restatement, and a structural
     // edge with no restatement at all, stay Olumi's. ("Pilot Developer Hire" carried the
     // other ai_proposed restatement; it is withheld as indistinct now — see above — so
     // "Maintain Current Staffing", the same class of restatement, holds the contrast.)
     expect(source(a, 'maintain_current_staffing', 'existing_team_continuity')).toBe('cee_hypothesis');
     expect(source(a, 'hire_two_developers', 'onboarding_workload')).toBe('cee_hypothesis');
-    expect(assessConstructionSize(a).brief_stated_keys.edges).toEqual([
-      'option:hire a tech lead->factor:tech leads hired:positive',
-      'option:hire two developers->factor:developers hired:positive',
-    ]);
+    // #94 6105226165 safe withholding: the same two unreceipted restatements are retained, but earn no user-edge protection.
+    expect(assessConstructionSize(a).brief_stated_keys.edges).toEqual([]);
   });
 
   it('RED: a retry that moves "Hire Two Developers" onto "Tech leads hired" is REFUSED — 0 writes', async () => {
@@ -270,7 +270,8 @@ describe('⛔ the kept option -> factor edge carries the user’s authorship of 
     expect(s2.nodes).toBeLessThanOrEqual(s1.nodes);
     expect(s2.edges).toBeLessThanOrEqual(s1.edges);
     expect(s2.brief_stated_keys.nodes).toEqual(s1.brief_stated_keys.nodes);
-    expect(source(admitCandidateModel(retry, {}), 'hire_two_developers', 'tech_leads_hired')).toBe('brief_extraction');
+    // #94 6105226165 safe withholding: unreceipted restatement; the edge and quantity are retained.
+    expect(source(admitCandidateModel(retry, {}), 'hire_two_developers', 'tech_leads_hired')).toBe('cee_hypothesis');
 
     const s = sequence(first, retry);
     const dp = dispatcher();

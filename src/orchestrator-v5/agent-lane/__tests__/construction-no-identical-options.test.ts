@@ -269,13 +269,31 @@ const withCreditedType = (n: SNode, key: string): SNode => {
   if (typed.extractionType === undefined) typed.extractionType = type;
   return { ...n, observed_state: typed } as SNode;
 };
+// #94 6105226165 safe withholding: scripted whole-graph diffs show ONLY these original cells/edges lost unproved credit.
+const WITHHELD_BY_CASE: Record<string, readonly (readonly [string, string])[]> = {
+  'f-20260926T020217Z': [['59_with_ai_release', 'pro_plan_price']],
+  'f-20260926T022404Z': [['raise_pro_price_to_59', 'pro_plan_price']],
+  'f-20260926T001627Z': [['raise_to_59_with_release', 'pro_plan_price']],
+  'f-20260926T022612Z': [['59_with_ai_release', 'pro_plan_price'], ['49_with_ai_release', 'pro_plan_price']],
+};
+const safeWithholding = <G extends SGraph>(g: G, key: string): G => ({
+  ...g,
+  nodes: g.nodes.map(n => {
+    const ids = (WITHHELD_BY_CASE[key] ?? []).filter(([option]) => option === n.id).map(([, factor]) => factor);
+    if (ids.length === 0 || n.interventions === undefined) return n;
+    return { ...n, interventions: Object.fromEntries(Object.entries(n.interventions)
+      .map(([id, level]) => [id, ids.includes(id) ? { ...level, source: 'cee_hypothesis' } : level])) };
+  }),
+  edges: g.edges.map(e => (WITHHELD_BY_CASE[key] ?? []).some(([option, factor]) => e.from === option && e.to === factor)
+    ? { ...e, provenance: { ...e.provenance, source: 'cee_hypothesis' } } : e),
+});
 const after2355 = <G extends SGraph>(g: G, key: string, beforeMagnitudeSubtraction: SGraph): G => {
   const projected = asProjectedMeanCapture({
     ...g,
     edges: g.edges.map((e) => ((RESTAMPED_BY_2355[key] ?? []).some(([f, t]) => e.from === f && e.to === t)
       ? { ...e, provenance: { ...e.provenance, source: 'cee_hypothesis' } } : e)),
   }, beforeMagnitudeSubtraction);
-  return { ...projected, nodes: projected.nodes.map(n => withCreditedType(n, key)) } as G;
+  return safeWithholding({ ...projected, nodes: projected.nodes.map(n => withCreditedType(n, key)) } as G, key);
 };
 /**
  * Base (cb1778b) predates the limit frame (#1919): admission now stamps each limit's `value_frame` right
@@ -470,7 +488,7 @@ describe('controls — what the rule must never touch', () => {
     const graph = { ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => n) } as typeof registered;
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
+    expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(safeWithholding({ ...run.brief.draft_graph, nodes: olumisKnownLevels(run.brief.draft_graph.nodes) }, key).nodes);
     expect(unsized(graph).edges).toEqual(after2355(run.brief.draft_graph, key, graph).edges);
     expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, after2355(baseGraph(key), key, graph)), G1_NO_HORIZON_WORDS)))).toBe(JSON.stringify(framedBase(after2355(baseGraph(key), key, graph), key)));
     expect(out).not.toHaveProperty('options_withheld');
@@ -670,7 +688,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     ]);
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['current_setup', '59_with_ai_release', '49_with_ai_release']);
-    expect(levelOf(graph, '49_with_ai_release', AT_49.brief.draft_graph)).toEqual(AT_49.brief.draft_graph.nodes.find((n) => n.id === '49_with_ai_release')!.interventions);
+    expect(levelOf(graph, '49_with_ai_release', AT_49.brief.draft_graph)).toEqual(safeWithholding(AT_49.brief.draft_graph, 'f-20260926T022612Z').nodes.find((n) => n.id === '49_with_ai_release')!.interventions);
     expect(out).not.toHaveProperty('options_withheld');
   });
 

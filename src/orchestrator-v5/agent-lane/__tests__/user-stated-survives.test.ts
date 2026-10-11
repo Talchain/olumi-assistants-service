@@ -156,7 +156,18 @@ it('served property census', async () => {
 }, 120_000);
 
 // MISCREDITED → PRESERVED_UNVERIFIED under the one receipt authority, RUN 46; RUN47 adds exactly the 28 named RUN45 cells.
+// #94 6105226165 / RUN58: identity-only transitions, also pinned in user-stated-survives-baseline.json.
+// p44-lab-two-risks-20261008/B1-d2.json and p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d2.json:
+// raise_pro_price_to_59.pro_plan_price: withheld -> credited OPTION setting,
+// "Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?"
+// arm-mechanism-2842/B3-d3:event_option_2.event_context_7 and arm-mechanism/B3-d2:four_junior_engineers.junior_engineers_hired:
+// credited -> preserved-unverified; "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?"
+// RUN58b: the same original two/four receipt now binds both arms; the two named RUN58 B3 cells are credited,
+// so arm-mechanism-2842/B3-d3.json:event_option_2.event_context_7 and
+// arm-mechanism/B3-d2.json:four_junior_engineers.junior_engineers_hired leave this disclosed-withheld list.
 const PRESERVED_UNVERIFIED_BY_CASE: Record<string, string[]> = {
+
+
   "compound-A": [
     "all_reliability.engineers_on_reliability_work",
     "all_prototype.engineers_on_prototype",
@@ -230,17 +241,11 @@ const PRESERVED_UNVERIFIED_BY_CASE: Record<string, string[]> = {
   "p44-lab-two-risks-20261008/B1-d1.json": [
     "raise_pro_price_to_59.pro_monthly_price"
   ],
-  "p44-lab-two-risks-20261008/B1-d2.json": [
-    "raise_pro_price_to_59.pro_plan_price"
-  ],
   "p44-lab-two-risks-20261008/B1-d3.json": [
     "raise_pro_to_59.pro_plan_price"
   ],
   "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d1.json": [
     "59_with_next_release.pro_plan_price"
-  ],
-  "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d2.json": [
-    "raise_pro_price_to_59.pro_plan_price"
   ],
   "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d3.json": [
     "raise_pro_price_to_59.pro_plan_monthly_price"

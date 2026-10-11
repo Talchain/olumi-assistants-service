@@ -1,5 +1,5 @@
 {
-  "failing_count": 36,
+  "failing_count": 34,
   "failing_ids": [
     "compound-A",
     "compound-B",
@@ -28,10 +28,8 @@
     "arm-mechanism/B1-d3.json",
     "arm-mechanism/sealedR-d1.json",
     "p44-lab-two-risks-20261008/B1-d1.json",
-    "p44-lab-two-risks-20261008/B1-d2.json",
     "p44-lab-two-risks-20261008/B1-d3.json",
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d1.json",
-    "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d2.json",
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d3.json",
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d2.json",
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d3.json",
@@ -66,10 +64,8 @@
     "arm-mechanism/B1-d3.json": 1,
     "arm-mechanism/sealedR-d1.json": 1,
     "p44-lab-two-risks-20261008/B1-d1.json": 1,
-    "p44-lab-two-risks-20261008/B1-d2.json": 1,
     "p44-lab-two-risks-20261008/B1-d3.json": 1,
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d1.json": 1,
-    "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d2.json": 1,
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d3.json": 1,
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d2.json": 1,
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d3.json": 2,
@@ -171,17 +167,11 @@
     "p44-lab-two-risks-20261008/B1-d1.json": [
       "raise_pro_price_to_59.pro_monthly_price"
     ],
-    "p44-lab-two-risks-20261008/B1-d2.json": [
-      "raise_pro_price_to_59.pro_plan_price"
-    ],
     "p44-lab-two-risks-20261008/B1-d3.json": [
       "raise_pro_to_59.pro_plan_price"
     ],
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d1.json": [
       "59_with_next_release.pro_plan_price"
-    ],
-    "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d2.json": [
-      "raise_pro_price_to_59.pro_plan_price"
     ],
     "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d3.json": [
       "raise_pro_price_to_59.pro_plan_monthly_price"
@@ -200,5 +190,5 @@
       "launch_starter_tier.starter_tier_monthly_price"
     ]
   },
-  "_comment": "MISCREDITED \u2192 PRESERVED_UNVERIFIED under the one receipt authority, RUN 46; RUN47 adds exactly the 28 named RUN45 cells to the quality-gap ratchet."
+  "_comment": "MISCREDITED \u2192 PRESERVED_UNVERIFIED under the one receipt authority, RUN 46; RUN47 adds exactly the 28 named RUN45 cells to the quality-gap ratchet. RUN58 / #94 6105226165: p44-lab-two-risks-20261008/B1-d2.json and p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d2.json, raise_pro_price_to_59.pro_plan_price: preserved-unverified -> credited option setting; original quote: Should we increase the Pro plan price from \u00a349 to \u00a359 per month with the next Pro feature release? arm-mechanism-2842/B3-d3.json, event_option_2.event_context_7, and arm-mechanism/B3-d2.json, four_junior_engineers.junior_engineers_hired: credited -> preserved-unverified; original quote: Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under \u00a3400k? RUN58b: negative-guard position correction restores receipt credit to arm-mechanism-2842/B3-d3.json:event_option_2.event_context_7 and arm-mechanism/B3-d2.json:four_junior_engineers.junior_engineers_hired; exactly these two named cells leave the disclosed-withheld baseline (same original two/four quote above)."
 }

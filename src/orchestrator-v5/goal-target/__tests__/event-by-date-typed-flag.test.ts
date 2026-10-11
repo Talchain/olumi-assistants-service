@@ -202,7 +202,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
       // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
       // original raw has no receipt; credit unproved — #94 6101950357(b)
-      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(admissionBase, sealed(), 'sealedR-d3'))).digest('hex')).toBe('51dedb4c60d079449c34092aa5af38a7de169b193db8e84444c78195eaba14bb');
+    // #94 6105226165 safe withholding: run57-out/contract-field-diffs.json proves only named intervention source deltas.
+      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(admissionBase, sealed(), 'sealedR-d3'))).digest('hex')).toBe('74b533c21af3a5bcccca8e393e84ec2b1f80dec7d50c168a6c019ea1ea58efa0');
       expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
       expect(info.mock.calls.some(c => (c[0] as { event?: string } | undefined)?.event === 'cee.event_by_date.fallback_kept')).toBe(false);
       const { result, registrations } = await built(sealed(), SEALED_BRIEF);
@@ -259,7 +260,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(result).toMatchObject({ ok: true, mutated: true });
     expect(registrations).toHaveLength(1);
     // Base staging 94b2554d registered this exact graph (census r3, graph_sha prefix).
-    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrations[0], JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
+    // #94 6105226165 safe withholding: run57-out/contract-field-diffs.json proves only named intervention source deltas.
+    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrations[0], JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('1b13e7040116db46');
     expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
   });
 
@@ -399,6 +401,7 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(JSON.stringify(explicitFalse)).toBe(JSON.stringify(a));
     // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
     // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
-    expect(createHash('sha256').update(JSON.stringify(a)).digest('hex')).toBe('28e2aee7fbe6e85c468c897e27c181016d1efa53a7ab3d8888a01b9caa5056e0');
+    // #94 6105226165 safe withholding: run57-out/contract-field-diffs.json proves only named intervention source deltas.
+    expect(createHash('sha256').update(JSON.stringify(a)).digest('hex')).toBe('169151d4b116e58304f9ed44a943d088834c2b64f17c7ca0a4a92b7174f8a0b4');
   });
 });

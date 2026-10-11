@@ -288,7 +288,9 @@ describe('a signed change keeps its sign, and one factor carries one value space
     expect(level(graph, CUT, PRICE)).toBeUndefined();
     expect(level(graph, RAISE, PRICE)).toBeCloseTo(0.1, 10);
     expect(said(out, /today is 100/)).toHaveLength(0);
-    expect(said(out, /List price change/)).toHaveLength(1);
+    // #94 6105226165 safe withholding: the retained 5 has no matching receipt; disclosure accompanies the unchanged negative-level refusal.
+    expect(said(out, /List price change/)).toHaveLength(2);
+    expect(out.not_represented).toContain('"List price change": Not confirmed from your brief');
     expect((await runAnalysis(graph)).refusal).not.toBe('mixed_scale_unresolved');
   });
 

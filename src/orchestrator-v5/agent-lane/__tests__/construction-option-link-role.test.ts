@@ -88,7 +88,8 @@ describe('an option link or action the brief does not give is never the user\'s'
   it('CONTROL — the untouched drafter answer: the £59 price action is the user\'s, the churn limit is a constraint, and no option link to churn is the user\'s', async () => {
     const g = await register([FIXTURE.raw]);
     const act = priceAction(g);
-    expect(act?.[1]).toMatchObject({ raw_value: 59, source: 'brief_extraction' });
+    // #94 6105223338 denominator conflict: GBP/subscriber/month is not written as £59 a month.
+    expect(act?.[1]).toMatchObject({ raw_value: 59, source: 'cee_hypothesis' });
     expect((g.goal_constraints ?? []).some((c: Rec) => c.node_id === churnId(g) && c.value === 5 && c.provenance === 'explicit')).toBe(true);
     expect(userLinksToChurn(g)).toEqual([]);
   });
@@ -96,7 +97,8 @@ describe('an option link or action the brief does not give is never the user\'s'
   it('a drafted "explicit" link from the £59 option to churn is never registered as the user\'s (the retry repeats it)', async () => {
     const g = await register([plant(linkToChurn)]);
     expect(userLinksToChurn(g)).toEqual([]);
-    expect(priceAction(g)?.[1]).toMatchObject({ raw_value: 59, source: 'brief_extraction' });
+    // #94 6105223338 denominator conflict: only the price action's source is withheld.
+    expect(priceAction(g)?.[1]).toMatchObject({ raw_value: 59, source: 'cee_hypothesis' });
   });
 
   it('…nor when the retry answers the level gap by making the churn LIMIT the option\'s action', async () => {
@@ -135,13 +137,29 @@ describe('an option link or action the brief does not give is never the user\'s'
 
   it('CONTROL — an "explicit" link from the £59 option to the price it sets stays the user\'s', async () => {
     const g = await register([plant(linkToPrice)]);
-    expect(linkToPriceSource(g)).toEqual(['brief_extraction']);
+    // #94 6105223338 denominator conflict; edge authorship follows the unconfirmed setting.
+    expect(linkToPriceSource(g)).toEqual(['cee_hypothesis']);
   });
 
   it('CONTROL — the churn limit typed as the £59 option\'s "explicit" action is never the user\'s action', async () => {
     const g = await register([plant(limitAsAction)]);
     expect(userActionsOnChurn(g)).toEqual([]);
     expect((g.goal_constraints ?? []).some((c: Rec) => c.node_id === churnId(g) && c.value === 5)).toBe(true);
-    expect(priceAction(g)?.[1]).toMatchObject({ raw_value: 59, source: 'brief_extraction' });
+    // #94 6105223338 denominator conflict: only the price action's source is withheld.
+    expect(priceAction(g)?.[1]).toMatchObject({ raw_value: 59, source: 'cee_hypothesis' });
   });
 });
+
+// #94 6105223338: the original receipt, tested with and without the unwritten denominator.
+for (const [unit, source] of [['GBP per subscriber per month', 'cee_hypothesis'], ['GBP per month', 'brief_extraction']] as const) {
+  it(`denominator contrast: ${unit} -> ${source}`, async () => {
+    const raw = plant(m => {
+      for (const f of m.factors) if (f.label === 'Pro plan monthly price') f.unit = unit;
+      for (const o of m.options) for (const iv of o.interventions ?? [])
+        if (iv.factor_label === 'Pro plan monthly price') iv.unit = unit;
+    });
+    const g = await register([raw]);
+    expect(priceAction(g)?.[1]).toMatchObject({ raw_value: 59, source });
+    expect(userLinksToChurn(g)).toEqual([]);
+  });
+}

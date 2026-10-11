@@ -265,6 +265,15 @@ function beforeAiLevelTypes(nodes: Record<string, any>[], candidate: CandidateMo
   });
 }
 
+// #94 6105226165 safe withholding: whole-field diffs prove only these original price cells/edges lost unproved credit.
+const withheldPriceCells = <G extends Graph>(g: G): G => ({
+  ...g,
+  nodes: g.nodes.map(n => ['feature_59_price', 'features_hold_49_price'].includes(n.id) && n.interventions?.['pro_plan_price']
+    ? { ...n, interventions: { ...n.interventions, ['pro_plan_price']: { ...n.interventions['pro_plan_price'], source: 'cee_hypothesis' } } } : n),
+  edges: g.edges.map(e => ['feature_59_price', 'features_hold_49_price'].includes(e.from) && e.to === 'pro_plan_price'
+    ? { ...e, provenance: { ...e.provenance, source: 'cee_hypothesis' } } : e),
+});
+
 describe('the fixture IS the served model (fidelity, not a self-authored stand-in)', () => {
   it('served: the option pointed at itself, the self-link was the only loop, and Run was refused on it', async () => {
     expect(SERVED.analysis_ready).toMatchObject({ status: 'blocked', blocked_reason: 'CYCLE_DETECTED', may_run: false });
@@ -287,7 +296,7 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     const { out, body } = await build(candidate);
     const comparisonBody = { ...body, nodes: beforeAiLevelTypes(body.nodes as Record<string, any>[], candidate, 'served') } as Graph;
     const withheld = new Set(loopWithheld(out));
-    const servedNodes = typedLevels(SERVED.draft_graph.nodes.map((n) => {
+    const servedNodes = typedLevels(withheldPriceCells(SERVED.draft_graph).nodes.map((n) => {
       if (n.id !== ADVERTISING || !withheld.has(SELF)) return n;
       const { [ADVERTISING]: _self, ...rest } = n.interventions!;
       return { ...n, interventions: rest };
@@ -301,7 +310,7 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     // P2 A5 (#2139), landed after this capture too: option levels are read back in the served short form, on the SERVED
     // factors' own frames and units (`one-form-levels.ts`); anything else they carry still fails this compare.
     expect(asServedBeforeOneForm(comparisonBody, SERVED.draft_graph).nodes.map((n) => canon(withoutG1(n)))).toEqual(servedNodes.map(canon));
-    expect(beforeDoorTag(body).edges.map(canon)).toEqual(asProjectedMeanCapture(SERVED.draft_graph, body).edges.filter((e) => !withheld.has(`${e.from}->${e.to}`)).map(canon));
+    expect(beforeDoorTag(body).edges.map(canon)).toEqual(asProjectedMeanCapture(withheldPriceCells(SERVED.draft_graph), body).edges.filter((e) => !withheld.has(`${e.from}->${e.to}`)).map(canon));
     expect(canon(body.goal_constraints)).toEqual(canon(SERVED.draft_graph.goal_constraints));
   });
 
@@ -311,9 +320,16 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     const mine = { ...ADVERTISING_LEVEL, provenance: 'explicit' as const };
     expect(advertising(SERVED.draft_graph).interventions![ADVERTISING]!.value).toBe(0.2);
     const withFactor = await build(servedCandidate({ advertisingLevel: mine }));
-    expect(advertising(withFactor.graph).interventions![ADVERTISING]!.value).toBe(0.2);
     const optionAlone = await build(servedCandidate({ advertisingLevel: mine, advertisingFactorLabel: null }));
-    expect(advertising(optionAlone.graph).interventions![ADVERTISING]!.value).toBe(20000);
+    // #94 6105226165 safe withholding: no receipt; neither folded nor option-only self-target can enter analysis.
+    for (const result of [withFactor, optionAlone]) {
+      expect(advertising(result.graph).interventions?.[ADVERTISING]).toBeUndefined();
+      expect(result.out.provenance_demoted).toContainEqual({ option: 'Advertising investment',
+        factor: 'Advertising investment', value: 20000, unit: 'GBP over six months' });
+    }
+    expect(withFactor.out.not_represented).toContain('"Advertising investment": Not confirmed from your brief');
+    expect((optionAlone.out.not_represented as string[]).some(line => line.includes('20000')
+      && line.includes('as a working figure') && line.includes("confirm it and I'll mark it as yours"))).toBe(true);
   });
 });
 
@@ -373,7 +389,8 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
    * The same draft with the quantity named apart ("Advertising spend"): no shared name, no loop. Its registered
    * body is pinned to the digest recorded at the served SHA (CEE cd489f1, before this fix): byte-identical.
    */
-  const ACYCLIC_BODY_SHA256_AT_BASE = '2a2b04a4b4cce87995a9c42b96a95c478a617045d4aea6d626f548b40d909c58';
+  // #94 6105226165 safe withholding: only feature_59_price/features_hold_49_price.pro_plan_price source changes (scripted field proof).
+  const ACYCLIC_BODY_SHA256_AT_BASE = 'b0ee99024aae3a1e21dc7efaafa880a8b08df2005cae587febcfe5afd9e87b43';
 
   it('an acyclic draft registers byte-identical, with no loop said or asked', async () => {
     const candidate = servedCandidate({ advertisingFactorLabel: 'Advertising spend' });
@@ -405,14 +422,16 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     expect(loopLines(out).some((s) => s.includes("it was Olumi's reading, not something you said"))).toBe(true);
   });
 
-  it('a self-link carrying the USER’s own figure is never dropped: the figure stays, and nothing says it was Olumi’s', async () => {
+  it('an unreceipted self-setting preserves its figure and disclosure without user or AI attribution', async () => {
     const { out, graph } = await build(servedCandidate({ advertisingLevel: { ...ADVERTISING_LEVEL, provenance: 'explicit' } }));
-    expect(loopWithheld(out)).toEqual([]);
-    expect(has(graph, ADVERTISING, ADVERTISING)).toBe(true);
-    // P2 A5 (#2139): the level also names the key it is stored under (`target_match`), as every constructed level does.
-    expect(advertising(graph).interventions?.[ADVERTISING]).toEqual({
-      value: 0.2, source: 'brief_extraction', target_match: { node_id: ADVERTISING, match_type: 'exact_id', confidence: 'high' },
-    });
-    expect(loopLines(out).some((s) => s.includes("Olumi's reading"))).toBe(false);
+    // #94 6105226165: drafter explicit is not a receipt; preserve the claim, withhold the illegal topology.
+    expect(loopWithheld(out)).toEqual([SELF]);
+    expect(has(graph, ADVERTISING, ADVERTISING)).toBe(false);
+    expect(advertising(graph).interventions?.[ADVERTISING]).toBeUndefined();
+    expect(out.provenance_demoted).toContainEqual({ option: 'Advertising investment', factor: 'Advertising investment',
+      value: 20000, unit: 'GBP over six months' });
+    expect(out.not_represented).toContain('"Advertising investment": Not confirmed from your brief');
+    // The loop sentence describes Olumi's invalid topology, not authorship of the retained 20000 claim.
+    expect((out.not_represented as string[]).some(line => line.includes('20000') && line.includes("Olumi's estimate"))).toBe(false);
   });
 });

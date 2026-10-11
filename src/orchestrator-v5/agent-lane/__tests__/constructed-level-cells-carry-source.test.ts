@@ -139,7 +139,8 @@ describe('a constructed option level states where it came from', () => {
 
   it('a brief-stated level (in range) is stamped brief_extraction', () => {
     // 2 of a stated range of 20 → 0.1 on the model scale.
-    expectCell(admitCandidateModel(banked(), {}), 0.1, 2, 'brief_extraction');
+    // #94 6105226165 safe withholding: unreceipted Developers hired 2; numeric frame unchanged.
+    expectCell(admitCandidateModel(banked(), {}), 0.1, 2, 'cee_hypothesis');
   });
 
   it.each(['inferred', 'ai_proposed'])('a %s level (in range) is stamped cee_hypothesis', (provenance) => {
@@ -149,7 +150,8 @@ describe('a constructed option level states where it came from', () => {
   it('an above-range level carries the same claim (the range widens; the level is never kept raw)', () => {
     // 25 hires against a stated range of 20: the range widens to 0..100 (said), so the level is
     // 0.25 in the factor's one value space — never a raw 25 beside normalised siblings (#69 5835137365).
-    expectCell(admitCandidateModel(withProvenance('explicit', 25), {}), 0.25, 25, 'brief_extraction');
+    // #94 6105226165 safe withholding: unreceipted Developers hired 25; widened frame unchanged.
+    expectCell(admitCandidateModel(withProvenance('explicit', 25), {}), 0.25, 25, 'cee_hypothesis');
     expectCell(admitCandidateModel(withProvenance('inferred', 25), {}), 0.25, 25, 'cee_hypothesis');
   });
 

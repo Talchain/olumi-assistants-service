@@ -719,8 +719,9 @@ describe('(4) B1\' (5845793528): a compaction may shed Olumi\'s option that reus
    * The user's 7 as `/graph/register` carries it: 7 / plausible_max 20, sourced from the brief — and, since P2 A5, in the
    * one form: the 7 itself on the factor's own frame and unit ("developers", cap 20), and the factor it is keyed by.
    */
-  const USER_SEVEN_REGISTERED = {
-    source: 'brief_extraction', value: 7 / 20, raw_value: 7, unit: 'developers',
+  // #94 6105226165 safe withholding: Grow to Seven Developers/developer_headcount/7 has no verified receipt.
+const USER_SEVEN_REGISTERED = {
+    source: 'cee_hypothesis', value: 7 / 20, raw_value: 7, unit: 'developers',
     target_match: { node_id: 'developer_headcount', match_type: 'exact_id', confidence: 'high' },
   };
   const optionIds = (g: Graph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.id).sort();
