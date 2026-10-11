@@ -205,6 +205,22 @@ export function buildCandidateSchema(): Record<string, unknown> {
         stated_in_brief: { type: 'boolean', description: 'True only when the brief itself says which.' },
       }, ['modelled', 'alternative', 'stated_in_brief'])], description:
         'Null unless the goal metric could mean one part (a plan, product, segment or region) or the whole.' },
+      // ⭐ RECOVERY BATCH C (rulings 1–2, 11; amendments 2–5). PROMPT HUNK — science sign-off required before ship.
+      // Optional in the candidate contract (a recorded candidate validates unchanged); required in what is sent
+      // (`strictForTheDrafter`). Admission validates them (`goal-target-basis.ts`); nothing is inferred from their absence.
+      quantity_frame: { type: 'string', enum: ['level', 'change'], description:
+        '"change" ONLY when the goal metric is itself measured as a change from today (see the CHANGE QUANTITIES rule); otherwise "level".' },
+      basis: { anyOf: [{ type: 'null' }, obj({
+        reference: { type: 'string', enum: ['today', 'launch'] },
+        denominator: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        period_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+        period_kind: { type: 'string', enum: ['at_end', 'over_period'] },
+        effect_unit: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        effects_at_period_end: { type: 'boolean' },
+        also_required: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
+        open_question: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      }, ['reference', 'denominator', 'period_months', 'period_kind', 'effect_unit', 'effects_at_period_end', 'also_required', 'open_question'])],
+      description: 'What the target is measured against (see the TARGET SEMANTICS rule). null when the goal states no target.' },
     }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'frame', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
@@ -213,6 +229,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // R1 (`@talchain/schemas` 0.61.0, `limit-frame.ts`): the contract's three writable frames. Legacy `delta` (a change
       // from the MODEL'S ORIGIN) gets no new writers.
       frame: { type: 'string', enum: ['level', 'change_abs', 'change_rel'] },
+      // ⭐ RECOVERY BATCH C (ruling 15) — PROMPT HUNK, science sign-off required. Optional in the contract.
+      role: { type: 'string', enum: ['limit', 'target'], description:
+        '"target" ONLY for one of SEVERAL success targets the user names beside the goal\u2019s own (see the SEVERAL TARGETS rule); a budget, time or other limit is "limit".' },
     }, ['metric', 'operator', 'value', 'unit', 'provenance', 'frame']) },
     /**
      * ⛔ NO `maxItems` ON ANYTHING THAT CAN HOLD USER MATERIAL. Removed after an
@@ -460,6 +479,10 @@ export const BUILD_INSTRUCTIONS = [
   // ("keep a risk only for a separate harm … otherwise leave it out") also dropped separate harms: risks 23 → 10 (lsD).
   'A LIMIT CAN ONLY BE CHECKED THROUGH SIZED LINKS. NO LINK MAY POINT FROM A RISK TO A QUANTITY IN `constraints`: a risk has no unit, so that link cannot be sized and the user’s limit cannot be checked. Instead, link every factor an option changes that moves the limited quantity STRAIGHT to it and give that link its size. That sized link already carries the limited quantity moving the wrong way, so do not size that loss a second time: keep that risk as a node, linked to the goal metric with all three size fields null. Every OTHER risk stays exactly as you would draw it, linked to the goal metric or to the quantity it threatens.',
   'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
+  // ⭐⭐ RECOVERY BATCH C — THE PROMPT HUNK FOR SCIENCE SIGN-OFF (rulings 1–5, 11, 15; amendments 2–5). ONE instruction.
+  'CHANGE QUANTITIES. When the goal is a percentage change of a quantity that has no unit of its own in the brief and whose level today the brief does not give ("increase productivity by at least 10%"), measure the goal AS that change: goal.quantity_frame "change", goal.frame "change_abs", goal.unit "%", goal.value the signed percentage (10), and the metric named for the quantity ("Productivity"). Every link into that goal then states effect_amount in % of today\u2019s level of it, per effect_per_source_change of its source, as the size AT the end of the goal\u2019s period, including recruitment, notice and ramp-up \u2014 never a steady-state size; two people are twice one person. A quantity with a unit of its own (money, customers, a rate in %) keeps goal.quantity_frame "level" and the frames above. '
+  + 'TARGET SEMANTICS. Whenever the goal states a target, give goal.basis: reference "today", or "launch" when the targets are measured from a launch; denominator, for a change, what 100% is, in words (for example "today\u2019s monthly development capacity"), null for a level target; period_months, the months at which or over which the target is measured; period_kind "at_end" for the level or change AT that month, "over_period" for a rate or a count over the first period_months; effect_unit, the unit every link into the goal states its effect in; effects_at_period_end true ONLY when every effect_amount into the goal is its size at the end of that period, including recruitment and ramp-up; also_required, the other conditions the user says the goal needs that this target does not include, in their words (for example "code quality maintained", "spend within \u00a3200,000"), else null; open_question, when the user\u2019s own words let the target be read more than one way (for example productivity described as a share of time, so "+10%" could mean 10% more than today or 10 more percentage points), the ONE question that asks which \u2014 never pick a reading \u2014 else null. With no stated target, basis is null. '
+  + 'SEVERAL TARGETS. When the user names MORE THAN ONE success target ("a conversion rate over 15% and 20 new customers within the first 3 months after launch"), make one of them the goal and put each other one in `constraints` with role "target", frame "level", the comparator exactly as written (">" for "over" or "above", ">=" for "at least") and the same period; every budget, time or other limit keeps role "limit". A count over a period is the total over that period from its start ("New customers in the first three months after launch"); a rate over a period is that period\u2019s rate ("Conversion rate over the first three months after launch"), never a month-end snapshot.',
   'Labels are NAMES, not sentences.',
   'Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.',
   'Output only the schema.',
@@ -582,6 +605,28 @@ export async function findConstructionVersion(
  * the model links to it by its exact label; the unchanged identity check still
  * refuses anything else.
  */
+/** Recovery Batch C: the drafted basis pinned value by value (strict output must return it unchanged), or `null`. */
+function pinnedBasis(b: CandidateModel['goal']['basis']): Record<string, unknown> {
+  if (b === null || b === undefined || typeof b !== 'object') return { type: 'null' };
+  const str = (v: unknown): Record<string, unknown> => (typeof v === 'string' ? { type: 'string', enum: [v] } : { type: 'null' });
+  const also = Array.isArray(b.also_required) ? b.also_required.filter((x): x is string => typeof x === 'string') : null;
+  return {
+    type: 'object', additionalProperties: false,
+    required: ['reference', 'denominator', 'period_months', 'period_kind', 'effect_unit', 'effects_at_period_end', 'also_required', 'open_question'],
+    properties: {
+      reference: { type: 'string', enum: [b.reference === 'launch' ? 'launch' : 'today'] },
+      denominator: str(b.denominator),
+      period_months: typeof b.period_months === 'number' ? { type: 'integer', enum: [b.period_months] } : { type: 'null' },
+      period_kind: { type: 'string', enum: [b.period_kind === 'over_period' ? 'over_period' : 'at_end'] },
+      effect_unit: str(b.effect_unit),
+      effects_at_period_end: { type: 'boolean', enum: [b.effects_at_period_end === true] },
+      also_required: also === null ? { type: 'null' }
+        : { type: 'array', minItems: also.length, maxItems: also.length, items: also.length === 0 ? { type: 'string' } : { type: 'string', enum: also } },
+      open_question: str(b.open_question),
+    },
+  };
+}
+
 export function retrySchemaPinningGoal(
   goal: CandidateModel['goal'],
   /**
@@ -621,6 +666,10 @@ export function retrySchemaPinningGoal(
       ? { type: 'number', enum: [goal.baseline_value] }
       : { type: 'null' },
     baseline_provenance: { type: 'string', enum: [goal.baseline_provenance ?? goal.provenance] },
+    // Recovery Batch C: the quantity's frame and the target's semantics are part of the goal, so a compaction cannot drop
+    // or change them. Absent (a candidate from before the fields) pins to "level" and "none" (null).
+    quantity_frame: { type: 'string', enum: [goal.quantity_frame === 'change' ? 'change' : 'level'] },
+    basis: pinnedBasis(goal.basis),
     // C46: the scope is part of the goal, so a compaction cannot switch readings or drop the
     // question. An absent scope (a candidate from before the field) pins to "none" (null).
     scope: goal.scope === null || goal.scope === undefined || typeof goal.scope !== 'object'
