@@ -1341,13 +1341,18 @@ async function runStructuralEditTool(input: {
   // receipts); the referee gate below in this dispatch then returns its ONE
   // governing verdict over the whole batch, exactly as it does for the
   // deterministic path. No second applier exists.
+  const encoderPreimage = GraphV3.safeParse(persisted);
   const editResultForPart = await handleEditGraph(
     context,
     payload.message,
     adapter,
     requestId,
     payload.turn_id,
-    { preComposedOperations: firstPart.operations as readonly PatchOperation[] },
+    { preComposedOperations: firstPart.operations as readonly PatchOperation[],
+      persistedGraph: encoderPreimage.success ? encoderPreimage.data : null,
+      preimageScope: { scenarioId: payload.scenario_id, persistedScenarioId: payload.scenario_id,
+        modelRevision: computeAnalysisAffectingGraphHash(encoderPreimage.success ? encoderPreimage.data : null),
+        expectedModelRevision: computeAnalysisAffectingGraphHash(context.graph) } },
   );
 
   return {
@@ -2325,8 +2330,19 @@ export async function dispatchEditGraph(
     }
   }
 
+  // Reuse the persistence writer's strict read before the edit; ingress is not a trusted preimage.
+  let persistedEncoderBase: unknown;
+  try { persistedEncoderBase = useAppendV6() ? editBase?.graph : await loadPersistedGraphStrict(payload.scenario_id); }
+  catch (cause) { throw new ModelReadFailedError(cause); }
+  const parsedEncoderBase = GraphV3.safeParse(persistedEncoderBase);
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
     graphStateToGraphV3WithParseResult(graphState, requestId, editBase?.graph != null);
+  const encoderContinuity = {
+    persistedGraph: parsedEncoderBase.success ? parsedEncoderBase.data : null,
+    preimageScope: parsedEncoderBase.success ? { scenarioId: payload.scenario_id, persistedScenarioId: payload.scenario_id,
+      modelRevision: computeAnalysisAffectingGraphHash(parsedEncoderBase.data),
+      expectedModelRevision: computeAnalysisAffectingGraphHash(parsedGraph) } : null,
+  };
   let recordedAnswer: RecordedEffectAnswer | null = null;
   if (params.recordedEffectAnswer !== undefined) {
     const resolved = resolveRecordedOptionEffectAnswer({
@@ -2965,13 +2981,13 @@ export async function dispatchEditGraph(
           // The native restatement wins when both resolve: it is an answer to a
           // question the product ASKED, and the option-effect resolution is a
           // read of the sentence. A recorded answer outranks a fresh guess.
-          nativeQuantityOperation !== null
-            ? { preComposedOperations: nativeQuantityOperation }
-            : optionEffectOperations === null
-            ? undefined
-            : { preComposedOperations: optionEffectOperations,
-                humanAuthority: optionEffectWrite === null ? []
-                  : [{ optionId: optionEffectWrite.optionId, factorId: optionEffectWrite.factorId }] },
+          { ...encoderContinuity,
+            ...(nativeQuantityOperation !== null
+              ? { preComposedOperations: nativeQuantityOperation }
+              : optionEffectOperations === null ? {}
+              : { preComposedOperations: optionEffectOperations,
+                  humanAuthority: optionEffectWrite === null ? []
+                    : [{ optionId: optionEffectWrite.optionId, factorId: optionEffectWrite.factorId }] }) },
         );
         // ⭐ THE NATIVE PATH'S OWN LANDING CHECK AND ACK.
         //
@@ -3293,7 +3309,7 @@ export async function dispatchEditGraph(
       if (useAppendV6()) {
         strictBase = editBase!.graph;
       } else {
-        strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+        strictBase = persistedEncoderBase;
       }
     } catch (err) {
       log.warn(

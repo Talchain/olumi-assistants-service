@@ -4436,6 +4436,8 @@ export async function runTurnExecutor(
         const outcome = executeValueBatch({
           proposal: read.proposal,
           currentGraph: baseGraph,
+          scenarioId: context.session_id,
+          expectedGraphHash: batchPending.preconditions?.graph_hash,
         });
         if (outcome.status !== 'executed') {
           log.warn(

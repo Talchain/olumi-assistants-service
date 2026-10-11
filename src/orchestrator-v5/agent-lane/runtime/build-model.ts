@@ -679,6 +679,10 @@ export function retrySchemaPinningGoal(
  * can confirm it. A candidate with no `value_kind` (stored before the field) is left
  * exactly as it was on staging.
  */
+interface VerifiedNativeAddition {
+  readonly claim: NonNullable<CandidateModel['options'][number]['interventions']>[number];
+  readonly verified: true;
+}
 export interface AdditionWithoutTotal {
   readonly option: string;
   readonly factor: string;
@@ -686,8 +690,9 @@ export interface AdditionWithoutTotal {
   readonly unit?: string;
   readonly reason: 'baseline_unknown' | 'unit_mismatch' | 'factor_unknown' | 'factor_ambiguous' | 'value_kind_unknown';
   readonly factor_unit?: string;
+  readonly native_addition?: VerifiedNativeAddition;
 }
-export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number; readonly unit?: string }
+export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number; readonly unit?: string; readonly native_addition?: VerifiedNativeAddition }
 /**
  * ⛔ A LIMIT THE USER STATED IS NEVER DROPPED UNSEEN.
  *
@@ -815,18 +820,26 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
             : !(solo.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief));
         if (intervention.provenance === 'explicit' && refused) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
-          interventions.push({ ...intervention, provenance: 'ai_proposed' });
+          // Keep the original unconfirmed claim, including its governing condition, as reasoning through reload.
+          interventions.push({ ...intervention, provenance: 'ai_proposed',
+            ...(intervention.basis === undefined && intervention.stated_evidence != null
+              ? { basis: intervention.stated_evidence.quote } : {}) });
         } else {
           interventions.push(intervention);
         }
         continue;
       }
       const factor = factors.length === 1 ? factors[0] : undefined;
+      // Retain a verified native operand separately from any unsupported computed total.
+      const nativeAddition: VerifiedNativeAddition | undefined = kind === 'additional'
+        && verifiedOptionSetting(model, option, intervention, brief)
+        ? { claim: structuredClone(intervention), verified: true } : undefined;
       const unresolved = (reason: AdditionWithoutTotal['reason']): void => {
         additions_without_total.push({
           option: option.label, factor: intervention.factor_label, value: intervention.value, reason,
           ...(intervention.unit ? { unit: intervention.unit } : {}),
           ...(factor?.unit ? { factor_unit: factor.unit } : {}),
+          ...(nativeAddition === undefined ? {} : { native_addition: nativeAddition }),
         });
         // Kept as what the option ACTS ON, with no level — never a guessed total.
         if (factors.length > 0) becameChanges.push(intervention.factor_label);
@@ -845,8 +858,14 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       const receipt = verifiedOptionTotal(model, option, intervention, brief);
       const verifiedTotal = receipt.verified;
       const statedFigure = verifiedTotal && !receipt.derived;
+      // An inferred zero cannot turn a verified addition into a literal/current total.
+      if (!verifiedTotal && nativeAddition !== undefined
+        && (factor.baseline_known !== true || (factor.baseline_value === 0 && !verifiedFactorLevel(model, factor, brief)))) {
+        unresolved('baseline_unknown'); continue;
+      }
       if (brief !== undefined && !verifiedTotal && intervention.provenance === 'explicit' && factor.baseline_known === true) {
-        provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
+        provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value,
+          ...(nativeAddition === undefined ? {} : { native_addition: nativeAddition }) });
       }
       // Withholding credit does not remove the existing uncertainty of a claimed-user operand computation.
       const uncertainty: Pick<Iv, 'value_confidence'> = !statedFigure && factor.baseline_known && factor.baseline_value !== 0
@@ -860,7 +879,9 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
         // Admission marks the level (`constructedLevel`) so the not-modelled manifest never credits a brief literal to it.
         ...(statedFigure ? {} : { derived_total: true }),
         ...uncertainty,
-        ...(receipt.basis === undefined ? {} : { basis: receipt.basis }),
+        ...(receipt.basis === undefined
+          ? verifiedTotal || intervention.basis !== undefined || nativeAddition?.claim.stated_evidence == null ? {} : { basis: nativeAddition.claim.stated_evidence.quote }
+          : { basis: receipt.basis }),
       } as Iv);
     }
     const changes = [...(option.changes ?? [])];
@@ -2463,11 +2484,16 @@ export async function buildModelFromBrief(
     if (originals.length !== 1) continue;
     const option = originals[0]!;
     for (const iv of option.interventions ?? []) {
-      if (canonicalLabel(iv.factor_label) !== canonicalLabel(option.label) || iv.provenance !== 'explicit'
+      if (canonicalLabel(iv.factor_label) !== canonicalLabel(option.label)
         || verifiedOptionSetting(candidate, option, iv, brief)) continue;
-      if (!preparation.provenance_demoted.some(d => d.option === option.label && d.factor === iv.factor_label && d.value === iv.value)) {
+      const retained = preparation.provenance_demoted.find(d => d.option === option.label && d.factor === iv.factor_label && d.value === iv.value);
+      // Preparation already demoted a modern claimed-user level; enrich that exact retained claim, never an AI guess.
+      if (retained === undefined && iv.provenance !== 'explicit') continue;
+      if (retained === undefined) {
         preparation.provenance_demoted.push({ option: option.label, factor: iv.factor_label, value: iv.value,
           ...(iv.unit === undefined ? {} : { unit: iv.unit }) });
+      } else if (retained.unit === undefined && iv.unit !== undefined) {
+        preparation.provenance_demoted[preparation.provenance_demoted.indexOf(retained)] = { ...retained, unit: iv.unit };
       }
     }
   }

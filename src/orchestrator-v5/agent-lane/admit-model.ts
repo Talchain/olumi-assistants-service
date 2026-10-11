@@ -77,7 +77,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting, verifiedOptionTotal } from './verified-option-setting.js';
+import { verifiedFactorLevel, verifiedGoalLevel, verifiedOptionAction, verifiedOptionSetting, verifiedOptionTotal } from './verified-option-setting.js';
 
 const MAX_ID = 100;
 
@@ -3329,6 +3329,7 @@ function admitOnce(
   sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null,
 ): AdmittedModel {
   // RUN52: establish receipt authority on native figures BEFORE the existing affine conversion.
+  const actionVerdicts = new Map<string, Map<string, string>>();
   const receiptVerdicts = new WeakMap<NonNullable<CandidateModel['options'][number]['interventions']>[number], boolean>();
   const { model: restatedModel, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
   for (const option of restatedModel.options) {
@@ -3338,6 +3339,11 @@ function admitOnce(
       const originalsForFactor = nativeOption?.interventions?.filter(i => i.factor_label === iv.factor_label) ?? [];
       const native = originalsForFactor.length === 1 ? originalsForFactor[0]! : undefined;
       if (nativeOption === undefined || native === undefined) { receiptVerdicts.set(iv, false); continue; }
+      if (verifiedOptionAction(candidateModel, nativeOption, native, brief)) {
+        const quantities = actionVerdicts.get(option.label) ?? new Map<string, string>();
+        quantities.set(iv.factor_label, native.stated_evidence!.quote);
+        actionVerdicts.set(option.label, quantities);
+      }
       const factors = candidateModel.factors.filter(f => f.label === native.factor_label);
       const baseline = factors.length === 1 ? factors[0]!.baseline_value : null;
       const derived = 'derived_total' in native && native.derived_total === true;
@@ -4479,7 +4485,7 @@ function admitOnce(
   // authored, so recording one as a projection would dilute the ledger and hide
   // the real projections.
   const decisionId = ids.get(DECISION_LABEL)!;
-  const topo = (from: string, to: string) => ({
+  const topo = (from: string, to: string): AdmittedEdge => ({
     from,
     to,
     strength: { ...STRUCTURAL_EDGE_DEFAULTS.strength },
@@ -4551,23 +4557,29 @@ function admitOnce(
    * canonical structural values, which is all the validator checks.
    */
   const USER_AUTHORED_EDGE_SOURCES = new Set(['brief_extraction', 'user_specified']);
-  /**
-   * ⛔ …AND ONLY THE OPTION'S OWN USER-STAMPED ACTION PUTS THE USER'S NAME ON ITS LINK (AIQ 5909030106 / 5909528911,
-   * DL 5909532986; MG SUCCESSOR root cause 5909516196). A link's `explicit` becomes `brief_extraction` for ANY link
-   * (`admit-candidate.ts`), so the drafter's word alone made "Raise price to £59 → Monthly churn" the user's on Paul's
-   * brief, whose only action is the price rise (P0's counterexample on the served control; the level-gap retry kept it
-   * whether it repeated the link, failed, or answered with the churn LIMIT as the option's action). An option → X link
-   * is the user's only when the brief's own words for that option name X (AIQ 5909754019 (1)), and admission has ONE
-   * reliable witness of that: the option's USER-STAMPED LEVEL on X ("Raise to £59" → the price). Everything else the
-   * drafter supplies (a `changes` entry, an Olumi level, a restated link) is its word, not the brief's, and no lexical
-   * test tells "£59 with AI release" → AI feature availability from "Raise price" → "Price-driven churn". So it fails
-   * CLOSED to Olumi's, which the user can confirm (P0 PARTNER CR 5909944908: H1 the level-gap retry's Olumi level,
-   * H2 a drafted `changes` entry, H3 an Olumi level in the first answer, each with a drafted `explicit` link, all became
-   * the user's under a "the user's option acts on X" rule). An under-claim is honest; a false "yours" is the defect.
+  /** A drafted link never witnesses its own authorship. An exact human/verified level or an independently
+   * verified original proposed-action receipt can witness only this option→quantity relationship.
+   * Changes lists, matching labels and useful wiring confer nothing. The structural constants are not
+   * authored effects, and the relationship verdict never grants a level, denominator or current observation.
    */
+  // A verified qualitative action witnesses only the relationship; quantitative credit remains receiptVerdicts-only.
+  const authoredActions = new Map([...actionVerdicts].flatMap(([option, factors]) => {
+    const optionId = ids.get(option);
+    return optionId === undefined ? [] : [[optionId, new Map([...factors].flatMap(([factor, quote]) => {
+      const factorId = ids.get(factor);
+      return factorId === undefined ? [] : [[factorId, quote] as const];
+    }))] as const];
+  }));
   const userActsOn = (optionId: string, factorId: string): boolean =>
-    USER_AUTHORED_EDGE_SOURCES.has(String(interventionsByOption.get(optionId)?.[factorId]?.source ?? ''));
+    USER_AUTHORED_EDGE_SOURCES.has(String(interventionsByOption.get(optionId)?.[factorId]?.source ?? ''))
+    || authoredActions.get(optionId)?.has(factorId) === true;
   for (const t of topologyEdges) {
+    if (authoredActions.get(t.from)?.has(t.to) === true) {
+      // Same structural writer and constants: authored relationship, never an authored coefficient.
+      t.provenance = { source: levelSourceFor('explicit', authoredActions.get(t.from)?.has(t.to) === true),
+        source_quote: authoredActions.get(t.from)!.get(t.to)! };
+      continue;
+    }
     if (!duplicatePairs.has(`${t.from}::${t.to}`) || !userActsOn(t.from, t.to)) continue;
     const userStated = linkResult.edges.find(
       (e) => e.from === t.from && e.to === t.to && USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')),

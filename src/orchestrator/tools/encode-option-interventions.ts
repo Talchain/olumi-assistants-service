@@ -31,6 +31,7 @@
  */
 import { normaliseFactorValue } from '../../orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.js';
 import { isDeepStrictEqual } from 'node:util';
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { OBSERVED_ROOT_SPELLINGS } from '../canonicalise-value-ops.js';
 import { log } from '../../utils/telemetry.js';
 import { buildFactorScaleMap, resolveRawInterventionValue, type FactorScaleInfo } from '../../orchestrator-v5/tools/plot-intervention-scale.js';
@@ -197,6 +198,20 @@ interface RawIntervention {
 /** In-process proof of the exact cells in a direct human edit/approval; never read from graph bytes. */
 export type InterventionHumanAuthority = readonly { readonly optionId: string; readonly factorId: string }[];
 
+/** Caller-owned operation/preimage identity, never accepted from a graph or edit payload. */
+export interface InterventionPreimageScope {
+  readonly scenarioId: string;
+  readonly persistedScenarioId: string;
+  readonly modelRevision: string | null;
+  readonly expectedModelRevision: string | null;
+}
+
+function preimageScopeMatches(scope: InterventionPreimageScope | null | undefined): boolean {
+  return scope !== undefined && scope !== null && scope.scenarioId.length > 0
+    && scope.scenarioId === scope.persistedScenarioId && typeof scope.modelRevision === 'string'
+    && scope.modelRevision.length > 0 && scope.modelRevision === scope.expectedModelRevision;
+}
+
 export interface EncodeOptionInterventionsResult<T> {
   /** The encoded graph (a clone) when any option was rewritten; else the original reference. */
   readonly graph: T;
@@ -210,6 +225,29 @@ export interface EncodeOptionInterventionsResult<T> {
 
 function isPlainObject(v: unknown): v is Dict {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Continuity retains historical bytes only; it is not a receipt or renewed verification. */
+function unchangedPersistedIntervention(graph: unknown, current: unknown, scope: InterventionPreimageScope | null | undefined,
+  optionId: string, factorId: string, cell: Dict): boolean {
+  if (!preimageScopeMatches(scope) || !isPlainObject(graph) || !Array.isArray(graph.nodes)
+    || !isPlainObject(current) || !Array.isArray(current.nodes)) return false;
+  const unique = (nodes: unknown[]) => {
+    const ids = nodes.filter(isPlainObject).map(n => n.id);
+    return ids.every(id => typeof id === 'string') && new Set(ids).size === ids.length;
+  };
+  if (!unique(graph.nodes) || !unique(current.nodes)
+    || (Array.isArray(graph.options) && !unique(graph.options))
+    || (Array.isArray(current.options) && !unique(current.options))) return false;
+  const previousOption: unknown = graph.nodes.find(n => isPlainObject(n) && n.id === optionId && n.kind === 'option');
+  const previousFactor: unknown = graph.nodes.find(n => isPlainObject(n) && n.id === factorId && n.kind === 'factor');
+  const factor: unknown = current.nodes.find(n => isPlainObject(n) && n.id === factorId && n.kind === 'factor');
+  if (!isPlainObject(previousOption) || !isPlainObject(previousOption.interventions)
+    || !isPlainObject(previousFactor) || !isPlainObject(factor)) return false;
+  const previous = previousOption.interventions[factorId];
+  if (!isPlainObject(previous)) return false;
+  // Conservative full-node equality includes every declared/native factor frame and identity field.
+  return isDeepStrictEqual(previous, cell) && isDeepStrictEqual(previousFactor, factor);
 }
 
 function finiteNum(v: unknown): number | undefined {
@@ -625,6 +663,9 @@ export function encodeOptionInterventionsForEdit<T>(
   touchedOptionIds?: ReadonlySet<string>,
   mustConfigureOptionIds?: ReadonlySet<string>,
   humanAuthority: InterventionHumanAuthority = [],
+  // Caller-owned pre-edit stored snapshot, never an operation payload or post-edit graph.
+  persistedGraph?: T | null,
+  preimageScope?: InterventionPreimageScope | null,
 ): EncodeOptionInterventionsResult<T> {
   if (!isPlainObject(graph) || !Array.isArray((graph as Dict).nodes)) {
     return { graph, unresolvedOptionIds: [] };
@@ -668,25 +709,35 @@ export function encodeOptionInterventionsForEdit<T>(
       const targets = optionTargets.get(id) ?? [];
       const recovered = gatherRawInterventions(node, targets);
 
-      // Preserve numeric top-level entries verbatim (PR #276 configured entries).
+      // Preserve PR #276 numeric fabric; a graph stamp alone is not authority.
       const base: Dict = {};
-      let humanStamped = false;
+      let authorityChanged = false;
       const top = node.interventions;
       if (isPlainObject(top)) {
         for (const [fac, iv] of Object.entries(top)) {
           if (toRawIntervention(iv).value !== undefined) {
             base[fac] = isPlainObject(iv) ? { ...iv } : iv;
-            if (isPlainObject(base[fac]) && base[fac].source === undefined
-              && humanAuthority.some(cell => cell.optionId === id && cell.factorId === fac)) {
-              base[fac].source = 'user_specified';
-              humanStamped = true;
+            const cell = base[fac];
+            if (isPlainObject(cell)) {
+              const approved = humanAuthority.some(pair => pair.optionId === id && pair.factorId === fac);
+              if (approved && classifyValueSource(cell.source) === 'user_stated' && cell.source !== 'user_specified') {
+                cell.source = 'user_specified';
+                authorityChanged = true;
+              } else if (classifyValueSource(cell.source) === 'user_stated' && !approved
+                && !unchangedPersistedIntervention(persistedGraph, graph, preimageScope, id, fac, cell)) {
+                delete cell.source;
+                authorityChanged = true;
+              } else if (cell.source === undefined && approved) {
+                cell.source = 'user_specified';
+                authorityChanged = true;
+              }
             }
           }
         }
       }
 
       if (recovered.size === 0) {
-        if (humanStamped) plan.push({ index: i, id, bundle: base });
+        if (authorityChanged) plan.push({ index: i, id, bundle: base });
         // Nothing to encode here. A touched option carrying node-level intervention
         // intent that gatherRawInterventions could not attribute (SHAPE 2 with an
         // ambiguous target — zero or multiple factor edges) is malformed → defer.

@@ -58,7 +58,7 @@ const GOAL = 'mrr';
 const SELF = `${ADVERTISING}->${ADVERTISING}`;
 
 type Link = { from: string; to: string; direction: 'positive' | 'negative'; provenance: 'explicit' | 'inferred'; effect_amount?: number; effect_per_source_change?: number };
-type Level = { factor_label: string; value: number; unit: string; provenance: 'explicit' | 'inferred' };
+type Level = { factor_label: string; value: number; unit: string; provenance: 'explicit' | 'inferred'; value_kind?: 'absolute' };
 const L = (from: string, to: string, direction: Link['direction'], extra: Partial<Link> = {}): Link => ({ from, to, direction, provenance: 'inferred', ...extra });
 
 /** The option's level on the quantity that shares its name — Olumi's £20k, as served (`cee_hypothesis`). */
@@ -433,5 +433,21 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     expect(out.not_represented).toContain('"Advertising investment": Not confirmed from your brief');
     // The loop sentence describes Olumi's invalid topology, not authorship of the retained 20000 claim.
     expect((out.not_represented as string[]).some(line => line.includes('20000') && line.includes("Olumi's estimate"))).toBe(false);
+  });
+
+  it('a modern unreceipted self-setting enriches exactly one retained claim with its native unit', async () => {
+    const candidate = servedCandidate({ advertisingLevel: { ...ADVERTISING_LEVEL, provenance: 'explicit', value_kind: 'absolute' } });
+    // Known baseline + supplied production brief reaches preparation's absolute receipt refusal before loop retention.
+    expect(candidate.factors.find(f => f.label === 'Advertising investment')).toMatchObject({ baseline_known: true, baseline_value: 0 });
+    const { out, graph } = await build(candidate);
+    const retained = (out.provenance_demoted as { option: string; factor: string; value: number; unit?: string }[])
+      .filter(d => d.option === 'Advertising investment' && d.factor === 'Advertising investment' && d.value === 20000);
+    expect(retained).toStrictEqual([{ option: 'Advertising investment', factor: 'Advertising investment',
+      value: 20000, unit: 'GBP over six months' }]);
+    expect(out.not_represented).toContain('"Advertising investment": Not confirmed from your brief');
+    expect((out.not_represented as string[]).some(line => line.includes('20000') && line.includes("Olumi's estimate"))).toBe(false);
+    expect(loopWithheld(out)).toEqual([SELF]);
+    expect(has(graph, ADVERTISING, ADVERTISING)).toBe(false);
+    expect(advertising(graph).interventions?.[ADVERTISING]).toBeUndefined();
   });
 });

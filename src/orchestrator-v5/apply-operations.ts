@@ -670,7 +670,7 @@ export function createApplyOperations(
     const touched = optionIdsTouchedByOperations(operations, applied);
     const mustConfigure = optionIdsAddedWithInterventionIntent(operations);
     const approvedLevels = approvedInterventionTargets(operations, applied.nodes);
-    const encoded = encodeOptionInterventionsForEdit(applied, touched, mustConfigure, approvedLevels);
+    const encoded = encodeOptionInterventionsForEdit(applied, touched, mustConfigure, approvedLevels, before, { scenarioId, persistedScenarioId: scenarioId, modelRevision: baseRevision, expectedModelRevision: input.modelRevision });
     if (encoded.unresolvedOptionIds.length > 0) {
       return refuse('I could not work out what that change means for the options, so I have not saved it');
     }

@@ -59,6 +59,7 @@ import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-ed
 // cycle (`import type` is erased).
 import {
   classifyIssueObligation,
+  classifyValueSource,
   type ObligationClass,
   type StructureProvenance,
 } from "../../cee/graph-readiness/obligation-provenance.js";
@@ -1465,9 +1466,40 @@ export function assessCanonicalAnalysisReadiness(
     // out. The empty touched set is the proposal candidate: it canonicalises
     // every safely expressible carrier while deliberately leaving unresolved
     // options alone, so one bad option cannot hide safe work on another.
-    const strictEncoding = encodeOptionInterventionsForEdit(graph);
-    const proposalEncoding = encodeOptionInterventionsForEdit(graph, new Set<string>());
-    const proposalGraph = proposalEncoding.graph;
+    // No operation/revision authority accompanies this read-only view. Historical bytes remain on the input.
+    const strictEncoding = encodeOptionInterventionsForEdit(graph, undefined, undefined, [], null /* no scoped preimage */, null);
+    const proposalEncoding = encodeOptionInterventionsForEdit(graph, new Set<string>(), undefined, [], null /* no scoped preimage */, null);
+    // Withholding a fresh analysis verdict must not migrate historical source bytes.
+    const retainHistoricalSources = (view: unknown): unknown => {
+      if (!isPlainObject(view) || !Array.isArray(view.nodes)) return view;
+      return { ...view, nodes: view.nodes.map((node) => {
+        if (!isPlainObject(node) || node.kind !== 'option' || typeof node.id !== 'string'
+          || !isPlainObject(node.interventions)) return node;
+        const before = optionRecordById(graph, node.id);
+        if (!before || !isPlainObject(before.interventions)) return node;
+        const oldInterventions = before.interventions;
+        const interventions = Object.fromEntries(Object.entries(node.interventions).map(([id, cell]) => {
+          const old = oldInterventions[id];
+          if (!isPlainObject(old) || !isPlainObject(cell) || cell.source !== undefined
+            || classifyValueSource(old.source) !== 'user_stated') return [id, cell];
+          const { source: _source, ...content } = old;
+          return [id, sameJson(content, cell) ? old : cell];
+        }));
+        return { ...node, interventions };
+      }) };
+    };
+    const historicalProposalGraph = retainHistoricalSources(proposalEncoding.graph);
+    // The options[] mirror may own analysis order; it cannot renew a historic cell's source verdict either.
+    const proposalGraph = isPlainObject(proposalEncoding.graph) && Array.isArray(proposalEncoding.graph.options)
+      ? { ...proposalEncoding.graph, options: proposalEncoding.graph.options.map((option) => {
+          if (!isPlainObject(option) || !isPlainObject(option.interventions)) return option;
+          return { ...option, interventions: Object.fromEntries(Object.entries(option.interventions).map(([id, cell]) => {
+            if (!isPlainObject(cell) || classifyValueSource(cell.source) !== 'user_stated') return [id, cell];
+            const { source: _source, ...content } = cell;
+            return [id, content];
+          })) };
+        }) }
+      : proposalEncoding.graph;
     const parsed = GraphV3.safeParse(proposalGraph);
     if (!parsed.success) {
       const issue: CanonicalReadinessIssue = {
@@ -1497,7 +1529,7 @@ export function assessCanonicalAnalysisReadiness(
     for (const node of parsed.data.nodes) {
       if (node.kind !== 'option') continue;
       const before = optionRecordById(graph, node.id);
-      const after = optionRecordById(proposalGraph, node.id);
+      const after = optionRecordById(historicalProposalGraph, node.id);
       if (!before || !after || sameJson(before, after)) continue;
       const issueId = `carrier_${carrierIssues.length + 1}`;
       carrierIssues.push({
@@ -1682,7 +1714,7 @@ export function assessCanonicalAnalysisReadiness(
         };
     const safeToAnalyse = blockingIssues.length === 0 && analysisReady?.status === 'ready';
     const strictCanonicalGraph = strictEncoding.unresolvedOptionIds.length === 0
-      ? strictEncoding.graph
+      ? retainHistoricalSources(strictEncoding.graph)
       : null;
     return {
       analysisReady,
@@ -1690,7 +1722,7 @@ export function assessCanonicalAnalysisReadiness(
       blockingIssues,
       repairProposal: proposal,
       canonicalGraph: safeToAnalyse ? strictCanonicalGraph : null,
-      proposedGraph: changes.length > 0 ? proposalGraph : null,
+      proposedGraph: changes.length > 0 ? historicalProposalGraph : null,
       repairedForAnalysis:
         safeToAnalyse && strictCanonicalGraph !== null && !sameJson(graph, strictCanonicalGraph),
       safeToAnalyse,

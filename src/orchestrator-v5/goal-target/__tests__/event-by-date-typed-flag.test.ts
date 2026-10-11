@@ -260,8 +260,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(result).toMatchObject({ ok: true, mutated: true });
     expect(registrations).toHaveLength(1);
     // Base staging 94b2554d registered this exact graph (census r3, graph_sha prefix).
-    // #94 6105226165 safe withholding: run57-out/contract-field-diffs.json proves only named intervention source deltas.
-    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrations[0], JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('1b13e7040116db46');
+    // RUN61: run61-out/digest-{ee89cb66,current}.json proves the original B3-d2 bytes restored.
+    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrations[0], JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
     expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
   });
 

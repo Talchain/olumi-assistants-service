@@ -394,6 +394,7 @@ describe('S1T2 residual Responses sites', () => {
       return { response, sid, rows: (response.json()._provider_calls ?? []) as policyModule.GenerativeCall[] };
     } finally { policySpy?.mockRestore(); }
   };
+  // RUN61: callStructured alone adds the AIE-approved goal receipt (4b22d293) and instruction (d85fecb7); run61-out/golden-proof.json.
   it.each(residualSites)('%s happy-path bytes equal the BEFORE golden', async site => {
     const { response } = await drive(site);
     expect(response.statusCode, response.body).toBe(200); expect(attempts).toHaveLength(site === 'callStructured' ? 2 : 1); expect(consumed).toHaveLength(attempts.length);

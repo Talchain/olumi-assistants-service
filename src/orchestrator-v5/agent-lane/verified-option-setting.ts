@@ -101,7 +101,7 @@ function onlySiblingArms(model: CandidateModel, selected: Option, others: readon
       if (low !== null && high !== null && low < value && value < high) return true;
     }
     const arm = ws[0] === 'or' || ws[0] === 'and' || ws[0] === 'to' ? ws.slice(1) : ws;
-    if (arm.some(w => BOUNDS.has(w)) || optionRoleRefused(text) || ['as', 'like'].includes(arm[0] ?? '')) return false;
+    if (claimScopeNegative(text) === 'bound' || optionRoleRefused(text) || ['as', 'like'].includes(arm[0] ?? '')) return false;
     const figures = ws.flatMap(w => { const n = figure(w); return n === null ? [] : [n]; });
     // DL 7 Oct (iii): an arm that writes the credited figure ("instead of the 4", "treat 4 as a ceiling") refuses.
     if (figures.includes(value)) return false;
@@ -111,7 +111,7 @@ function onlySiblingArms(model: CandidateModel, selected: Option, others: readon
 
 /** Contextual targets cannot attest the action. Account for every written amount through existing typed readers. */
 function independentBoundContext(model: CandidateModel, factor: Factor, text: string): boolean {
-  if (FOREIGN_LEVEL.test(text) || ATTRIBUTION.test(text) || words(text).includes('if')) return false;
+  if (governingScopeRefused(text)) return false;
   const amounts = findLinkEffectAmounts(text);
   if (amounts.length === 0) return false;
   return amounts.every(amount => {
@@ -131,14 +131,39 @@ function independentBoundContext(model: CandidateModel, factor: Factor, text: st
   });
 }
 
+/** Scope of the original located claim, never a candidate provenance or a positive opening.
+ * Consumers apply the result to their evidenced role; option questions/proposals remain eligible.
+ * The existing period-report prefix is retained by currentLevelWords.
+ */
+type ClaimScopeNegative = 'history' | 'desire' | 'condition' | 'attribution' | 'denial' | 'target' | 'bound' | 'none';
+function claimScopeNegative(text: string): ClaimScopeNegative {
+  const ws = currentLevelWords(text);
+  if (FOREIGN_LEVEL.test(text) || ATTRIBUTION.test(text)) return 'attribution';
+  if (linkEffectQuoteContextMiss(text, text) === 'denied' || ws.includes('not')) return 'denial';
+  if (/\b(?:if|unless|provided|subject to|contingent on|conditional on)\b/iu.test(text)) return 'condition';
+  if (/\b(?:had|was|used to have)\b/iu.test(text) || ws.some(w => w === 'last' || w === 'previous')) return 'history';
+  if (/\b(?:hope|want|aim|expect)\b|\bplan to have\b/iu.test(text)) return 'desire';
+  if (ws.some(w => ['goal', 'target', 'limit', 'forecast', 'estimate', 'estimated'].includes(w))) return 'target';
+  if (ws.some(w => BOUNDS.has(w))) return 'bound';
+  return 'none';
+}
+/** These negatives govern the whole receipt, including an attribution/condition outside a selected arm.
+ * Separately bound contextual targets/bounds are still checked by independentBoundContext.
+ */
+function governingScopeRefused(text: string): boolean {
+  const scope = claimScopeNegative(text);
+  return scope !== 'none' && scope !== 'target' && scope !== 'bound';
+}
+
 /** Negative role checks shared by option arms; no opening or action vocabulary grants credit. */
 function optionRoleRefused(text: string, factor?: Factor): boolean {
-  if (FOREIGN_LEVEL.test(text) || ATTRIBUTION.test(text) || linkEffectQuoteContextMiss(text, text) === 'denied') return true;
+  const scope = claimScopeNegative(text);
+  if (scope !== 'none' && scope !== 'bound') return true;
   // These existing introductions EVIDENCE an option role in the source; they are not required openings.
   const introduction = /^(?:Our options are to |One option is to |Decision: )/iu.exec(text);
   const tokens = words(text.slice(introduction?.[0].length ?? 0));
   const ws = ['or', 'and', 'to'].includes(tokens[0] ?? '') ? tokens.slice(1) : tokens;
-  if (ws.some(w => ['goal', 'target', 'limit', 'forecast', 'estimate', 'estimated', 'last', 'previous', 'not', 'if', 'but', 'currently'].includes(w))) return true;
+  if (ws.some(w => w === 'but' || w === 'currently')) return true;
   if (ws.includes('plan') && !words(factor?.label ?? '').includes('plan')) return true;
   // A reporting predicate under a different subject is not this option's intervention.
   // This preserves the existing third-party/current-report refusal without requiring a proposal head.
@@ -159,9 +184,7 @@ function optionRoleRefused(text: string, factor?: Factor): boolean {
 
 function settingClause(a: Assertion, at: number, change = false, ownedStart?: number, factor?: Factor, model?: CandidateModel): { text: string; start: number; frame: string[]; bound?: boolean; others: { text: string; next: boolean }[] } | null {
   // RUN52: the receipt's structural role needs no accepted proposal opening.
-  if (FOREIGN_LEVEL.test(a.text) || ATTRIBUTION.test(a.text)
-    || linkEffectQuoteContextMiss(a.text, a.text) === 'denied'
-    || words(a.text).some(w => w === 'last' || w === 'previous' || w === 'not')) return null;
+  if (governingScopeRefused(a.text)) return null;
   const bodyStart = ownedStart ?? 0;
   const body = a.text.slice(bodyStart);
   let start = bodyStart;
@@ -187,7 +210,7 @@ function settingClause(a: Assertion, at: number, change = false, ownedStart?: nu
           && !(purpose !== undefined && t.index! > purpose.index! && isChangeWord(w) && !BOUNDS.has(w));
       }) || /[+/()]|[0-9][ \t]{0,4}(?:or|and|-)[ \t]{0,4}[0-9]/iu.test(part)) return null;
       // The complete local clause supplies the setting; a numeric alternative is never a point.
-      if (ws.includes('or') || ws.includes('but') || ws.includes('if')) return null;
+      if (ws.includes('or') || ws.includes('but')) return null;
       found = { text: part, start, frame: [first ?? ''] };
     } else if (part.trim() !== '') {
       // `next` marks only the clause directly after the setting (the one place a bracketing range may stand).
@@ -211,7 +234,7 @@ function coordinatedSiblingArms(model: CandidateModel, selected: Option, others:
     }
     if (bound === false) return false;
     const arm = ws[0] === 'or' || ws[0] === 'and' || ws[0] === 'to' ? ws.slice(1) : ws;
-    if (arm.some(w => BOUNDS.has(w)) || optionRoleRefused(text) || ['as', 'like'].includes(arm[0] ?? '')) return false;
+    if (claimScopeNegative(text) === 'bound' || optionRoleRefused(text) || ['as', 'like'].includes(arm[0] ?? '')) return false;
     const figures = ws.flatMap(w => { const n = figure(w); return n === null ? [] : [n]; });
     // DL 7 Oct (iii): an arm that writes the credited figure ("instead of the 4", "treat 4 as a ceiling") refuses.
     if (figures.includes(value)) return false;
@@ -221,9 +244,7 @@ function coordinatedSiblingArms(model: CandidateModel, selected: Option, others:
 /** An option-setting frame. Current-level ownership stays separate; history, conditions and third-party claims abstain. */
 function coordinatedSettingClause(a: Assertion, at: number, change = false, ownedStart?: number, model?: CandidateModel, factor?: Factor): { text: string; start: number; frame: string[]; bound?: boolean; others: { text: string; next: boolean; bound?: boolean }[] } | null {
   // RUN52: the receipt's structural role needs no accepted proposal opening.
-  if (FOREIGN_LEVEL.test(a.text) || ATTRIBUTION.test(a.text)
-    || linkEffectQuoteContextMiss(a.text, a.text) === 'denied'
-    || words(a.text).some(w => w === 'last' || w === 'previous' || w === 'not' || w === 'if')) return null;
+  if (governingScopeRefused(a.text)) return null;
   const bodyStart = ownedStart ?? 0;
   const body = a.text.slice(bodyStart);
   const governing = words(body)[0] ?? '';
@@ -231,7 +252,7 @@ function coordinatedSettingClause(a: Assertion, at: number, change = false, owne
   // #94 6102610518(1): bind each coordinated action's HEAD, never a figure in its purpose.
   // The existing span reader independently names the factor; the complete local unit frame must agree.
   const boundHead = (part: string): string | null => {
-    if (!coordinated || model === undefined || !currentLevelRole(part)) return null;
+    if (!coordinated || model === undefined || optionRoleRefused(part, factor)) return null;
     const tokens = [...part.matchAll(/[\p{L}\p{N}]{1,64}/gu)];
     const amounts = findLinkEffectAmounts(part);
     if (amounts.length !== 1) return null;
@@ -280,7 +301,7 @@ function coordinatedSettingClause(a: Assertion, at: number, change = false, owne
           && !(purpose !== undefined && t.index! > purpose.index! && isChangeWord(w) && !BOUNDS.has(w));
       }) || /[+/()]|[0-9][ \t]{0,4}(?:or|and|-)[ \t]{0,4}[0-9]/iu.test(part)) return null;
       // The complete local clause supplies the setting; a numeric alternative is never a point.
-      if (ws.includes('or') || ws.includes('but') || ws.includes('if')) return null;
+      if (ws.includes('or') || ws.includes('but')) return null;
       found = { text: part, start, ...(head === null ? {} : { bound: true }),
         frame: head !== null ? [governing] : [first ?? ''] };
     } else if (part.trim() !== '') {
@@ -363,6 +384,40 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
     return false;
   }
 }
+/** Relationship authorship is independent of the setting's quantitative frame.
+ * Only the original proposed-action receipt, independently named option and quantity can witness it.
+ * This verdict grants neither a level nor an effect size.
+ */
+export function verifiedOptionAction(model: CandidateModel, option: Option, intervention: Intervention,
+  brief: string | undefined): boolean {
+  try {
+    if (typeof brief !== 'string' || intervention.stated_evidence == null) return false;
+    const sentences = assertions(brief);
+    const a = exactEvidence(brief, intervention.stated_evidence.quote, sentences);
+    if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
+    const factors = model.factors.filter(f => f.label === intervention.factor_label);
+    if (factors.length !== 1 || (option.interventions ?? []).filter(i => i.factor_label === intervention.factor_label).length !== 1) return false;
+    const factor = factors[0]!;
+    const others = [model.goal.metric, ...model.factors.filter(f => f !== factor).map(f => f.label),
+      ...model.outcomes.map(o => o.label), ...model.risks.map(r => r.label)];
+    // The existing directional source reader must locate an action, rather than a state/capacity report.
+    // No claimed magnitude or declared unit is used to license relationship authorship.
+    return findLinkEffectAmounts(a.text).some(amount => {
+      const clause = settingClause(a, amount.index, intervention.value_kind === 'additional', undefined,
+        { ...factor, unit: null }, model);
+      if (clause === null || deriveGoalIntent(clause.text).direction === 'undetermined'
+        || !namedOption(model, option, clause.text, amount.magnitude)
+        || !onlySiblingArms(model, option, clause.others, amount.magnitude)) return false;
+      return figureTheUserWroteForSpan(amount.magnitude, undefined, a.text, {
+        target: [factor.label], others, strict: true, requireNamed: true,
+        at: amount.index, writtenAmounts: [amount],
+      }) !== null;
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** A literal total and a verified additive derivation are distinct receipts from the same authority. */
 export function verifiedOptionTotal(model: CandidateModel, option: Option, addition: Intervention,
   brief: string | undefined): { verified: boolean; derived: boolean; basis?: string } {
@@ -478,7 +533,7 @@ function verifiedAddition(model: CandidateModel, option: Option, intervention: I
   const amount = { ...written, index: written.index + offset };
   const clause = coordinated ? coordinatedSettingClause(a, amount.index, true, current?.start, model, factor)
     : settingClause(a, amount.index, true, current?.start, factor, model);
-  if (clause === null || FOREIGN_LEVEL.test(a.text) || ATTRIBUTION.test(a.text)
+  if (clause === null || governingScopeRefused(a.text)
     || !(coordinated ? coordinatedSiblingArms : onlySiblingArms)(model, option, clause.others, intervention.value)) return false;
   // A resulting level remains a point even when the candidate calls it additional.
   if (typeof intervention.unit !== 'string' || linkEffectFigureNotAChange(clause.text,
@@ -496,7 +551,7 @@ function verifiedAddition(model: CandidateModel, option: Option, intervention: I
   const unmodified = a.text.slice(0, end) + tail;
   const localUnmodified = coordinated ? unmodified.slice(clause.start, clause.start + clause.text.length
     - (originalTail.length - tail.length)) : unmodified.slice(clause.start);
-  if (!currentLevelRole(localUnmodified)) return false;
+  if (optionRoleRefused(localUnmodified, factor)) return false;
   const elliptical = current !== null && afterChangeWord(a.text.slice(end)) !== a.text.slice(end)
     && /^[.!?]?$/u.test(tail.trim());
   if (!elliptical && !sameFrame(unmodified, { start: amount.index, end }, factor.unit, amount, factor.label)) return false;
@@ -547,7 +602,7 @@ const OWN_ORGANISATION = new Set(['clinic', 'team', 'company', 'organisation', '
 // Possessive first person does not own a supplier's or rival's figure, or a reported assertion.
 const FOREIGN_LEVEL = /\b(?:supplier|competitor|rival|council|they|their|says|claims|reports)\b|\baccording to\b/iu;
 function ownsFactorLevel(before: string, factor: Factor): boolean {
-  if (FOREIGN_LEVEL.test(before)) return false;
+  if (claimScopeNegative(before) === 'attribution') return false;
   const own = words(factor.label).concat(words(typeof factor.unit === 'string' ? factor.unit : ''));
   const names = (w: string): boolean => own.some(v => sameName(v, w));
   const body = (text: string): boolean => words(text).every(w => grammar(w) || w === 'off' || names(w));
@@ -598,8 +653,8 @@ function currentLevelWords(text: string): string[] {
   return words(local.replace(/([\p{L}]+)-up\b/giu, '$1'));
 }
 function currentLevelRole(text: string): boolean {
-  return !FOREIGN_LEVEL.test(text) && !currentLevelWords(text).some(w => BOUNDS.has(w)
-    || ['goal', 'target', 'limit', 'plan', 'forecast', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w));
+  return claimScopeNegative(text) === 'none'
+    && !currentLevelWords(text).some(w => ['plan', 'or', 'but'].includes(w));
 }
 
 /** Set aside a rival only on the located amount's complete typed frame, never on its name alone. */

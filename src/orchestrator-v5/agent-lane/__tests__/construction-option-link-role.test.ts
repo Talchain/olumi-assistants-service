@@ -137,8 +137,7 @@ describe('an option link or action the brief does not give is never the user\'s'
 
   it('CONTROL — an "explicit" link from the £59 option to the price it sets stays the user\'s', async () => {
     const g = await register([plant(linkToPrice)]);
-    // #94 6105223338 denominator conflict; edge authorship follows the unconfirmed setting.
-    expect(linkToPriceSource(g)).toEqual(['cee_hypothesis']);
+    expect(linkToPriceSource(g)).toEqual(['brief_extraction']);
   });
 
   it('CONTROL — the churn limit typed as the £59 option\'s "explicit" action is never the user\'s action', async () => {

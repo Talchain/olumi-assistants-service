@@ -961,9 +961,10 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   let rawAppliedGraph: GraphV3T | null = null;
   try {
     const applied = applyAndValidateMutation(input.currentGraph, (clone) => {
+      // The validated clone is the store-loaded preimage; the pure applier returns a separate postimage.
       const patched = applyPatchOperations(clone, opsForApplier);
       const approvedCells = approvedInterventionTargets(opsForApplier, patched.nodes);
-      const encoded = encodeOptionInterventionsForEdit(patched, new Set(approvedCells.map(cell => cell.optionId)), undefined, approvedCells);
+      const encoded = encodeOptionInterventionsForEdit(patched, new Set(approvedCells.map(cell => cell.optionId)), undefined, approvedCells, clone, { scenarioId: input.scenarioId, persistedScenarioId: input.scenarioId, modelRevision: input.currentGraphHash, expectedModelRevision: input.currentGraphHash });
       if (encoded.unresolvedOptionIds.length > 0) throw new Error('apply_error');
       const candidate = encoded.graph;
       rawAppliedGraph = candidate;

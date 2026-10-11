@@ -115,7 +115,8 @@ export interface ReadinessResult {
  */
 export function canonicaliseForAnalysis(graph: unknown): unknown {
   try {
-    return encodeOptionInterventionsForEdit(graph).graph;
+    // A read-only view carries no operation/revision proof; it grants no fresh source verdict.
+    return encodeOptionInterventionsForEdit(graph, undefined, undefined, [], null /* no scoped preimage */, null).graph;
   } catch {
     return graph;
   }
