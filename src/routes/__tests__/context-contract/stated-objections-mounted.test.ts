@@ -9,9 +9,11 @@
  * provider SHAs). Contrast: the same request with one dissent fact carries it verbatim, newest-per-finding, at most 3.
  */
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import { capture, findState, valueAt } from './provider-harness.js';
 
+const AIE_APPROVED_USE_SHA256 = '7819664466d9f90cbe478b0b6804b98c44c6265ccbb41f2313b0f9381daf479e';
 const dissent = (finding: string, statement: string, noop = false): HandlerFact => HandlerFactSchema.parse({
   fact_type: 'finding_dissent', fact_version: 1, noop,
   result: { finding_id: finding, analysis_id: '0d9c7b6a-5e4f-4a3b-8c2d-1e0f9a8b7c6d', statement, provenance: 'user_set' },
@@ -41,6 +43,10 @@ describe.each(['ordinary-converse', 'selected-converse'] as const)('S8 stated ob
       expect(c).toEqual([{ finding_id: 'finding-price', analysis_id: '0d9c7b6a-5e4f-4a3b-8c2d-1e0f9a8b7c6d', statement: reason }]);
     }
     expect(valueAt(payloadsOf(w), 'stated_objections_use').length).toBe(carried.length);
+    // The LLM-facing sentence is pinned BY BYTES to the AIE-approved amendment (#94 6103551589).
+    for (const use of valueAt(payloadsOf(w), 'stated_objections_use')) {
+      expect(createHash('sha256').update(String(use)).digest('hex')).toBe(AIE_APPROVED_USE_SHA256);
+    }
     // It sits in the canonical state the model reads, beside the analysis it disagrees with.
     expect(Object.keys(findState(w.calls[0]!.payloads))).toContain('stated_objections');
   }, 60_000);

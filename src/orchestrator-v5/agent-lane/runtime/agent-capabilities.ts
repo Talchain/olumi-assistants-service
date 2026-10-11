@@ -1348,7 +1348,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
  * Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
  */
 /** How the model uses `stated_objections` (AIE-ACKed wording; carried beside the data, as `left_out[].use` is). */
-const STATED_OBJECTIONS_USE = "These are the user's own stated disagreements with findings, verbatim and newest first. They change nothing in the model or the analysis. Engage with the reason in their words; never present it as Olumi's finding, and never as agreement.";
+const STATED_OBJECTIONS_USE = "These are the user's own stated disagreements with findings, verbatim and newest first. They do not by themselves change the model or existing analysis. Engage with the reasons in their words; never present them as Olumi's findings, as agreement or as resolved.";
 
 export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_ready'>): Record<string, unknown> {
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
