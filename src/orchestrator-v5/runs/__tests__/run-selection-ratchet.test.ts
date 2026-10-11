@@ -30,7 +30,8 @@ const OWN = [
 const BASELINE = 8;
 const RECONCILED_OWN_IDS = ['R03', 'R04', 'R05', 'R09', 'R25', 'R26', 'R27', 'R55'];
 // Sanctioned set readers return collections, never implement a private single-Run choice.
-const sanctioned = new Set(['readFactsWithTurnFor', 'readRecentAppliedMutationFactsFor', 'readScenarioRunAnalysisFactsFor']);
+// `readStatedObjectionFactsFor` (S8) pages the user's `finding_dissent` facts: a collection of reasons, never a Run choice.
+const sanctioned = new Set(['readFactsWithTurnFor', 'readRecentAppliedMutationFactsFor', 'readScenarioRunAnalysisFactsFor', 'readStatedObjectionFactsFor']);
 type Hit = { file: string; name: string; kind: 'query' | 'sort' | 'stored-order' | 'pick'; line: number };
 function stripComments(source: string): string {
   const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source);
