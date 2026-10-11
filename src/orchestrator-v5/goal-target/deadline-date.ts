@@ -22,10 +22,19 @@
  *    shows the date, and [Change date] corrects another reading); "<day> <Month> [yyyy]" / "<Month> <day>[,] [yyyy]" that day; a
  *    date without a year that has passed means next year's;
  *  · "end of (the) year" / "year-end" is 31 December;
+ *  · ⭐ RECOVERY BATCH B (B1, Paul's marketing test, 11 Oct): "N months/weeks/days [to <what>] from <day>" counts from a
+ *    STATED day, not from today ("six months from 9 October", "6 months to launch our new features from last Friday").
+ *    The day is a calendar date (day and month, optionally the year) or "last <weekday>". A start day without a year is
+ *    the reference year's: it is NEVER rolled into next year (a start day in the past is normal), so a count that then
+ *    ends on or before today is not placed (`null`, the user is asked). "last <weekday>" is the user's own dating of it
+ *    ("Last Friday was the 9th of October", `readStatedWeekdayDate`, accepted only when that date IS that weekday), else
+ *    counted back from the reference day only when no reading is a guess: when this week's <weekday> is still ahead of
+ *    it (or is it), last week's; otherwise `null`;
  *  · a date that is today or has passed is not a deadline: `null`.
  */
 
-export type DeadlineForm = 'months_from_today' | 'weeks_from_today' | 'days_from_today' | 'quarter_end' | 'month_end' | 'date' | 'year_end';
+export type DeadlineForm = 'months_from_today' | 'weeks_from_today' | 'days_from_today' | 'months_from_date' | 'weeks_from_date' | 'days_from_date'
+  | 'quarter_end' | 'month_end' | 'date' | 'year_end';
 
 export interface StatedDeadline {
   /** The phrase as given (trimmed), for the card and the record. */
@@ -37,6 +46,23 @@ export interface StatedDeadline {
   readonly reference: string;
   /** The count the user stated, when they stated one ("6 months" → 6, unit months). Never derived from a date. */
   readonly stated_count?: { readonly value: number; readonly unit: 'months' | 'weeks' | 'days' };
+  /**
+   * Batch B: a count from a STATED day ("six months from 9 October"): that day and the count, for the card ("6 months from
+   * 9 October 2026"). Never `stated_count`, which counts from the reference: the horizon is still measured from the
+   * reference day, so a count from another day is not its length.
+   */
+  readonly anchor?: { readonly date: string; readonly count: { readonly value: number; readonly unit: 'months' | 'weeks' | 'days' } };
+}
+
+export const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+
+/** How a phrase is read beyond its words (Batch B). */
+export interface DeadlineReadOptions {
+  /** The user's own dating of "last <weekday>" (`readStatedWeekdayDate` over their message): used instead of counting back. */
+  readonly lastWeekday?: { readonly weekday: Weekday; readonly date: string };
+  /** `false`: no reference day to count "last <weekday>" back from, so it is never counted (the user is asked). Default true. */
+  readonly relativeWeekdays?: boolean;
 }
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'] as const;
@@ -62,6 +88,18 @@ const LEAD_TOKEN = /^(?:we[ \t]{1,4}have|we've[ \t]{1,4}got|there[ \t]{1,4}is|th
 
 /** The forms a deadline phrase may take, anchored and bounded (no nested repeats); one canonical body each. */
 const COUNT_FORM = new RegExp(`^${COUNT_RE}[ \\t-]{1,2}(months?|weeks?|days?)(?:'?s?[ \\t]{1,2}time|[ \\t]{1,2}from[ \\t]{1,2}(?:now|today)|[ \\t]{1,2}(?:deadline|away|out))?$`);
+/**
+ * Batch B: "<count> <unit> [to <at most 6 words>] from <day>" — a count from a stated day; the day is read by `readStartDay`.
+ * Anchored, with ONE bounded nested repeat (the words between: letters only, at most six, each at most 20), timed with the
+ * rest in `DEADLINE_PATTERNS_FOR_TIMING`.
+ */
+const FROM_DAY_FORM = new RegExp(`^${COUNT_RE}[ \\t-]{1,2}(months?|weeks?|days?)(?:[ \\t]{1,2}to(?:[ \\t]{1,2}[a-z']{1,20}){1,6})?[ \\t]{1,2}from[ \\t]{1,2}([a-z0-9][a-z0-9 ,\\t-]{0,40})$`);
+const WEEKDAY_RE = `(${WEEKDAYS.join('|')})`;
+const LAST_WEEKDAY_FORM = new RegExp(`^last[ \\t]{1,2}${WEEKDAY_RE}$`);
+/** "last friday" anywhere in a phrase. */
+const LAST_WEEKDAY_NAMED = new RegExp(`(?:^|[^a-z])last[ \\t]{1,4}${WEEKDAY_RE}(?![a-z])`);
+/** "last friday was …" / "last friday is …" anywhere in a message (the date after it is read by `readCalendarDay`). */
+const WEEKDAY_DATED = new RegExp(`(?:^|[^a-z])last[ \\t]{1,4}${WEEKDAY_RE}[ \\t]{1,4}(?:was|is)[ \\t]{1,4}`);
 const QUARTER_FORM = /^(?:end[ \t]{1,2}of[ \t]{1,2}(?:the[ \t]{1,2})?)?q([1-4])(?:[ \t]{1,2}(\d{4}))?$/;
 const YEAR_END_FORM = /^(?:end[ \t]{1,2}of[ \t]{1,2}(?:the[ \t]{1,2}|this[ \t]{1,2})?year|year[ \t-]?end|end[ \t]{1,2}of[ \t]{1,2}(\d{4}))$/;
 const MONTH_END_FORM = new RegExp(`^(?:end[ \\t]{1,2}of[ \\t]{1,2})?${MONTH_RE}(?:[ \\t]{1,2}(\\d{4}))?$`);
@@ -70,7 +108,7 @@ const MONTH_DAY_FORM = new RegExp(`^${MONTH_RE}[ \\t]{1,2}(\\d{1,2})(?:st|nd|rd|
 const ISO_FORM = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** Every pattern this module runs, for the 5k → 20k timing rows only (the public reader gates input at 80 characters). */
-export const DEADLINE_PATTERNS_FOR_TIMING: readonly RegExp[] = [LEAD_TOKEN, COUNT_FORM, QUARTER_FORM, YEAR_END_FORM, MONTH_END_FORM, DAY_MONTH_FORM, MONTH_DAY_FORM, ISO_FORM];
+export const DEADLINE_PATTERNS_FOR_TIMING: readonly RegExp[] = [LEAD_TOKEN, COUNT_FORM, FROM_DAY_FORM, LAST_WEEKDAY_FORM, LAST_WEEKDAY_NAMED, WEEKDAY_DATED, QUARTER_FORM, YEAR_END_FORM, MONTH_END_FORM, DAY_MONTH_FORM, MONTH_DAY_FORM, ISO_FORM];
 
 const pad = (n: number): string => String(n).padStart(2, '0');
 const iso = (y: number, m0: number, d: number): string => `${y}-${pad(m0 + 1)}-${pad(d)}`;
@@ -100,6 +138,84 @@ export function addMonths(fromIso: string, months: number): string {
 function addDays(fromIso: string, days: number): string {
   const [y, m, d] = fromIso.split('-').map(Number) as [number, number, number];
   return isoOf(new Date(Date.UTC(y, m - 1, d + days)));
+}
+
+/** 0 = Monday … 6 = Sunday, of a YYYY-MM-DD calendar date. */
+const weekdayIndexOf = (isoDate: string): number => {
+  const [y, m, d] = isoDate.split('-').map(Number) as [number, number, number];
+  return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+};
+
+/**
+ * A calendar day written as a day and a month (optionally the year): "9 October", "the 9th of October", "October 9, 2026",
+ * "2026-10-09". Without a year it is the year of `today` — NEVER rolled into another year (Batch B: a start day may well
+ * have passed). `null` for anything else, or a day that month does not have.
+ */
+function readCalendarDay(raw: string, today: string): string | null {
+  const t = raw.trim().replace(/,$/, '').replace(/^the[ \t]{1,2}/, '');
+  const dayMonth = DAY_MONTH_FORM.exec(t);
+  const monthDay = dayMonth === null ? MONTH_DAY_FORM.exec(t) : null;
+  const isoDate = dayMonth === null && monthDay === null ? ISO_FORM.exec(t) : null;
+  const parts = dayMonth !== null ? { d: Number(dayMonth[1]), m0: MONTH_ALIASES[dayMonth[2]!]!, y: dayMonth[3] }
+    : monthDay !== null ? { d: Number(monthDay[2]), m0: MONTH_ALIASES[monthDay[1]!]!, y: monthDay[3] }
+      : isoDate !== null ? { d: Number(isoDate[3]), m0: Number(isoDate[2]) - 1, y: isoDate[1] } : null;
+  if (parts === null) return null;
+  const y = parts.y !== undefined ? Number(parts.y) : Number(today.slice(0, 4));
+  if (parts.m0 < 0 || parts.m0 > 11 || parts.d < 1 || parts.d > lastDay(y, parts.m0)) return null;
+  return iso(y, parts.m0, parts.d);
+}
+
+/**
+ * "last <weekday>" counted back from `today` (the reference day), only where no reading is a guess: when this week's
+ * <weekday> is still ahead of `today`, last week's is the only one; on that weekday itself, a week ago. When this week's
+ * has already passed ("last Friday" on a Sunday: two days ago, or nine?) it is `null` and the user is asked.
+ */
+function lastWeekdayBefore(today: string, weekday: Weekday): string | null {
+  const r = weekdayIndexOf(today);
+  const w = WEEKDAYS.indexOf(weekday);
+  if (w < r) return null;
+  return addDays(today, -(r - w + 7));
+}
+
+/** The start day of a "from <day>" count; `null` when it cannot be read without guessing. */
+function readStartDay(raw: string, today: string, opts: DeadlineReadOptions): string | null {
+  const t = raw.trim().replace(/,$/, '').replace(/^the[ \t]{1,2}/, '');
+  const last = LAST_WEEKDAY_FORM.exec(t);
+  if (last !== null) {
+    const weekday = last[1] as Weekday;
+    if (opts.lastWeekday !== undefined && opts.lastWeekday.weekday === weekday) return opts.lastWeekday.date;
+    return opts.relativeWeekdays === false ? null : lastWeekdayBefore(today, weekday);
+  }
+  return readCalendarDay(t, today);
+}
+
+/**
+ * ⭐ Batch B: the user's own dating of a relative weekday in their message — "Last Friday was the 9th of October." — read
+ * against `today` for the year (never rolled), and accepted ONLY when that date IS that weekday (9 October 2026 is a
+ * Friday). `null` otherwise: a date that is not that weekday is a slip to ask about, never a reading to choose.
+ */
+export function readStatedWeekdayDate(text: string, today: string): { readonly weekday: Weekday; readonly date: string } | null {
+  if (typeof text !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
+  const plain = text.slice(0, 400).toLowerCase().replace(/[‘’]/g, "'").replace(/[–—]/g, '-');
+  const m = WEEKDAY_DATED.exec(plain);
+  if (m === null) return null;
+  const rest = plain.slice(m.index + m[0].length);
+  const stop = rest.search(/[.!?;\n]/);
+  const day = readCalendarDay(stop < 0 ? rest : rest.slice(0, stop), today);
+  const weekday = m[1] as Weekday;
+  return day !== null && WEEKDAYS[weekdayIndexOf(day)] === weekday ? { weekday, date: day } : null;
+}
+
+/** The weekday a text names as "last <weekday>" (Batch B), or `null`. */
+export function lastWeekdayNamedIn(text: string): Weekday | null {
+  const m = LAST_WEEKDAY_NAMED.exec(String(text).slice(0, 400).toLowerCase());
+  return m === null ? null : m[1] as Weekday;
+}
+
+/** The weekday a message DATES ("Last Friday was …"), date unchecked: the gate only; `readStatedWeekdayDate` reads the date. */
+export function weekdayDatedIn(text: string): Weekday | null {
+  const m = WEEKDAY_DATED.exec(String(text).slice(0, 400).toLowerCase());
+  return m === null ? null : m[1] as Weekday;
 }
 
 const countOf = (raw: string): number | null => {
@@ -139,7 +255,7 @@ export function timeBetween(fromIso: string, toIso: string, unit: 'months' | 'we
  * The deadline a short phrase states, on the calendar, from `today` (YYYY-MM-DD), or `null` when the phrase names no
  * date this module can place without guessing (a fiscal quarter, "soon", "next sprint", a date already passed).
  */
-export function readStatedDeadline(phrase: string, today: string): StatedDeadline | null {
+export function readStatedDeadline(phrase: string, today: string, opts: DeadlineReadOptions = {}): StatedDeadline | null {
   if (typeof phrase !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
   const words = phrase.trim();
   if (words === '' || words.length > 80) return null;
@@ -148,7 +264,7 @@ export function readStatedDeadline(phrase: string, today: string): StatedDeadlin
   let body = plain;
   for (let i = 0; i <= 10 && body !== ''; i += 1) {
     const countBody = body.replace(/^(?:end of (?:the )?)?month (\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)$/i, '$1 months');
-    const placed = placeDeadline(countBody, words, today);
+    const placed = placeDeadline(countBody, words, today, opts);
     if (placed !== undefined) return placed;
     const lead = LEAD_TOKEN.exec(body);
     if (lead === null) return null;
@@ -161,7 +277,7 @@ export function readStatedDeadline(phrase: string, today: string): StatedDeadlin
 }
 
 /** One canonical body, every form; `undefined` when no form matches (the caller may strip a lead word and retry). */
-function placeDeadline(body: string, words: string, today: string): StatedDeadline | null | undefined {
+function placeDeadline(body: string, words: string, today: string, opts: DeadlineReadOptions): StatedDeadline | null | undefined {
   const [ty] = today.split('-').map(Number) as [number];
   const result = (form: DeadlineForm, date: string, stated?: StatedDeadline['stated_count']): StatedDeadline | null =>
     date > today ? { words, form, date, reference: today, ...(stated !== undefined ? { stated_count: stated } : {}) } : null;
@@ -174,6 +290,23 @@ function placeDeadline(body: string, words: string, today: string): StatedDeadli
     const unit = count[2]!.startsWith('month') ? 'months' : count[2]!.startsWith('week') ? 'weeks' : 'days';
     if (unit === 'months') return result('months_from_today', addMonths(today, n), { value: n, unit });
     return result(unit === 'weeks' ? 'weeks_from_today' : 'days_from_today', addDays(today, unit === 'weeks' ? 7 * n : n), { value: n, unit });
+  }
+  // Batch B: "six months from 9 October", "6 months to launch our new features from last Friday".
+  const fromDay = FROM_DAY_FORM.exec(body);
+  if (fromDay !== null) {
+    const n = countOf(fromDay[1]!);
+    if (n === null || n < 1 || n > 120) return null;
+    const unit = fromDay[2]!.startsWith('month') ? 'months' : fromDay[2]!.startsWith('week') ? 'weeks' : 'days';
+    const startWords = fromDay[3]!.trim();
+    if (startWords === 'now' || startWords === 'today') {
+      const date = unit === 'months' ? addMonths(today, n) : addDays(today, unit === 'weeks' ? 7 * n : n);
+      return result(unit === 'months' ? 'months_from_today' : unit === 'weeks' ? 'weeks_from_today' : 'days_from_today', date, { value: n, unit });
+    }
+    const start = readStartDay(startWords, today, opts);
+    if (start === null) return null;
+    const date = unit === 'months' ? addMonths(start, n) : addDays(start, unit === 'weeks' ? 7 * n : n);
+    const form = unit === 'months' ? 'months_from_date' : unit === 'weeks' ? 'weeks_from_date' : 'days_from_date';
+    return date > today ? { words, form, date, reference: today, anchor: { date: start, count: { value: n, unit } } } : null;
   }
   // "Q2", "Q2 2027", "end of Q2".
   const quarter = QUARTER_FORM.exec(body);
@@ -222,6 +355,11 @@ function placeDeadline(body: string, words: string, today: string): StatedDeadli
 
 /** "6 months from today" / "12 weeks from today" for a stated count; for a date, the time from today in `unit`. */
 export function sayTimeFromToday(d: StatedDeadline, unit: 'months' | 'weeks' | 'days'): string {
+  // Batch B: a count from a stated day says that day ("6 months from 9 October 2026"), never "from today".
+  if (d.anchor !== undefined && d.anchor.count.unit === unit) {
+    const c = d.anchor.count.value;
+    return `${c} ${c === 1 ? unit.slice(0, -1) : unit} from ${sayDate(d.anchor.date)}`;
+  }
   const n = d.stated_count !== undefined && d.stated_count.unit === unit ? d.stated_count.value : timeBetween(d.reference, d.date, unit);
   const one = unit.slice(0, -1);
   const about = d.stated_count !== undefined && d.stated_count.unit === unit ? '' : Number.isInteger(n) ? '' : 'about ';
@@ -229,7 +367,7 @@ export function sayTimeFromToday(d: StatedDeadline, unit: 'months' | 'weeks' | '
   return `${about}${shown} ${n === 1 ? one : unit} from today`;
 }
 
-/** The card's "(6 months from today)": in the unit the user counted in, else months. */
+/** The card's "(6 months from today)": in the unit the user counted in, else months; a count from a stated day, from that day. */
 export function sayDeadlineFromToday(d: StatedDeadline): string {
-  return sayTimeFromToday(d, d.stated_count?.unit ?? 'months');
+  return sayTimeFromToday(d, d.anchor?.count.unit ?? d.stated_count?.unit ?? 'months');
 }

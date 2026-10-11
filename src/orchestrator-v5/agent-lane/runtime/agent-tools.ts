@@ -504,7 +504,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'propose_goal_deadline',
     description:
       'Record the DEADLINE the user has stated for their goal ("we have a deadline in 6 months", "by Q2", "by the end of March", '
-      + '"7 April 2027"), as a date on the goal. Call it in the SAME turn the user states it, even beside another change they ask for. '
+      + '"7 April 2027", "six months from 9 October"), as a date on the goal. Call it in the SAME turn the user states it, even beside another change they ask for; '
+      + 'when the user then dates a "last Friday" in that phrase ("Last Friday was the 9th of October"), call it again with the same deadline_words. '
       + 'Give deadline_words EXACTLY as the user wrote the deadline phrase (for example "a deadline in 6 months"): Olumi works out the '
       + 'calendar date itself, from the brief’s recorded creation date, and the card asks the user to confirm it ("Is your deadline 7 April 2027 (6 months from '
       + '7 October 2026)?"). Never compute or state a date yourself, and never pass a duration that is not the deadline (for example how long '
