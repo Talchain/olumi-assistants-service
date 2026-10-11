@@ -330,13 +330,15 @@ describe("the live value-bearing contract, adjudicated", () => {
     // ACCEPTED: its REQUIRED `source: user_stated` warrants the sole number in the attestation object; no finding
     // needs a ledger entry (adding one would fail the stale-decision rule). The explicit decision is pinned below.
     // +1 LEVEL_SHARED site / +1 ACCEPTED (S4): approved literal goal_horizon_stated_months, like goal_horizon_months.
-    expect(SITES.length).toBe(57);
-    expect(FINDINGS.length).toBe(41);
+    // Batch C: ruling 4 — +2 LEVEL_SHARED sites / +2 findings / +2 ACCEPTED (12 Oct): CEE's NodeV3 `goal_target_basis`
+    // {target_raw (a staleness key equal to goal_threshold_raw), period_months (months by name, `source: olumi_reading`)}.
+    expect(SITES.length).toBe(59);
+    expect(FINDINGS.length).toBe(43);
     expect(report.open.length).toBe(20);
-    expect(report.accepted.length).toBe(21);
+    expect(report.accepted.length).toBe(23);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(9);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(7);
-    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(16);
+    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(18);
     expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(25);
   });
 

@@ -904,6 +904,32 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.mitigations[].occurrence_reduction; " +
       "reason given there (a fraction by meaning, attested by the block's `occurrence.basis`).",
   },
+  // ── SCOPE-AMBIGUOUS: the goal's target basis (declared 12 Oct 2026, recovery Batch C; Batch 0 change-goal decision
+  //    ruling 4 and amendments 2–3) — two numbers inside one CEE-only block, never on the wire and never hashed ──────
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_target_basis.target_raw",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — not a value, a STALENESS KEY. Its one writer (`admitGoalTargetBasis`, goal-target-basis.ts) copies the " +
+      "goal's own stored `goal_threshold_raw` into it, and its one reader (`goalTargetBasisOf`) drops the WHOLE basis " +
+      "unless it still equals the node's `goal_threshold_raw` exactly (with `quantity_frame` / `target_frame`), so an " +
+      "edited target can never be read through an old basis. Its unit and attestation are therefore `goal_threshold_raw`'s " +
+      "(`goal_threshold_unit`, `threshold_source`) by equality; nothing reads it as a number. No producer may write it " +
+      "(field-safety CEE-owned roots), and it is outside the analysis hash's node vocabulary (graph-hash.ts).",
+  },
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_target_basis.period_months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — field-scoped by construction, as `goal_horizon_months` is: its UNIT is its name (whole months, " +
+      "`.int().min(1).max(120)`), and what it measures is named by its two siblings — `reference` (today | launch) and " +
+      "`period_kind` (at_end | over_period). Its attestation is the block's REQUIRED literal `source: 'olumi_reading'`: " +
+      "it is always Olumi's reading of the brief, never presented as the user's. Its one writer refuses it when it " +
+      "disagrees with the drafted deadline ('period_conflict'), and the horizon verdict licenses a chance on it only " +
+      "when it equals the held months ('basis_at_h'). Read only for the licence's words and that verdict; no producer may " +
+      "write it (field-safety CEE-owned); outside the analysis hash. ⚠ A basis-only change would therefore not stale a " +
+      "result — today the draft door is its only writer and rewrites the whole goal; an edit door (Batch B) must re-run.",
+  },
 ];
 
 // ============================================================================
