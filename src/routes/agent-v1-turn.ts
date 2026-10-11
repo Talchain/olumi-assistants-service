@@ -118,7 +118,7 @@ import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizing
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
-import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
+import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -2392,7 +2392,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // helpers on the same readback: without them the replay loses the typed chance headline the user first saw.
           const screenNow = goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
             (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
-          rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
+          rebuilt = withScreenLinesOwed(rebuilt, screenNow, goalChanceNotesForAgent(state.analysisResult, state.graph,
+            (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current')).text;
           replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
           const guidedReplayFinding = replayGuidedText !== null && replayText.includes(replayGuidedText) ? replayGuidedText : null;
           replayObligations = [
@@ -4918,7 +4919,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let screenLines: ReturnType<typeof goalChanceScreenLinesForAgent> = [];
     if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
-      const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines);
+      // Recovery Batch C: the run-wide disclosures and each target's own chance, said once after the lines.
+      const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
+        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent));
       if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
       if (ranged.added > 0) {
         log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),

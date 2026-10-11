@@ -13,7 +13,8 @@
  * one of them removed is not here to gate.
  */
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
-import { GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_PROBABILITY_UNUSABLE, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_TARGET_NOT_TESTABLE, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import { goalTargetBasisOf } from './goal-target-basis.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { resolveGoalDirection } from './goal-direction.js';
 
@@ -179,4 +180,28 @@ export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goal
     out = { ...out, inference_warnings: [...warnings, { code: GOAL_FIT_UNUSABLE, message: MESSAGE, severity: 'warning', goal_fit_cause: fitCause }] };
   }
   return out as E;
+}
+
+/**
+ * ⭐ RECOVERY BATCH C, amendment 3: a target that can be read more than one way ("+10%": 10% more than today's capacity, or
+ * 10 more percentage points?) is never resolved by picking. While the goal's stated basis carries that question, every
+ * option's claims AGAINST the target are withheld (the ordering stays, as for any untestable target), and the question is
+ * the reason the user reads. Returns `envelope` itself when there is no open question. Pure.
+ */
+export function withholdForOpenTargetQuestion<E>(envelope: E, graph: unknown, goalId: unknown): E {
+  if (!isRec(envelope)) return envelope;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const question = goal === undefined ? undefined : goalTargetBasisOf(goal)?.open_question;
+  if (question === undefined) return envelope;
+  const scored = [...new Set(readOptionResultSources(envelope).flat().flatMap((r) => {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    return id === undefined ? [] : [id];
+  }))];
+  if (scored.length === 0) return envelope;
+  const message = `Not shown. Your target can be read more than one way. ${question}`;
+  return withholdOptionGoalFigures(envelope, new Set(scored), {
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message, say: question,
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: 'target_reading_open' },
+  }, { keepOutcome: true, keepOrdering: true });
 }

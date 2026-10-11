@@ -1,0 +1,240 @@
+/**
+ * ⭐ RECOVERY BATCH C — WHAT THE GOAL'S TARGET IS MEASURED AGAINST (Batch 0 change-goal decision, rulings 1–14 and 18–23;
+ * science review 2 amendments 1–7; `BATCH0-CHANGE-GOAL-DECISION.md`).
+ *
+ * A chance of meeting a target is only a chance of meeting THE USER'S target when five things are stated and agree: the
+ * frame (a level, or a change from today), the reference (today, or the launch), the denominator (what 100% is, for a
+ * percentage change), the period (the target is met at month N, or over the first N months), and the unit every option's
+ * effect on the goal is stated in. The drafter states them (ruling 11); admission validates them HERE and stores Olumi's
+ * reading on the goal (`goal_target_basis`, CEE-only, declared on `NodeV3`); the licence reads them back from the graph
+ * the Run scored. A basis whose target has since been edited is stale and reads as absent (never re-applied).
+ *
+ * WHAT A BASIS LICENSES, AND WHAT IT DOES NOT:
+ *   · a change target with no level today (hiring: "+10% productivity" on a `quantity_frame: 'change'` goal, ruling 2–5):
+ *     admitted without a base once the denominator, period and effect unit are stated (ISL scores the paired change);
+ *   · "at three months" in the sentence only when the period is stated and every effect is stated AT the period's end,
+ *     including recruitment and ramp-up (amendment 2). A held horizon without that basis is still withheld
+ *     (`goal-horizon-verdict.ts`); steady state is never assumed;
+ *   · an ambiguous target ("+10%": points of capacity, or 10% of today's?) is never resolved by picking (amendment 3):
+ *     the question is stored and the chance is withheld with it.
+ * Pure and total.
+ */
+import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
+
+type Rec = Record<string, unknown>;
+const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const words = (v: unknown, max: number): string | undefined => {
+  if (typeof v !== 'string') return undefined;
+  const t = v.trim().replace(/\s+/g, ' ');
+  return t !== '' && t.length <= max && !/[\r\n<>{}]/.test(t) ? t : undefined;
+};
+
+export const BASIS_TEXT_MAX = 120;
+export const BASIS_QUESTION_MAX = 300;
+export const BASIS_ALSO_REQUIRED_MAX = 5;
+
+/** The drafter's statement of the target's semantics (`buildCandidateSchema` `goal.basis`). Every member is required in what is sent. */
+export interface DraftedGoalTargetBasis {
+  readonly reference: 'today' | 'launch';
+  readonly denominator: string | null;
+  readonly period_months: number | null;
+  readonly period_kind: 'at_end' | 'over_period';
+  readonly effect_unit: string | null;
+  readonly effects_at_period_end: boolean;
+  readonly also_required: readonly string[] | null;
+  readonly open_question: string | null;
+}
+
+/** Olumi's validated reading, stored on the goal node. The three `target_*`/`quantity_frame` members are its staleness key. */
+export interface GoalTargetBasis {
+  readonly quantity_frame: 'level' | 'change';
+  readonly target_frame: 'level' | 'change_abs' | 'change_rel';
+  readonly target_raw: number;
+  readonly reference: 'today' | 'launch';
+  readonly denominator?: string;
+  readonly period_months: number;
+  readonly period_kind: 'at_end' | 'over_period';
+  readonly effect_unit: string;
+  readonly effects_at_period_end: boolean;
+  /** The other conditions the user stated with this target that this chance does not include (amendment 4). */
+  readonly also_required?: readonly string[];
+  /** Amendment 3: the target can be read more than one way; this asks which. While present, no chance is shown. */
+  readonly open_question?: string;
+  readonly source: 'olumi_reading';
+}
+
+export type GoalTargetBasisRefusal = 'reference' | 'denominator' | 'period' | 'period_conflict' | 'effect_unit' | 'frame';
+
+/**
+ * Validate the drafter's basis for a goal target (ruling 11). `null` basis → `{ basis: null }` (no reading; every older
+ * candidate). A refusal names the missing or invalid member; the caller says it and writes no threshold for a target that
+ * needs the basis (a change with no level today).
+ */
+export function admitGoalTargetBasis(args: {
+  readonly drafted: DraftedGoalTargetBasis | null | undefined;
+  readonly quantityFrame: 'level' | 'change';
+  readonly targetFrame: 'level' | 'change_abs' | 'change_rel';
+  readonly targetRaw: number;
+  readonly horizonMonths: number | null | undefined;
+}): { readonly basis: GoalTargetBasis | null } | { readonly refused: GoalTargetBasisRefusal } {
+  const d = args.drafted;
+  if (d === null || d === undefined || !isRec(d)) return { basis: null };
+  if (d.reference !== 'today' && d.reference !== 'launch') return { refused: 'reference' };
+  // A change of a change quantity is only ever its own change in its own units (the contract: no change_rel on `change`).
+  if (args.quantityFrame === 'change' && args.targetFrame !== 'change_abs') return { refused: 'frame' };
+  const change = args.targetFrame !== 'level';
+  const denominator = words(d.denominator, BASIS_TEXT_MAX);
+  // ⛔ A change with no stated denominator is still refused (ruling 9): "10%" of nothing named is not a target.
+  if (change && denominator === undefined) return { refused: 'denominator' };
+  const period = d.period_months;
+  if (!finite(period) || !Number.isInteger(period) || period < 1 || period > 120) return { refused: 'period' };
+  if (finite(args.horizonMonths) && args.horizonMonths !== period) return { refused: 'period_conflict' };
+  const effectUnit = words(d.effect_unit, BASIS_TEXT_MAX);
+  if (effectUnit === undefined) return { refused: 'effect_unit' };
+  const also = Array.isArray(d.also_required)
+    ? d.also_required.map((x) => words(x, BASIS_TEXT_MAX)).filter((x): x is string => x !== undefined).slice(0, BASIS_ALSO_REQUIRED_MAX) : [];
+  const question = words(d.open_question, BASIS_QUESTION_MAX);
+  return { basis: {
+    quantity_frame: args.quantityFrame,
+    target_frame: args.targetFrame,
+    target_raw: args.targetRaw,
+    reference: d.reference,
+    ...(change && denominator !== undefined ? { denominator } : {}),
+    period_months: period,
+    period_kind: d.period_kind === 'over_period' ? 'over_period' : 'at_end',
+    effect_unit: effectUnit,
+    effects_at_period_end: d.effects_at_period_end === true,
+    ...(also.length > 0 ? { also_required: also } : {}),
+    ...(question !== undefined ? { open_question: question } : {}),
+    source: 'olumi_reading',
+  } };
+}
+
+/** The refusal in the user's words, for the build's ledger. */
+export function goalTargetBasisRefusalWords(metric: string, refusal: GoalTargetBasisRefusal): string {
+  const what = {
+    reference: 'where the change is measured from (today, or the launch)',
+    denominator: 'what the percentage is a percentage of (for example, today\'s level of it)',
+    period: 'when the target must be met (the number of months)',
+    period_conflict: 'one period: the target\'s period and its deadline disagree',
+    effect_unit: 'the unit each option\'s effect on it is stated in',
+    frame: 'whether the target is a level or a change in the quantity\'s own unit',
+  }[refusal];
+  return `No chance of meeting the target for "${metric}" is shown yet: Olumi needs ${what}, and will not guess it.`;
+}
+
+/** Read the stored basis, or `undefined` when there is none, it is malformed, or the target it describes has since changed. */
+export function goalTargetBasisOf(goal: unknown): GoalTargetBasis | undefined {
+  if (!isRec(goal) || !isRec(goal.goal_target_basis)) return undefined;
+  const b = goal.goal_target_basis;
+  const quantityFrame = goal.quantity_frame === 'change' ? 'change' : 'level';
+  const targetFrame = goal.goal_threshold_frame === 'change_abs' || goal.goal_threshold_frame === 'change_rel' ? goal.goal_threshold_frame : 'level';
+  if (b.source !== 'olumi_reading' || b.quantity_frame !== quantityFrame || b.target_frame !== targetFrame
+    || !finite(b.target_raw) || b.target_raw !== goal.goal_threshold_raw) return undefined;
+  if (b.reference !== 'today' && b.reference !== 'launch') return undefined;
+  if (!finite(b.period_months) || !Number.isInteger(b.period_months) || b.period_months < 1 || b.period_months > 120) return undefined;
+  if (b.period_kind !== 'at_end' && b.period_kind !== 'over_period') return undefined;
+  const effectUnit = words(b.effect_unit, BASIS_TEXT_MAX);
+  if (effectUnit === undefined || typeof b.effects_at_period_end !== 'boolean') return undefined;
+  const denominator = words(b.denominator, BASIS_TEXT_MAX);
+  if (targetFrame !== 'level' && denominator === undefined) return undefined;
+  const also = Array.isArray(b.also_required) ? b.also_required.map((x) => words(x, BASIS_TEXT_MAX)).filter((x): x is string => x !== undefined) : [];
+  const question = words(b.open_question, BASIS_QUESTION_MAX);
+  return {
+    quantity_frame: quantityFrame, target_frame: targetFrame, target_raw: b.target_raw,
+    reference: b.reference, ...(denominator !== undefined ? { denominator } : {}),
+    period_months: b.period_months, period_kind: b.period_kind, effect_unit: effectUnit,
+    effects_at_period_end: b.effects_at_period_end,
+    ...(also.length > 0 ? { also_required: also } : {}),
+    ...(question !== undefined ? { open_question: question } : {}),
+    source: 'olumi_reading',
+  };
+}
+
+const NUMBER_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+const months = (n: number): string => `${n <= 12 ? NUMBER_WORDS[n] : String(n)} ${n === 1 ? 'month' : 'months'}`;
+const monthNumber = (n: number): string => `month ${n <= 12 ? NUMBER_WORDS[n] : String(n)}`;
+
+/** "at three months" / "three months after launch" / "over the first three months after launch" (rulings 18–22, amendment 5). */
+export function periodWords(basis: Pick<GoalTargetBasis, 'reference' | 'period_months' | 'period_kind'>): string {
+  const n = months(basis.period_months);
+  if (basis.period_kind === 'over_period') return `over the first ${n}${basis.reference === 'launch' ? ' after launch' : ''}`;
+  return basis.reference === 'launch' ? `${n} after launch` : `at ${n}`;
+}
+
+const COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>=': 'at least', '>': 'above', '<=': 'at most', '<': 'below' };
+export const comparatorWords = (op: unknown): string | undefined => typeof op === 'string' ? COMPARATOR_WORDS[op] : undefined;
+
+/**
+ * The words after "chance of", for the goal's own target (rulings 18–21): `undefined` when they cannot be said exactly.
+ *   · level:       ‘X’ being at least T at three months
+ *   · change_abs:  ‘X’ increasing by at least C units from today at three months — and, for a change MEASURED in % of today
+ *                  (hiring, ruling 20), ‘X’ being at least 10% higher than today at three months
+ *   · change_rel:  ‘X’ being at least r% higher than today at three months (today's level is said by the caller, ruling 21)
+ */
+export function targetChanceWords(args: {
+  readonly label: string;
+  readonly frame: 'level' | 'change_abs' | 'change_rel';
+  readonly comparator: string;
+  /** level/change_abs: in the target's unit; change_rel: the stored fraction r. */
+  readonly value: number;
+  readonly unit: string;
+  readonly basis?: Pick<GoalTargetBasis, 'reference' | 'period_months' | 'period_kind'>;
+}): string | undefined {
+  const { label, frame, comparator, value, unit } = args;
+  const bound = comparatorWords(comparator);
+  if (bound === undefined || !finite(value) || label.trim() === '' || /[\r\n]/.test(label)) return undefined;
+  const time = args.basis === undefined ? '' : ` ${periodWords(args.basis)}`;
+  const x = `‘${label.trim()}’`;
+  if (frame === 'level') {
+    if (unit.trim() === '') return undefined;
+    return `${x} being ${bound} ${sayFigureAsWritten(value, unit)}${time}`;
+  }
+  // A change: its sign is its direction; the comparator bounds its size ("at least 10% higher", "at most 5% lower").
+  if (value === 0) return undefined;
+  const up = value > 0;
+  const size = Math.abs(value);
+  const sizeBound = up ? bound : ({ 'at least': 'at most', above: 'below', 'at most': 'at least', below: 'above' } as Record<string, string>)[bound]!;
+  const more = sizeBound === 'above' ? 'more than' : sizeBound === 'below' ? 'less than' : sizeBound;
+  if (frame === 'change_rel') {
+    const pct = Math.round(size * 100 * 1e6) / 1e6;
+    return `${x} being ${more} ${pct}% ${up ? 'higher' : 'lower'} than today${time}`;
+  }
+  if (unit.trim() === '') return undefined;
+  if (/^%$|^percent$/i.test(unit.trim())) return `${x} being ${more} ${size}% ${up ? 'higher' : 'lower'} than today${time}`;
+  return `${x} ${up ? 'increasing' : 'decreasing'} by ${more} ${sayFigureAsWritten(size, unit)} from today${time}`;
+}
+
+/** Amendment 1: every paired frame reads the status quo as unchanged; disclosed for every frame, the status quo row by assumption. */
+export function statusQuoAssumptionWords(labels: string | readonly string[], basis?: Pick<GoalTargetBasis, 'reference' | 'period_months' | 'period_kind'>): string {
+  const through = basis === undefined ? '' : basis.period_kind === 'over_period'
+    ? ` over ${basis.reference === 'launch' ? 'that period' : `the next ${months(basis.period_months)}`}` : ` through ${monthNumber(basis.period_months)}`;
+  const named = (typeof labels === 'string' ? [labels] : [...labels]).map((l) => `‘${l}’`);
+  const list = named.length <= 1 ? (named[0] ?? '') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return `This assumes carrying on as now leaves ${list} unchanged${through}; each option is measured against that.`;
+}
+
+/** Amendment 1: the status quo row's own line. Never a Monte Carlo figure or interval. */
+export function statusQuoRowWords(label: string): string {
+  return `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
+}
+
+/** Amendment 2 + DL hiring decision: the timing basis and the additive reading, said beside the chance. */
+export function effectsBasisWords(basis: GoalTargetBasis): string | undefined {
+  if (!basis.effects_at_period_end) return undefined;
+  const when = basis.period_kind === 'over_period' ? `over the first ${months(basis.period_months)}${basis.reference === 'launch' ? ' after launch' : ''}`
+    : `at ${monthNumber(basis.period_months)}`;
+  return `Each option’s effects are read as their size ${when}, including recruitment and ramp-up (${basis.effect_unit}), and are added together: twice the change counts twice, with no diminishing returns, interactions or extra onboarding drag modelled.`;
+}
+
+/** Amendment 4: a chance that covers the target alone, while the user's goal also requires other conditions. */
+export function partialGoalWords(label: string, others: readonly string[]): string | undefined {
+  if (others.length === 0) return undefined;
+  return `This chance covers ‘${label}’ only. It does not include: ${others.join('; ')}.`;
+}
+
+/** Amendments 7 and 10: a change_rel on Olumi's starting value. */
+export function estimateOnlyWords(base: number, unit: string): string {
+  return `Provisional estimate using Olumi’s assumed starting value: ${sayFigureAsWritten(base, unit)}. That starting value’s own uncertainty is not included.`;
+}

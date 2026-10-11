@@ -68,11 +68,14 @@ import { sayFigure } from './say-figure.js';
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
+import { admitGoalTargetBasis, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
 import {
   admitCandidateConstraints,
+  canonicalProvenance,
   percentLevelFrame,
   type CandidateConstraint,
   type AdmittedConstraint,
+  type ConstraintAdmissionResult,
 } from './admit-constraint.js';
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
@@ -163,6 +166,18 @@ export interface CandidateModel {
      * the drafter saw no part-or-whole reading, exactly what an older candidate meant.
      */
     scope?: GoalScopeDeclaration | null;
+    /**
+     * Recovery Batch C (ruling 2): what the goal metric MEASURES. `change` = the metric is itself a change from today
+     * ("productivity, % change from today"), 0 today by definition; its target is `change_abs` in its own unit. Optional
+     * because the banked contract has no such field: absent means `level`, exactly what an older candidate meant.
+     */
+    quantity_frame?: 'level' | 'change' | null;
+    /**
+     * Recovery Batch C (ruling 11): the target's semantics as the drafter states them — reference, denominator, period,
+     * effect unit, whether effects are their size at the period's end, what else the goal requires, and an open question
+     * when the target reads more than one way. Validated by `admitGoalTargetBasis`; absent = none stated (older candidates).
+     */
+    basis?: DraftedGoalTargetBasis | null;
   };
   readonly constraints: readonly CandidateConstraint[];
   readonly options: readonly {
@@ -510,6 +525,8 @@ export interface AdmittedNode {
    * keyed to the level it read; `NodeV3.goal_level_reading`. Never the user's; its words are said.
    */
   goal_level_reading?: { level: number; level_unit: string; quote: string; lead: string; bound?: '<=' | '<' | '>=' | '>' };
+  /** Recovery Batch C: Olumi's validated reading of the target's semantics (`goal-target-basis.ts`); `NodeV3.goal_target_basis`. */
+  goal_target_basis?: GoalTargetBasis;
   /**
    * ⛔ A NODE'S `provenance` IS A DISPLAY ENUM, NOT THE EDGE OBJECT
    * (`cee-v3.ts:363` — `from_brief | ai_inferred | user_set`). Edges carry the
@@ -2879,6 +2896,44 @@ export function admitStatedGoalChange(
   const unit = goal.unit && !isChangeOwnPercent({ ...goal, value: raw }) ? goal.unit : undefined;
   const stored = frame === 'change_rel' ? raw / 100 : raw;
   const node: Partial<AdmittedNode> = { ...(unit ? { goal_threshold_unit: unit } : {}), goal_threshold_frame: frame, goal_threshold_raw: stored };
+  /**
+   * ⭐ RECOVERY BATCH C (rulings 2–5, 9–11): the drafter's stated semantics, validated once. A basis never makes a base
+   * up: it only (a) lets a change QUANTITY be scored with no level today, (b) lets a relative change stand on Olumi's own
+   * starting value as `estimate_only`, and (c) says the reference and period beside the chance.
+   */
+  const quantityFrame = goal.quantity_frame === 'change' ? 'change' : 'level';
+  const basisVerdict = admitGoalTargetBasis({
+    drafted: goal.basis, quantityFrame, targetFrame: frame, targetRaw: stored, horizonMonths: goal.horizon_months,
+  });
+  const basis = 'basis' in basisVerdict ? basisVerdict.basis : null;
+  const withBasis = (n: Partial<AdmittedNode>): Partial<AdmittedNode> => (basis === null ? n : { ...n, goal_target_basis: basis });
+  if (quantityFrame === 'change') {
+    /**
+     * ⭐ A CHANGE QUANTITY (ruling 2, hiring): "productivity, % change from today" with `change_abs` +10 in its own unit. ISL
+     * scores the option's paired change against the status quo (`level_i = B + (option − SQ)`, B = 0 today by definition), so
+     * NO level today is needed or written. Its scale is the change's own (`%` → 0–100), so every effect stated in "% of today's
+     * productivity" is sized on that frame (`resolveMagnitudeFrame` reads `goal_threshold_cap`). Refused unless the basis is
+     * stated and valid (ruling 9: a missing denominator is still refused), and a relative change of a change is refused (the
+     * contract: no `change_rel` on a `change` quantity).
+     */
+    const changeNode: Partial<AdmittedNode> = {
+      ...(goal.unit ? { goal_threshold_unit: goal.unit } : {}), goal_threshold_frame: frame, goal_threshold_raw: stored, quantity_frame: 'change',
+    };
+    const refusal = frame !== 'change_abs' ? 'frame' as const : 'refused' in basisVerdict ? basisVerdict.refused
+      : basis === null ? 'denominator' as const : !goal.unit ? 'frame' as const : null;
+    if (refusal !== null) return { node: changeNode, withheld: goalTargetBasisRefusalWords(goal.metric, refusal) };
+    const resolvedChange = stored !== 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(stored), goal.unit, undefined) : null;
+    if (resolvedChange === null) {
+      return { node: changeNode, withheld: `A change of ${raw}${goal.unit ? ` ${goal.unit}` : ''} in "${goal.metric}" does not sit on a scale Olumi can read, so no chance of reaching it is shown.` };
+    }
+    return { node: {
+      ...changeNode,
+      goal_threshold_cap: resolvedChange.cap,
+      goal_threshold_cap_provenance: resolvedChange.provenance,
+      goal_threshold: stored / resolvedChange.cap,
+      goal_target_basis: basis!,
+    } };
+  }
   const sign = raw > 0 ? '+' : '';
   const change = frame === 'change_rel' ? `${sign}${raw}%` : `${sign}${raw}${unit ? ` ${unit}` : ''}`;
   const today = goal.baseline_value;
@@ -2903,7 +2958,16 @@ export function admitStatedGoalChange(
     }
     return null;
   })();
-  if (notTheUsers !== null && fromBrief?.kind !== 'adopt') {
+  /**
+   * ⭐ RECOVERY BATCH C (ruling 9; amendments 7 and 10): a RELATIVE change on Olumi's own starting value is no longer refused
+   * outright. With a valid basis it is admitted as `estimate_only`: the base is written as OLUMI'S (`cee_inference`, never
+   * the user's), and the licence labels the chance "Provisional estimate using Olumi's assumed starting value: B", adding that
+   * B's own uncertainty is not included. A missing base, a base claimed as the user's but not in the brief, or a missing
+   * denominator stays refused. A LEVEL target on Olumi's base stays withheld (amendment 7: `admitModel`'s level guard).
+   */
+  const estimateOnly = notTheUsers !== null && fromBrief?.kind !== 'adopt' && frame === 'change_rel' && basis !== null
+    && typeof today === 'number' && Number.isFinite(today) && goalLevelIsEstimated(goal);
+  if (notTheUsers !== null && fromBrief?.kind !== 'adopt' && !estimateOnly) {
     // ⛔ AIQ 5894808343 (1), no-regret: the brief DID give a figure, so "was not stated" would be false.
     if (fromBrief?.kind === 'refused') {
       const gave = fromBrief.written.map((w) => `‘${w}’`).join(' and ');
@@ -2913,9 +2977,9 @@ export function admitStatedGoalChange(
     }
     return { node, withheld: notTheUsers };
   }
-  const level = notTheUsers === null ? today as number : (fromBrief as Extract<BriefGoalLevel, { kind: 'adopt' }>).value;
+  const level = notTheUsers === null || estimateOnly ? today as number : (fromBrief as Extract<BriefGoalLevel, { kind: 'adopt' }>).value;
   // ⛔ AIQ 5897443539 (run 0): a reading of a "%"-typed percentage change carries the level's unit read from the brief.
-  const readUnit = notTheUsers !== null && fromBrief?.kind === 'adopt' ? fromBrief.unit : undefined;
+  const readUnit = notTheUsers !== null && !estimateOnly && fromBrief?.kind === 'adopt' ? fromBrief.unit : undefined;
   const goalUnit = readUnit ?? goal.unit;
   const target = frame === 'change_rel' ? level * (1 + stored) : level + stored;
   const resolved = level > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(level, target), goalUnit, undefined) : null;
@@ -2935,7 +2999,14 @@ export function admitStatedGoalChange(
   };
   if (notTheUsers === null) {
     // Only a level the user stated for this goal reaches here (`goalLevelIsEstimated`, `userWroteLevel` above).
-    return { node: { ...withBase, observed_state: briefGoalObservedState(level / resolved.cap, goal.unit, level, resolved.cap) } };
+    return { node: withBasis({ ...withBase, observed_state: briefGoalObservedState(level / resolved.cap, goal.unit, level, resolved.cap) }) };
+  }
+  if (estimateOnly) {
+    // OLUMI'S starting value, said as such by the licence (`estimate_only`); never `brief_extraction` / `user_stated`.
+    return { node: withBasis({
+      ...withBase,
+      observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goal.unit ? { unit: goal.unit } : {}), source: 'cee_inference', raw_value: level, cap: resolved.cap },
+    }) };
   }
   // ⭐ AIQ (b): OLUMI'S READING of the brief's figure. Never `user_stated` (`cee_inference`); the reading carries the
   // brief's clause and the words, keyed to the level it read (`goalLevelReadingWords`: a level the user states or edits
@@ -2948,15 +3019,53 @@ export function admitStatedGoalChange(
   const unitText = typeof goalUnit === 'string' ? goalUnit : '';
   const words = goalLevelSentence(lead, { level, frame, stored, unit: unitText, bound }) ?? `${lead}.`;
   return {
-    node: {
+    node: withBasis({
       ...withBase,
       observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goalUnit ? { unit: goalUnit } : {}), source: 'cee_inference', raw_value: level, cap: resolved.cap },
       goal_level_reading: { level, level_unit: unitText, quote: adopt.quote, lead, ...(bound !== null ? { bound } : {}) },
-    },
+    }),
     reading: words,
   };
 }
 
+
+/**
+ * ⭐ RECOVERY BATCH C (ruling 15; DL scope decision 2): SEVERAL TARGETS ARE STORED AS THE GOAL'S TARGETS. A level row the
+ * drafter typed `role: 'target'` is marked `role: 'goal_target'`, and the goal's own stated level target is written beside
+ * them as its own row (the goal panel's raw + row pair, `statedGoalTargetOf`), so the Run sends every target and ISL's
+ * same-draw joint covers each (`goal-targets-joint.ts`). A strict comparator is held as stated (`operator_as_stated`).
+ * Nothing changes for a model with no target rows: the result is returned as the SAME reference.
+ */
+function withGoalTargetRows(
+  result: ConstraintAdmissionResult, model: CandidateModel, nodes: readonly Partial<AdmittedNode>[],
+  nodeIdFor: (metric: string) => string | undefined,
+): ConstraintAdmissionResult {
+  const goal = nodes.find((n) => n.kind === 'goal');
+  const targetNodes = new Set(model.constraints.filter((c) => c.role === 'target' && (c.frame ?? 'level') === 'level')
+    .map((c) => nodeIdFor(c.metric)).filter((id): id is string => id !== undefined && id !== goal?.id));
+  if (goal === undefined || typeof goal.id !== 'string' || targetNodes.size === 0) return result;
+  const marked = result.constraints.map((c) => (targetNodes.has(c.node_id) && (c.value_frame ?? 'level') === 'level'
+    ? { ...c, role: 'goal_target' as const } : c));
+  if (!marked.some((c) => c.role === 'goal_target')) return result;
+  const raw = goal.goal_threshold_raw;
+  const op = model.goal.operator;
+  const stated = op === '>' || op === '<' ? op : undefined;
+  const held = op === '>' || op === '>=' ? '>=' : op === '<' || op === '<=' ? '<=' : undefined;
+  if (goal.goal_threshold_frame !== 'level' || typeof raw !== 'number' || !Number.isFinite(raw) || held === undefined) {
+    return { ...result, constraints: marked };
+  }
+  const id = `agent-lane:${goal.id}:${held}`;
+  if (marked.some((c) => c.constraint_id === id)) {
+    return { ...result, constraints: marked.map((c) => (c.constraint_id === id ? { ...c, role: 'goal_target' as const } : c)) };
+  }
+  const own: AdmittedConstraint = {
+    constraint_id: id, node_id: goal.id, operator: held, ...(stated !== undefined ? { operator_as_stated: stated } : {}),
+    value: raw, label: model.goal.metric,
+    ...(typeof goal.goal_threshold_unit === 'string' ? { unit: goal.goal_threshold_unit } : {}),
+    provenance: canonicalProvenance(model.goal.provenance), value_frame: 'level', role: 'goal_target',
+  };
+  return { ...result, constraints: [own, ...marked] };
+}
 
 /** #1840's goal `observed_state` for a level the brief states: `{ value: B, baseline: B, unit?, source, raw_value, cap }`. */
 function briefGoalObservedState(normalised: number, unit: string | null | undefined, raw: number, cap: number): NonNullable<AdmittedNode['observed_state']> {
@@ -3624,6 +3733,12 @@ function admitOnce(
             withheld(verdict.reason);
           }
         }
+        // Recovery Batch C (rulings 18, 22; amendment 5): a LEVEL target's stated period and reference, held for the words
+        // and the horizon verdict. An invalid or absent basis changes nothing here: the level path is exactly as before.
+        const levelBasis = admitGoalTargetBasis({
+          drafted: model.goal.basis, quantityFrame: model.goal.quantity_frame === 'change' ? 'change' : 'level',
+          targetFrame: 'level', targetRaw: raw, horizonMonths: model.goal.horizon_months,
+        });
         return {
           ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
           goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
@@ -3636,6 +3751,7 @@ function admitOnce(
               }
             : {}),
           ...(observed_state !== undefined ? { observed_state } : {}),
+          ...('basis' in levelBasis && levelBasis.basis !== null ? { goal_target_basis: levelBasis.basis } : {}),
         };
       })(),
     },
@@ -4471,7 +4587,7 @@ function admitOnce(
     ),
   ];
   const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
-  const constraintResult = admitCandidateConstraints(
+  const constraintResult = withGoalTargetRows(admitCandidateConstraints(
     model.constraints,
     nodeIdForMetric,
     // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
@@ -4483,7 +4599,7 @@ function admitOnce(
         ...(typeof n.label === 'string' ? { label: n.label } : {}),
       };
     },
-  );
+  ), model, nodes, nodeIdForMetric);
 
   /**
    * ⛔ ONE CONNECTION, ONE EDGE — an option's link to a factor it already acts on

@@ -29,6 +29,7 @@ import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
 import { goalChanceEstimateLinkCount } from './goal-chance-estimate-attribution.js';
 import { sentencesOf } from './reply/compose-reply.js';
+import { sayDisplayedPct } from '../goal-target/goal-targets-joint.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
 
@@ -128,6 +129,43 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   // Preserve the existing owed-point and named-option gates exactly.
   return [...(pointsOwed ? points : []), ...ranges]
     .filter((line): line is GoalChanceScreenLine => line.label !== undefined);
+}
+
+/**
+ * ⭐ RECOVERY BATCH C: the sentences said ONCE beside the chances, in the screen's order — for several targets, the joint's
+ * withheld reason (and the Fréchet bound, amendment 6) and then each target's own chance (ruling 15: "each target separately
+ * below"); the status quo row by assumption (amendment 1); then the licence's disclosures (amendments 1, 2, 4, 7, 10). Read only
+ * from the Run's stored licence (`goalChanceFactsForAgent`); [] when it carries none or the Run is not current.
+ */
+export function goalChanceNotesForAgent(result: unknown, graph: unknown, current: boolean): string[] {
+  const facts = goalChanceFactsForAgent(result, graph, current);
+  const nodes = rec(graph)?.nodes;
+  const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
+    .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
+    .map((n) => [n.id as string, n.label as string]));
+  const recorded = rec(facts.goal_chance_licence?.option_labels_by_option);
+  const labelOf = (id: string): string | undefined => {
+    const r = recorded?.[id];
+    return typeof r === 'string' && r.trim() !== '' ? r : labels.get(id);
+  };
+  const out: string[] = [];
+  const targets = facts.goal_targets;
+  if (targets !== undefined) {
+    if (targets.joint.status === 'withheld') {
+      out.push(targets.joint.line);
+      if (targets.joint.frechet_line !== undefined) out.push(targets.joint.frechet_line);
+    }
+    for (const t of targets.per_target) {
+      const each = Object.entries(t.pct_by_option).flatMap(([id, pct]) => {
+        const label = labelOf(id);
+        return label === undefined ? [] : [`‘${label}’ ${sayDisplayedPct(pct)}`];
+      });
+      if (each.length > 0) out.push(`On its own, the chance of ${t.words}, in this model: ${each.join('; ')}.`);
+    }
+  }
+  if (facts.goal_chance_status_quo !== undefined) out.push(facts.goal_chance_status_quo.line);
+  for (const note of facts.goal_chance_notes ?? []) out.push(note);
+  return out;
 }
 
 /** Every licensed cell's SAME sentence, including point forms not owed in narration. */
@@ -233,7 +271,19 @@ const LIST_START = /^\s*(?:[-*•]|\d{1,3}[.)])\s/;
  * MOVED to follow that figure for options without shortfalls. A shortfall option only appends its missing canonical unit;
  * its existing wording, notes and driver sentence stay as they stand.
  */
-export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScreenLine[]): { text: string; added: number } {
+export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScreenLine[], notes: readonly string[] = []): { text: string; added: number } {
+  // Recovery Batch C: the run-wide sentences said once, after the chance lines, each only when the reply does not already
+  // carry it word for word (quotes aside).
+  const owedNotes = notes.filter((n) => n.trim() !== '');
+  if (owedNotes.length === 0) return withScreenLinesOwedOnly(text, lines);
+  const base = withScreenLinesOwedOnly(text, lines);
+  const missing = owedNotes.filter((n) => !sameWordsIn(base.text, n));
+  if (missing.length === 0) return base;
+  const said = missing.join(' ');
+  return { text: base.text.trim() === '' ? said : `${base.text.trimEnd()}\n\n${said}`, added: base.added + missing.length };
+}
+
+function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenLine[]): { text: string; added: number } {
   // Narration never supplies k, even when it guessed correctly. Complete producer-bound sentences are already authorised;
   // keep their exact bytes while applying RC4's existing guard to all other narrator text before deterministic assembly.
   const authorised: string[] = [];

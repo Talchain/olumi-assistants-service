@@ -213,7 +213,7 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
-import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
+import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { sentGoalThresholdOf, withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
@@ -317,12 +317,13 @@ export const PLOT_BRIEF_MAX_CHARS = 10_000;
  */
 export function wireGoalConstraints<C>(goalConstraints: C): C {
   if (!Array.isArray(goalConstraints)) return goalConstraints;
-  const carries = (c: unknown): c is Record<string, unknown> =>
-    c !== null && typeof c === 'object' && Object.prototype.hasOwnProperty.call(c, 'operator_as_stated');
+  // `role` (Batch C: a goal target, `goal-targets-joint.ts`) is CEE's own metadata and never travels either.
+  const carries = (c: unknown): c is Record<string, unknown> => c !== null && typeof c === 'object'
+    && (Object.prototype.hasOwnProperty.call(c, 'operator_as_stated') || Object.prototype.hasOwnProperty.call(c, 'role'));
   if (!goalConstraints.some(carries)) return goalConstraints;
   return goalConstraints.map((c: unknown) => {
     if (!carries(c)) return c;
-    const { operator_as_stated: stated, ...engine } = c;
+    const { operator_as_stated: stated, role: _role, ...engine } = c;
     const strict = (stated === '>' && engine.operator === '>=') || (stated === '<' && engine.operator === '<=');
     return strict ? { ...engine, operator: stated } : engine;
   }) as C;
@@ -2208,6 +2209,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
+    // ⭐ Recovery Batch C (amendment 3): a target read more than one way is not tested until the user says which.
+    response = withholdForOpenTargetQuestion(response, graphForAnalysis, snapshot.goal_node_id);
+
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
     // stated": PLoT's GOAL_DIRECTION_UNATTESTED is taken off the run it would mislabel, before the headline and the store.
     response = withoutDirectionUnattestedOnHeldFloor(response, heldGoalPointsUp(graphForAnalysis, snapshot.goal_node_id));
@@ -2871,7 +2875,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance),
-      snapshot.rawPersistedGraph ?? graphForAnalysis);
+      snapshot.rawPersistedGraph ?? graphForAnalysis,
+      // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
+      // so a several-targets joint names exactly the conditions ISL counted on each draw.
+      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);

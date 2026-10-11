@@ -182,7 +182,17 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
     if (Array.isArray(r.constraint_margins)) {
       out.constraint_margins = r.constraint_margins.filter((x) => !drop.includes(readString(readRecord(x)?.constraint_id) ?? ''));
     }
+    // Recovery Batch C: a precision describes the figure it sits beside (its n_informative and standard error ARE that
+    // figure's), so it goes with it — never a precision left standing for a withheld chance.
+    const cpp = readRecord(r.constraint_probabilities_precision);
+    if (cpp !== null) {
+      const next = { ...cpp };
+      for (const cid of drop) delete next[cid];
+      out.constraint_probabilities_precision = next;
+    }
     if ('probability_of_joint_goal' in out) delete out.probability_of_joint_goal;
+    delete out.probability_of_joint_goal_precision;
+    delete out.joint_probability_precision;
     return out;
   };
   const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
@@ -284,6 +294,9 @@ export function withholdOptionGoalFigures<E>(
       delete out.probability_of_goal;
       for (const k of GOAL_CHANCE_COMPANION_KEYS) delete out[k];
       delete out.probability_of_joint_goal;
+      // Recovery Batch C: the joint's precision goes with the joint it describes.
+      delete out.probability_of_joint_goal_precision;
+      delete out.joint_probability_precision;
       // The downside figures (p05, cvar_10, regret) are in the goal's outcome units: they go with the target claims, as
       // before R2 (Codex r1 #2606: kept under P1/P5 they reached the Agent while the outcome was withheld).
       delete out.downside;

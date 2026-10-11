@@ -8,12 +8,18 @@ import { goalHorizonWithholdDetail } from './goal-horizon-detail.js';
 import { horizonSteadyAttested } from './horizon-basis.js';
 import { goalKindOf } from './goal-kind.js';
 import { timeClassOf } from './time-class.js';
+import { goalTargetBasisOf } from './goal-target-basis.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
   && !Array.isArray(value) ? value as Rec : undefined;
 
-export type GoalHorizonVerdict = 'no_horizon' | 'computed_at_h' | 'steady_attested' | 'withhold';
+/**
+ * `basis_at_h` (recovery Batch C, amendment 2; ruling 12): the goal's own stated basis says every option's effect on it IS
+ * its size at the held month (including recruitment and ramp-up) — an explicit timing assumption Olumi states beside the
+ * chance, never a steady state. Only at the SAME month as the held horizon, and never while the target's question is open.
+ */
+export type GoalHorizonVerdict = 'no_horizon' | 'computed_at_h' | 'steady_attested' | 'basis_at_h' | 'withhold';
 export const GOAL_HORIZON_STEADY_ATTESTED = 'GOAL_HORIZON_STEADY_ATTESTED';
 
 /** The one held-month accessor: wording consumers do not validate/re-derive the horizon. */
@@ -61,10 +67,17 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
   const goal = goals.length === 1 ? goals[0] : undefined;
   if (heldGoalHorizonMonths(goal) === undefined) {
     // Calendar dates have no bound carrier today; share-by-date's event chances already model time.
-    return heldGoalDeadline(goal) !== undefined && goalKindOf(graph) !== 'share_by_date' ? 'withhold' : 'no_horizon';
+    if (heldGoalDeadline(goal) !== undefined && goalKindOf(graph) !== 'share_by_date') return 'withhold';
+    // Batch C: no held month, but the target's own stated period with effects at its end — the chance says that period.
+    const stated = goalTargetBasisOf(goal);
+    return stated !== undefined && stated.effects_at_period_end && stated.open_question === undefined ? 'basis_at_h' : 'no_horizon';
   }
   if (accumulationTestedAtGoalHorizon(graph, envelope)) return 'computed_at_h';
-  return horizonSteadyAttested(graph) ? 'steady_attested' : 'withhold';
+  if (horizonSteadyAttested(graph)) return 'steady_attested';
+  // ⛔ Amendment 2: never assume steady state for an urgent hire. Without an at-horizon basis the chance is withheld.
+  const basis = goalTargetBasisOf(goal);
+  return basis !== undefined && basis.effects_at_period_end && basis.open_question === undefined
+    && basis.period_months === heldGoalHorizonMonths(goal) ? 'basis_at_h' : 'withhold';
 }
 
 /**

@@ -529,6 +529,14 @@ export const GoalConstraintSchema = z.object({
       pre_normalisation_unit: z.string(),
     })
     .optional(),
+  /**
+   * ⭐ RECOVERY BATCH C (ruling 15; DL scope decision 2): `goal_target` = this row is one of the GOAL'S TARGETS (marketing:
+   * conversion above 15% AND at least 20 new customers), not a limit. Absent = a limit, exactly as every row before C. The
+   * Run sends every row, so ISL's same-draw joint covers each target (and any limit, which the headline then names); the
+   * licence reads this marker to say each target's own chance and the joint (`goal-targets-joint.ts`). CEE metadata: the
+   * PLoT wire copy never carries it (`wireGoalConstraints`). Declared because this object strips undeclared keys.
+   */
+  role: z.enum(["goal_target"]).optional(),
   /** Deadline metadata for temporal constraints */
   deadline_metadata: z.object({
     deadline_date: z.string().optional(),

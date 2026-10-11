@@ -44,6 +44,12 @@ import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateLinkCount } from '../agent-lane/goal-chance-estimate-attribution.js';
+import { resolveGoalDirection } from './goal-direction.js';
+import {
+  effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoRowWords,
+  targetChanceWords, type GoalTargetBasis,
+} from './goal-target-basis.js';
+import { goalTargetsBlockOf, readGoalTargetsBlock, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
 import {
   displayedPctAt, displayRoundingFor, goalChanceDisplayClass, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
   type GoalChanceDisplayRounding, type GoalChanceDriver, type GoalChanceNoDriverReason, type GoalChancePrecision,
@@ -134,7 +140,9 @@ export interface GoalChanceLicence {
   readonly spread_note_by_option?: Readonly<Record<string, string>>;
   readonly shortfall_note_by_option?: Readonly<Record<string, string>>;
   /** The target as the user stated it: the UI says it in these words, never re-derives the comparator. */
-  readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string; readonly by_date?: string };
+  readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string; readonly by_date?: string;
+    /** Batch C: the target's frame when it is not a level (a change from today). */
+    readonly frame?: 'change_abs' | 'change_rel' };
   /**
    * ⭐ D3 cut 5 (DL 0df0e1; Science d5 #87 6008242694 / 6008252938): present iff a USER-STATED link on a licensed option's
    * path to the goal carries an existence probability below 1 — the chances then also count Olumi's own assumption that
@@ -169,6 +177,28 @@ export interface GoalChanceLicence {
    * conditional. The UI places `line` instead of a %; absent for any other withhold.
    */
   readonly withheld_reason_by_option?: Readonly<Record<string, GoalChanceZeroSpread>>;
+  /**
+   * ⭐ RECOVERY BATCH C (rulings 18–22): the words after "chance of" for THIS Run's headline, when its target's reference and
+   * period are stated (`goal-target-basis.ts`) — "‘productivity’ being at least 10% higher than today at three months" — or,
+   * with several targets, the joint's words naming every condition. Absent = the older "chance of meeting your goal".
+   */
+  readonly chance_words?: string;
+  /** Batch C: the disclosures said beside the chance, in order (amendments 1, 2, 4, 7, 10; rulings 6, 8, 14). */
+  readonly notes?: readonly string[];
+  /** Amendment 1: the status quo row of a change target, by assumption — never a figure or an interval. */
+  readonly status_quo?: { readonly option_id: string; readonly line: string };
+  /** Ruling 9 / amendments 7, 10: a relative change on Olumi's own starting value. */
+  readonly estimate_only?: { readonly base: number; readonly unit: string };
+  /** Amendment 7: any Olumi input (a starting value or an effect size) on the path makes the result provisional. */
+  readonly provisional?: true;
+  /** Batch C, several targets: each target's own chance and the same-draw joint (the headline) or why it is withheld. */
+  readonly targets?: GoalTargetsBlock;
+}
+
+/** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
+export interface GoalChanceConstraintInputs {
+  readonly storedConstraints?: unknown;
+  readonly sentConstraints?: unknown;
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -212,7 +242,7 @@ export function displayedGoalPct(p: number): number {
  */
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
-  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph,
+  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -221,10 +251,26 @@ export function goalChanceLicenceOf(
   if (shareChanceInputFailure(graph) !== null) return null;
   if (share === null && isEventShareForecast(graph)) return null;
   const target = goal === undefined ? null : statedGoalTargetOf(graph as Rec, goal);
-  // A LEVEL target only: a target stated as a change ("cut by 20%") has no ruled sentence yet.
-  if (target === null || (target.frame !== undefined && target.frame !== 'level')) return null;
-  const comparator = target.held === undefined ? undefined : COMPARATOR[target.held];
+  // ⭐ RECOVERY BATCH C (rulings 19–21): a target stated as a CHANGE from today now has its ruled sentence — but only on its
+  // stated, validated, current basis (reference, denominator, period, effect unit; `goal-target-basis.ts`). A change with
+  // no basis stays unlicensed (ruling 11: semantics are explicit or the chance is not said). A target that can be read more
+  // than one way is never licensed while its question is open (amendment 3).
+  const changeFrame = target?.frame === 'change_abs' || target?.frame === 'change_rel' ? target.frame : undefined;
+  if (target === null || (target.frame !== undefined && target.frame !== 'level' && changeFrame === undefined)) return null;
+  const basis: GoalTargetBasis | undefined = goal === undefined ? undefined : goalTargetBasisOf(goal);
+  // ⛔ Ruling 12 / amendment 2: a change's "at three months" needs its effects stated at that month; never steady state.
+  if ((changeFrame !== undefined && (basis === undefined || !basis.effects_at_period_end)) || basis?.open_question !== undefined) return null;
+  // A change carries its direction in its sign; with no comparator held, the run's own sense is the bound ISL scored.
+  const held = target.held ?? (changeFrame === undefined ? undefined
+    : resolveGoalDirection(graph, goalId)?.direction === 'minimise' ? '<=' : '>=');
+  const comparator = held === undefined ? undefined : COMPARATOR[held];
   if (comparator === undefined || typeof target.unit !== 'string' || target.unit.trim() === '') return null;
+  // ⭐ Ruling 21 / amendments 7, 10: a relative change needs today's level; on OLUMI's own starting value it is estimate_only.
+  const goalState = isRec(goal?.observed_state) ? goal!.observed_state : undefined;
+  const base = changeFrame === 'change_rel' && finite(goalState?.raw_value) ? goalState!.raw_value as number : undefined;
+  if (changeFrame === 'change_rel' && base === undefined) return null;
+  const estimateOnly = changeFrame === 'change_rel' && goalState?.source === 'cee_inference' && !isRec(goal?.goal_level_reading);
+  const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
 
   // The Run's own option records, current-first: the first carrier that has any is the comparison.
   const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
@@ -248,6 +294,8 @@ export function goalChanceLicenceOf(
     const shareGate = share !== null && share.goal.id === goalId
       ? shareGateForOption(graph, id, typeof p === 'number' ? p : undefined, step) : undefined;
     if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
+    // ⭐ Amendment 1: a change target's status quo is measured against itself — no change, by assumption, never a finding.
+    if (changeFrame !== undefined && id === statusQuoId) { withheld.push(id); continue; }
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
     if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) {
       withheld.push(id);
@@ -309,7 +357,8 @@ export function goalChanceLicenceOf(
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
   const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
   const estimateLinks = licensed.length === 0 ? 0 : goalChanceEstimateLinkCount(graph, option_ids, goalId);
-  return {
+  const goalLabel = typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label) ? goal.label.trim() : undefined;
+  const single: GoalChanceLicence = {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
     message: licensed.length === 0 ? '' : `Each option’s ${share === null ? 'chance of meeting your goal'
@@ -340,6 +389,140 @@ export function goalChanceLicenceOf(
     ...(Object.keys(drivers).length > 0 ? { driver_by_option: drivers } : {}),
     ...(Object.keys(noDrivers).length > 0 ? { no_driver_by_option: noDrivers } : {}),
   };
+  return withBatchCWords(single, {
+    envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
+    olumiEffects: estimateLinks > 0, constraints, option_ids,
+  });
+}
+
+/**
+ * ⭐ RECOVERY BATCH C: the ruled sentence (18–22) and its disclosures (amendments 1, 2, 4, 7, 10) on the licence the UI and
+ * the Agent already read by identity, and — with several targets — the joint headline that replaces the single target's.
+ * Never a figure the Run did not compute; never a parallel licence.
+ */
+function withBatchCWords(single: GoalChanceLicence, c: {
+  readonly envelope: unknown; readonly graph: unknown; readonly goal: Rec | undefined; readonly goalLabel: string | undefined;
+  readonly basis: GoalTargetBasis | undefined; readonly changeFrame: 'change_abs' | 'change_rel' | undefined;
+  readonly comparatorHeld: string; readonly target: { readonly value: number; readonly unit?: string };
+  readonly base: number | undefined; readonly estimateOnly: boolean; readonly statusQuoId: string | undefined;
+  readonly olumiEffects: boolean; readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
+}): GoalChanceLicence {
+  const { goalLabel, changeFrame } = c;
+  // A level target's period is said only on an at-period-end basis (ruling 12); otherwise today's words, unchanged.
+  const basis = c.basis !== undefined && c.basis.effects_at_period_end ? c.basis : undefined;
+  if (goalLabel === undefined || (basis === undefined && changeFrame === undefined)) {
+    // No stated basis: today's single-target licence, plus the several-targets block if the Run sent target rows.
+    return withSeveralTargets(single, { ...c, basis });
+  }
+  const words = targetChanceWords({
+    label: goalLabel, frame: changeFrame ?? 'level', comparator: c.comparatorHeld, value: c.target.value, unit: c.target.unit ?? '',
+    ...(basis !== undefined ? { basis } : {}),
+  });
+  if (words === undefined) return withSeveralTargets(single, { ...c, basis });
+  const notes: string[] = [];
+  // Ruling 21: the base a relative change is read from is said; on Olumi's value, as Olumi's (amendments 7, 10).
+  if (changeFrame === 'change_rel' && c.base !== undefined) {
+    notes.push(c.estimateOnly ? estimateOnlyWords(c.base, c.target.unit ?? '')
+      : `Using ${sayFigureAsWritten(c.base, c.target.unit ?? '')} as today’s ‘${goalLabel}’.`);
+  }
+  // Amendment 1: every paired frame reads carrying on as unchanged.
+  notes.push(statusQuoAssumptionWords(goalLabel, basis));
+  // Amendment 2 / DL hiring decision: the effects' timing basis and the additive reading.
+  const effects = basis === undefined ? undefined : effectsBasisWords(basis);
+  if (effects !== undefined) notes.push(effects);
+  // Amendment 4: what this target leaves out — the brief's other stated conditions and every limit the Run did not include.
+  const limits = limitsOutsideTheChance(c.graph, c.constraints);
+  // A drafter's free-text condition that restates a typed limit's figure is that limit: said once, in the limit's words.
+  const others = (basis?.also_required ?? []).filter((t) => !limits.some((l) => t.includes(l.figure)));
+  const partial = partialGoalWords(goalLabel, [...limits.map((l) => l.words), ...others]);
+  if (partial !== undefined && !sentTargetRows(c.constraints)) notes.push(partial);
+  const provisional = c.estimateOnly || c.olumiEffects;
+  const out: GoalChanceLicence = {
+    ...single,
+    target: { ...single.target, ...(changeFrame !== undefined ? { frame: changeFrame } : {}) },
+    chance_words: `chance of ${words}`,
+    notes,
+    ...(changeFrame !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
+      ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel) } } : {}),
+    ...(c.estimateOnly && c.base !== undefined ? { estimate_only: { base: c.base, unit: c.target.unit ?? '' } } : {}),
+    ...(provisional ? { provisional: true as const } : {}),
+  };
+  return withSeveralTargets(out, { ...c, basis });
+}
+
+const sentTargetRows = (c: GoalChanceConstraintInputs): boolean => {
+  const stored = Array.isArray(c.storedConstraints) ? c.storedConstraints.filter(isRec) : [];
+  const sent = Array.isArray(c.sentConstraints) ? c.sentConstraints.filter(isRec) : [];
+  return sent.some((r) => stored.some((s) => s.constraint_id === r.constraint_id && s.role === GOAL_TARGET_ROLE));
+};
+
+/** The labels of the limits the user set that this single-target chance does not include (amendment 4). */
+function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs): { words: string; figure: string }[] {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const stored = Array.isArray(c.storedConstraints) ? c.storedConstraints.filter(isRec) : [];
+  return stored.flatMap((row) => {
+    if (row.role === GOAL_TARGET_ROLE || isRec(row.deadline_metadata)) return [];
+    const label = nodes.find((n) => n.id === row.node_id)?.label;
+    const bound = row.operator_as_stated ?? row.operator;
+    const words = bound === '<' ? 'below' : bound === '<=' ? 'at most' : bound === '>' ? 'above' : bound === '>=' ? 'at least' : undefined;
+    if (typeof label !== 'string' || label.trim() === '' || words === undefined || !finite(row.value)) return [];
+    const figure = sayFigureAsWritten(row.value, typeof row.unit === 'string' ? row.unit : '');
+    return [{ words: `‘${label.trim()}’ ${words} ${figure}`, figure }];
+  });
+}
+
+/**
+ * ⭐ Several targets (rulings 15–17, 22; amendments 5–6): the joint is the headline. Licensed → `pct_by_option` IS the joint
+ * (the one figure the UI already quotes as "the chance of meeting your goal") and the single target's claims about
+ * `probability_of_goal` (spread, shortfall, drivers, superlatives) go. Withheld → no option is quoted; the reason, and the
+ * Fréchet bound when it applies, ride `targets.joint`. Each target's own chance is listed below in `targets.per_target`.
+ */
+function withSeveralTargets(l: GoalChanceLicence, c: {
+  readonly envelope: unknown; readonly graph: unknown; readonly basis: GoalTargetBasis | undefined;
+  readonly statusQuoId: string | undefined; readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
+}): GoalChanceLicence {
+  const block = goalTargetsBlockOf({
+    envelope: c.envelope, graph: c.graph, storedConstraints: c.constraints.storedConstraints,
+    sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
+    ...(c.statusQuoId !== undefined ? { statusQuoId: c.statusQuoId } : {}),
+    ...(c.basis !== undefined ? { basis: c.basis } : {}),
+  });
+  if (block === null) return l;
+  const {
+    leader_option_id: _leader, next_option_id: _next, similar_option_ids: _similar, spread_note_by_option: _spread,
+    shortfall_note_by_option: _shortfall, driver_by_option: _drivers, no_driver_by_option: _noDrivers, sent_threshold: _sent,
+    summary_withheld: _summary, display_rounding_by_option: _rounding, withheld_reason_by_option: _zero, user_link_existence: _exists,
+    ...kept
+  } = l;
+  // Amendment 1 for every target the joint names (the single target's line named one); amendment 4 does not apply: the
+  // joint itself names every condition the Run sent.
+  const targetNames = block.conditions.filter((x) => x.role === 'target').map((x) => x.label);
+  const notes = (l.notes ?? []).flatMap((n) => n.startsWith('This chance covers ') ? []
+    : n.startsWith('This assumes carrying on as now') && targetNames.length > 0 ? [statusQuoAssumptionWords(targetNames, c.basis)] : [n]);
+  // Amendment 1: carrying on as now is the reference for every target, by assumption — never given a figure here.
+  const targetLabels = targetNames.map((x) => `‘${x}’`);
+  const statusQuo = c.statusQuoId !== undefined && c.option_ids.includes(c.statusQuoId) && targetLabels.length > 0
+    ? { status_quo: { option_id: c.statusQuoId,
+      line: `Doing nothing: no change to ${targetLabels.length === 1 ? targetLabels[0] : `${targetLabels.slice(0, -1).join(', ')} or ${targetLabels[targetLabels.length - 1]}`} in this model, by assumption.` } }
+    : {};
+  if (block.joint.status === 'licensed') {
+    const quoted = block.joint.pct_by_option;
+    return {
+      ...kept,
+      form: 'each',
+      pct_by_option: quoted,
+      ...(c.option_ids.filter((id) => !Object.hasOwn(quoted, id)).length > 0
+        ? { withheld_option_ids: c.option_ids.filter((id) => !Object.hasOwn(quoted, id)) } : {}),
+      ...(block.joint.display_rounding_by_option !== undefined ? { display_rounding_by_option: block.joint.display_rounding_by_option } : {}),
+      chance_words: `chance of ${block.joint.words}`,
+      ...(notes.length > 0 ? { notes } : {}),
+      ...statusQuo,
+      targets: block,
+    };
+  }
+  const { withheld_option_ids: _w, chance_words: _words, status_quo: _sq, ...rest } = kept;
+  return { ...rest, form: 'each', pct_by_option: {}, withheld_option_ids: [...c.option_ids], ...(notes.length > 0 ? { notes } : {}),
+    ...statusQuo, targets: block };
 }
 
 /** One Run-input candidate must agree with every licensed option; ambiguity records nothing. */
@@ -568,9 +751,9 @@ function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly stri
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
 export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
-  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph,
+  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): E {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, horizonGraph);
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
   if (licence === null || !isRec(envelope)) return envelope;
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
   return { ...envelope, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;
@@ -590,6 +773,15 @@ export function nearestFiveGoalChancesForAgent(result: unknown): ReadonlyMap<str
     .flatMap((w) => (Array.isArray(w) ? w : [])).find((w): w is Rec => isRec(w) && w.code === GOAL_CHANCE_LICENSED)!;
   const steps = isRec(r.display_rounding_by_option) ? r.display_rounding_by_option : {};
   const pct = isRec(r.pct_by_option) ? r.pct_by_option : {};
+  // ⛔ Recovery Batch C (ruling 15): with several targets the headline IS the same-draw joint, never the goal node's own
+  // `probability_of_goal` (one target's marginal). EVERY quoted option is handed the joint as displayed, so no Agent row
+  // can carry a single target's chance beside the joint's words; a withheld joint quotes nothing (no display, no figure).
+  if (isRec(r.targets)) {
+    for (const [id, shown] of Object.entries(pct)) {
+      if (typeof shown === 'number' && Number.isInteger(shown) && shown >= 0 && shown <= 100) out.set(id, shown / 100);
+    }
+    return out;
+  }
   for (const [id, step] of Object.entries(steps)) {
     const shown = pct[id];
     if (step === 'nearest_5' && typeof shown === 'number' && Number.isInteger(shown) && shown >= 0 && shown <= 100) out.set(id, shown / 100);
@@ -696,6 +888,9 @@ export function goalChanceLicenceForAgent(result: unknown): {
   withheld_reason_by_option?: Readonly<Record<string, GoalChanceZeroSpread>>;
   olumi_estimate_link_count?: number;
   goal_node_id?: string; goal_label?: string; option_labels_by_option?: Readonly<Record<string, string>>;
+  /** Recovery Batch C: the stored sentence parts, read only when well formed (a record at odds with itself speaks for nothing). */
+  chance_words?: string; notes?: readonly string[]; status_quo?: { option_id: string; line: string };
+  estimate_only?: { base: number; unit: string }; provisional?: true; targets?: GoalTargetsBlock;
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
@@ -770,5 +965,28 @@ export function goalChanceLicenceForAgent(result: unknown): {
     ...(similar !== undefined ? { similar_option_ids: similar } : {}),
     ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),
     ...(Object.keys(zeroSpreadReasons).length > 0 ? { withheld_reason_by_option: zeroSpreadReasons } : {}),
+    ...batchCPartsOf(r, optionIds, withheld ?? []),
+  };
+}
+
+/** Batch C's stored sentence parts, each validated on its own; a malformed part is simply not read. */
+function batchCPartsOf(r: Rec, optionIds: readonly string[], withheld: readonly string[]): {
+  chance_words?: string; notes?: readonly string[]; status_quo?: { option_id: string; line: string };
+  estimate_only?: { base: number; unit: string }; provisional?: true; targets?: GoalTargetsBlock;
+} {
+  const sayable = (v: unknown, max = 600): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= max && !/[\r\n]/.test(v);
+  const notes = Array.isArray(r.notes) && r.notes.length > 0 && r.notes.every((n) => sayable(n)) ? r.notes as string[] : undefined;
+  const sq = isRec(r.status_quo) && typeof r.status_quo.option_id === 'string' && withheld.includes(r.status_quo.option_id)
+    && sayable(r.status_quo.line) ? { option_id: r.status_quo.option_id, line: r.status_quo.line as string } : undefined;
+  const est = isRec(r.estimate_only) && finite(r.estimate_only.base) && typeof r.estimate_only.unit === 'string'
+    ? { base: r.estimate_only.base, unit: r.estimate_only.unit } : undefined;
+  const targets = r.targets === undefined ? undefined : readGoalTargetsBlock(r.targets, optionIds);
+  return {
+    ...(sayable(r.chance_words, 600) && r.chance_words.startsWith('chance of ') ? { chance_words: r.chance_words } : {}),
+    ...(notes !== undefined ? { notes } : {}),
+    ...(sq !== undefined ? { status_quo: sq } : {}),
+    ...(est !== undefined ? { estimate_only: est } : {}),
+    ...(r.provisional === true ? { provisional: true as const } : {}),
+    ...(targets !== undefined ? { targets } : {}),
   };
 }
