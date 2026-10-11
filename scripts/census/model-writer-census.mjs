@@ -11,7 +11,7 @@
  * TypeScript calls, constants, payloads, aliases and wrappers use the TS AST
  * and checker, never source regexes. SQL is a read-only migration-text census;
  * delegation is conservatively followed even when a wrapper forbids p_graph.
- * Named deployed-only RPCs carry explicit pg_proc evidence below; all other
+ * Named cross-repo RPCs carry deployed pg_proc or explicitly source-only evidence below; all other
  * missing RPC SQL / unresolved dynamic names are reported, never called safe.
  */
 import ts from 'typescript';
@@ -23,6 +23,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const DOOR_FILE = 'src/orchestrator-v5/persist-graph-write.ts';
 const STORE_FILE = 'src/orchestrator-v5/session/supabase-store.ts';
 const DOORS = new Set(['appendCheckedGraphWrite', 'commitModelChange']);
+const GUEST_STORE_FILE = 'src/orchestrator-v5/guest-copy/index.ts';
 const VERSION_STORE_FILE = 'src/orchestrator-v5/model-management/store-adapter.ts';
 // Read-only pg_proc evidence measured by af (8 Oct ~23:3xZ, project below); see PR #2891.
 // These definitions live in another repo; this is not a blanket SQL exemption.
@@ -50,6 +51,20 @@ export const DEPLOYED_ONLY_RPCS = {
     project: 'etmmuzwxtcjipwphdola', measured_at: '2026-10-08 ~23:3xZ',
   },
 };
+// Accepted RUN 8 cross-repo source proposal, NOT a claim of deployment.
+// Deployment is DB-first; a missing checked RPC fails closed in CEE.
+export const SOURCE_ONLY_RPCS = {
+  copy_guest_scenario_checked: {
+    classification: 'writer',
+    signature: 'copy_guest_scenario_checked(p_source_scenario_id uuid, p_user_id uuid, p_checked_source_graph jsonb, p_checked_source_revision bigint)',
+    security: 'SECURITY DEFINER', volatility: 'VOLATILE',
+    statement: 'INSERT INTO public.scenarios (user_id, title, graph, source_scenario_id) VALUES (p_user_id, v_title, v_graph, p_source_scenario_id)',
+    source_repo: 'DecisionGuideAI',
+    source_migration: 'supabase/migrations/20261011100000_checked_guest_copy_function.sql',
+    disposition: 'accepted source-only RUN 8; live application UNRUN',
+  },
+};
+const CROSS_REPO_RPCS = { ...DEPLOYED_ONLY_RPCS, ...SOURCE_ONLY_RPCS };
 const REQUIRED_WRITERS = [
   'append_turn_atomic', 'append_turn_atomic_v2', 'append_turn_atomic_v3',
   'append_turn_atomic_v4', 'append_turn_atomic_v4r', 'append_turn_atomic_v5',
@@ -105,7 +120,7 @@ export function classifyMigrationRpcs(root = ROOT) {
     }
   }
   const writers = new Set([...definitions.values()].filter(d => d.direct.length).map(d => d.name));
-  for (const [name, evidence] of Object.entries(DEPLOYED_ONLY_RPCS)) {
+  for (const [name, evidence] of Object.entries(CROSS_REPO_RPCS)) {
     if (!definitions.has(name) && evidence.classification === 'writer') writers.add(name);
   }
   let changed = true;
@@ -245,7 +260,7 @@ export function census({ root = ROOT, extraFiles = [], doorFile = DOOR_FILE } = 
       const names = strings(call.node.arguments[0]);
       rpcCalls.push({ ...call, names });
       if (!names.length) diagnostics.push(`${call.file}:${call.line}: unresolved RPC name`);
-      for (const name of names) if (!sql.definitions.has(name) && !Object.hasOwn(DEPLOYED_ONLY_RPCS, name)) {
+      for (const name of names) if (!sql.definitions.has(name) && !Object.hasOwn(CROSS_REPO_RPCS, name)) {
         diagnostics.push(`${call.file}:${call.line}: no migration SQL for RPC ${name}`);
       }
       if (names.some(name => sql.writers.has(name))) {
@@ -313,7 +328,7 @@ export function census({ root = ROOT, extraFiles = [], doorFile = DOOR_FILE } = 
     for (const sym of [...dispatchReachable]) for (const next of equivalents.get(sym) ?? []) {
       if (!dispatchReachable.has(next)) { dispatchReachable.add(next); changed = true; }
     }
-    for (const call of calls) if ([STORE_FILE, VERSION_STORE_FILE].includes(call.file)
+    for (const call of calls) if ([STORE_FILE, VERSION_STORE_FILE, GUEST_STORE_FILE].includes(call.file)
       && dispatchReachable.has(call.owner?.name && symbol(call.owner.name)) && call.sym) {
       if (!dispatchReachable.has(call.sym)) { dispatchReachable.add(call.sym); changed = true; }
     }
@@ -331,25 +346,29 @@ export function census({ root = ROOT, extraFiles = [], doorFile = DOOR_FILE } = 
     for (let ancestor = call.node.parent; ancestor; ancestor = ancestor.parent) {
       if (call.file === doorFile && ts.isFunctionDeclaration(ancestor) && DOORS.has(named(ancestor))) inDoor = true;
     }
-    const inSession = [STORE_FILE, VERSION_STORE_FILE].includes(call.file)
+    const inSession = [STORE_FILE, VERSION_STORE_FILE, GUEST_STORE_FILE].includes(call.file)
       && dispatchReachable.has(call.owner?.name && symbol(call.owner.name));
     const isDoor = doorSymbols.has(call.sym);
     const detail = isDoor ? { kind: 'door_caller', callee: call.sym.name } : primitive.get(call.node)
       ?? (writers.has(call.sym) ? { kind: 'store_method', callee: call.node.expression.getText() } : undefined);
     if (!detail) continue;
     const site = { file: call.file, line: call.line, ...detail };
-    if (inDoor || inSession) {
+    // The unchecked legacy guest RPC is prohibited even inside a door/adapter.
+    // Reaching a dispatch target cannot exempt a downgrade to the legacy call.
+    const legacyGuestRpc = call.name === 'rpc' && strings(call.node.arguments[0]).includes('copy_guest_scenario');
+    if ((inDoor || inSession) && !legacyGuestRpc) {
       excluded.push({ ...site, reason: inDoor ? 'inside door implementation' : call.file === STORE_FILE
-        ? 'session implementation reached by door' : 'version adapter reached by door' });
+        ? 'session implementation reached by door' : call.file === VERSION_STORE_FILE ? 'version adapter reached by door' : 'guest adapter reached by door' });
     } else sites.push(site);
   }
   const sort = (a, b) => a.file.localeCompare(b.file) || a.line - b.line;
-  const rpcNames = new Set([...sql.definitions.keys(), ...Object.keys(DEPLOYED_ONLY_RPCS), ...rpcCalls.flatMap(c => c.names)]);
+  const rpcNames = new Set([...sql.definitions.keys(), ...Object.keys(CROSS_REPO_RPCS), ...rpcCalls.flatMap(c => c.names)]);
   const rpcs = [...rpcNames].sort().map(name => {
     const def = sql.definitions.get(name);
     const deployed = !def && Object.hasOwn(DEPLOYED_ONLY_RPCS, name) ? DEPLOYED_ONLY_RPCS[name] : undefined;
-    return { name, classification: !def && !deployed ? 'unresolved' : sql.writers.has(name) ? 'writer' : 'non-writer',
-      deployed_evidence: deployed,
+    const proposed = !def && Object.hasOwn(SOURCE_ONLY_RPCS, name) ? SOURCE_ONLY_RPCS[name] : undefined;
+    return { name, classification: !def && !deployed && !proposed ? 'unresolved' : sql.writers.has(name) ? 'writer' : 'non-writer',
+      deployed_evidence: deployed, source_only_evidence: proposed,
       definition: def?.definition, end: def?.end, direct_writes: def?.direct ?? [],
       writer_delegates: def?.delegates.filter(d => sql.writers.has(d.name)) ?? [],
       call_sites: rpcCalls.filter(c => c.names.includes(name)).map(c => ({ file: c.file, line: c.line })) };

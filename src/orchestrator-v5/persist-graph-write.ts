@@ -1,9 +1,9 @@
 /**
  * The existing controlled graph/model write door.
  * appendCheckedGraphWrite handles turn appends; commitModelChange handles
- * SAVE_VERSION and RESTORE_VERSION using the existing atomic version RPCs.
+ * SAVE_VERSION, RESTORE_VERSION and COPY_GUEST_SCENARIO atomic RPCs.
  * Ownership and graph checks precede dispatch; original revision CAS remains
- * authoritative inside each RPC. Guest copy remains an explicit open residual.
+ * authoritative inside each RPC; guest copy binds checked source bytes there.
  * Projection and hashing precede this module. Checks never repair or mutate
  * graph bytes, and restore is never split into multiple writes.
  */
@@ -12,7 +12,10 @@ import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pend
 import { assertDoorProvenance } from './goal-target/horizon-basis-provenance.js';
 import { log } from '../utils/telemetry.js';
 import { assertUntouchedLevelQuantities } from './untouched-level-invariant.js';
-import { assertDoorOwnership } from './ownership/door-ownership.js';
+import { GuestCopyStoreError } from './guest-copy/index.js';
+import type { GuestCopyStorePort, GuestCopyOutcome } from './guest-copy/index.js';
+import { PersistedGraphInvariantError as GuestGraphInvariantError } from './persisted-graph-invariants.js';
+import { readVerifiedWriteCaller, assertDoorOwnership } from './ownership/door-ownership.js';
 import { computeGraphIdentityHash } from './context/graph-identity.js';
 import { ModelVersionSignInRequiredError, ModelVersionStoreError } from './model-management/store-adapter.js';
 import type { SaveVersionWrite, AtomicRestoreVersionWrite, ModelVersionStorePort } from './model-management/store-adapter.js';
@@ -396,12 +399,19 @@ export async function appendCheckedGraphWrite(
  * Version operations dispatch their existing RPC once, without a fabricated turn or split transaction.
  * All graphs are already projected/hashed. Neither checks nor dispatch may change their bytes.
  */
-type ModelChange = {
+type CopyGuestChange = {
+  readonly operation: 'COPY_GUEST_SCENARIO';
+  readonly store: GuestCopyStorePort;
+  readonly sourceScenarioId: string;
+  readonly userId: string;
+};
+
+type ModelChange = CopyGuestChange | ({
   readonly store: ModelVersionStorePort;
 } & ({ readonly operation: 'SAVE_VERSION'; readonly write: SaveVersionWrite }
   | { readonly operation: 'RESTORE_VERSION'; readonly write: AtomicRestoreVersionWrite;
       /** Server-read head, never a client-supplied admission flag. */
-      readonly restoreHead?: ModelVersionRecord | null });
+      readonly restoreHead?: ModelVersionRecord | null }));
 
 /** Preserve the existing, identity-bound Undo admission; an arbitrary boolean cannot grant it. */
 export function isReturnLegRestore(params: {
@@ -420,8 +430,47 @@ export function isReturnLegRestore(params: {
 export function commitModelChange(params: Extract<ModelChange, { operation: 'SAVE_VERSION' }>): Promise<VersionWriteOutcome>;
 // eslint-disable-next-line no-redeclare -- TypeScript overloads share this one door implementation.
 export function commitModelChange(params: Extract<ModelChange, { operation: 'RESTORE_VERSION' }>): Promise<AtomicRestoreVersionOutcome>;
-// eslint-disable-next-line no-redeclare -- Implementation of the two TypeScript overload signatures above.
-export async function commitModelChange(params: ModelChange): Promise<VersionWriteOutcome | AtomicRestoreVersionOutcome> {
+// eslint-disable-next-line no-redeclare -- Same door, typed guest-copy operation.
+export function commitModelChange(params: CopyGuestChange): Promise<GuestCopyOutcome>;
+// eslint-disable-next-line no-redeclare -- Implementation of the TypeScript overload signatures above.
+export async function commitModelChange(params: ModelChange): Promise<VersionWriteOutcome | AtomicRestoreVersionOutcome | GuestCopyOutcome> {
+  if (params.operation === 'COPY_GUEST_SCENARIO') {
+    const userId = readVerifiedWriteCaller();
+    if (userId === null || userId !== params.userId) return { kind: 'refused', reason: 'unknown_user' };
+    // A replay writes nothing. Recover it even if the source has since moved or
+    // become invalid. The authoritative replay key remains inside the RPC.
+    // A replay can also appear AFTER this pre-read. Preserve created:false from
+    // the RPC: recovery does not certify the just-checked source was copied.
+    const replay = await params.store.readGuestCopy(params.sourceScenarioId, userId);
+    const source = replay ?? await params.store.readGuestSource(params.sourceScenarioId);
+    if (source === null) return { kind: 'refused', reason: 'not_copyable' };
+    const graph = JSON.parse(JSON.stringify(source.graph ?? {})) as unknown;
+    if (replay === null) {
+      if (source.user_id !== null) return { kind: 'refused', reason: 'not_copyable' };
+      if (source.graph === null || typeof source.graph !== 'object' || Array.isArray(source.graph)) {
+        return { kind: 'refused', reason: 'no_model' };
+      }
+      if (Buffer.byteLength(JSON.stringify(graph), 'utf8') > 1048576) {
+        return { kind: 'refused', reason: 'too_large' };
+      }
+      try {
+        assertNoIntroducedGraphViolations({ graph, writesGraph: true,
+          identity: { scenario_id: params.sourceScenarioId }, baseGraphForInvariants: null, source: 'guest_copy' });
+      } catch (error) {
+        if (error instanceof GuestGraphInvariantError || error instanceof PreconditionRiskLinkWriteError) {
+          return { kind: 'refused', reason: 'no_model' };
+        }
+        throw error;
+      }
+    }
+    // Non-null checked arguments are mandatory, including on replay. No legacy
+    // downgrade, even if PostgREST has not reloaded the new function signature.
+    if (!Number.isSafeInteger(source.revision)) {
+      throw new GuestCopyStoreError('copy_guest_scenario checked source unavailable');
+    }
+    return params.store.copyGuestScenarioChecked({ sourceScenarioId: params.sourceScenarioId,
+      userId, graph, revision: source.revision });
+  }
   const { store, write } = params;
   let owner: string | null | undefined;
   await assertDoorOwnership({

@@ -10,6 +10,6 @@ export interface GraphWriterCensus {
   readonly sites: readonly GraphWriterSite[];
 }
 
-export const BASELINE: 2;
+export const BASELINE: 0;
 export const BYPASS_EXEMPTIONS: readonly string[];
 export function requireOnlyExemptedWrites(census: GraphWriterCensus): void;

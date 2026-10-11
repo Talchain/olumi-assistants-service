@@ -53,12 +53,14 @@ describe('model writer census ratchet', () => {
       .toEqual([{ kind: 'door_caller', callee: 'appendCheckedGraphWrite' }]);
   });
 
-  it('a duplicate exempted writer is RED, and a migrated writer requires removing its exemption', () => {
-    const bypass = measured.sites.find(s => s.kind !== 'door_caller')!;
+  it('a reintroduced guest writer is RED; zero has no stale exemptions', () => {
+    const bypass = { file: 'src/orchestrator-v5/guest-copy/index.ts', line: 1,
+      kind: 'rpc', callee: 'copy_guest_scenario' };
     expect(() => requireOnlyExemptedWrites({ ...measured, sites: [...measured.sites, bypass] }))
       .toThrow('Unexempted graph write');
-    expect(() => requireOnlyExemptedWrites({ ...measured, sites: measured.sites.filter(s => s !== bypass) }))
-      .toThrow('Remove migrated graph-write exemptions');
+    expect(BYPASS_EXEMPTIONS).toEqual([]);
+    expect(() => requireOnlyExemptedWrites({ ...measured, outside_door: 1 }))
+      .toThrow('Lower baseline to 1');
   });
 
   it('every production RPC must have resolved migration SQL or named deployed evidence', () => {
