@@ -2800,12 +2800,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           });
         },
         // S8 durable human reasoning: the scenario-wide `finding_dissent` read (NOT a conversation-history read, no turn
-        // window: a dissent older than the window still reaches the model) + the existing projector. A store without the
-        // read has no objections to report, never a failed turn.
-        readStatedObjections: async (sid: string) =>
-          typeof store.readStatedObjectionFactsFor === 'function'
-            ? projectStatedObjections(await store.readStatedObjectionFactsFor(sid, STATED_OBJECTION_FACT_ROWS_READ, STATED_OBJECTIONS_CAP))
-            : [],
+        // window: a dissent older than the window still reaches the model) + the existing projector. A store WITHOUT the
+        // read cannot say whether the user stated an objection: that is UNKNOWN, not a successful empty read, so it takes
+        // the same path as a failed read (the capability raises `stated_objections_unreadable`; the turn never fails).
+        readStatedObjections: async (sid: string) => {
+          if (typeof store.readStatedObjectionFactsFor !== 'function') throw new Error('stated_objections_reader_unavailable');
+          return projectStatedObjections(await store.readStatedObjectionFactsFor(sid, STATED_OBJECTION_FACT_ROWS_READ, STATED_OBJECTIONS_CAP));
+        },
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid, { validation: 'strict' }) }

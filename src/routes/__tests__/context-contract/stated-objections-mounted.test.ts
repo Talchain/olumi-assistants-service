@@ -32,6 +32,7 @@ describe.each(['ordinary-converse', 'selected-converse'] as const)('S8 stated ob
     const w = await capture(turn, 'run2');
     expect(valueAt(payloadsOf(w), 'stated_objections')).toEqual([]);
     expect(valueAt(payloadsOf(w), 'stated_objections_use')).toEqual([]);
+    expect(valueAt(payloadsOf(w), 'stated_objections_unreadable')).toEqual([]);
   }, 60_000);
 
   it('a stated objection reaches the Agent verbatim, addressed by id, with how to use it', async () => {
@@ -64,11 +65,34 @@ describe.each(['ordinary-converse', 'selected-converse'] as const)('S8 stated ob
     expect(JSON.stringify(payloadsOf(w))).not.toContain('A noop receipt');
   }, 60_000);
 
-  it('an unreadable fact store is no objections, never a failed turn', async () => {
+  it('an unreadable fact store never fails the turn and is UNKNOWN, not none: the model is told the list could not be read', async () => {
     const w = await capture(turn, 'run2', { storage: {
       readStatedObjectionFactsFor: async () => { throw new Error('store unavailable'); },
     } });
     expect(w.calls.length).toBeGreaterThan(0);
     expect(valueAt(payloadsOf(w), 'stated_objections')).toEqual([]);
+    expect(valueAt(payloadsOf(w), 'stated_objections_use')).toEqual([]);
+    const flags = valueAt(payloadsOf(w), 'stated_objections_unreadable');
+    expect(flags.length).toBeGreaterThan(0);
+    for (const f of flags) expect(f).toBe(true);
+  }, 60_000);
+
+  it('a store WITHOUT the stated-objections read is UNKNOWN as well: an absent capability is not a successful empty read', async () => {
+    // `undefined` overrides the harness default (a successful empty read), so the route finds no reader at all.
+    const w = await capture(turn, 'run2', { storage: { readStatedObjectionFactsFor: undefined } });
+    expect(w.calls.length).toBeGreaterThan(0);
+    expect(valueAt(payloadsOf(w), 'stated_objections')).toEqual([]);
+    expect(valueAt(payloadsOf(w), 'stated_objections_use')).toEqual([]);
+    const flags = valueAt(payloadsOf(w), 'stated_objections_unreadable');
+    expect(flags.length).toBeGreaterThan(0);
+    for (const f of flags) expect(f).toBe(true);
+  }, 60_000);
+
+  it('CONTRAST: a readable list with no dissent, and a readable list with one, never carry the unreadable flag', async () => {
+    const none = await capture(turn, 'run2', withFacts([]));
+    expect(valueAt(payloadsOf(none), 'stated_objections_unreadable')).toEqual([]);
+    const one = await capture(turn, 'run2', withFacts([dissent('finding-price', 'The contract runs to 2028.')]));
+    expect(valueAt(payloadsOf(one), 'stated_objections_unreadable')).toEqual([]);
+    expect(valueAt(payloadsOf(one), 'stated_objections').length).toBeGreaterThan(0);
   }, 60_000);
 });
