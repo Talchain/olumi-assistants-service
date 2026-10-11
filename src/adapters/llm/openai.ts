@@ -8,7 +8,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
-import { assertProviderAllowed, recordProviderAttempt, recordProviderUsage, type ProviderCallDetail } from "./provider-policy.js";
+import { assertProviderAllowed, recordProviderAttempt, recordProviderRetry, recordProviderUsage, type ProviderCallDetail, type ProviderCallHandle } from "./provider-policy.js";
 import { captureLlmPhysicalAttempt, withLlmInvocationCapture } from '../../utils/request-timing.js';
 import {
   retryConfigForLiveEval,
@@ -1993,17 +1993,36 @@ export function clampRationaleWhy(why: string): string {
   return `${body.trimEnd()}\u2026`;
 }
 
-/** Responses transport for the ordinary agent turn. The caller's body and success Response are untouched.
+/** Responses transport for the Agent turn. The caller's body and success Response are untouched.
  * Retries remain owned by the existing turn retry policy; this adapter records each physical attempt.
  */
 export async function postResponses(
   body: Readonly<Record<string, unknown>>,
-  options: { readonly detail: ProviderCallDetail; readonly signal?: AbortSignal; readonly retryOnTransportFailure?: boolean },
+  options: {
+    readonly detail: ProviderCallDetail;
+    readonly site?: string;
+    readonly signal?: AbortSignal;
+    /** Legacy opt-in prediction; Agent retry owners leave absent and mark the actual resend themselves. */
+    readonly retryOnTransportFailure?: boolean;
+    readonly onProviderHandle?: (handle: ProviderCallHandle) => void;
+    readonly retryOfHandle?: ProviderCallHandle;
+    /** Status-only callers must not wait for an error body they never consume. */
+    readonly readHttpErrorBody?: boolean;
+    /** Existing research/construction/brief callers own their JSON errors and retry decisions. */
+    readonly preserveResponseErrors?: boolean;
+  },
 ): Promise<{ r: Response; usageHandle: number | undefined }> {
-  const handle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
+  const handle = assertProviderAllowed('openai', options.site ?? 'agent-v1-turn.callModel', {
     ...options.detail, model: String(body.model),
-    settings: Object.fromEntries(['reasoning', 'max_output_tokens', 'tool_choice'].filter(k => body[k] !== undefined).map(k => [k, body[k]])),
+    settings: Object.fromEntries(['reasoning', 'max_output_tokens', 'tool_choice', 'temperature', 'max_tool_calls'].filter(k => body[k] !== undefined).map(k => [k, body[k]])),
   });
+  options.onProviderHandle?.(handle);
+  if (options.retryOfHandle !== undefined) recordProviderRetry(options.retryOfHandle, 'transport');
+  const isTimeout = (err: unknown): boolean => {
+    const e = err as { name?: unknown; cause?: { code?: unknown } } | null | undefined;
+    return e?.name === 'TimeoutError' || options.preserveResponseErrors === true
+      && (e?.cause?.code === 'UND_ERR_HEADERS_TIMEOUT' || e?.cause?.code === 'UND_ERR_BODY_TIMEOUT');
+  };
   let r: Response;
   try {
     r = await fetch('https://api.openai.com/v1/responses', {
@@ -2014,7 +2033,7 @@ export async function postResponses(
     });
   } catch (err) {
     const name = err instanceof Error ? err.name : '';
-    const outcome = name === 'TimeoutError' ? 'timeout' : name === 'AbortError' ? 'cancelled' : 'transport_error';
+    const outcome = isTimeout(err) ? 'timeout' : name === 'AbortError' ? 'cancelled' : 'transport_error';
     recordProviderAttempt(handle, { transport_status: null, result: name || 'transport_failure', outcome,
       retry: outcome === 'transport_error' && options.retryOnTransportFailure === true,
       ...(outcome === 'transport_error' && options.retryOnTransportFailure === true ? { retry_reason: 'transport' as const } : {}) });
@@ -2024,8 +2043,12 @@ export async function postResponses(
     // The route reads this body next; an unreadable error body is a transport failure it retries, so the receipt must
     // say so (a received status with retry:false but a second request would be a false receipt).
     let bodyUnreadable = false;
-    try { await r.clone().text(); } catch { bodyUnreadable = true; }
-    const willRetry = bodyUnreadable && options.retryOnTransportFailure === true;
+    let bodyError: unknown;
+    if (options.readHttpErrorBody !== false) {
+      try { await r.clone().text(); } catch (err) { bodyUnreadable = true; bodyError = err; }
+    }
+    const willRetry = bodyUnreadable && options.retryOnTransportFailure === true
+      && !isTimeout(bodyError) && !(bodyError instanceof Error && bodyError.name === 'AbortError');
     recordProviderAttempt(handle, { transport_status: r.status, result: bodyUnreadable ? 'http_error_body_unreadable' : 'http_error',
       outcome: r.status === 429 ? 'rate_limited' : 'http_error', retry: willRetry,
       ...(willRetry ? { retry_reason: 'transport' as const } : {}) });
@@ -2039,8 +2062,13 @@ export async function postResponses(
       response_sha256: createHash('sha256').update(responseBytes).digest('hex') });
   } catch (err) {
     const name = err instanceof Error ? err.name : '';
+    const willRetry = options.preserveResponseErrors === true && options.retryOnTransportFailure === true
+      && !isTimeout(err) && name !== 'AbortError';
     recordProviderAttempt(handle, { transport_status: r.status, result: name || 'invalid_json',
-      outcome: name === 'TimeoutError' ? 'timeout' : name === 'AbortError' ? 'cancelled' : 'invalid_response', retry: false });
+      outcome: isTimeout(err) ? 'timeout' : name === 'AbortError' ? 'cancelled' : 'invalid_response', retry: willRetry,
+      ...(willRetry ? { retry_reason: 'transport' as const } : {}) });
+    // Return the original response so these callers encounter their original parsing/stream error.
+    if (options.preserveResponseErrors === true) return { r, usageHandle: handle };
     // A received response with unreadable JSON is not a no-response transport failure.
     throw new Error('openai_invalid_response');
   }

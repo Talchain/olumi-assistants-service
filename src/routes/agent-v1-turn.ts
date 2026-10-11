@@ -49,7 +49,7 @@ import { readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOp
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
-import { OPENAI_ONLY, assertProviderAllowed, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordProviderRetry, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
+import { OPENAI_ONLY, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordProviderRetry, recordedProviderCalls, runWithProviderPolicy, type ProviderCallHandle } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, withResearchControlTruth, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { composeHeldResultReply, composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
@@ -218,7 +218,6 @@ function parsedGraphOrNull(raw: unknown): GraphV3T | null {
   return parsed.success ? parsed.data : null;
 }
 
-const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
 /**
  * T1 (b) — THE INSTRUCTIONS CARRY AN EXPLICIT CACHE BREAKPOINT (OpenAI prompt-caching guide, GPT-5.6+: routing is automatic,
@@ -1747,6 +1746,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   };
   const callModelFor = (budget: CallBudget): CallModel => async (req) => {
     let transportAttempt = 0;
+    let lastHandle: ProviderCallHandle;
     return withTransportRetry(req, async () => {
       transportAttempt += 1;
       /**
@@ -1791,7 +1791,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         max_output_tokens: req.max_output_tokens,
       };
       const deadlineMs = (req as { deadline_ms?: unknown }).deadline_ms;
-      const post = (sentBody: Record<string, unknown>, carrier: 'developer_breakpoint' | 'instructions') => postResponses(sentBody, {
+      const post = (sentBody: Record<string, unknown>, carrier: 'developer_breakpoint' | 'instructions', retryOfHandle?: ProviderCallHandle) => postResponses(sentBody, {
         detail: {
           model: budget.model,
           purpose: req.purpose === 'prewarm' ? 'prewarm' : 'conversation',
@@ -1799,12 +1799,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           instructions_carrier: carrier,
         },
         ...(typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
-        retryOnTransportFailure: !(typeof deadlineMs === 'number' && deadlineMs > 0) && transportAttempt === 1,
+        onProviderHandle: h => { lastHandle = h; },
+        ...(retryOfHandle !== undefined ? { retryOfHandle } : {}),
       });
       const breakpoint = alias === 'agent.converse' && !instructionsBreakpointRefused;
+      const retryOfHandle = transportAttempt > 1 ? lastHandle : undefined;
       let { r, usageHandle } = breakpoint
-        ? await post(withInstructionsBreakpoint(plainBody), 'developer_breakpoint')
-        : await post(plainBody, 'instructions');
+        ? await post(withInstructionsBreakpoint(plainBody), 'developer_breakpoint', retryOfHandle)
+        : await post(plainBody, 'instructions', retryOfHandle);
       if (!r.ok) {
         const text = await r.text();
         const refused = breakpoint && refusesInstructionsBreakpoint(r.status, text);
@@ -1847,13 +1849,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const model = budgetFor('gpt-6.1-sol', 'conversation').model;
     // Built once, so the ledger's sha is of the instructions this exact body sends (`RESEARCH_INSTRUCTIONS` today).
     const researchBody = researchRequestBody(query, model);
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', {
-      model, purpose: 'public_research', ...agentRequestIdentity('agent.research', researchBody),
-    });
-    const r = await fetch(OPENAI_RESPONSES_URL, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify(researchBody),
+    const { r, usageHandle } = await postResponses(researchBody, {
+      site: 'agent-v1-turn.callResearch',
+      detail: { model, purpose: 'public_research', ...agentRequestIdentity('agent.research', researchBody) },
+      preserveResponseErrors: true,
       // Bounded (#2042 N2): the captured search took 15 s; a hung one is said as unfinished, never waited on.
       signal: AbortSignal.timeout(60_000),
     });
@@ -1879,97 +1878,101 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   const callStructured = async (
     reqBody: Parameters<CallStructuredModel>[0],
     deadlineAt: number,
-  ): ReturnType<CallStructuredModel> => onceMoreOnTransportFailure('construction', async () => {
-    const timedOut = (budgetMs: number, err?: unknown) => {
-      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', budget_ms: budgetMs, ...(err !== undefined ? { err: String(err).slice(0, 200) } : {}) },
-        'agent-lane: construction call out of turn budget; not retried, nothing registered');
-      return { text: '', status: 'incomplete', incomplete_reason: CONSTRUCTION_TIMEOUT_REASON };
-    };
-    const budgetMs = deadlineAt - Date.now();
-    // Past the deadline no call starts: it could not end before the browser gives up.
-    if (budgetMs <= 0) return timedOut(budgetMs);
-    /**
-     * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
-     *
-     * #1825 wired `callModel` and left this handle discarded, so the caching witness on
-     * served `c2ef0b8` read: 4 conversation calls with usage (9,441 of 14,638 input
-     * tokens cached, 64.5%) and `call 3 construction: (no usage)`. Construction is
-     * banked at ~54s with in 838 / out 3404 incl. 2070 reasoning — by far the largest
-     * single call — so leaving it dark meant the aggregate cache figure could never be
-     * trusted and the obvious optimisation target could not be ranked.
-     *
-     * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
-     * write was missing. Nothing new is fetched or computed here.
-     */
-    // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
-    // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
-    const sentBody: Record<string, unknown> = {
-      model: reqBody.model,
-      instructions: reqBody.instructions,
-      input: reqBody.input,
-      max_output_tokens: reqBody.max_output_tokens,
-      ...(reqBody.reasoning_effort !== undefined
-        ? { reasoning: { effort: reqBody.reasoning_effort } }
-        : {}),
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'whole_candidate',
-          strict: true,
-          schema: strictForTheDrafter(reqBody.schema),
+  ): ReturnType<CallStructuredModel> => {
+    let transportAttempt = 0;
+    let lastHandle: ProviderCallHandle;
+    return onceMoreOnTransportFailure('construction', async () => {
+      transportAttempt += 1;
+      const timedOut = (budgetMs: number, err?: unknown) => {
+        log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', budget_ms: budgetMs, ...(err !== undefined ? { err: String(err).slice(0, 200) } : {}) },
+          'agent-lane: construction call out of turn budget; not retried, nothing registered');
+        return { text: '', status: 'incomplete', incomplete_reason: CONSTRUCTION_TIMEOUT_REASON };
+      };
+      const budgetMs = deadlineAt - Date.now();
+      // Past the deadline no call starts: it could not end before the browser gives up.
+      if (budgetMs <= 0) return timedOut(budgetMs);
+      /**
+       * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
+       *
+       * #1825 wired `callModel` and left this handle discarded, so the caching witness on
+       * served `c2ef0b8` read: 4 conversation calls with usage (9,441 of 14,638 input
+       * tokens cached, 64.5%) and `call 3 construction: (no usage)`. Construction is
+       * banked at ~54s with in 838 / out 3404 incl. 2070 reasoning — by far the largest
+       * single call — so leaving it dark meant the aggregate cache figure could never be
+       * trusted and the obvious optimisation target could not be ranked.
+       *
+       * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
+       * write was missing. Nothing new is fetched or computed here.
+       */
+      // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
+      // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
+      const sentBody: Record<string, unknown> = {
+        model: reqBody.model,
+        instructions: reqBody.instructions,
+        input: reqBody.input,
+        max_output_tokens: reqBody.max_output_tokens,
+        ...(reqBody.reasoning_effort !== undefined
+          ? { reasoning: { effort: reqBody.reasoning_effort } }
+          : {}),
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'whole_candidate',
+            strict: true,
+            schema: strictForTheDrafter(reqBody.schema),
+          },
         },
-      },
-    };
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
-      model: reqBody.model, purpose: 'construction', ...agentRequestIdentity('agent.construct', sentBody),
-    });
-    let j: {
-      output?: { type?: string; content?: { type?: string; text?: string }[] }[];
-      usage?: Record<string, unknown>;
-      status?: unknown;
-      incomplete_details?: { reason?: unknown } | null;
-    };
-    try {
-      const r = await fetch(OPENAI_RESPONSES_URL, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(sentBody),
-        // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
-        signal: AbortSignal.timeout(budgetMs),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+      };
+      let usageHandle: number | undefined;
+      let j: {
+        output?: { type?: string; content?: { type?: string; text?: string }[] }[];
+        usage?: Record<string, unknown>;
+        status?: unknown;
+        incomplete_details?: { reason?: unknown } | null;
+      };
+      try {
+        const response = await postResponses(sentBody, {
+          site: 'agent-v1-turn.callStructured',
+          detail: { model: reqBody.model, purpose: 'construction', ...agentRequestIdentity('agent.construct', sentBody) },
+          preserveResponseErrors: true,
+          onProviderHandle: h => { lastHandle = h; },
+          ...(transportAttempt > 1 ? { retryOfHandle: lastHandle } : {}),
+          // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
+          signal: AbortSignal.timeout(budgetMs),
+        });
+        const { r } = response;
+        usageHandle = response.usageHandle;
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+        }
+        j = (await r.json()) as typeof j;
+      } catch (err) {
+        if (isConstructionTimeout(err)) return timedOut(budgetMs, err);
+        throw err;
       }
-      j = (await r.json()) as typeof j;
-    } catch (err) {
-      if (isConstructionTimeout(err)) return timedOut(budgetMs, err);
-      throw err;
-    }
-    let text = '';
-    for (const item of j.output ?? []) {
-      if (item.type !== 'message') continue;
-      for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
-    }
-    // Same contract as the conversation path: never throws, and records nothing for a
-    // malformed payload, so measuring a call cannot turn a successful one into a failure.
-    recordProviderUsage(usageHandle, j.usage);
-    // ⛔ COMPLETION STATUS IS PART OF THE CONTRACT HERE TOO (AIX-001, as `callModel`). It was dropped, so an answer the
-    // output cap cut off (served 770a477: output_tokens 6000 exactly, 2/14 first briefs) read as a parse error.
-    const incompleteReason = typeof j.incomplete_details?.reason === 'string' ? j.incomplete_details.reason : undefined;
-    if (j.status === 'incomplete') {
-      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
-    }
-    return {
-      text,
-      usage: j.usage,
-      ...(typeof j.status === 'string' ? { status: j.status } : {}),
-      ...(incompleteReason !== undefined ? { incomplete_reason: incompleteReason } : {}),
-    };
-  }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
+      let text = '';
+      for (const item of j.output ?? []) {
+        if (item.type !== 'message') continue;
+        for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
+      }
+      // Same contract as the conversation path: never throws, and records nothing for a
+      // malformed payload, so measuring a call cannot turn a successful one into a failure.
+      recordProviderUsage(usageHandle, j.usage);
+      // ⛔ COMPLETION STATUS IS PART OF THE CONTRACT HERE TOO (AIX-001, as `callModel`). It was dropped, so an answer the
+      // output cap cut off (served 770a477: output_tokens 6000 exactly, 2/14 first briefs) read as a parse error.
+      const incompleteReason = typeof j.incomplete_details?.reason === 'string' ? j.incomplete_details.reason : undefined;
+      if (j.status === 'incomplete') {
+        log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
+      }
+      return {
+        text,
+        usage: j.usage,
+        ...(typeof j.status === 'string' ? { status: j.status } : {}),
+        ...(incompleteReason !== undefined ? { incomplete_reason: incompleteReason } : {}),
+      };
+    }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
+  };
 
   /**
    * ⭐ C6-2: the ONE brief-reading call (`agent-lane/brief-reading.ts`). Same provider policy and usage ledger as every
@@ -1985,13 +1988,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       max_output_tokens: 600,
       text: { format: { type: 'json_schema', name: 'brief_spans', strict: true, schema: reqBody.schema } },
     };
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callBriefReading', {
-      model: reqBody.model, purpose: 'brief_reading', ...agentRequestIdentity('agent.read_brief', sentBody),
-    });
-    const r = await fetch(OPENAI_RESPONSES_URL, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify(sentBody),
+    const { r, usageHandle } = await postResponses(sentBody, {
+      site: 'agent-v1-turn.callBriefReading',
+      detail: { model: reqBody.model, purpose: 'brief_reading', ...agentRequestIdentity('agent.read_brief', sentBody) },
+      preserveResponseErrors: true,
+      readHttpErrorBody: false,
       signal: AbortSignal.timeout(BRIEF_READING_TIMEOUT_MS),
     });
     if (!r.ok) throw new Error(`openai_${r.status}`);
