@@ -98,13 +98,18 @@ integrityRows.push(
   { name: 'F: duplicate factor refuses', run: () => { const i = positive(); Object.assign(i.model, { factors: [...i.model.factors, structuredClone(i.model.factors.find(f => f.label === census[0]!.factor)!)] }); const o = i.model.options.find(o => o.label === census[0]!.option)!; assert.equal(verifiedOptionSetting(i.model, o, level(i.model, census[0]!.option, census[0]!.factor), i.brief), false); } },
 );
 export const seamRows: Row[] = [
-  { name: 'zero is required; nonzero/null estimated baseline demotes', run: () => {
-    for (const value of [5, null]) { const i = positive(); Object.assign(i.model.factors.find(f => f.label === census[0]!.factor)!, { baseline_value: value }); mustDemote(i); }
+  { name: 'verified receipt credits with nonzero/null estimated baseline', run: () => {
+    // RUN48: absolute receipt authority is independent of whether the baseline is known or zero.
+    for (const value of [5, null]) { const i = positive(); Object.assign(i.model.factors.find(f => f.label === census[0]!.factor)!, { baseline_value: value });
+      const o = i.model.options.find(o => o.label === census[0]!.option)!;
+      assert.equal(verifiedOptionSetting(i.model, o, level(i.model, census[0]!.option, census[0]!.factor), i.brief), true);
+      assertCell(i.model, i.brief, census[0]!.option, census[0]!.factor, 'explicit'); }
   } },
-  { name: 'known-baseline and missing-kind controls stay unchanged', run: () => {
+  { name: 'known-baseline null receipt demotes; missing-kind stored carrier stays explicit', run: () => {
     const i = positive(); const iv = level(i.model, census[0]!.option, census[0]!.factor);
     Object.assign(iv, { stated_evidence: null }); Object.assign(i.model.factors.find(f => f.label === census[0]!.factor)!, { baseline_known: true });
-    assert.equal(level(prepare(i.model, i.brief).candidate, census[0]!.option, census[0]!.factor).provenance, 'explicit');
+    // RUN48: a known baseline cannot confer authority on an unreceipted absolute setting.
+    assert.equal(level(prepare(i.model, i.brief).candidate, census[0]!.option, census[0]!.factor).provenance, 'ai_proposed');
     Object.assign(i.model.factors.find(f => f.label === census[0]!.factor)!, { baseline_known: false });
     delete (iv as typeof iv & { value_kind?: string }).value_kind;
     assert.equal(level(prepare(i.model, i.brief).candidate, census[0]!.option, census[0]!.factor).provenance, 'explicit');
@@ -184,17 +189,23 @@ const UNRECEIPTED_RAW_DIGESTS: Readonly<Record<string, string>> = {
   // RUN45 field diff: only p.provenance_demoted changes; candidate/admitted bytes and credit unchanged.
   'ca2cc3ca.json': '488d8a280942de883b80e7218ff307b4f61a331357071cc162a3cad095c71d98',
   // original raw has no receipt; credit unproved — #94 6101950357(b)
-  'a4d58afe.first.json': '68d85be9b268a19dbed5661ddd55b0a122c4cf4b828ff9eb09c782a6e324493e',
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'a4d58afe.first.json': '1f5615462e26e58d1d52e90e8d0708e51775e61da58c88cf8b3a3f9714585d1b',
   // original raw has no receipt; credit unproved — #94 6101950357(b)
-  'a4d58afe.json': '98d34b422b0b7c2282bf3851d1a92b6ece4d7c9f918a82b8eb8a6777528bf7e1',
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'a4d58afe.json': '57c1ea2e951f58bacc4860c27b62ab0b7aed8751aee445f08c5f82547277eb57',
   // original raw has no receipt; credit unproved — #94 6101950357(b)
-  'fff05472.json': '170e543c2bb67a4b2f6018c518f333c984e2b6f1dd5d6c87c7c5c63562ce84cc',
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'fff05472.json': 'a1f2b59fb3917ac9f39d83ad4d6d94bc42b141ccaa5448ede27b8325971ac332',
   // original raw has no receipt; credit unproved — #94 6101950357(b)
-  'b7398aad.json': 'be2a18f5eaea7fab46a2dfd76895eebc3d3f1cfb5ff312d4e27f214ffc911441',
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'b7398aad.json': '83e5aa6f3ca6eb0a3af9f5859097f5a5fe6275920baec1cdac96abdc9981c089',
   // original raw has no receipt; credit unproved — #94 6101950357(b)
-  'f440be4a.json': '0ba819a6b9e715fb14523e9e66f7dd803740cddc7dcf7d45a3547cb169b47814',
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'f440be4a.json': '3da164068b69fc41cc626642009273d2bed4a864652f1856eb889c95c90a8fc9',
   // original raw has no receipt; credit unproved — #94 6101950357(b)
-  '549f6ab8.json': '14ae3f48cbf79101dd21301702db5b1a82b20dc52083284c2c9d0ba1ab1692b6',
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  '549f6ab8.json': '3fb72b771012d9a7c144df7e4a83330c2287bbdf0ac3baf855020f8f0024ec63',
 };
 export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
   name: `raw no-evidence ${c.file} ${c.sha256}`,

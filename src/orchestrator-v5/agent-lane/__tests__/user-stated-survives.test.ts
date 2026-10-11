@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { expect, it } from 'vitest';
+import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
 import { prepareProvisionalCandidate } from '../runtime/build-model.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { countsInWords } from '../stated-by-user.js';
@@ -527,4 +528,49 @@ it('RUN46 known-baseline absolute refusal is demoted by identity; verified contr
   expect(verified.candidate.options.find(p => p.label === o.label)!.interventions!
     .find(p => p.factor_label === i.factor_label && p.value === i.value)?.provenance).toBe('explicit');
   expect(verified.provenance_demoted).not.toContainEqual({ option: o.label, factor: i.factor_label, value: i.value });
+});
+
+// RUN48: graph bytes cannot substitute for checked human-entry authority.
+it('RUN48 recovered user source needs authority for exactly the edited option/factor', () => {
+  const graph = { nodes: [
+    { id: 'factor', kind: 'factor', label: 'Capacity' },
+    { id: 'option', kind: 'option', label: 'Increase capacity', data: {
+      interventions: { factor: { value: 0.4, source: 'user_specified' } } } },
+  ], edges: [] };
+  const read = (authority: readonly { optionId: string; factorId: string }[]) => {
+    const encoded = encodeOptionInterventionsForEdit(graph, new Set(['option']), undefined, authority).graph;
+    const cell = (encoded.nodes.find(n => n.id === 'option') as Rec).interventions as Record<string, Rec>;
+    expect(cell.factor!.value).toBe(0.4);
+    return cell.factor!;
+  };
+  expect(read([]).source).toBeUndefined();
+  expect(read([{ optionId: 'option', factorId: 'factor' }]).source).toBe('user_specified');
+  expect(read([{ optionId: 'other', factorId: 'factor' }]).source).toBeUndefined();
+  expect(read([{ optionId: 'option', factorId: 'other' }]).source).toBeUndefined();
+  // Caller-to-encoder wiring: the checked identity is passed out of band, never recovered from a source stamp.
+  const handler = fs.readFileSync(path.join(__dirname, '../../../orchestrator/tools/edit-graph.ts'), 'utf8');
+  const caller = fs.readFileSync(path.join(__dirname, '../../handlers/edit-graph-dispatch.ts'), 'utf8');
+  expect(handler).toContain('encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds, mustConfigureOptionIds, opts?.humanAuthority)');
+  expect(caller).toContain('humanAuthority: optionEffectWrite === null ? []');
+  expect(caller).toContain('[{ optionId: optionEffectWrite.optionId, factorId: optionEffectWrite.factorId }]');
+});
+it('RUN48 identical known-baseline factor disclosures are served once for one or two demoted options', async () => {
+  const probes: { id: string; model: CandidateModel; brief: string; option: string; factor: string }[] = JSON.parse(
+    fs.readFileSync(path.join(__dirname, 'fixtures/r5-verified-probes.json'), 'utf8'));
+  const p = probes.find(p => p.id === 'N0')!;
+  for (const values of [[4], [4, 6]]) {
+    const model = structuredClone(p.model); const template = model.options.find(o => o.label === p.option)!;
+    const iv = template.interventions!.find(i => i.factor_label === p.factor)!;
+    model.factors.find(f => f.label === p.factor)!.baseline_known = true;
+    const options = values.map(value => ({ ...template, label: `${template.label} ${value}`,
+      interventions: [{ ...iv, value, stated_evidence: null }] }));
+    const candidate: CandidateModel = { ...model, options };
+    const row: Row = { id: 'RUN48 disclosure', brief: p.brief, drafter_texts: [JSON.stringify(candidate)] };
+    const served = await replay(row);
+    expect(served.result.provenance_demoted).toHaveLength(values.length);
+    const lines = served.result.not_represented;
+    if (!Array.isArray(lines)) throw new Error('Missing served disclosures');
+    expect(lines.filter((line: unknown) => line === `"${p.factor}": Not confirmed from your brief`))
+      .toStrictEqual([`"${p.factor}": Not confirmed from your brief`]);
+  }
 });

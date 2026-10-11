@@ -100,7 +100,7 @@ import {
 import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
 import { shouldHandOffProposeToLlmLane, resolveClauseLabel } from "./propose-handoff.js";
 import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
-import { clearInheritedInterventionSourceQuotes, omitInheritedInterventionRanges, hasNewInterventionRanges, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
+import { clearInheritedInterventionSourceQuotes, omitInheritedInterventionRanges, hasNewInterventionRanges, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent, type InterventionHumanAuthority } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
@@ -242,6 +242,8 @@ export interface EditGraphOpts {
    * persisted graph. It fails honestly instead.
    */
   preComposedOperations?: readonly PatchOperation[];
+  /** Checked user cells supplied by the deterministic human-entry caller, never graph source bytes. */
+  humanAuthority?: InterventionHumanAuthority;
 }
 
 // ============================================================================
@@ -3987,7 +3989,7 @@ export async function handleEditGraph(
       // bare needs_encoding add (no requested intervention, configured later) is
       // never rejected.
       const mustConfigureOptionIds = optionIdsAddedWithInterventionIntent(operations);
-      const encoded = encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds, mustConfigureOptionIds);
+      const encoded = encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds, mustConfigureOptionIds, opts?.humanAuthority);
       if (encoded.unresolvedOptionIds.length > 0) {
         validationOutcome = 'option_interventions_unresolvable';
         setViolationCodes(['option_interventions_unresolvable']);

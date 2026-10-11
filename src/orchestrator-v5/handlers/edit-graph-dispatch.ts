@@ -2969,7 +2969,9 @@ export async function dispatchEditGraph(
             ? { preComposedOperations: nativeQuantityOperation }
             : optionEffectOperations === null
             ? undefined
-            : { preComposedOperations: optionEffectOperations },
+            : { preComposedOperations: optionEffectOperations,
+                humanAuthority: optionEffectWrite === null ? []
+                  : [{ optionId: optionEffectWrite.optionId, factorId: optionEffectWrite.factorId }] },
         );
         // ⭐ THE NATIVE PATH'S OWN LANDING CHECK AND ACK.
         //

@@ -2529,7 +2529,7 @@ export async function buildModelFromBrief(
       ...admitted.loss.filter((l) => /\.extra_parent\./.test(l.field_path)).map((l) => l.reason),
       ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
-      ...preparation.provenance_demoted.map((d) => {
+      ...new Set(preparation.provenance_demoted.map((d) => {
         const factors = preparation.candidate.factors.filter((f) => f.label === d.factor);
         if (factors.length === 1 && factors[0]!.baseline_known === true) {
           // Existing conditional-input-basis level label; no claim that a known baseline is unknown.
@@ -2538,7 +2538,7 @@ export async function buildModelFromBrief(
         }
         return `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
           `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`;
-      }),
+      })),
       ...preparation.levels_over_own_levers.map(sayOptionLevelOverOwnLevers),
       directionless.length > 0
         ? `${directionless.length} relationship(s) were left out because nobody has stated which way they run.`
