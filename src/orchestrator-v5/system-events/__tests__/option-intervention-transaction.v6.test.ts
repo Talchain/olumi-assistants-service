@@ -1042,15 +1042,9 @@ describe('ONE user operation → ONE atomic commit, for a WHOLE approved batch (
   });
 });
 
-/**
- * ⭐ L4 (DL 5929790081; CODEX preflight 5929956793): an approved link set SIZES a placeholder, through the REAL door and the
- * REAL link writer, read back cold. Paul's e-12/e-13 (`96c6f5f4`) sat at 0.85 — the very-strong midpoint — as
- * `olumi_placeholder`; his 09:25 approval left them placeholders, and "Olumi hasn't sized…" repeated three Runs.
- */
-describe('L4: an approved link set sizes a placeholder (real door, real writer, cold reload)', () => {
+describe('Batch A: placeholder confirmation refuses atomically; a newly adopted size still works', () => {
   beforeEach(() => __setUseAppendV6ForTest(true));
   afterEach(() => __setUseAppendV6ForTest(false));
-
   const PLACEHOLDER = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };
   function withPlaceholder(mean: number) {
     const g = clone(canonicalGraph());
@@ -1067,14 +1061,14 @@ describe('L4: an approved link set sizes a placeholder (real door, real writer, 
     return cold.edges.find(e => e.from === 'factor' && e.to === 'goal')! as unknown as { strength: { mean: number }; provenance?: Record<string, unknown> };
   };
 
-  it('RED (e-12): Olumi’s band on a placeholder ALREADY at it — a review (confirm_current, not adopted) — sizes it as Olumi’s estimate, accepted', async () => {
+  it('refuses confirm_current on a placeholder without writing or stamping review, including cold reload', async () => {
     const seeded = withPlaceholder(0.85);
     const p = jsonStore(seeded);
     const r = await executeOptionInterventionBatch(linkSet(seeded, { mean: 0.85, magnitude: 0.85, intent: 'confirm_current', band: 'very strong', adopted: false }), p.fresh());
-    expect(r.kind, JSON.stringify(r)).toBe('committed');
-    const e = await coldEdge(p);
-    expect(e.strength.mean).toBe(0.85);
-    expect(e.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm', band: 'very strong' } });
+    expect(r).toMatchObject({ kind: 'refused' });
+    expect(p.attempts).toHaveLength(0);
+    expect(await p.fresh().loadGraph(SCENARIO_ID)).toStrictEqual(seeded);
+    expect((await coldEdge(p)).provenance).not.toHaveProperty('reviewed_by_user');
   });
 
   it('RED: Olumi’s band that MOVES a placeholder (an adopted set) sizes it too — Olumi’s, never the user’s', async () => {

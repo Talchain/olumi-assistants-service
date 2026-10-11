@@ -111,8 +111,8 @@ function freshStore(): SessionStore {
               graph_hash: briefRow.graph_hash, seed_used: briefRow.seed_used, response_hash: briefRow.response_hash,
             },
           } };
-          const rec = records.find(r => r.scenario_id === filters.scenario_id && r.record_id === filters.id);
-          return { error: null, data: rec === undefined ? null : { id: rec.record_id, scenario_id: rec.scenario_id } };
+          const rec = records.find(r => r.scenario_id === filters.scenario_id && r.record_id === filters.record_id);
+          return { error: null, data: rec === undefined ? null : { record_id: rec.record_id, scenario_id: rec.scenario_id } };
         },
       };
       return chain;
@@ -223,7 +223,7 @@ describe('S1-C post-append bounded capture through the real commit door', () => 
     const read = await cold(); expect(read.run_recording).toBeUndefined();
     expect(read.analysis_state).not.toBeNull();
     expect(read.analysis_state?.run_state.kind).toBe('complete_current');
-    expect(readCalls).toContainEqual({ table: 'decision_records', filters: { scenario_id: SCENARIO, id: decision.write.record_id } });
+    expect(readCalls).toContainEqual({ table: 'decision_records', filters: { scenario_id: SCENARIO, record_id: decision.write.record_id } });
     expect(readCalls).toContainEqual({ table: 'scenarios', filters: { id: SCENARIO } });
   });
 
