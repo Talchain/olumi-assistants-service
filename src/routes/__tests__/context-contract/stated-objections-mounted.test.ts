@@ -77,6 +77,17 @@ describe.each(['ordinary-converse', 'selected-converse'] as const)('S8 stated ob
     for (const f of flags) expect(f).toBe(true);
   }, 60_000);
 
+  it('a store WITHOUT the stated-objections read is UNKNOWN as well: an absent capability is not a successful empty read', async () => {
+    // `undefined` overrides the harness default (a successful empty read), so the route finds no reader at all.
+    const w = await capture(turn, 'run2', { storage: { readStatedObjectionFactsFor: undefined } });
+    expect(w.calls.length).toBeGreaterThan(0);
+    expect(valueAt(payloadsOf(w), 'stated_objections')).toEqual([]);
+    expect(valueAt(payloadsOf(w), 'stated_objections_use')).toEqual([]);
+    const flags = valueAt(payloadsOf(w), 'stated_objections_unreadable');
+    expect(flags.length).toBeGreaterThan(0);
+    for (const f of flags) expect(f).toBe(true);
+  }, 60_000);
+
   it('CONTRAST: a readable list with no dissent, and a readable list with one, never carry the unreadable flag', async () => {
     const none = await capture(turn, 'run2', withFacts([]));
     expect(valueAt(payloadsOf(none), 'stated_objections_unreadable')).toEqual([]);
