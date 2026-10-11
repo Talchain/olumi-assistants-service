@@ -1,3 +1,5 @@
+import { GraphStateIngressSchema } from '../../orchestrator-v5/boundary/request-extensions.js';
+import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 /**
  * V5 edit_graph P0 (add-option encoding) — encode option interventions to the
  * canonical top-level OptionV3 contract, or report which options cannot be
@@ -204,6 +206,14 @@ export interface InterventionPreimageScope {
   readonly persistedScenarioId: string;
   readonly modelRevision: string | null;
   readonly expectedModelRevision: string | null;
+}
+
+export function interventionPreimageScope(graph: unknown, current: unknown, scenarioId: string): InterventionPreimageScope {
+  const before = GraphStateIngressSchema.safeParse(graph);
+  const expected = GraphStateIngressSchema.safeParse(current);
+  return { scenarioId, persistedScenarioId: scenarioId,
+    modelRevision: before.success ? computeAnalysisAffectingGraphHash(before.data) : null,
+    expectedModelRevision: expected.success ? computeAnalysisAffectingGraphHash(expected.data) : null };
 }
 
 function preimageScopeMatches(scope: InterventionPreimageScope | null | undefined): boolean {
@@ -720,15 +730,12 @@ export function encodeOptionInterventionsForEdit<T>(
             const cell = base[fac];
             if (isPlainObject(cell)) {
               const approved = humanAuthority.some(pair => pair.optionId === id && pair.factorId === fac);
-              if (approved && classifyValueSource(cell.source) === 'user_stated' && cell.source !== 'user_specified') {
+              if (approved && (classifyValueSource(cell.source) === 'user_stated' || cell.source === undefined)) {
+                authorityChanged ||= cell.source !== 'user_specified';
                 cell.source = 'user_specified';
-                authorityChanged = true;
-              } else if (classifyValueSource(cell.source) === 'user_stated' && !approved
+              } else if (classifyValueSource(cell.source) === 'user_stated'
                 && !unchangedPersistedIntervention(persistedGraph, graph, preimageScope, id, fac, cell)) {
                 delete cell.source;
-                authorityChanged = true;
-              } else if (cell.source === undefined && approved) {
-                cell.source = 'user_specified';
                 authorityChanged = true;
               }
             }
@@ -784,7 +791,8 @@ export function encodeOptionInterventionsForEdit<T>(
         if (isTouched || mustConfigure) unresolved.push(id);
         continue; // leave malformed; discarded if the edit defers, else untouched
       }
-      plan.push({ index: i, id, bundle });
+      if (authorityChanged || !isDeepStrictEqual(node.interventions, bundle) || node.data !== undefined)
+        plan.push({ index: i, id, bundle });
     }
 
     if (unresolved.length > 0) {

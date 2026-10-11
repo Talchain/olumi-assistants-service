@@ -34,7 +34,7 @@ import { describe, it, expect } from 'vitest';
 
 import { parseEditGraphResponse } from '../../../orchestrator/tools/edit-graph.js';
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
-import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
+import { encodeOptionInterventionsForEdit, interventionPreimageScope } from '../../../orchestrator/tools/encode-option-interventions.js';
 import { evaluateEditGraphMutations } from '../../handlers/edit-graph-referee-gate.js';
 import {
   buildNativeQuantityOperation,
@@ -115,7 +115,7 @@ const applyChain = () => {
   const g = calibratedGraph();
   const base = GraphV3.parse(g) as GraphV3T;
   const applied = applyPatchOperations(base, canonicalise(g));
-  return encodeOptionInterventionsForEdit(applied, new Set([OPTION_ID]), undefined, [{ optionId: OPTION_ID, factorId: FACTOR_ID }]);
+  return encodeOptionInterventionsForEdit(applied, new Set([OPTION_ID]), undefined, [{ optionId: OPTION_ID, factorId: FACTOR_ID }], base, interventionPreimageScope(base, base, 'native-quantity'));
 };
 
 describe('native-quantity write — the ACTUAL apply chain', () => {
@@ -233,7 +233,7 @@ describe('an answered Olumi estimate is the user’s figure (AIQ Q1): the ask en
   }
   const answered = () => {
     const g = estimatedGraph();
-    return encodeOptionInterventionsForEdit(applyPatchOperations(GraphV3.parse(g) as GraphV3T, canonicalise(g)), new Set([OPTION_ID]), undefined, [{ optionId: OPTION_ID, factorId: FACTOR_ID }]).graph;
+    return encodeOptionInterventionsForEdit(applyPatchOperations(GraphV3.parse(g) as GraphV3T, canonicalise(g)), new Set([OPTION_ID]), undefined, [{ optionId: OPTION_ID, factorId: FACTOR_ID }], GraphV3.parse(g), interventionPreimageScope(g, g, 'native-quantity')).graph;
   };
   const askOn = (g: unknown) => {
     const nodes = (g as { nodes: Array<Record<string, unknown>> }).nodes;

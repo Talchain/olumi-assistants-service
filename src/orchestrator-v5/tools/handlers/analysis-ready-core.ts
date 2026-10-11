@@ -1,3 +1,4 @@
+import type { InterventionHumanAuthority } from '../../../orchestrator/tools/encode-option-interventions.js';
 /**
  * EP2 — shared NEUTRAL analysis-readiness core (V5 Edit Safety Core, Phase 1).
  *
@@ -45,7 +46,7 @@ import {
   type CanonicalReadinessIssueCode,
   type CanonicalReadinessRepairProposal,
 } from '../../../orchestrator/tools/analysis-ready-helper.js';
-import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
+import { encodeOptionInterventionsForEdit, interventionPreimageScope } from '../../../orchestrator/tools/encode-option-interventions.js';
 import { draftedTeamPartOf, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import { limitSinkBranch } from '../../../graph/limit-sink-branch.js';
@@ -115,8 +116,8 @@ export interface ReadinessResult {
  */
 export function canonicaliseForAnalysis(graph: unknown): unknown {
   try {
-    // A read-only view carries no operation/revision proof; it grants no fresh source verdict.
-    return encodeOptionInterventionsForEdit(graph, undefined, undefined, [], null /* no scoped preimage */, null).graph;
+    // Read-only continuity: the supplied stored graph is its own preimage; no new authority is granted.
+    return encodeOptionInterventionsForEdit(graph, undefined, undefined, [], graph, interventionPreimageScope(graph, graph, 'read-only')).graph;
   } catch {
     return graph;
   }
@@ -616,7 +617,7 @@ export const NO_COMPARISON_NEXT_STEP =
 /**
  * Resolve the two-term admission for a graph. Pure and total.
  */
-export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
+export function resolveRunAdmission(rawGraph: unknown, humanAuthority: InterventionHumanAuthority = []): RunAdmission {
   // ⭐ ONE DERIVATION OF THE COHERENCE RULE, wrapping the seven return sites
   // below rather than adding an eighth thing each of them must remember. Every
   // one of those returns already sets `willProceed`; deriving
@@ -659,7 +660,7 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
   } catch {
     // Recognition is optional. The existing total assessor owns malformed-input refusals.
   }
-  const admission = resolveRunAdmissionTerms(admissionGraph);
+  const admission = resolveRunAdmissionTerms(admissionGraph, humanAuthority);
   const eventRefusal = eventByDateRefusalOf(rawGraph);
   return {
     ...admission,
@@ -672,6 +673,7 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
 
 function resolveRunAdmissionTerms(
   rawGraph: unknown,
+  humanAuthority: InterventionHumanAuthority,
 ): Omit<RunAdmission, 'blockedNextStep'> {
   const empty: ScaffoldPlan = {
     will_scaffold_options: false,
@@ -685,7 +687,7 @@ function resolveRunAdmissionTerms(
   let assessment: ReturnType<typeof assessCanonicalAnalysisReadiness>;
   let strict: ReadinessResult;
   try {
-    assessment = assessCanonicalAnalysisReadiness(rawGraph);
+    assessment = assessCanonicalAnalysisReadiness(rawGraph, humanAuthority);
     strict = readinessResultFrom(assessment);
   } catch {
     // `assessCanonicalAnalysisReadiness` is declared TOTAL and carries its own

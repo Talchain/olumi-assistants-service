@@ -1,3 +1,4 @@
+import { interventionPreimageScope, type InterventionHumanAuthority } from '../../orchestrator/tools/encode-option-interventions.js';
 import { prepareHorizonBasisForWrite } from '../goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { hasReliesOnRiskWrite } from '../graph-management/field-safety.js';
@@ -1350,9 +1351,7 @@ async function runStructuralEditTool(input: {
     payload.turn_id,
     { preComposedOperations: firstPart.operations as readonly PatchOperation[],
       persistedGraph: encoderPreimage.success ? encoderPreimage.data : null,
-      preimageScope: { scenarioId: payload.scenario_id, persistedScenarioId: payload.scenario_id,
-        modelRevision: computeAnalysisAffectingGraphHash(encoderPreimage.success ? encoderPreimage.data : null),
-        expectedModelRevision: computeAnalysisAffectingGraphHash(context.graph) } },
+      preimageScope: interventionPreimageScope(encoderPreimage.success ? encoderPreimage.data : null, context.graph, payload.scenario_id) },
   );
 
   return {
@@ -2330,19 +2329,28 @@ export async function dispatchEditGraph(
     }
   }
 
-  // Reuse the persistence writer's strict read before the edit; ingress is not a trusted preimage.
-  let persistedEncoderBase: unknown;
-  try { persistedEncoderBase = useAppendV6() ? editBase?.graph : await loadPersistedGraphStrict(payload.scenario_id); }
-  catch (cause) { throw new ModelReadFailedError(cause); }
-  const parsedEncoderBase = GraphV3.safeParse(persistedEncoderBase);
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
     graphStateToGraphV3WithParseResult(graphState, requestId, editBase?.graph != null);
+  let encoderBaseRead: Promise<unknown> | undefined;
+  const readEncoderBase = (): Promise<unknown> => encoderBaseRead ??= useAppendV6()
+    ? Promise.resolve(editBase?.graph)
+    : loadPersistedGraphStrict(payload.scenario_id);
   const encoderContinuity = {
-    persistedGraph: parsedEncoderBase.success ? parsedEncoderBase.data : null,
-    preimageScope: parsedEncoderBase.success ? { scenarioId: payload.scenario_id, persistedScenarioId: payload.scenario_id,
-      modelRevision: computeAnalysisAffectingGraphHash(parsedEncoderBase.data),
-      expectedModelRevision: computeAnalysisAffectingGraphHash(parsedGraph) } : null,
+    loadInterventionPreimage: async () => {
+      try {
+        const base = await readEncoderBase();
+        const parsed = GraphV3.safeParse(base);
+        const current = structuredClone(parsedGraph);
+        prepareHorizonBasisForWrite(current, parsed.success ? parsed.data : undefined, payload.scenario_id);
+        return { persistedGraph: parsed.success ? parsed.data : null,
+          preimageScope: parsed.success ? interventionPreimageScope(parsed.data, current, payload.scenario_id) : null };
+      } catch {
+        // The existing post-provider merge/read path owns the failure class and copy.
+        return { persistedGraph: null, preimageScope: null };
+      }
+    },
   };
+  let operationHumanAuthority: InterventionHumanAuthority = [];
   let recordedAnswer: RecordedEffectAnswer | null = null;
   if (params.recordedEffectAnswer !== undefined) {
     const resolved = resolveRecordedOptionEffectAnswer({
@@ -2920,6 +2928,7 @@ export async function dispatchEditGraph(
         const nativeWrite = nativeQuantityOperation === null || nativeAnswer.kind !== 'bind'
           ? null
           : nativeAnswer;
+        if (nativeWrite !== null) operationHumanAuthority = [{ optionId: nativeWrite.optionId, factorId: nativeWrite.factorId }];
 
         const optionEffect = recordedAnswer !== null
           ? { matched: true as const, kind: 'write' as const,
@@ -2946,6 +2955,7 @@ export async function dispatchEditGraph(
         const optionEffectWrite =
           optionEffectOperations === null ? null : optionEffectResolved;
         if (optionEffectWrite !== null) {
+          if (nativeWrite === null) operationHumanAuthority = [{ optionId: optionEffectWrite.optionId, factorId: optionEffectWrite.factorId }];
           emit(TelemetryEvents.V5OptionEffectWriteResolved, {
             request_id: requestId,
             scenario_id: payload.scenario_id,
@@ -2983,7 +2993,9 @@ export async function dispatchEditGraph(
           // read of the sentence. A recorded answer outranks a fresh guess.
           { ...encoderContinuity,
             ...(nativeQuantityOperation !== null
-              ? { preComposedOperations: nativeQuantityOperation }
+              ? { preComposedOperations: nativeQuantityOperation,
+                  humanAuthority: nativeWrite === null ? []
+                    : [{ optionId: nativeWrite.optionId, factorId: nativeWrite.factorId }] }
               : optionEffectOperations === null ? {}
               : { preComposedOperations: optionEffectOperations,
                   humanAuthority: optionEffectWrite === null ? []
@@ -3309,7 +3321,7 @@ export async function dispatchEditGraph(
       if (useAppendV6()) {
         strictBase = editBase!.graph;
       } else {
-        strictBase = persistedEncoderBase;
+        strictBase = await readEncoderBase();
       }
     } catch (err) {
       log.warn(
@@ -5286,7 +5298,7 @@ export async function dispatchEditGraph(
   // construction — the graph this reads is the one that stays in
   // `scenarios.graph`.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
-    ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!)
+    ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!, operationHumanAuthority)
     : (!successfulAppliedMutation ||
         optionInterventionWriteWithheld ||
         // Same reviewer finding: a turn that refused the write must still hand

@@ -1,3 +1,4 @@
+import type { InterventionHumanAuthority } from '../../orchestrator/tools/encode-option-interventions.js';
 import { isUnverifiedUserMaterial } from './provenance-display.js';
 /**
  * Analysis-Ready Transformer
@@ -109,6 +110,7 @@ export function transformOptionToAnalysisReady(
    * MISSING verdict must exclude rather than hold.
    */
   isBaseline = false,
+  humanAuthority: InterventionHumanAuthority = [],
 ): OptionForAnalysisT {
   // Flatten interventions: Record<string, InterventionV3> -> Record<string, number>
   const interventions: Record<string, number> = {};
@@ -158,17 +160,21 @@ export function transformOptionToAnalysisReady(
 
   // Build extraction metadata from first intervention's source/confidence
   let extractionMetadata: ExtractionMetadataT | undefined;
-  const firstIntervention = Object.values(option.interventions ?? {})[0];
+  const firstEntry = Object.entries(option.interventions ?? {})[0];
+  const firstIntervention = firstEntry?.[1];
   if (firstIntervention) {
     extractionMetadata = {
-      source: firstIntervention.source,
+      source: classifyValueSource(firstIntervention.source) === "user_stated"
+        ? humanAuthority.some(pair => pair.optionId === option.id && pair.factorId === firstEntry?.[0])
+          ? "user_specified" : undefined
+        : firstIntervention.source,
       confidence: firstIntervention.value_confidence ?? firstIntervention.target_match.confidence,
       reasoning: firstIntervention.reasoning,
     };
   } else if (option.provenance) {
     // Fallback to option provenance
     extractionMetadata = {
-      source: option.provenance.source,
+      source: classifyValueSource(option.provenance.source) === "user_stated" ? undefined : option.provenance.source,
       confidence: "low",
       reasoning: option.provenance.brief_quote,
     };
@@ -246,6 +252,8 @@ export function transformOptionToAnalysisReady(
 export interface AnalysisReadyContext {
   /** Suggested seed for reproducibility */
   seed?: string;
+  /** Checked exact-cell authority for this operation, never inferred from stored source. */
+  humanAuthority?: InterventionHumanAuthority;
   /** Request ID for tracing */
   requestId?: string;
 }
@@ -908,6 +916,7 @@ export function buildAnalysisReadyPayload(
       option,
       (optionFactorAdj.get(option.id) ?? []).length,
       index === baselineIdx,
+      context.humanAuthority,
     ),
   );
 
@@ -1032,7 +1041,8 @@ export function buildAnalysisReadyPayload(
       if (!isDirectStatedMagnitude) continue;
       const bindingResolved =
         intervention !== undefined &&
-        intervention.source === "brief_extraction" &&
+        classifyValueSource(intervention.source) === "user_stated" &&
+        context.humanAuthority?.some(pair => pair.optionId === v3Option.id && pair.factorId === factorId) === true &&
         intervention.raw_value === rawValue;
       if (bindingResolved) continue;
 
@@ -1183,9 +1193,11 @@ export function buildAnalysisReadyPayload(
       // meaningful human-readable string was produced.
       if (detail.display_value === bareFallback) continue;
       const v3Intervention = v3Option?.interventions?.[factorId];
-      const source = v3Intervention && typeof (v3Intervention as { source?: unknown }).source === 'string'
-        ? (v3Intervention as { source: string }).source
-        : undefined;
+      const stampedSource = v3Intervention?.source;
+      const source = classifyValueSource(stampedSource) === 'user_stated'
+        ? context.humanAuthority?.some(pair => pair.optionId === analysisOpt.option_id && pair.factorId === factorId)
+          ? 'user_specified' : undefined
+        : stampedSource;
       (analysisOpt.interventions as Record<string, unknown>)[factorId] = {
         value: numericValue,
         ...(source ? { source } : {}),

@@ -30,7 +30,7 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { parseEditGraphResponse } from '../../../orchestrator/tools/edit-graph.js';
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
-import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
+import { encodeOptionInterventionsForEdit, interventionPreimageScope } from '../../../orchestrator/tools/encode-option-interventions.js';
 import {
   computeStructuralReadiness,
   mergeInterventionSources,
@@ -248,7 +248,7 @@ describe('configure-option apply chain (served-prompt op shapes, scenario A)', (
       expect(decision.governing).toBe('proceed');
       expect(decision.blockApply).toBe(false);
       const applied = applyPatchOperations(GraphV3.parse(before), operations);
-      const encoded = encodeOptionInterventionsForEdit(applied, new Set([answer.pair.optionId]));
+      const encoded = encodeOptionInterventionsForEdit(applied, new Set([answer.pair.optionId]), undefined, [{ optionId: answer.pair.optionId, factorId: answer.pair.factorId }], GraphV3.parse(before), interventionPreimageScope(before, before, scenarioId));
       expect(encoded.unresolvedOptionIds).toEqual([]);
       const projected = projectGraphForPersistence(encoded.graph);
       expect(readCommittedOptionEffect(projected, answer.pair.optionId, answer.pair.factorId)).toBe(value);

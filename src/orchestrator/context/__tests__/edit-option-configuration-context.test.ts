@@ -1,3 +1,4 @@
+import { interventionPreimageScope } from '../../tools/encode-option-interventions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import type { LLMAdapter } from '../../../adapters/llm/types.js';
@@ -207,7 +208,7 @@ describe('real edit adapter input → controlled model reply → canonical confi
       };
     });
     const adapter: LLMAdapter = { name: 'fixtures', model: 'controlled-fixture', chat, draftGraph: unused, suggestOptions: unused, clarifyBrief: unused, critiqueGraph: unused, explainDiff: unused };
-    const result = await handleEditGraph(ctx, `Configure Grandfather existing customers: copy Pro Feature Value Perception from ${sourceId}; set blended price to £51 as agreed.`, adapter, `config-${sourceId}`, `turn-${sourceId}`, { maxRetries: 0, invocationInput: { confirmation_mode: 'apply_pending_proposal' } });
+    const result = await handleEditGraph(ctx, `Configure Grandfather existing customers: copy Pro Feature Value Perception from ${sourceId}; set blended price to £51 as agreed.`, adapter, `config-${sourceId}`, `turn-${sourceId}`, { maxRetries: 0, invocationInput: { confirmation_mode: 'apply_pending_proposal' }, persistedGraph: ctx.graph, preimageScope: interventionPreimageScope(ctx.graph, ctx.graph, 'option-configuration') });
     expect(chat).toHaveBeenCalledTimes(1);
     expect(result.wasRejected).toBe(false);
     const applied = GraphV3.parse(result.appliedGraph);

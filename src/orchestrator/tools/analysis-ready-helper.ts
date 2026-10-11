@@ -40,7 +40,7 @@ import {
 // admission predicate this estate keeps paying for.
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
-import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
+import { encodeOptionInterventionsForEdit, interventionPreimageScope, type InterventionHumanAuthority } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
 // `cee/transforms/analysis-ready.ts`. See the kernel's header for why the
@@ -59,7 +59,6 @@ import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-ed
 // cycle (`import type` is erased).
 import {
   classifyIssueObligation,
-  classifyValueSource,
   type ObligationClass,
   type StructureProvenance,
 } from "../../cee/graph-readiness/obligation-provenance.js";
@@ -975,9 +974,9 @@ export function blockerIssue(
  * `offered` gap as a demand and the defect would look fixed in the tests that
  * happen to read the stamped array.
  */
-function stampObligationsInPlace(issues: CanonicalReadinessIssue[], graph: unknown): void {
+function stampObligationsInPlace(issues: CanonicalReadinessIssue[], graph: unknown, humanAuthority: InterventionHumanAuthority): void {
   for (let i = 0; i < issues.length; i += 1) {
-    const decision = classifyIssueObligation(issues[i], graph);
+    const decision = classifyIssueObligation(issues[i], graph, [], humanAuthority);
     issues[i] = {
       ...issues[i],
       provenance: decision.provenance,
@@ -1026,6 +1025,7 @@ function requiredInputForIssue(
  */
 function projectSemanticAnalysisReadyFromGraph(
   graph: unknown,
+  humanAuthority: InterventionHumanAuthority,
 ): AnalysisReadyPayload | undefined {
   const parsed = GraphV3.safeParse(graph);
   if (!parsed.success) return undefined;
@@ -1107,7 +1107,7 @@ function projectSemanticAnalysisReadyFromGraph(
         })
         .filter((option): option is OptionV3T => option !== null);
 
-  const canonical = buildAnalysisReadyPayload(options, goalNodeId, parsed.data);
+  const canonical = buildAnalysisReadyPayload(options, goalNodeId, parsed.data, { humanAuthority });
   return projectCanonicalPayloadToWire(canonical);
 }
 
@@ -1440,6 +1440,7 @@ function appendSemanticIssues(
  */
 export function assessCanonicalAnalysisReadiness(
   graph: unknown,
+  humanAuthority: InterventionHumanAuthority = [],
 ): CanonicalReadinessAssessment {
   try {
     if (graph === null || graph === undefined) {
@@ -1466,40 +1467,11 @@ export function assessCanonicalAnalysisReadiness(
     // out. The empty touched set is the proposal candidate: it canonicalises
     // every safely expressible carrier while deliberately leaving unresolved
     // options alone, so one bad option cannot hide safe work on another.
-    // No operation/revision authority accompanies this read-only view. Historical bytes remain on the input.
-    const strictEncoding = encodeOptionInterventionsForEdit(graph, undefined, undefined, [], null /* no scoped preimage */, null);
-    const proposalEncoding = encodeOptionInterventionsForEdit(graph, new Set<string>(), undefined, [], null /* no scoped preimage */, null);
-    // Withholding a fresh analysis verdict must not migrate historical source bytes.
-    const retainHistoricalSources = (view: unknown): unknown => {
-      if (!isPlainObject(view) || !Array.isArray(view.nodes)) return view;
-      return { ...view, nodes: view.nodes.map((node) => {
-        if (!isPlainObject(node) || node.kind !== 'option' || typeof node.id !== 'string'
-          || !isPlainObject(node.interventions)) return node;
-        const before = optionRecordById(graph, node.id);
-        if (!before || !isPlainObject(before.interventions)) return node;
-        const oldInterventions = before.interventions;
-        const interventions = Object.fromEntries(Object.entries(node.interventions).map(([id, cell]) => {
-          const old = oldInterventions[id];
-          if (!isPlainObject(old) || !isPlainObject(cell) || cell.source !== undefined
-            || classifyValueSource(old.source) !== 'user_stated') return [id, cell];
-          const { source: _source, ...content } = old;
-          return [id, sameJson(content, cell) ? old : cell];
-        }));
-        return { ...node, interventions };
-      }) };
-    };
-    const historicalProposalGraph = retainHistoricalSources(proposalEncoding.graph);
-    // The options[] mirror may own analysis order; it cannot renew a historic cell's source verdict either.
-    const proposalGraph = isPlainObject(proposalEncoding.graph) && Array.isArray(proposalEncoding.graph.options)
-      ? { ...proposalEncoding.graph, options: proposalEncoding.graph.options.map((option) => {
-          if (!isPlainObject(option) || !isPlainObject(option.interventions)) return option;
-          return { ...option, interventions: Object.fromEntries(Object.entries(option.interventions).map(([id, cell]) => {
-            if (!isPlainObject(cell) || classifyValueSource(cell.source) !== 'user_stated') return [id, cell];
-            const { source: _source, ...content } = cell;
-            return [id, content];
-          })) };
-        }) }
-      : proposalEncoding.graph;
+    // These are read-only views of the stored graph, not new source verdicts.
+    const scope = interventionPreimageScope(graph, graph, 'read-only');
+    const strictEncoding = encodeOptionInterventionsForEdit(graph, undefined, undefined, [], graph, scope);
+    const proposalEncoding = encodeOptionInterventionsForEdit(graph, new Set<string>(), undefined, [], graph, scope);
+    const proposalGraph = proposalEncoding.graph;
     const parsed = GraphV3.safeParse(proposalGraph);
     if (!parsed.success) {
       const issue: CanonicalReadinessIssue = {
@@ -1529,7 +1501,7 @@ export function assessCanonicalAnalysisReadiness(
     for (const node of parsed.data.nodes) {
       if (node.kind !== 'option') continue;
       const before = optionRecordById(graph, node.id);
-      const after = optionRecordById(historicalProposalGraph, node.id);
+      const after = optionRecordById(proposalGraph, node.id);
       if (!before || !after || sameJson(before, after)) continue;
       const issueId = `carrier_${carrierIssues.length + 1}`;
       carrierIssues.push({
@@ -1586,7 +1558,7 @@ export function assessCanonicalAnalysisReadiness(
       blockingIssues.push(structuralIssue(violation, index));
     });
 
-    const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
+    const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph, humanAuthority);
     // Derived from `parsed.data` — the SAME graph `projectSemanticAnalysisReadyFromGraph`
     // reads, schema-validated, so the disclosure can never describe a different
     // model than the ask it rides on.
@@ -1638,8 +1610,8 @@ export function assessCanonicalAnalysisReadiness(
     // rather than at each mint site is deliberate — four separate mints feed these
     // arrays (carrier, numeric, structural, semantic), and a per-mint stamp is
     // exactly the hand-maintained mirror that goes stale when a fifth is added.
-    stampObligationsInPlace(carrierIssues, graph);
-    stampObligationsInPlace(blockingIssues, graph);
+    stampObligationsInPlace(carrierIssues, graph, humanAuthority);
+    stampObligationsInPlace(blockingIssues, graph, humanAuthority);
 
     const allIssues = [...carrierIssues, ...blockingIssues];
     const proposal: CanonicalReadinessRepairProposal | null =
@@ -1714,7 +1686,7 @@ export function assessCanonicalAnalysisReadiness(
         };
     const safeToAnalyse = blockingIssues.length === 0 && analysisReady?.status === 'ready';
     const strictCanonicalGraph = strictEncoding.unresolvedOptionIds.length === 0
-      ? retainHistoricalSources(strictEncoding.graph)
+      ? strictEncoding.graph
       : null;
     return {
       analysisReady,
@@ -1722,7 +1694,7 @@ export function assessCanonicalAnalysisReadiness(
       blockingIssues,
       repairProposal: proposal,
       canonicalGraph: safeToAnalyse ? strictCanonicalGraph : null,
-      proposedGraph: changes.length > 0 ? historicalProposalGraph : null,
+      proposedGraph: changes.length > 0 ? proposalGraph : null,
       repairedForAnalysis:
         safeToAnalyse && strictCanonicalGraph !== null && !sameJson(graph, strictCanonicalGraph),
       safeToAnalyse,
@@ -1785,8 +1757,9 @@ export function assessCanonicalAnalysisReadiness(
  */
 export function buildCanonicalAnalysisReadyFromGraph(
   graph: unknown,
+  humanAuthority: InterventionHumanAuthority = [],
 ): AnalysisReadyPayload | undefined {
-  return canonicalAnalysisReadyFrom(resolveRunAdmission(graph), graph);
+  return canonicalAnalysisReadyFrom(resolveRunAdmission(graph, humanAuthority), graph);
 }
 
 /**

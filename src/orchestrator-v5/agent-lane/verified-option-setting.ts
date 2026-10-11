@@ -105,7 +105,11 @@ function onlySiblingArms(model: CandidateModel, selected: Option, others: readon
     const figures = ws.flatMap(w => { const n = figure(w); return n === null ? [] : [n]; });
     // DL 7 Oct (iii): an arm that writes the credited figure ("instead of the 4", "treat 4 as a ceiling") refuses.
     if (figures.includes(value)) return false;
-    return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN));
+    return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN)
+      // A named sibling cannot hide an incompatible written period or denominator on its own amount.
+      && findLinkEffectAmounts(text).every(amount => (o.interventions ?? []).some(iv =>
+        model.factors.some(f => f.label === iv.factor_label
+          && sameFrame(text, { start: amount.index, end: amount.index + amount.matchedText.length }, f.unit, amount, f.label)))));
   });
 }
 
@@ -238,7 +242,11 @@ function coordinatedSiblingArms(model: CandidateModel, selected: Option, others:
     const figures = ws.flatMap(w => { const n = figure(w); return n === null ? [] : [n]; });
     // DL 7 Oct (iii): an arm that writes the credited figure ("instead of the 4", "treat 4 as a ceiling") refuses.
     if (figures.includes(value)) return false;
-    return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN));
+    return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN)
+      // A named sibling cannot hide an incompatible written period or denominator on its own amount.
+      && findLinkEffectAmounts(text).every(amount => (o.interventions ?? []).some(iv =>
+        model.factors.some(f => f.label === iv.factor_label
+          && sameFrame(text, { start: amount.index, end: amount.index + amount.matchedText.length }, f.unit, amount, f.label)))));
   });
 }
 /** An option-setting frame. Current-level ownership stays separate; history, conditions and third-party claims abstain. */

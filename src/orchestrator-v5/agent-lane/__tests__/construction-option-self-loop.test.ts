@@ -431,6 +431,9 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     expect(out.provenance_demoted).toContainEqual({ option: 'Advertising investment', factor: 'Advertising investment',
       value: 20000, unit: 'GBP over six months' });
     expect(out.not_represented).toContain('"Advertising investment": Not confirmed from your brief');
+    // RUN66b: preserve both whole-result assertions from the superseded RUN61 witnesses.
+    expect(JSON.stringify(out)).toContain('20000');
+    expect(JSON.stringify(out)).toContain('GBP over six months');
     // The loop sentence describes Olumi's invalid topology, not authorship of the retained 20000 claim.
     expect((out.not_represented as string[]).some(line => line.includes('20000') && line.includes("Olumi's estimate"))).toBe(false);
   });
@@ -445,6 +448,9 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     expect(retained).toStrictEqual([{ option: 'Advertising investment', factor: 'Advertising investment',
       value: 20000, unit: 'GBP over six months' }]);
     expect(out.not_represented).toContain('"Advertising investment": Not confirmed from your brief');
+    // RUN66b: preserve both whole-result assertions from the superseded RUN61 witnesses.
+    expect(JSON.stringify(out)).toContain('20000');
+    expect(JSON.stringify(out)).toContain('GBP over six months');
     expect((out.not_represented as string[]).some(line => line.includes('20000') && line.includes("Olumi's estimate"))).toBe(false);
     expect(loopWithheld(out)).toEqual([SELF]);
     expect(has(graph, ADVERTISING, ADVERTISING)).toBe(false);

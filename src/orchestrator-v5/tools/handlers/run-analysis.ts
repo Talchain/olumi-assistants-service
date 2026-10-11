@@ -2380,19 +2380,22 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // restated, not a check (AI Quality, #70 5844226031): read off the options PLoT received, and passed as the FIFTH
     // argument — the fourth stays deliberately omitted (see above).
     // WIRE, not graph (review 5844327116): a status quo the gate HELD sets the target on the wire only.
+    const leaderUnattributedTargetIds = new Set<string>();
     const leaderEstimatedTargetIds = collectLeaderEstimatedTargetIds(
       graphForAnalysis,
       ratifiedConstraints,
       leadingOptionId ?? null,
-      { options: submittedOptions, held: gate.held },
+      { options: submittedOptions, held: gate.held,
+        // This run carries no exact intervention approval/receipt context. Stored source is not new proof.
+        humanAuthority: [], unattributedTargetIds: leaderUnattributedTargetIds },
     );
-    if (leaderEstimatedTargetIds.size > 0) {
+    if ([...leaderEstimatedTargetIds].some(id => !leaderUnattributedTargetIds.has(id))) {
       log.info(
         {
           event: 'run_analysis.limit_rests_on_olumi_estimate',
           request_id: invocation.requestId,
           scenario_id: args.scenario_id,
-          constraint_ids: [...leaderEstimatedTargetIds],
+          constraint_ids: [...leaderEstimatedTargetIds].filter(id => !leaderUnattributedTargetIds.has(id)),
         },
         'run_analysis: a limit on a quantity the leading option sets at Olumi\'s estimate is not counted as checked',
       );
@@ -2431,7 +2434,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       leaderEstimatedTargetIds,
       // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
       // R-c: with the options PLoT scores, so a change limit moved only through unsized parts is withheld.
-      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations),
+      { ...collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations),
+        unattributedInterventionIds: leaderUnattributedTargetIds },
       strictThresholdPins,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A

@@ -1,3 +1,4 @@
+import { GraphStateIngressSchema } from '../../../orchestrator-v5/boundary/request-extensions.js';
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -10,7 +11,7 @@ import * as spellings from '../../canonicalise-value-ops.js';
 import * as telemetry from '../../../utils/telemetry.js';
 import * as scales from '../../../orchestrator-v5/tools/plot-intervention-scale.js';
 import * as proposal from '../../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { GraphV3, InterventionV3, type GraphV3T, type InterventionV3T } from '../../../schemas/cee-v3.js';
+import { GraphV3, InterventionV3, OptionV3, type GraphV3T, type InterventionV3T } from '../../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../patch-applier.js';
 import { probes, prepare, admitted } from '../../../orchestrator-v5/agent-lane/__tests__/fixtures/r5-verified-cases.js';
 import { projectGraphForPersistence } from '../../../orchestrator-v5/persisted-graph-projection.js';
@@ -18,6 +19,10 @@ import { encodeOptionInterventionsForEdit, type InterventionHumanAuthority, type
 
 import { computeAnalysisAffectingGraphHash } from '../../../orchestrator-v5/context/graph-hash.js';
 import { assessCanonicalAnalysisReadiness } from '../analysis-ready-helper.js';
+import { collectLeaderEstimatedTargetIds, deriveConstraintVerdict, type RatifiedConstraint } from '../../context/constraint-feasibility.js';
+import { canonicaliseForAnalysis } from '../../../orchestrator-v5/tools/handlers/analysis-ready-core.js';
+import { transformOptionToAnalysisReady, buildAnalysisReadyPayload } from '../../../cee/transforms/analysis-ready.js';
+import { decideOptionCostAsk } from '../../../orchestrator-v5/coaching/decide-option-cost-ask.js';
 
 const modulePath = resolve('src/orchestrator/tools/encode-option-interventions.ts');
 const moduleBytes = readFileSync(modulePath, 'utf8');
@@ -72,6 +77,8 @@ function mutantModule(old: string, replacement: string) {
   const dependencies: Record<string, unknown> = {
     '../../orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.js': normalise,
     'node:util': nodeUtil,
+    '../../orchestrator-v5/boundary/request-extensions.js': { GraphStateIngressSchema },
+    '../../orchestrator-v5/context/graph-hash.js': { computeAnalysisAffectingGraphHash },
     '../../cee/graph-readiness/obligation-provenance.js': provenance,
     '../canonicalise-value-ops.js': spellings,
     '../../utils/telemetry.js': telemetry,
@@ -114,6 +121,88 @@ function productionFiles(dir: string): string[] {
 }
 
 describe('RUN63b canonical intervention authority at the real encode boundary', () => {
+  it('RUN66b read-only continuity keeps the original graph reference and every cell byte', () => {
+    const graph = snapshot({ fac_a: cell() }); const bytes = JSON.stringify(graph);
+    expect(canonicaliseForAnalysis(graph)).toBe(graph);
+    expect(JSON.stringify(graph)).toBe(bytes);
+  });
+  it('RUN66b extraction metadata requires current exact-cell authority, never historical continuity', () => {
+    const graph = snapshot({ fac_a: { ...cell('user_specified'), reasoning: 'Original claim' } });
+    const bytes = JSON.stringify(graph);
+    const option = OptionV3.parse({ ...graph.nodes.find(n => n.id === 'opt_a'), status: 'ready' });
+    const without = transformOptionToAnalysisReady(option);
+    const withAuthority = transformOptionToAnalysisReady(option, 0, false, approved);
+    const siblingOnly = transformOptionToAnalysisReady(option, 0, false, [{ optionId: 'opt_a', factorId: 'fac_b' }]);
+    expect(without.extraction_metadata?.source).toBeUndefined();
+    expect(siblingOnly.extraction_metadata?.source).toBeUndefined();
+    expect(withAuthority.extraction_metadata?.source).toBe('user_specified');
+    const historical = OptionV3.parse({ ...option, interventions: { fac_a: cell('brief_extraction') } });
+    expect(transformOptionToAnalysisReady(historical, 0, false, approved).extraction_metadata?.source).toBe('user_specified');
+    expect(historical.interventions.fac_a.source).toBe('brief_extraction');
+    expect(without.extraction_metadata?.reasoning).toBe('Original claim');
+    expect(without.interventions).toStrictEqual(withAuthority.interventions);
+    expect(JSON.stringify(graph)).toBe(bytes);
+  });
+  it('RUN66b direct raw-magnitude licence needs exact authority; number, native frame and stored bytes stay', () => {
+    const graph = snapshot({ fac_a: { ...cell('user_specified'), reasoning: 'Direct causal value bound by edge' } });
+    const bytes = JSON.stringify(graph);
+    const option = OptionV3.parse({ ...graph.nodes.find(n => n.id === 'opt_a'), status: 'ready',
+      raw_interventions: { fac_a: 40 }, provenance: { source: 'brief_extraction', brief_quote: 'Original claim' } });
+    const without = buildAnalysisReadyPayload([option], 'goal', graph);
+    const withAuthority = buildAnalysisReadyPayload([option], 'goal', graph, { humanAuthority: approved });
+    const unresolved = (payload: typeof without) => payload.blockers?.filter(b => b.factor_id === 'fac_a'
+      && b.blocker_type === 'ambiguous_value' && b.message.includes('source binding is unresolved')) ?? [];
+    expect(unresolved(without)).toHaveLength(1);
+    expect(unresolved(withAuthority)).toStrictEqual([]);
+    expect(without.options[0].raw_interventions).toStrictEqual(withAuthority.options[0].raw_interventions);
+    expect(without.options[0].intervention_details).toStrictEqual(withAuthority.options[0].intervention_details);
+    expect(JSON.stringify(graph)).toBe(bytes);
+  });
+  it('RUN66b obligation wording checks the exact effect, not its option or stored source', () => {
+    const graph = snapshot({ fac_a: cell('user_specified') }); const bytes = JSON.stringify(graph);
+    const issue = { issue_id: 'missing', code: 'MISSING_OPTION_VALUE' as const, category: 'option_values' as const,
+      message: 'Existing ask', repairability: 'human_input_required' as const, option_id: 'opt_a', factor_id: 'fac_a' };
+    expect(provenance.classifyIssueObligation(issue, graph, [], []).provenance).toBe('unattributed');
+    expect(provenance.classifyIssueObligation(issue, graph, [], approved).provenance).toBe('user_stated');
+    expect(provenance.classifyIssueObligation(issue, graph, [], [{ optionId: 'opt_a', factorId: 'fac_b' }]).provenance).toBe('unattributed');
+    const withSibling = snapshot({ fac_a: cell('user_specified'), fac_b: { ...cell(), source: undefined } });
+    expect(provenance.structureProvenanceOfEffect(withSibling, 'opt_a', 'fac_b', approved)).toBe('unattributed');
+    expect(JSON.stringify(graph)).toBe(bytes);
+  });
+  it('RUN66b native rule (d) withholds unknown authority without calling it an AI estimate', () => {
+    const graph = snapshot({ fac_a: cell('user_specified') }); const bytes = JSON.stringify(graph);
+    const ratified: RatifiedConstraint[] = [{ constraint_id: 'limit', label: 'Riders limit', node_id: 'fac_a' }];
+    const options = graph.nodes.filter(n => n.kind === 'option');
+    const unattributed = new Set<string>();
+    const without = collectLeaderEstimatedTargetIds(graph, ratified, 'opt_a',
+      { options, held: [], humanAuthority: [], unattributedTargetIds: unattributed });
+    const withAuthority = collectLeaderEstimatedTargetIds(graph, ratified, 'opt_a',
+      { options, held: [], humanAuthority: approved });
+    expect([...without]).toStrictEqual(['limit']);
+    expect([...unattributed]).toStrictEqual(['limit']);
+    expect([...withAuthority]).toStrictEqual([]);
+    const envelope = { constraints_status: 'computed',
+      constraint_results: [{ constraint_id: 'limit', scale_provenance: { source: 'scale_frame', range_unified: true, decision_grade: true } }],
+      option_comparison: [{ option_id: 'opt_a', constraint_probabilities: { limit: 0.9 } }] };
+    const result = deriveConstraintVerdict(envelope, ratified, 'opt_a', undefined, without,
+      { userBaselineIds: new Set(['limit']), userAssumptionIds: new Set(), unattributedInterventionIds: unattributed });
+    expect(result.perLimit).toStrictEqual([{ constraint_id: 'limit', state: 'unscored', reason: 'base_owner_unestablished' }]);
+    expect(deriveConstraintVerdict(envelope, ratified, 'opt_a', undefined, withAuthority,
+      { userBaselineIds: new Set(['limit']), userAssumptionIds: new Set() }).perLimit)
+      .toStrictEqual([{ constraint_id: 'limit', state: 'scored' }]);
+    expect(JSON.stringify(graph)).toBe(bytes);
+  });
+  it('RUN66b native-cost answer suppression requires current exact-cell authority, graph bytes unchanged', () => {
+    const graph = snapshot({ fac_a: cell('user_specified') }); const bytes = JSON.stringify(graph);
+    const input = { notDecisionGrade: true, ratified: [{ constraint_id: 'limit', node_id: 'fac_a', unit: 'riders' }],
+      nodes: graph.nodes, options: graph.nodes.filter(n => n.kind === 'option') };
+    expect(decideOptionCostAsk(input)).toMatchObject({ option_id: 'opt_a', factor_id: 'fac_a' });
+    expect(decideOptionCostAsk({ ...input, humanAuthority: approved })).toBeNull();
+    expect(decideOptionCostAsk({ ...input, humanAuthority: [{ optionId: 'opt_a', factorId: 'fac_b' }] }))
+      .toMatchObject({ option_id: 'opt_a', factor_id: 'fac_a' });
+    expect(JSON.stringify(graph)).toBe(bytes);
+  });
+
   it.each(['brief_extraction', 'user_specified'] as const)('%s: new model stamp absent; exact human change is user_specified', source => {
     const before = snapshot(); const written = cell(source);
     const after = update(before, { fac_a: written });

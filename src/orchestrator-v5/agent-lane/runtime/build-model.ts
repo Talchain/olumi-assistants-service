@@ -860,7 +860,7 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       const statedFigure = verifiedTotal && !receipt.derived;
       // An inferred zero cannot turn a verified addition into a literal/current total.
       if (!verifiedTotal && nativeAddition !== undefined
-        && (factor.baseline_known !== true || (factor.baseline_value === 0 && !verifiedFactorLevel(model, factor, brief)))) {
+        && factor.baseline_value === 0 && !verifiedFactorLevel(model, factor, brief)) {
         unresolved('baseline_unknown'); continue;
       }
       if (brief !== undefined && !verifiedTotal && intervention.provenance === 'explicit' && factor.baseline_known === true) {

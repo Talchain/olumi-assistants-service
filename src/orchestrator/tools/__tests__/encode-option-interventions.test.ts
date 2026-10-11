@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  encodeOptionInterventionsForEdit,
+  encodeOptionInterventionsForEdit, interventionPreimageScope,
   optionIdsTouchedByOperations,
   optionIdsAddedWithInterventionIntent,
   clearInheritedInterventionSourceQuotes,
@@ -206,7 +206,7 @@ describe('encodeOptionInterventionsForEdit (add-option encoding)', () => {
       nodes: [goal(), cappedFactor(), { id: 'opt_clean', kind: 'option', label: 'Clean', interventions: { fac_annual_cost: { value: 0.5, source: 'brief_extraction', target_match: { node_id: 'fac_annual_cost', match_type: 'exact_id', confidence: 'high' } } } }],
       edges: [edge('opt_clean', 'fac_annual_cost')],
     };
-    const out = encodeOptionInterventionsForEdit(g);
+    const out = encodeOptionInterventionsForEdit(g, undefined, undefined, [], g, interventionPreimageScope(g, g, 'stored-read'));
     expect(out).toEqual({ graph: g, unresolvedOptionIds: [] });
     expect(out.graph).toBe(g);
   });

@@ -247,6 +247,10 @@ export interface EditGraphOpts {
   /** Trusted caller's store-loaded preimage and revision pin; never request graph bytes. */
   persistedGraph?: ConversationContext['graph'];
   preimageScope?: InterventionPreimageScope | null;
+  loadInterventionPreimage?: () => Promise<{
+    persistedGraph: ConversationContext['graph'] | null;
+    preimageScope: InterventionPreimageScope | null;
+  }>;
 }
 
 // ============================================================================
@@ -3992,7 +3996,14 @@ export async function handleEditGraph(
       // bare needs_encoding add (no requested intervention, configured later) is
       // never rejected.
       const mustConfigureOptionIds = optionIdsAddedWithInterventionIntent(operations);
-      const encoded = encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds, mustConfigureOptionIds, opts?.humanAuthority, opts?.persistedGraph ?? null /* no trusted preimage if caller omits it */, opts?.preimageScope ?? null);
+      // Preserve the existing range-consent read before the lazy strict merge-base read.
+      if (hasNewInterventionRanges(undefined, appliedGraph) && !(await loadStoredRangeBase())) {
+        return buildRejectionResult('The stored model could not be read. Nothing was changed.',
+          operations, baseGraphHash, turnId, startTime,
+          'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+      }
+      const preimage = await opts?.loadInterventionPreimage?.();
+      const encoded = encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds, mustConfigureOptionIds, opts?.humanAuthority, preimage?.persistedGraph ?? opts?.persistedGraph ?? null /* no trusted preimage if caller omits it */, preimage?.preimageScope ?? opts?.preimageScope ?? null);
       if (encoded.unresolvedOptionIds.length > 0) {
         validationOutcome = 'option_interventions_unresolvable';
         setViolationCodes(['option_interventions_unresolvable']);
@@ -4272,7 +4283,7 @@ export async function handleEditGraph(
     // Compute analysis_ready from post-patch graph (single candidate graph flow)
     const readinessGraph = appliedGraph ?? candidateGraph;
     const analysisReady = readinessGraph
-      ? buildCanonicalAnalysisReadyFromGraph(readinessGraph)
+      ? buildCanonicalAnalysisReadyFromGraph(readinessGraph, opts?.humanAuthority)
       : undefined;
 
     // Extract explicit intervention_updates from operations for downstream consumers.
