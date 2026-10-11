@@ -607,6 +607,8 @@ it('served census: 116 corpus + 8 R2; fewer not_representable set-asides and goa
   const baseline = await count(true);
   const current = await count(false);
   process.stdout.write('S7 2BA CENSUS ' + JSON.stringify({ drafts: 124, ...current, baseline }) + '\n');
-  expect(baseline).toEqual({ not_representable: 85, placeholders: 421, goal_path_links: 1122 });
-  expect(current.not_representable).toBeLessThan(85);
+  // Batch A ruling 7: A1 retains same-unit ±1 definitions; set-asides 85→76, placeholders 421→409, paths 1122→1115.
+  expect(baseline).toEqual({ not_representable: 76, placeholders: 409, goal_path_links: 1115 });
+  // Batch A ruling 7: fitting must still improve on the A1-adjusted baseline.
+  expect(current.not_representable).toBeLessThan(baseline.not_representable);
 }, 120_000);

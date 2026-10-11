@@ -224,15 +224,19 @@ describe('pass-through: a drafted definition is typed on its total\'s frame (raw
     expect(node(PART).id).toBe('mrr_lost_to_price_rise_churn');
   });
 
-  it('CONTROL: an Olumi size into the part (£250 per customer, no brief figure) that the narrower frame would push past ±1 — the part keeps its frame, Olumi\'s size is kept, the definition is asked as before', async () => {
+  it('Batch A CONTROL: £250 per customer stays an estimate; the same-unit minus-one onward definition keeps its size and the part frame', async () => {
     const response = JSON.parse(FX.pass_through.response_text) as Rec;
     const into = (response.links as Rec[]).find((l) => l.from === 'Customers lost from price rise' && l.to === PART)!;
     Object.assign(into, { effect_amount: 250, provenance: 'inferred', effect_provenance: 'inferred' });
     const { node, edge } = await build(JSON.stringify(response), FX.pass_through.brief);
     expect(node(PART).scale_frame).toBe(500000);
     expect(edge('Customers lost from price rise', PART).provenance).toMatchObject({ magnitude: 'olumi_estimate', natural_effect: { amount: 250, per_source_change: 1 } });
-    expect(edge(PART, GOAL).provenance.magnitude).toBe('olumi_placeholder');
-    expect(edge(PART, GOAL).provenance.definitional).toBeUndefined();
+    // Batch A ruling 7: the changed edge is the -£1/£1 definition, not the £250/customer incoming estimate.
+    expect(edge(PART, GOAL).provenance.magnitude).toBe('olumi_estimate');
+    // Batch A ruling 7: same-unit ±1 definitions keep their size under A1.
+    expect(edge(PART, GOAL).provenance.definitional).toBe(true);
+    // Batch A ruling 7: cross-unit £250/customer must never become definitional.
+    expect(edge('Customers lost from price rise', PART).provenance.definitional).toBeUndefined();
   });
 
   it('CONTROL (Codex r1 P1): the part drafted as a FACTOR (the refit never widens a factor) keeps its frame — the user\'s £300 per customer is never cut', async () => {

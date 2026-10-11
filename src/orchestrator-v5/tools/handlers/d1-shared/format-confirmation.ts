@@ -741,6 +741,8 @@ export function formatEdgeStrengthConfirmed(input: {
   readonly toLabel: string;
   readonly sizing: LinkSizing | undefined;
 }): string {
+  // Batch A ruling 3: confirming a placeholder says it is still not sized.
+  if (input.sizing === 'placeholder') return `The link between ${input.fromLabel} and ${input.toLabel} has not been sized yet; nothing was changed.`;
   if (input.sizing === 'olumi_accepted') return acceptedOlumiEstimateSentence(input.fromLabel, input.toLabel);
   const confirmed = `Confirmed the current strength of the link between ${input.fromLabel} and ${input.toLabel}`;
   return input.sizing === 'user' ? `${confirmed} as your judgement.` : `${confirmed}.`;

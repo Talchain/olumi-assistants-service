@@ -466,12 +466,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       };
       // R11: the strength the user would author is unchanged (mean and direction as stored), so this write is a review.
       const reviewOnly = drawn === undefined && !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction;
-      if (reviewOnly && isPlaceholderLink(rawTargetEdge ?? targetEdge)) {
-        throw new D1HandlerError('PRECONDITION_UNMET', 'adjust_edge_strength: no Olumi estimate to confirm.', {
-          details: { handler_id: 'adjust_edge_strength', reason: 'no_olumi_estimate', from: parsed.from, to: parsed.to },
-          userGuidance: "There's no Olumi estimate for this link yet — give your own figure or ask Olumi to estimate it.",
-        });
-      }
+      // Batch A ruling 2: placeholder confirmation succeeds as review and preserves its sizing.
       // ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a write that MOVES the strength of a link holding the user's
       // own figure would drop that figure (below: the magnitude contract strips `natural_effect` + `magnitude`). Refused
       // for every caller, nothing written, the figure quoted — unless the approval carried the user's explicit replace
@@ -517,7 +512,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // has no source to keep, and none may be invented, so nothing is recorded on it.
         if (reviewOnly) {
           if (edge.provenance !== undefined) {
-            // Confirmation records review only; placeholder confirmations were refused before mutation.
+            // Batch A ruling 2: confirmation records review only, including unsized placeholders.
             edge.provenance = {
               ...edge.provenance,
               reviewed_by_user: {

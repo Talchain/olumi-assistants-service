@@ -637,18 +637,21 @@ describe('Batch A: confirming an estimate never approves a placeholder', () => {
     { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' },
     { source: 'cee_hypothesis', magnitude: 'olumi_estimate', mean_projected: true },
     { source: 'user_specified', mean_projected: true },
-  ])('refuses a placeholder without any write or review: %j', async provenance => {
+  ])('Batch A: a placeholder confirm succeeds as review and preserves sizing: %j', async provenance => {
     const graph = buildD1Fixture();
     graph.edges[0]!.provenance = provenance as never;
     graph.edges[0]!.defaulted = true;
     const before = structuredClone(graph);
-    await expect(createAdjustEdgeStrengthHandler()(buildInvocation(graph,
+    const outcome = await createAdjustEdgeStrengthHandler()(buildInvocation(graph,
       makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.4, operator: 'set' }),
-    ))).rejects.toMatchObject({
-      cause_kind: 'precondition_unmet_at_execute',
-      details: expect.objectContaining({ reason: 'no_olumi_estimate',
-        specific_issue: "There's no Olumi estimate for this link yet — give your own figure or ask Olumi to estimate it." }),
-    });
+    ));
+    const saved = (outcome.mutated_graph as GraphV3T).edges.find(e => e.from === 'f-budget' && e.to === 'g-revenue')!;
+    const { reviewed_by_user: review, ...kept } = saved.provenance as Record<string, unknown>;
+    // Batch A ruling 2: a successful confirm records review.
+    expect(review).toMatchObject({ intent: 'confirm', at: expect.any(String) });
+    // Batch A ruling 2: every sizing and authorship byte is preserved.
+    expect({ ...saved, provenance: kept }).toStrictEqual(before.edges[0]);
+    // Batch A ruling 2: the caller's graph remains unchanged.
     expect(graph).toStrictEqual(before);
   });
 

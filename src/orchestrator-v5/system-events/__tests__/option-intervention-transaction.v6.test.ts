@@ -1042,7 +1042,7 @@ describe('ONE user operation → ONE atomic commit, for a WHOLE approved batch (
   });
 });
 
-describe('Batch A: placeholder confirmation refuses atomically; a newly adopted size still works', () => {
+describe('Batch A: placeholder confirmation commits review atomically; a newly adopted size still works', () => {
   beforeEach(() => __setUseAppendV6ForTest(true));
   afterEach(() => __setUseAppendV6ForTest(false));
   const PLACEHOLDER = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };
@@ -1061,14 +1061,25 @@ describe('Batch A: placeholder confirmation refuses atomically; a newly adopted 
     return cold.edges.find(e => e.from === 'factor' && e.to === 'goal')! as unknown as { strength: { mean: number }; provenance?: Record<string, unknown> };
   };
 
-  it('refuses confirm_current on a placeholder without writing or stamping review, including cold reload', async () => {
+  it('Batch A: confirms a placeholder with one commit, unchanged sizing and durable review', async () => {
     const seeded = withPlaceholder(0.85);
     const p = jsonStore(seeded);
     const r = await executeOptionInterventionBatch(linkSet(seeded, { mean: 0.85, magnitude: 0.85, intent: 'confirm_current', band: 'very strong', adopted: false }), p.fresh());
-    expect(r).toMatchObject({ kind: 'refused' });
-    expect(p.attempts).toHaveLength(0);
-    expect(await p.fresh().loadGraph(SCENARIO_ID)).toStrictEqual(seeded);
-    expect((await coldEdge(p)).provenance).not.toHaveProperty('reviewed_by_user');
+    // Batch A ruling 2: placeholder confirmation succeeds.
+    expect(r).toMatchObject({ kind: 'committed' });
+    // Batch A ruling 5: one proposal produces one commit.
+    expect(p.attempts).toHaveLength(1);
+    const cold = await p.fresh().loadGraph(SCENARIO_ID) as ReturnType<typeof canonicalGraph>;
+    const e = cold.edges.find(edge => edge.from === 'factor' && edge.to === 'goal')!;
+    const { reviewed_by_user: review, ...kept } = e.provenance as Record<string, unknown>;
+    // Batch A ruling 2: every stored sizing byte survives the cold reload unchanged.
+    expect({ ...e, provenance: kept }).toStrictEqual(seeded.edges.find(edge => edge.from === 'factor' && edge.to === 'goal'));
+    // Batch A ruling 2: the review itself survives storage and reload.
+    expect(review).toMatchObject({ intent: 'confirm', band: 'very strong' });
+    // Batch A ruling 2: review cannot move the analysis hash.
+    expect(computeAnalysisAffectingGraphHash(cold)).toBe(computeAnalysisAffectingGraphHash(seeded));
+    // Batch A ruling 2: the ingress reader also retains the review.
+    expect((await coldEdge(p)).provenance).toHaveProperty('reviewed_by_user', review);
   });
 
   it('RED: Olumi’s band that MOVES a placeholder (an adopted set) sizes it too — Olumi’s, never the user’s', async () => {
