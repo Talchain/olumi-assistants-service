@@ -219,7 +219,7 @@ describe('(2) confirm_current from a band: the whole strength is kept (#2473 CR)
     const result = await applyStated(graph, confirm(), 'very strong');
     if (result.kind !== 'mutated') throw new Error(result.reason);
     // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
-    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph));
+    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph as GraphV3T));
   });
 
   it('CONTRAST (a confirm of the exact FIGURE — the UI’s "Confirm this estimate", no stated band): std untouched, still admitted', async () => {
@@ -238,7 +238,7 @@ describe('(2) confirm_current from a band: the whole strength is kept (#2473 CR)
     expect(review).not.toHaveProperty('band');
     if (result.kind !== 'mutated') return;
     // Batch A ruling 2: a confirmation keeps the analysis hash unchanged.
-    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph));
+    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph as GraphV3T));
   });
 
   it('CONTRAST: a stated band the link does NOT sit in is not a band for this write — std untouched', async () => {

@@ -280,7 +280,7 @@ describe('(e) the analysis hash: the std change is IN it, `std_defaulted` is NOT
     expect(persistedEdge(result).strength).toStrictEqual({ mean: USER_FIGURE, std: 0.00375 });
     expect(persistedEdge(result)).not.toHaveProperty('std_defaulted');
     // Batch A ruling 2: confirmation preserves sizing as well as std, so the analysis hash stays fresh.
-    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(base));
+    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(GraphV3.parse(base)));
   });
 });
 
