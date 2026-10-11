@@ -450,35 +450,40 @@ function routeContract<T>(name: string, dependencies: Record<string, unknown>): 
   visit(source);
   if (expression === undefined) throw new Error(`Missing production closure ${name}`);
   const script = ts.transpileModule(`const extracted = ${expression};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  return new Function('dependencies', `const { ${Object.keys(dependencies).join(', ')} } = dependencies; ${script}; return extracted;`)(dependencies) as T;
+  return new Function('dependencies', `let { ${Object.keys(dependencies).join(', ')} } = dependencies; ${script}; return extracted;`)(dependencies) as T;
 }
 
 describe('S1T2 R2 actual resend receipts', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
   type Site = 'callStructured' | 'callModel';
-  const drive = async (site: Site, first: 'null' | '{}' | 'transport' | '{broken', expired = false, deadlined = false) => {
+  const contractDependencies = () => ({
+    ...policyModule, postResponses: adapter.postResponses, agentRequestIdentity, onceMoreOnTransportFailure,
+    strictForTheDrafter, CONSTRUCTION_TIMEOUT_REASON: 'construction_timeout',
+    isConstructionTimeout: routeContract<(err: unknown) => boolean>('isConstructionTimeout', {}),
+    log: { warn: vi.fn(), error: vi.fn() }, conversationPromptAlias, callEffortFor,
+    forcedToolOf: routeContract<(req: unknown) => string | undefined>('forcedToolOf', {}),
+    withInstructionsBreakpoint: routeContract<(body: Record<string, unknown>) => Record<string, unknown>>('withInstructionsBreakpoint', {}),
+    refusesInstructionsBreakpoint: routeContract<(status: number, text: string) => boolean>('refusesInstructionsBreakpoint', {}),
+    instructionsBreakpointRefused: false,
+    withTransportRetry: routeContract<(req: unknown, call: () => Promise<unknown>) => Promise<unknown>>('withTransportRetry', { onceMoreOnTransportFailure }),
+  });
+  const drive = async (site: Site, first: 'null' | '{}' | 'transport' | '{broken', expired = false, deadlined = false, revoke = false) => {
     let now = 1_000;
     const deadline = 2_000;
     vi.spyOn(Date, 'now').mockImplementation(() => now);
     const physical: policyModule.GenerativeCall[] = [];
-    const policy = { ...OPENAI_ONLY('receipt-contract'), request_id: `contract-${site}-${first}-${expired}-${deadlined}`, scenario_id: scenario };
+    const policy = { ...OPENAI_ONLY('receipt-contract'), allowed: new Set<policyModule.LlmProvider>(['openai']), request_id: `contract-${site}-${first}-${expired}-${deadlined}`, scenario_id: scenario };
     vi.stubGlobal('fetch', vi.fn(async () => {
       const receipt = policyModule.currentProviderPolicy()!.calls.at(-1)!;
       physical.push(receipt); // Identity of the ledger row guarded immediately before THIS physical send.
-      if (physical.length === 1 && first === 'transport') { if (expired) now = deadline; throw new TypeError('fetch failed'); }
+      if (physical.length === 1 && first === 'transport') {
+        if (expired) now = deadline;
+        if (revoke) policy.allowed.delete('openai');
+        throw new TypeError('fetch failed');
+      }
       return new Response(physical.length === 1 ? first : '{}', { status: 200 });
     }));
-    const dependencies = {
-      ...policyModule, postResponses: adapter.postResponses, agentRequestIdentity, onceMoreOnTransportFailure,
-      strictForTheDrafter, CONSTRUCTION_TIMEOUT_REASON: 'construction_timeout',
-      isConstructionTimeout: routeContract<(err: unknown) => boolean>('isConstructionTimeout', {}),
-      log: { warn: vi.fn(), error: vi.fn() }, conversationPromptAlias, callEffortFor,
-      forcedToolOf: routeContract<(req: unknown) => string | undefined>('forcedToolOf', {}),
-      withInstructionsBreakpoint: routeContract<(body: Record<string, unknown>) => Record<string, unknown>>('withInstructionsBreakpoint', {}),
-      refusesInstructionsBreakpoint: routeContract<(status: number, text: string) => boolean>('refusesInstructionsBreakpoint', {}),
-      instructionsBreakpointRefused: false,
-      withTransportRetry: routeContract<(req: unknown, call: () => Promise<unknown>) => Promise<unknown>>('withTransportRetry', { onceMoreOnTransportFailure }),
-    };
+    const dependencies = contractDependencies();
     let result: unknown; let error: unknown;
     await runWithProviderPolicy(policy, async () => {
       try {
@@ -522,33 +527,70 @@ describe('S1T2 R2 actual resend receipts', () => {
   it('callModel F2 control: ordinary transport retry has no absolute deadline guard', async () => {
     const run = await drive('callModel', 'transport', true); assertFirst(run, 'callModel', 2, true); expect(run.error).toBeUndefined();
   });
-  const receipt = (site: string): policyModule.GenerativeCall => ({ site, provider: 'openai', model: 'gpt-x', purpose: 'fixture', outcome: 'allowed',
-    attempt: { transport_status: 200, result: 'completed', outcome: 'success', retry: false } });
-  it('last-attempt marker marks the LATEST row at its own site, and only a row that completed', () => {
-    const older = receipt('target'); const latest = receipt('target'); const other = receipt('other');
-    runWithProviderPolicy({ ...OPENAI_ONLY('marker'), calls: [older, latest, other] }, () => policyModule.recordProviderRetryOfLastAttempt('target', 'transport'));
-    expect(latest.attempt).toMatchObject({ retry: true, retry_reason: 'transport' });
-    for (const untouched of [older, other]) expect(untouched.attempt).toMatchObject({ retry: false });
-  });
-  it('last-attempt marker never reclaims an OLDER answered attempt when the latest row at the site was refused or unfinished', () => {
-    for (const shape of ['refused', 'unfinished'] as const) {
-      const older = receipt('target'); const answered = receipt('target');
-      const last = shape === 'refused' ? { ...receipt('target'), outcome: 'refused_before_network' as const } : receipt('target');
-      if (shape === 'unfinished') delete last.attempt;
-      runWithProviderPolicy({ ...OPENAI_ONLY('marker-' + shape), calls: [older, answered, last] }, () => policyModule.recordProviderRetryOfLastAttempt('target', 'transport'));
-      for (const untouched of [older, answered]) expect(untouched.attempt).toMatchObject({ retry: false });
-      if (shape === 'unfinished') expect(last.attempt).toBeUndefined();
+  for (const site of ['callStructured', 'callModel'] as const) {
+    it(`R3 ${site} admission negative: revoked permission cannot mark request #1 as retried`, async () => {
+      const run = await drive(site, 'transport', false, false, true);
+      dump(`r3-${site}-admission-negative.json`, JSON.stringify({ physical: run.physical.length, rows: run.policy.calls }));
+      expect(run.physical).toHaveLength(1); expect(run.policy.calls).toHaveLength(2);
+      expect(run.physical[0]).toBe(run.policy.calls[0]);
+      expect(run.physical[0].attempt?.retry, 'request #1 after refused retry').toBe(false);
+      expect(run.physical[0].attempt?.retry_reason).toBeUndefined();
+      expect(run.policy.calls[1]).toMatchObject({ site: `agent-v1-turn.${site}`, outcome: 'refused_before_network', request_id: run.policy.request_id });
+      expect(run.policy.calls[1].attempt).toBeUndefined(); expect(run.error).toBeInstanceOf(policyModule.ForbiddenProviderError);
+    });
+    it(`R3 ${site} admission control: kept permission marks the admitted retry`, async () => {
+      const run = await drive(site, 'transport');
+      dump(`r3-${site}-admission-control.json`, JSON.stringify({ physical: run.physical.length, rows: run.policy.calls }));
+      assertFirst(run, site, 2, true); expect(run.error).toBeUndefined();
+    });
+  }
+  it.each([true, false])('R3 construction overlap=%s keeps A and B physical receipt identities', async overlap => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const policy = { ...OPENAI_ONLY('overlap-contract'), request_id: 'overlap', scenario_id: scenario };
+    const physical: Array<{ invocation: string; row: policyModule.GenerativeCall }> = [];
+    let rejectA!: (error: Error) => void;
+    const blockedA = new Promise<Response>((_resolve, reject) => { rejectA = reject; });
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const invocation = JSON.parse(String(init?.body)).input;
+      const row = policyModule.currentProviderPolicy()!.calls.at(-1)!;
+      physical.push({ invocation, row });
+      if (physical.length === 1) return blockedA;
+      return new Response('{}', { status: 200 });
+    }));
+    // One extracted function, two invocations: handles must belong to each invocation, not the shared site/function.
+    const call = routeContract<CallStructuredModel>('callStructured', contractDependencies());
+    const request = { model: 'gpt-x', instructions: 'fixture', max_output_tokens: 100, schema: { type: 'object', properties: {}, additionalProperties: false } };
+    await runWithProviderPolicy(policy, async () => {
+      const a = call({ ...request, input: 'A' }, 2_000);
+      expect(physical).toHaveLength(1);
+      if (overlap) await call({ ...request, input: 'B' }, 2_000);
+      rejectA(new TypeError('fetch failed'));
+      await a;
+    });
+    dump(`r3-overlap-${overlap}.json`, JSON.stringify({ physical: physical.length, rows: physical }));
+    expect(physical).toHaveLength(overlap ? 3 : 2); expect(policy.calls).toHaveLength(physical.length);
+    physical.forEach(({ row }, i) => expect(row).toBe(policy.calls[i]));
+    const a = physical.filter(p => p.invocation === 'A').map(p => p.row);
+    expect(a).toHaveLength(2);
+    expect(a[0].attempt?.retry, 'A physical request #1').toBe(true); expect(a[0].attempt?.retry_reason).toBe('transport');
+    expect(a[1].attempt?.retry).toBe(false); expect(a[1].attempt?.retry_reason).toBeUndefined();
+    if (overlap) {
+      const b = physical.find(p => p.invocation === 'B')!.row;
+      expect(b.attempt).toMatchObject({ outcome: 'success', retry: false }); expect(b.attempt?.retry_reason).toBeUndefined();
     }
   });
-  it('last-attempt marker is a no-op outside policy, without a matching attempt, or after truncation', () => {
-    expect(() => policyModule.recordProviderRetryOfLastAttempt('target', 'transport')).not.toThrow();
-    const row = receipt('target');
-    const incomplete = receipt('target'); delete incomplete.attempt;
-    for (const policy of [OPENAI_ONLY('empty'), { ...OPENAI_ONLY('different'), calls: [row] },
-      { ...OPENAI_ONLY('unfinished'), calls: [incomplete] }, { ...OPENAI_ONLY('truncated'), calls: [row], truncated: true }]) {
-      runWithProviderPolicy(policy, () => policyModule.recordProviderRetryOfLastAttempt(policy.route === 'different' ? 'other' : 'target', 'transport'));
-    }
-    expect(row.attempt).toMatchObject({ retry: false }); expect(row.attempt?.retry_reason).toBeUndefined(); expect(incomplete.attempt).toBeUndefined();
+  it('R3 callModel carrier fallback inside a transport retry keeps its own reason', async () => {
+    const physical: policyModule.GenerativeCall[] = [];
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      physical.push(policyModule.currentProviderPolicy()!.calls.at(-1)!);
+      if (physical.length === 1) throw new TypeError('fetch failed');
+      if (physical.length === 2) return new Response(JSON.stringify({ error: { param: 'input[0].content[0].prompt_cache_breakpoint' } }), { status: 400 });
+      return new Response('{}', { status: 200 });
+    }));
+    const call = routeContract<(budget: CallBudget) => CallModel>('callModelFor', contractDependencies())(budgetFor('gpt-6.1-sol', 'conversation'));
+    await runWithProviderPolicy(OPENAI_ONLY('carrier-after-transport'), () => call({ instructions: 'fixture', input: [], tools: [], max_output_tokens: 100 }));
+    expect(physical).toHaveLength(3);
+    expect(physical.map(p => [p.attempt?.retry, p.attempt?.retry_reason])).toEqual([[true, 'transport'], [true, 'instructions_carrier_fallback'], [false, undefined]]);
   });
   it('adapter absent option records false; explicit legacy retry prediction retains its semantics', async () => {
     for (const kind of ['transport', 'unreadableHTTP', 'invalidJSON'] as const) for (const optIn of [false, true]) {

@@ -380,19 +380,3 @@ export function recordProviderRetry(handle: ProviderCallHandle, reason: NonNulla
   attempt.retry = true;
   attempt.retry_reason = reason;
 }
-
-/**
- * The caller is about to send a retry: mark the attempt it is retrying, which is the LATEST row at this site. If that row was
- * refused or never completed there is nothing it retried, so nothing is marked (an older, answered attempt is never
- * reclaimed as "retried"). Skipped on truncated ledgers.
- */
-export function recordProviderRetryOfLastAttempt(site: string, reason: NonNullable<NonNullable<GenerativeCall['attempt']>['retry_reason']>): void {
-  const policy = store.getStore();
-  if (policy === undefined || policy.truncated) return;
-  for (let i = policy.calls.length - 1; i >= 0; i--) {
-    const call = policy.calls[i];
-    if (call.site !== site) continue;
-    if (call.outcome === 'allowed' && call.attempt !== undefined) recordProviderRetry(i, reason);
-    return;
-  }
-}

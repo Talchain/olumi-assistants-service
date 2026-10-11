@@ -8,7 +8,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
-import { assertProviderAllowed, recordProviderAttempt, recordProviderUsage, type ProviderCallDetail } from "./provider-policy.js";
+import { assertProviderAllowed, recordProviderAttempt, recordProviderRetry, recordProviderUsage, type ProviderCallDetail, type ProviderCallHandle } from "./provider-policy.js";
 import { captureLlmPhysicalAttempt, withLlmInvocationCapture } from '../../utils/request-timing.js';
 import {
   retryConfigForLiveEval,
@@ -2004,6 +2004,8 @@ export async function postResponses(
     readonly signal?: AbortSignal;
     /** Legacy opt-in prediction; Agent retry owners leave absent and mark the actual resend themselves. */
     readonly retryOnTransportFailure?: boolean;
+    readonly onProviderHandle?: (handle: ProviderCallHandle) => void;
+    readonly retryOfHandle?: ProviderCallHandle;
     /** Status-only callers must not wait for an error body they never consume. */
     readonly readHttpErrorBody?: boolean;
     /** Existing research/construction/brief callers own their JSON errors and retry decisions. */
@@ -2014,6 +2016,8 @@ export async function postResponses(
     ...options.detail, model: String(body.model),
     settings: Object.fromEntries(['reasoning', 'max_output_tokens', 'tool_choice', 'temperature', 'max_tool_calls'].filter(k => body[k] !== undefined).map(k => [k, body[k]])),
   });
+  options.onProviderHandle?.(handle);
+  if (options.retryOfHandle !== undefined) recordProviderRetry(options.retryOfHandle, 'transport');
   const isTimeout = (err: unknown): boolean => {
     const e = err as { name?: unknown; cause?: { code?: unknown } } | null | undefined;
     return e?.name === 'TimeoutError' || options.preserveResponseErrors === true
