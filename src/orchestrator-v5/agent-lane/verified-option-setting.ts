@@ -93,7 +93,7 @@ function namedOption(model: CandidateModel, selected: Option, clause: string, va
  * A coordinated elliptical head must independently bind its own factor and full typed frame.
  * Only a range that brackets the figure ("between 80 and 250") may directly follow it.
  */
-function onlySiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean }[], value: number): boolean {
+function onlySiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean }[], value: number, factor: Factor): boolean {
   return others.every(({ text, next }) => {
     const ws = words(text);
     if (next && ws.length === 4 && ws[0] === 'between' && ws[2] === 'and') {
@@ -107,9 +107,14 @@ function onlySiblingArms(model: CandidateModel, selected: Option, others: readon
     if (figures.includes(value)) return false;
     return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN)
       // A named sibling cannot hide an incompatible written period or denominator on its own amount.
-      && findLinkEffectAmounts(text).every(amount => (o.interventions ?? []).some(iv =>
-        model.factors.some(f => f.label === iv.factor_label
-          && sameFrame(text, { start: amount.index, end: amount.index + amount.matchedText.length }, f.unit, amount, f.label)))));
+      && (o.interventions ?? []).filter(iv => iv.factor_label === factor.label).length <= 1
+      && findLinkEffectAmounts(text).every(amount => {
+        const span = { start: amount.index, end: amount.index + amount.matchedText.length };
+        // A sibling's amount is scoped to this quantity; unrelated intervention frames cannot veto it.
+        return sameFrame(text, span, factor.unit, amount, factor.label)
+          && (o.interventions ?? []).filter(iv => iv.factor_label === factor.label)
+            .every(iv => sameFrame(text, span, iv.unit, amount, factor.label));
+      }));
   });
 }
 
@@ -140,7 +145,7 @@ function independentBoundContext(model: CandidateModel, factor: Factor, text: st
  * The existing period-report prefix is retained by currentLevelWords.
  */
 type ClaimScopeNegative = 'history' | 'desire' | 'condition' | 'attribution' | 'denial' | 'target' | 'bound' | 'none';
-function claimScopeNegative(text: string): ClaimScopeNegative {
+export function claimScopeNegative(text: string): ClaimScopeNegative {
   const ws = currentLevelWords(text);
   if (FOREIGN_LEVEL.test(text) || ATTRIBUTION.test(text)) return 'attribution';
   if (linkEffectQuoteContextMiss(text, text) === 'denied' || ws.includes('not')) return 'denial';
@@ -229,7 +234,7 @@ function settingClause(a: Assertion, at: number, change = false, ownedStart?: nu
   return found === null ? null : { ...found, others };
 }
 
-function coordinatedSiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean; bound?: boolean }[], value: number): boolean {
+function coordinatedSiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean; bound?: boolean }[], value: number, factor: Factor): boolean {
   return others.every(({ text, next, bound }) => {
     const ws = words(text);
     if (next && ws.length === 4 && ws[0] === 'between' && ws[2] === 'and') {
@@ -244,9 +249,14 @@ function coordinatedSiblingArms(model: CandidateModel, selected: Option, others:
     if (figures.includes(value)) return false;
     return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN)
       // A named sibling cannot hide an incompatible written period or denominator on its own amount.
-      && findLinkEffectAmounts(text).every(amount => (o.interventions ?? []).some(iv =>
-        model.factors.some(f => f.label === iv.factor_label
-          && sameFrame(text, { start: amount.index, end: amount.index + amount.matchedText.length }, f.unit, amount, f.label)))));
+      && (o.interventions ?? []).filter(iv => iv.factor_label === factor.label).length <= 1
+      && findLinkEffectAmounts(text).every(amount => {
+        const span = { start: amount.index, end: amount.index + amount.matchedText.length };
+        // A sibling's amount is scoped to this quantity; unrelated intervention frames cannot veto it.
+        return sameFrame(text, span, factor.unit, amount, factor.label)
+          && (o.interventions ?? []).filter(iv => iv.factor_label === factor.label)
+            .every(iv => sameFrame(text, span, iv.unit, amount, factor.label));
+      }));
   });
 }
 /** An option-setting frame. Current-level ownership stays separate; history, conditions and third-party claims abstain. */
@@ -415,7 +425,7 @@ export function verifiedOptionAction(model: CandidateModel, option: Option, inte
         { ...factor, unit: null }, model);
       if (clause === null || deriveGoalIntent(clause.text).direction === 'undetermined'
         || !namedOption(model, option, clause.text, amount.magnitude)
-        || !onlySiblingArms(model, option, clause.others, amount.magnitude)) return false;
+        || !onlySiblingArms(model, option, clause.others, amount.magnitude, factor)) return false;
       return figureTheUserWroteForSpan(amount.magnitude, undefined, a.text, {
         target: [factor.label], others, strict: true, requireNamed: true,
         at: amount.index, writtenAmounts: [amount],
@@ -505,7 +515,7 @@ function verifiedPoint(model: CandidateModel, option: Option, intervention: Inte
   const clause = bound ? arm : coordinated ? coordinatedSettingClause(a, span.start, false, undefined, model, factor)
     : settingClause(a, span.start, false, undefined, factor, model);
   if (clause === null || !namedOption(model, option, clause.text, amount.magnitude)
-    || !(coordinated ? coordinatedSiblingArms : onlySiblingArms)(model, option, clause.others, intervention.value)) return false;
+    || !(coordinated ? coordinatedSiblingArms : onlySiblingArms)(model, option, clause.others, intervention.value, factor)) return false;
   if (model.constraints.some(c => c.value === intervention.value && metricNamesLabel(c.metric, factor.label))) return false;
   const local = { start: span.start - clause.start, end: span.end - clause.start };
   // The existing clause boundary ends the quantity's unit before its purpose; it cannot drop a declared base/period.
@@ -542,7 +552,7 @@ function verifiedAddition(model: CandidateModel, option: Option, intervention: I
   const clause = coordinated ? coordinatedSettingClause(a, amount.index, true, current?.start, model, factor)
     : settingClause(a, amount.index, true, current?.start, factor, model);
   if (clause === null || governingScopeRefused(a.text)
-    || !(coordinated ? coordinatedSiblingArms : onlySiblingArms)(model, option, clause.others, intervention.value)) return false;
+    || !(coordinated ? coordinatedSiblingArms : onlySiblingArms)(model, option, clause.others, intervention.value, factor)) return false;
   // A resulting level remains a point even when the candidate calls it additional.
   if (typeof intervention.unit !== 'string' || linkEffectFigureNotAChange(clause.text,
     { amount: intervention.value, amount_unit: intervention.unit, per_source_change: 1,

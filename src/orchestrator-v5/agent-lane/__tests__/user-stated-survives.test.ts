@@ -555,7 +555,7 @@ it('RUN48 recovered user source needs authority for exactly the edited option/fa
   // Caller-to-encoder wiring: the checked identity is passed out of band, never recovered from a source stamp.
   const handler = fs.readFileSync(path.join(__dirname, '../../../orchestrator/tools/edit-graph.ts'), 'utf8');
   const caller = fs.readFileSync(path.join(__dirname, '../../handlers/edit-graph-dispatch.ts'), 'utf8');
-  expect(handler).toContain('encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds, mustConfigureOptionIds, opts?.humanAuthority)');
+  expect(handler).toContain('encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds, mustConfigureOptionIds, opts?.humanAuthority, preimage?.persistedGraph ?? opts?.persistedGraph ?? null /* no trusted preimage if caller omits it */, preimage?.preimageScope ?? opts?.preimageScope ?? null)');
   expect(caller).toContain('humanAuthority: optionEffectWrite === null ? []');
   expect(caller).toContain('[{ optionId: optionEffectWrite.optionId, factorId: optionEffectWrite.factorId }]');
 });

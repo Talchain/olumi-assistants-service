@@ -1,4 +1,5 @@
 import type { InterventionHumanAuthority } from '../../../orchestrator/tools/encode-option-interventions.js';
+import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
 /**
  * EP2 — shared NEUTRAL analysis-readiness core (V5 Edit Safety Core, Phase 1).
  *
@@ -117,7 +118,10 @@ export interface ReadinessResult {
 export function canonicaliseForAnalysis(graph: unknown): unknown {
   try {
     // Read-only continuity: the supplied stored graph is its own preimage; no new authority is granted.
-    return encodeOptionInterventionsForEdit(graph, undefined, undefined, [], graph, interventionPreimageScope(graph, graph, 'read-only')).graph;
+    const scopeGraph = structuredClone(graph);
+    prepareHorizonBasisForWrite(scopeGraph, undefined, 'read-only');
+    return encodeOptionInterventionsForEdit(graph, undefined, undefined, [], graph,
+      interventionPreimageScope(scopeGraph, scopeGraph, 'read-only')).graph;
   } catch {
     return graph;
   }

@@ -114,8 +114,8 @@ describe('optional provenance boundaries retain unattributed quantities through 
         target_match: { node_id: 'price', match_type: 'exact_id', confidence: 'high' },
         value_confidence: 'medium', reasoning: 'Retained quantity reasoning' } },
     } : n) });
-    const encoded = encodeOptionInterventionsForEdit(native, new Set(['raise']), undefined,
-      origin === 'approved human' ? [{ optionId: 'raise', factorId: 'price' }] : []);
+    const humanAuthority = origin === 'approved human' ? [{ optionId: 'raise', factorId: 'price' }] : [];
+    const encoded = encodeOptionInterventionsForEdit(native, new Set(['raise']), undefined, humanAuthority);
     const canonical = GraphV3.parse(encoded.graph);
     const cell = canonical.nodes.find(n => n.id === 'raise')!.interventions!.price;
     const strict = InterventionV3.parse(cell);
@@ -128,7 +128,7 @@ describe('optional provenance boundaries retain unattributed quantities through 
     const ready = OptionForAnalysis.parse(transformOptionToAnalysisReady(OptionV3.parse({
       id: 'raise', label: 'Raise price', status: 'ready', interventions: { price: strict },
       provenance: { source: 'user_specified' },
-    })));
+    }), 0, false, humanAuthority));
     const metadata = ExtractionMetadata.parse(ready.extraction_metadata);
     expect(metadata).toMatchObject({ confidence: 'medium', reasoning: 'Retained quantity reasoning' });
     expect(metadata.source).toBe(strict.source);

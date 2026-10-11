@@ -42,6 +42,7 @@ import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analys
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { encodeOptionInterventionsForEdit, interventionPreimageScope, type InterventionHumanAuthority } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
+import { prepareHorizonBasisForWrite } from "../../orchestrator-v5/goal-target/horizon-basis-provenance.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
 // `cee/transforms/analysis-ready.ts`. See the kernel's header for why the
 // discriminator is `origin` and not `provenance.source` (measured: the V3
@@ -1468,7 +1469,11 @@ export function assessCanonicalAnalysisReadiness(
     // every safely expressible carrier while deliberately leaving unresolved
     // options alone, so one bad option cannot hide safe work on another.
     // These are read-only views of the stored graph, not new source verdicts.
-    const scope = interventionPreimageScope(graph, graph, 'read-only');
+    // A read-only continuity hash cannot attest submitted horizon provenance.
+    // Prepare only the hash input; the stored graph and its history stay byte-identical.
+    const scopeGraph = structuredClone(graph);
+    prepareHorizonBasisForWrite(scopeGraph, undefined, 'read-only');
+    const scope = interventionPreimageScope(scopeGraph, scopeGraph, 'read-only');
     const strictEncoding = encodeOptionInterventionsForEdit(graph, undefined, undefined, [], graph, scope);
     const proposalEncoding = encodeOptionInterventionsForEdit(graph, new Set<string>(), undefined, [], graph, scope);
     const proposalGraph = proposalEncoding.graph;

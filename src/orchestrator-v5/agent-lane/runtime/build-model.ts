@@ -39,7 +39,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel, verifiedOptionSetting, verifiedOptionTotal } from '../verified-option-setting.js';
+import { claimScopeNegative, verifiedFactorLevel, verifiedOptionSetting, verifiedOptionTotal } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -820,9 +820,12 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
             : !(solo.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief));
         if (intervention.provenance === 'explicit' && refused) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
-          // Keep the original unconfirmed claim, including its governing condition, as reasoning through reload.
+          // Retain governing scope as reasoning; an ordinary no-receipt demotion does not invent a basis.
+          const scope = intervention.stated_evidence == null ? 'none' : claimScopeNegative(intervention.stated_evidence.quote);
+          const retainScope = scope === 'history' || scope === 'desire' || scope === 'condition'
+            || scope === 'attribution' || scope === 'denial';
           interventions.push({ ...intervention, provenance: 'ai_proposed',
-            ...(intervention.basis === undefined && intervention.stated_evidence != null
+            ...(intervention.basis === undefined && intervention.stated_evidence != null && retainScope
               ? { basis: intervention.stated_evidence.quote } : {}) });
         } else {
           interventions.push(intervention);

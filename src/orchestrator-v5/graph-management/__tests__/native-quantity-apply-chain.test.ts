@@ -101,6 +101,8 @@ const WRITE = {
   nativeValue: 150000,
   unit: 'GBP',
 };
+// The current typed WRITE supplies this exact-cell authority; never recover it from graph source.
+const WRITE_AUTHORITY = [{ optionId: WRITE.optionId, factorId: WRITE.factorId }];
 const SCALE = { cap: 250000, unit: 'GBP' };
 
 function canonicalise(g: Record<string, unknown>) {
@@ -115,7 +117,7 @@ const applyChain = () => {
   const g = calibratedGraph();
   const base = GraphV3.parse(g) as GraphV3T;
   const applied = applyPatchOperations(base, canonicalise(g));
-  return encodeOptionInterventionsForEdit(applied, new Set([OPTION_ID]), undefined, [{ optionId: OPTION_ID, factorId: FACTOR_ID }], base, interventionPreimageScope(base, base, 'native-quantity'));
+  return encodeOptionInterventionsForEdit(applied, new Set([OPTION_ID]), undefined, WRITE_AUTHORITY, base, interventionPreimageScope(base, base, 'native-quantity'));
 };
 
 describe('native-quantity write — the ACTUAL apply chain', () => {
@@ -189,6 +191,7 @@ describe('native-quantity write — the ACTUAL apply chain', () => {
     const optionNode = nodes.find((n) => n.id === OPTION_ID)!;
     const ask = decideOptionCostAsk({
       notDecisionGrade: true,
+      humanAuthority: WRITE_AUTHORITY,
       ratified: [{ node_id: FACTOR_ID, unit: 'GBP', label: 'Budget limit' }],
       nodes: nodes as never,
       options: [{
@@ -233,13 +236,14 @@ describe('an answered Olumi estimate is the user’s figure (AIQ Q1): the ask en
   }
   const answered = () => {
     const g = estimatedGraph();
-    return encodeOptionInterventionsForEdit(applyPatchOperations(GraphV3.parse(g) as GraphV3T, canonicalise(g)), new Set([OPTION_ID]), undefined, [{ optionId: OPTION_ID, factorId: FACTOR_ID }], GraphV3.parse(g), interventionPreimageScope(g, g, 'native-quantity')).graph;
+    return encodeOptionInterventionsForEdit(applyPatchOperations(GraphV3.parse(g) as GraphV3T, canonicalise(g)), new Set([OPTION_ID]), undefined, WRITE_AUTHORITY, GraphV3.parse(g), interventionPreimageScope(g, g, 'native-quantity')).graph;
   };
-  const askOn = (g: unknown) => {
+  const askOn = (g: unknown, humanAuthority: typeof WRITE_AUTHORITY = []) => {
     const nodes = (g as { nodes: Array<Record<string, unknown>> }).nodes;
     const optionNode = nodes.find((n) => n.id === OPTION_ID)!;
     return decideOptionCostAsk({
       notDecisionGrade: true,
+      humanAuthority,
       ratified: RATIFIED,
       nodes: nodes as never,
       options: [{ id: OPTION_ID, label: WITNESS.ids.option_label, interventions: optionNode.interventions }],
@@ -265,7 +269,7 @@ describe('an answered Olumi estimate is the user’s figure (AIQ Q1): the ask en
   });
 
   it('⭐ the ask does not re-select the cell the user has just answered', () => {
-    expect(askOn(answered())).toBeNull();
+    expect(askOn(answered(), WRITE_AUTHORITY)).toBeNull();
   });
 
   it('⭐ rule (d) credits the user: the limit is no longer withheld over an estimate', () => {
