@@ -3721,9 +3721,14 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
       const delta = await selectedRunDeltaForModel(ctx.scenario_id, g, g.run_delta);
-      // S8: what the user has said they do not accept, in their words. An unreadable list is no list, never a failed turn.
+      // S8: what the user has said they do not accept, in their words. An unreadable list never fails the turn, but it is
+      // UNKNOWN, never "none": the model is told the list could not be read (the `receipt_unreadable` convention).
+      let statedObjectionsUnreadable = false;
       const statedObjections = opts.readStatedObjections === undefined ? []
-        : await opts.readStatedObjections(ctx.scenario_id, ctx.request_id).catch(() => [] as readonly StatedObjection[]);
+        : await opts.readStatedObjections(ctx.scenario_id, ctx.request_id).catch(() => {
+          statedObjectionsUnreadable = true;
+          return [] as readonly StatedObjection[];
+        });
       const { run_delta: _wireDelta, ...readWithoutDelta } = g;
       const modelRead = { ...readWithoutDelta, ...(delta === undefined ? {} : { run_delta: delta }) };
       const scopeIssues = g.goal_scope_reconciliation ?? [];
@@ -3793,6 +3798,8 @@ export function createAgentCapabilities(
         awaiting_your_approval: [...await liveHeldAwaiting(ctx.scenario_id), ...proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)],
         // S8: durable human reasoning. Present only when the user has stated an objection (default bytes unchanged).
         ...(statedObjections.length > 0 ? { stated_objections: statedObjections, stated_objections_use: STATED_OBJECTIONS_USE } : {}),
+        // Present ONLY when the read failed: the user may have stated objections that could not be read this turn.
+        ...(statedObjectionsUnreadable ? { stated_objections_unreadable: true } : {}),
       };
     },
 
