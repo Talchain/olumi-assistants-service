@@ -8,6 +8,11 @@ import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } f
 import { ProposalStore, createProposal, approvedOperationKey, MAX_EXECUTIONS_PER_PROPOSAL, type ProposalContent } from '../../src/orchestrator-v5/agent-lane/proposal.js';
 import { isComposerApprovalWords } from '../../src/orchestrator-v5/agent-lane/composer-approval-words.js';
 import * as adapter from '../../src/adapters/llm/openai.js';
+import * as capabilitiesModule from '../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import * as policyModule from '../../src/adapters/llm/provider-policy.js';
+import * as briefModule from '../../src/orchestrator-v5/agent-lane/brief-reading.js';
+import * as researchModule from '../../src/orchestrator-v5/agent-lane/runtime/public-research.js';
+import { runWithStageStream } from '../../src/cee/unified-pipeline/stage-stream-context.js';
 import { OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../src/adapters/llm/provider-policy.js';
 import { agentRequestIdentity } from '../../src/orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { narrateWriteOutcome } from '../../src/orchestrator-v5/agent-lane/write-outcome.js';
@@ -57,7 +62,7 @@ const BASELINE = [
   'src/routes/agent-v1-turn.ts:callStructured',
   'src/routes/agent-v1-turn.ts:callBriefReading',
 ];
-const EXEMPTIONS = [...BASELINE];
+const EXEMPTIONS = BASELINE.filter(entry => !entry.startsWith('src/routes/agent-v1-turn.ts:'));
 vi.setConfig({ testTimeout: 60_000 });
 function symbol(n: ts.Node): string {
   for (let p: ts.Node | undefined = n; p; p = p.parent) {
@@ -283,4 +288,147 @@ describe('SYS1 ordinary Responses transport', () => {
     expect(rows[0].prompt_sha256).toBe(rows[1].prompt_sha256); expect(rows[0].tools_sha256).toBe(rows[1].tools_sha256);
   });
 
+});
+
+// S1 task 2: real route, fixture-only provider and storage boundaries. Golden capture precedes transport edits.
+const residualSites = ['callResearch', 'callStructured', 'callBriefReading'] as const;
+type ResidualSite = typeof residualSites[number];
+type SiteGolden = { body: string; instructions: string; tools: string; schema: string; consumed: string };
+describe('S1T2 residual Responses sites', () => {
+  let app: FastifyInstance;
+  let active: ResidualSite;
+  let failure: '429' | '503' | 'transport' | 'terminal' | 'TimeoutError' | 'undiciTimeout' | 'unreadableHTTP' | 'malformed' | undefined;
+  let attempts: string[] = [];
+  let consumed: string[] = [];
+  let sequence = 0;
+  let discovery = false;
+  const captured: Partial<Record<ResidualSite, SiteGolden[]>> = {};
+  const usage = { input_tokens: 23, output_tokens: 7 };
+  const brief = 'Reach 90% delivery reliability within 6 months. Hire a tech lead or hire two developers. Team capacity is 5 people.';
+  const query = 'typical churn after a SaaS price rise of about 20%';
+  const candidate = {
+    goal: { metric: 'Delivery reliability', operator: '>=', value: 90, unit: '%', horizon_months: 6, provenance: 'explicit' }, constraints: [],
+    options: [{ label: 'Hire a tech lead', provenance: 'explicit', interventions: [] }],
+    factors: [{ label: 'Team capacity', role: 'controllable', baseline_known: true, baseline_value: 5, unit: 'people', provenance: 'explicit' }],
+    risks: [], outcomes: [{ label: 'Delivery reliability', provenance: 'inferred' }],
+    links: [{ from: 'Team capacity', to: 'Delivery reliability', direction: 'positive', provenance: 'inferred' }], unknowns: [],
+  };
+  const nativeResearch = (JSON.parse(readFileSync('src/orchestrator-v5/agent-lane/__tests__/fixtures/native-research-ne02.json', 'utf8')) as { response: Record<string, unknown> }).response;
+  const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }], status: 'completed', usage });
+  const responseFor = (site: ResidualSite) => site === 'callResearch' ? { ...nativeResearch, usage }
+    : say(site === 'callStructured' ? JSON.stringify(candidate) : JSON.stringify({ goal: '90% delivery reliability', limits: [], options: ['Hire a tech lead', 'hire two developers'], build: false }));
+  beforeAll(async () => {
+    process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
+    // Observe exactly what the EXISTING caller consumes, without changing its execution.
+    const makeCaps = capabilitiesModule.createAgentCapabilities;
+    vi.spyOn(capabilitiesModule, 'createAgentCapabilities').mockImplementation((...args) => {
+      const call = args[2];
+      if (call) args[2] = async (...input) => { const result = await call(...input); consumed.push(JSON.stringify(result)); return result; };
+      return makeCaps(...args);
+    });
+    const readBrief = briefModule.readBrief;
+    vi.spyOn(briefModule, 'readBrief').mockImplementation((message, call) => readBrief(message, async input => {
+      const result = await call(input); consumed.push(JSON.stringify(result)); return result;
+    }));
+    const readResearch = researchModule.readResearchResponse;
+    vi.spyOn(researchModule, 'readResearchResponse').mockImplementation(input => { consumed.push(JSON.stringify(input)); return readResearch(input); });
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const bytes = String(init?.body); const body = JSON.parse(bytes);
+      const site: ResidualSite | undefined = body.text?.format?.name === 'brief_spans' ? 'callBriefReading'
+        : body.text?.format?.name === 'whole_candidate' ? 'callStructured'
+        : body.tools?.some((t: { type?: string }) => t.type === 'web_search') ? 'callResearch' : undefined;
+      if (site) {
+        expect(site).toBe(active); attempts.push(bytes);
+        if (failure === '429' || failure === '503') return new Response('fixture refusal', { status: Number(failure) });
+        if (failure === 'terminal' || failure === 'transport' && attempts.length === 1) throw new TypeError('fetch failed');
+        if (failure === 'TimeoutError') { const error = new Error('fixture timeout'); error.name = 'TimeoutError'; throw error; }
+        if (failure === 'undiciTimeout') throw new TypeError('fetch failed', { cause: { code: 'UND_ERR_HEADERS_TIMEOUT' } });
+        if (failure === 'unreadableHTTP') return new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('fixture body lost')); } }), { status: 503 });
+        if (failure === 'malformed') return new Response('{broken', { status: 200 });
+        return new Response(JSON.stringify(responseFor(site)), { status: 200 });
+      }
+      if (!discovery && body.max_output_tokens !== 16 && active !== 'callBriefReading') {
+        discovery = true;
+        const name = active === 'callResearch' ? 'offer_public_research' : 'build_model_from_brief';
+        const args = active === 'callResearch' ? { query } : { brief };
+        return new Response(JSON.stringify({ output: [{ type: 'function_call', name, call_id: 'site-discovery', arguments: JSON.stringify(args) }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify(say('Here is where the model stands.')), { status: 200 });
+    }));
+    const { agentV1TurnRoute } = await import('../../src/routes/agent-v1-turn.js');
+    app = Fastify({ logger: false });
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: active === 'callResearch' ? nodes : [], edges: [] }, graph_hash: active === 'callResearch' ? 'h0' : null }));
+    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
+    app.post('/assist/v1/scenarios/:id/graph/register', async () => ({ registered: true, graph_hash: 'h1' }));
+    app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'Fixture state.', blocks: [], suggested_actions: [], insights: [] }));
+    await app.register(agentV1TurnRoute); await app.ready();
+  });
+  afterAll(async () => { await app.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { attempts = []; consumed = []; discovery = false; failure = undefined; });
+  const drive = async (site: ResidualSite, refuse = false) => {
+    active = site;
+    const sid = `22222222-2222-4222-8222-${String(++sequence).padStart(12, '0')}`;
+    const inject = (extra: Record<string, unknown> = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: sid, message: site === 'callResearch' ? 'What churn do SaaS firms see after a price rise?' : brief, ...extra,
+    } });
+    if (site === 'callResearch') { await inject(); attempts = []; consumed = []; }
+    const originalPolicy = policyModule.runWithProviderPolicy;
+    const originalAssert = policyModule.assertProviderAllowed;
+    // Refuse the target site only: construction's preceding conversation must still reach its tool.
+    const policySpy = refuse ? vi.spyOn(policyModule, 'assertProviderAllowed').mockImplementation((provider, at, detail) => {
+      if (at !== `agent-v1-turn.${site}`) return originalAssert(provider, at, detail);
+      const policy = policyModule.currentProviderPolicy();
+      if (policy === undefined) throw new Error('Expected the real route provider policy');
+      return originalPolicy({ ...policy, allowed: new Set() }, () => originalAssert(provider, at, detail));
+    }) : undefined;
+    try {
+      const chip = researchModule.researchChipFor(query)!;
+      const response = site === 'callResearch' ? await inject({ message: chip.message, source: 'chip_click', chip: { id: chip.id } })
+        : site === 'callBriefReading' ? await runWithStageStream(() => undefined, async () => await inject()) : await inject();
+      return { response, sid, rows: (response.json()._provider_calls ?? []) as policyModule.GenerativeCall[] };
+    } finally { policySpy?.mockRestore(); }
+  };
+  it.each(residualSites)('%s happy-path bytes equal the BEFORE golden', async site => {
+    const { response } = await drive(site);
+    expect(response.statusCode, response.body).toBe(200); expect(attempts).toHaveLength(site === 'callStructured' ? 2 : 1); expect(consumed).toHaveLength(attempts.length);
+    const proof = attempts.map((bytes, i) => {
+      const body = JSON.parse(bytes);
+      return { body: sha(bytes), instructions: sha(body.instructions), tools: jsonSha(body.tools ?? null), schema: jsonSha(body.text?.format?.schema ?? null), consumed: consumed[i] };
+    });
+    if (process.env.SYS1_CAPTURE_SITES === '1') {
+      captured[site] = proof;
+      if (residualSites.every(s => captured[s])) writeFileSync(`${golden}/sites-before.json`, JSON.stringify(captured, null, 2) + '\n');
+    } else expect(proof).toEqual(JSON.parse(readFileSync(`${golden}/sites-before.json`, 'utf8'))[site]);
+  });
+  it.each(residualSites)('%s has one host-bound physical success receipt and usage', async site => {
+    const { rows, sid } = await drive(site);
+    const calls = rows.filter(r => r.site === `agent-v1-turn.${site}`);
+    expect(calls).toHaveLength(attempts.length); expect(calls).toHaveLength(site === 'callStructured' ? 2 : 1);
+    calls.forEach((call, i) => {
+      const body = JSON.parse(attempts[i]);
+      expect(call).toMatchObject({ request_id: expect.any(String), scenario_id: sid,
+        attempt: { outcome: 'success', transport_status: 200, retry: false, response_sha256: sha(JSON.stringify(responseFor(site))) }, usage: { raw: usage } });
+      expect(call.settings).toEqual(Object.fromEntries(['reasoning', 'max_output_tokens', 'tool_choice', 'temperature', 'max_tool_calls'].filter(k => body[k] !== undefined).map(k => [k, body[k]])));
+    });
+  });
+  it.each(residualSites)('%s provider policy refuses before network', async site => {
+    const { rows } = await drive(site, true);
+    expect(attempts).toHaveLength(0); expect(consumed).toHaveLength(0);
+    const calls = rows.filter(r => r.site === `agent-v1-turn.${site}`);
+    expect(calls.length).toBeGreaterThan(0); expect(calls.every(r => r.outcome === 'refused_before_network' && r.attempt === undefined)).toBe(true);
+  });
+  for (const site of residualSites) {
+    it.each(['429', '503', 'transport', 'terminal', 'TimeoutError', 'undiciTimeout', 'unreadableHTTP', 'malformed'] as const)(`${site} %s is receipted with the existing attempt count`, async kind => {
+      failure = kind;
+      const { rows } = await drive(site);
+      const calls = rows.filter(r => r.site === `agent-v1-turn.${site}`);
+      const retried = site === 'callStructured' && ['transport', 'terminal', 'malformed', 'unreadableHTTP'].includes(kind);
+      expect(attempts).toHaveLength(retried ? kind === 'transport' ? 3 : 2 : 1); expect(calls).toHaveLength(attempts.length);
+      const expectedOutcome = kind === '429' ? 'rate_limited' : kind === '503' || kind === 'unreadableHTTP' ? 'http_error' : kind === 'TimeoutError' || kind === 'undiciTimeout' ? 'timeout' : kind === 'malformed' ? 'invalid_response' : 'transport_error';
+      expect(calls[0].attempt).toMatchObject({ outcome: expectedOutcome, transport_status: kind === '429' || kind === '503' ? Number(kind) : kind === 'unreadableHTTP' ? 503 : kind === 'malformed' ? 200 : null, retry: retried });
+      if (kind === 'unreadableHTTP') expect(calls[0].attempt?.result).toBe(site === 'callBriefReading' ? 'http_error' : 'http_error_body_unreadable');
+      if (retried) expect(calls[1].attempt).toMatchObject({ outcome: kind === 'transport' ? 'success' : expectedOutcome, retry: false });
+      if (kind !== 'transport' || !retried) expect(consumed).toHaveLength((kind === 'TimeoutError' || kind === 'undiciTimeout') && site === 'callStructured' ? 1 : 0);
+    });
+  }
 });
