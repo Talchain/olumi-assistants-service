@@ -1,4 +1,9 @@
+import { postResponses } from '../adapters/llm/openai.js';
 import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
+import { projectStatedObjections, STATED_OBJECTIONS_CAP } from '../orchestrator-v5/context/stated-objections.js';
+/** Hard cap on dissent facts read per turn; paging stops earlier once STATED_OBJECTIONS_CAP different findings are covered. */
+const STATED_OBJECTION_FACT_ROWS_READ = 200;
+import { isComposerApprovalWords } from '../orchestrator-v5/agent-lane/composer-approval-words.js';
 import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-card.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -44,7 +49,7 @@ import { readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOp
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
-import { OPENAI_ONLY, assertProviderAllowed, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
+import { OPENAI_ONLY, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordProviderRetry, recordedProviderCalls, runWithProviderPolicy, type ProviderCallHandle } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, withResearchControlTruth, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { composeHeldResultReply, composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
@@ -213,7 +218,6 @@ function parsedGraphOrNull(raw: unknown): GraphV3T | null {
   return parsed.success ? parsed.data : null;
 }
 
-const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
 /**
  * T1 (b) — THE INSTRUCTIONS CARRY AN EXPLICIT CACHE BREAKPOINT (OpenAI prompt-caching guide, GPT-5.6+: routing is automatic,
@@ -1740,103 +1744,101 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const deadline = (req as { deadline_ms?: unknown } | null | undefined)?.deadline_ms;
     return typeof deadline === 'number' && deadline > 0 ? call() : onceMoreOnTransportFailure('conversation', call);
   };
-  const callModelFor = (budget: CallBudget): CallModel => async (req) => withTransportRetry(req, async () => {
-    /**
-     * ⭐ THE HANDLE IS KEPT SO CACHING CAN BE MEASURED AT ALL.
-     *
-     * This return value was discarded, and with it the only way to answer "is the
-     * instruction prefix being cached, and by how much" on a real turn. The prefix is
-     * structurally cacheable — `AGENT_INSTRUCTIONS` is a pure constant with zero
-     * interpolations and `AGENT_TOOLS` is a module-level readonly array — but
-     * "structurally cacheable" is a claim about the SOURCE, not a measurement of the
-     * PROVIDER. `normaliseProviderUsage` reads `input_tokens_details.cached_tokens`,
-     * the Responses API's own cache field, so this turns an assumption into a number
-     * on every turn.
-     *
-     * ⚠ Bound BY HANDLE, never to "the last call": this route makes 4-6
-     * conversation calls per turn, and attributing a cache hit to the wrong one is the
-     * quietest possible way to make the measurement wrong.
-     */
-    /**
-     * ⭐ WHICH PROMPT, NOT ONLY WHICH SITE (AIQ identity map @30c0e79c; `prompt-identity.ts`). The Run fast path's one
-     * interpreting call (`tool_choice: 'none'`) is `agent.interpret`; every other conversation call is
-     * `agent.converse`. The sha is of `req.instructions` — the SAME string the body below sends, so C5b's view line or
-     * the interpret-only constraint changes it.
-     */
-    // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
-    const alias = conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice);
-    const plainBody: Record<string, unknown> = {
-      model: budget.model,
-      instructions: req.instructions,
-      input: req.input,
-      tools: req.tools,
-      // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
-      ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
-      // A pressed chip that names its tool (`firstCallTool`, the loop's first call only): sent only when that tool is
-      // among the tools this call declares, so a forced call can never name a tool the turn does not carry.
-      ...(forcedToolOf(req) !== undefined ? { tool_choice: { type: 'function', name: forcedToolOf(req) } } : {}),
-      // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
-      ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
-      // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
-      // P44 S1: a call that only states a held proposal takes the model's banked `narrate` effort (`narrateEffortFor`).
-      ...(callEffortFor(budget, req) !== undefined ? { reasoning: { effort: callEffortFor(budget, req) } } : {}),
-      max_output_tokens: req.max_output_tokens,
-    };
-    const deadlineMs = (req as { deadline_ms?: unknown }).deadline_ms;
-    const post = (sentBody: Record<string, unknown>, carrier: 'developer_breakpoint' | 'instructions') => {
-      const handle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
+  const callModelFor = (budget: CallBudget): CallModel => async (req) => {
+    let transportAttempt = 0;
+    let lastHandle: ProviderCallHandle;
+    return withTransportRetry(req, async () => {
+      transportAttempt += 1;
+      /**
+       * ⭐ THE HANDLE IS KEPT SO CACHING CAN BE MEASURED AT ALL.
+       *
+       * This return value was discarded, and with it the only way to answer "is the
+       * instruction prefix being cached, and by how much" on a real turn. The prefix is
+       * structurally cacheable — `AGENT_INSTRUCTIONS` is a pure constant with zero
+       * interpolations and `AGENT_TOOLS` is a module-level readonly array — but
+       * "structurally cacheable" is a claim about the SOURCE, not a measurement of the
+       * PROVIDER. `normaliseProviderUsage` reads `input_tokens_details.cached_tokens`,
+       * the Responses API's own cache field, so this turns an assumption into a number
+       * on every turn.
+       *
+       * ⚠ Bound BY HANDLE, never to "the last call": this route makes 4-6
+       * conversation calls per turn, and attributing a cache hit to the wrong one is the
+       * quietest possible way to make the measurement wrong.
+       */
+      /**
+       * ⭐ WHICH PROMPT, NOT ONLY WHICH SITE (AIQ identity map @30c0e79c; `prompt-identity.ts`). The Run fast path's one
+       * interpreting call (`tool_choice: 'none'`) is `agent.interpret`; every other conversation call is
+       * `agent.converse`. The sha is of `req.instructions` — the SAME string the body below sends, so C5b's view line or
+       * the interpret-only constraint changes it.
+       */
+      // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
+      const alias = conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice);
+      const plainBody: Record<string, unknown> = {
         model: budget.model,
-        // T1 (b): the cache prewarm is a real call, on the ledger as itself (`PREWARM_OUTPUT_TOKENS`).
-        purpose: req.purpose === 'prewarm' ? 'prewarm' : 'conversation',
-        // The identity is of the instructions TEXT wherever it rides, so a before/after pair differs only in its carrier.
-        ...agentRequestIdentity(alias, plainBody),
-        instructions_carrier: carrier,
-      });
-      return fetch(OPENAI_RESPONSES_URL, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
-          'content-type': 'application/json',
+        instructions: req.instructions,
+        input: req.input,
+        tools: req.tools,
+        // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
+        ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
+        // A pressed chip that names its tool (`firstCallTool`, the loop's first call only): sent only when that tool is
+        // among the tools this call declares, so a forced call can never name a tool the turn does not carry.
+        ...(forcedToolOf(req) !== undefined ? { tool_choice: { type: 'function', name: forcedToolOf(req) } } : {}),
+        // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
+        ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
+        // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
+        // P44 S1: a call that only states a held proposal takes the model's banked `narrate` effort (`narrateEffortFor`).
+        ...(callEffortFor(budget, req) !== undefined ? { reasoning: { effort: callEffortFor(budget, req) } } : {}),
+        max_output_tokens: req.max_output_tokens,
+      };
+      const deadlineMs = (req as { deadline_ms?: unknown }).deadline_ms;
+      const post = (sentBody: Record<string, unknown>, carrier: 'developer_breakpoint' | 'instructions', retryOfHandle?: ProviderCallHandle) => postResponses(sentBody, {
+        detail: {
+          model: budget.model,
+          purpose: req.purpose === 'prewarm' ? 'prewarm' : 'conversation',
+          ...agentRequestIdentity(alias, plainBody),
+          instructions_carrier: carrier,
         },
-        body: JSON.stringify(sentBody),
-        // 2a: a caller-set deadline aborts the call, and such a call is never retried (`withTransportRetry`).
         ...(typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
-      }).then((res) => ({ r: res, usageHandle: handle }));
-    };
-    const breakpoint = alias === 'agent.converse' && !instructionsBreakpointRefused;
-    let { r, usageHandle } = breakpoint
-      ? await post(withInstructionsBreakpoint(plainBody), 'developer_breakpoint')
-      : await post(plainBody, 'instructions');
-    if (!r.ok) {
-      const text = await r.text();
-      const refused = breakpoint && refusesInstructionsBreakpoint(r.status, text);
-      if (refused && !instructionsBreakpointRefused) {
-        instructionsBreakpointRefused = true;
-        log.error({ site: 'agent-v1-turn.callModel', status: r.status, detail: text.slice(0, 300) }, 'agent-lane: provider refused the instructions cache breakpoint; sending top-level instructions from now on');
-      }
-      // ⛔ A PREWARM IS NEVER RESENT (Codex r1 P1 on T1 b): it is unawaited, so a resend could be made after the turn's
-      // ledger and `llm_calls_used` are written — a call the turn never counts. The latch alone is its job.
-      // ⛔ NOR IS A DEADLINED CALL: its deadline is its whole budget, made once (`withTransportRetry`; CODEX CEE BUDDY pre-read).
-      const deadlined = typeof deadlineMs === 'number' && deadlineMs > 0;
-      if (!refused || req.purpose === 'prewarm' || deadlined) throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
-      ({ r, usageHandle } = await post(plainBody, 'instructions'));
+        onProviderHandle: h => { lastHandle = h; },
+        ...(retryOfHandle !== undefined ? { retryOfHandle } : {}),
+      });
+      const breakpoint = alias === 'agent.converse' && !instructionsBreakpointRefused;
+      const retryOfHandle = transportAttempt > 1 ? lastHandle : undefined;
+      let { r, usageHandle } = breakpoint
+        ? await post(withInstructionsBreakpoint(plainBody), 'developer_breakpoint', retryOfHandle)
+        : await post(plainBody, 'instructions', retryOfHandle);
       if (!r.ok) {
-        const retryText = await r.text();
-        throw new Error(`openai_${r.status}: ${retryText.slice(0, 300)}`);
+        const text = await r.text();
+        const refused = breakpoint && refusesInstructionsBreakpoint(r.status, text);
+        if (refused && !instructionsBreakpointRefused) {
+          instructionsBreakpointRefused = true;
+          log.error({ site: 'agent-v1-turn.callModel', status: r.status, detail: text.slice(0, 300) }, 'agent-lane: provider refused the instructions cache breakpoint; sending top-level instructions from now on');
+        }
+        // ⛔ A PREWARM IS NEVER RESENT (Codex r1 P1 on T1 b): it is unawaited, so a resend could be made after the turn's
+        // ledger and `llm_calls_used` are written — a call the turn never counts. The latch alone is its job.
+        // ⛔ NOR IS A DEADLINED CALL: its deadline is its whole budget, made once (`withTransportRetry`; CODEX CEE BUDDY pre-read).
+        const deadlined = typeof deadlineMs === 'number' && deadlineMs > 0;
+        if (!refused || req.purpose === 'prewarm' || deadlined) throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+        recordProviderRetry(usageHandle, 'instructions_carrier_fallback');
+        ({ r, usageHandle } = await post(plainBody, 'instructions'));
+        if (!r.ok) {
+          const retryText = await r.text();
+          throw new Error(`openai_${r.status}: ${retryText.slice(0, 300)}`);
+        }
       }
-    }
-    const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown; status?: unknown; incomplete_details?: { reason?: unknown } | null };
-    // Never throws, and records nothing for a malformed payload, so a successful call
-    // cannot be turned into a failed one by the measurement of it.
-    recordProviderUsage(usageHandle, j.usage);
-    // The usage sidecar is read above and is not part of the transport contract. Completion status IS (AIX-001):
-    // an `incomplete` 200 can carry a partial answer.
-    return {
-      output: j.output,
-      ...(typeof j.status === 'string' ? { status: j.status } : {}),
-      ...(typeof j.incomplete_details?.reason === 'string' ? { incomplete_reason: j.incomplete_details.reason } : {}),
-    };
-  });
+      const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown; status?: unknown; incomplete_details?: { reason?: unknown } | null };
+      // Never throws, and records nothing for a malformed payload, so a successful call
+      // cannot be turned into a failed one by the measurement of it.
+      recordProviderUsage(usageHandle, j.usage);
+      // The usage sidecar is read above and is not part of the transport contract. Completion status IS (AIX-001):
+      // an `incomplete` 200 can carry a partial answer.
+      return {
+        output: j.output,
+        ...(typeof j.status === 'string' ? { status: j.status } : {}),
+        ...(typeof j.incomplete_details?.reason === 'string' ? { incomplete_reason: j.incomplete_details.reason } : {}),
+      };
+    });
+  };
 
   /**
    * ⭐ THE ONE PUBLIC RESEARCH REQUEST (R1, `public-research.ts`): the approved query only, native web search required
@@ -1847,13 +1849,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const model = budgetFor('gpt-6.1-sol', 'conversation').model;
     // Built once, so the ledger's sha is of the instructions this exact body sends (`RESEARCH_INSTRUCTIONS` today).
     const researchBody = researchRequestBody(query, model);
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', {
-      model, purpose: 'public_research', ...agentRequestIdentity('agent.research', researchBody),
-    });
-    const r = await fetch(OPENAI_RESPONSES_URL, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify(researchBody),
+    const { r, usageHandle } = await postResponses(researchBody, {
+      site: 'agent-v1-turn.callResearch',
+      detail: { model, purpose: 'public_research', ...agentRequestIdentity('agent.research', researchBody) },
+      preserveResponseErrors: true,
       // Bounded (#2042 N2): the captured search took 15 s; a hung one is said as unfinished, never waited on.
       signal: AbortSignal.timeout(60_000),
     });
@@ -1879,97 +1878,101 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   const callStructured = async (
     reqBody: Parameters<CallStructuredModel>[0],
     deadlineAt: number,
-  ): ReturnType<CallStructuredModel> => onceMoreOnTransportFailure('construction', async () => {
-    const timedOut = (budgetMs: number, err?: unknown) => {
-      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', budget_ms: budgetMs, ...(err !== undefined ? { err: String(err).slice(0, 200) } : {}) },
-        'agent-lane: construction call out of turn budget; not retried, nothing registered');
-      return { text: '', status: 'incomplete', incomplete_reason: CONSTRUCTION_TIMEOUT_REASON };
-    };
-    const budgetMs = deadlineAt - Date.now();
-    // Past the deadline no call starts: it could not end before the browser gives up.
-    if (budgetMs <= 0) return timedOut(budgetMs);
-    /**
-     * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
-     *
-     * #1825 wired `callModel` and left this handle discarded, so the caching witness on
-     * served `c2ef0b8` read: 4 conversation calls with usage (9,441 of 14,638 input
-     * tokens cached, 64.5%) and `call 3 construction: (no usage)`. Construction is
-     * banked at ~54s with in 838 / out 3404 incl. 2070 reasoning — by far the largest
-     * single call — so leaving it dark meant the aggregate cache figure could never be
-     * trusted and the obvious optimisation target could not be ranked.
-     *
-     * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
-     * write was missing. Nothing new is fetched or computed here.
-     */
-    // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
-    // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
-    const sentBody: Record<string, unknown> = {
-      model: reqBody.model,
-      instructions: reqBody.instructions,
-      input: reqBody.input,
-      max_output_tokens: reqBody.max_output_tokens,
-      ...(reqBody.reasoning_effort !== undefined
-        ? { reasoning: { effort: reqBody.reasoning_effort } }
-        : {}),
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'whole_candidate',
-          strict: true,
-          schema: strictForTheDrafter(reqBody.schema),
+  ): ReturnType<CallStructuredModel> => {
+    let transportAttempt = 0;
+    let lastHandle: ProviderCallHandle;
+    return onceMoreOnTransportFailure('construction', async () => {
+      transportAttempt += 1;
+      const timedOut = (budgetMs: number, err?: unknown) => {
+        log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', budget_ms: budgetMs, ...(err !== undefined ? { err: String(err).slice(0, 200) } : {}) },
+          'agent-lane: construction call out of turn budget; not retried, nothing registered');
+        return { text: '', status: 'incomplete', incomplete_reason: CONSTRUCTION_TIMEOUT_REASON };
+      };
+      const budgetMs = deadlineAt - Date.now();
+      // Past the deadline no call starts: it could not end before the browser gives up.
+      if (budgetMs <= 0) return timedOut(budgetMs);
+      /**
+       * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
+       *
+       * #1825 wired `callModel` and left this handle discarded, so the caching witness on
+       * served `c2ef0b8` read: 4 conversation calls with usage (9,441 of 14,638 input
+       * tokens cached, 64.5%) and `call 3 construction: (no usage)`. Construction is
+       * banked at ~54s with in 838 / out 3404 incl. 2070 reasoning — by far the largest
+       * single call — so leaving it dark meant the aggregate cache figure could never be
+       * trusted and the obvious optimisation target could not be ranked.
+       *
+       * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
+       * write was missing. Nothing new is fetched or computed here.
+       */
+      // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
+      // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
+      const sentBody: Record<string, unknown> = {
+        model: reqBody.model,
+        instructions: reqBody.instructions,
+        input: reqBody.input,
+        max_output_tokens: reqBody.max_output_tokens,
+        ...(reqBody.reasoning_effort !== undefined
+          ? { reasoning: { effort: reqBody.reasoning_effort } }
+          : {}),
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'whole_candidate',
+            strict: true,
+            schema: strictForTheDrafter(reqBody.schema),
+          },
         },
-      },
-    };
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
-      model: reqBody.model, purpose: 'construction', ...agentRequestIdentity('agent.construct', sentBody),
-    });
-    let j: {
-      output?: { type?: string; content?: { type?: string; text?: string }[] }[];
-      usage?: Record<string, unknown>;
-      status?: unknown;
-      incomplete_details?: { reason?: unknown } | null;
-    };
-    try {
-      const r = await fetch(OPENAI_RESPONSES_URL, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(sentBody),
-        // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
-        signal: AbortSignal.timeout(budgetMs),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+      };
+      let usageHandle: number | undefined;
+      let j: {
+        output?: { type?: string; content?: { type?: string; text?: string }[] }[];
+        usage?: Record<string, unknown>;
+        status?: unknown;
+        incomplete_details?: { reason?: unknown } | null;
+      };
+      try {
+        const response = await postResponses(sentBody, {
+          site: 'agent-v1-turn.callStructured',
+          detail: { model: reqBody.model, purpose: 'construction', ...agentRequestIdentity('agent.construct', sentBody) },
+          preserveResponseErrors: true,
+          onProviderHandle: h => { lastHandle = h; },
+          ...(transportAttempt > 1 ? { retryOfHandle: lastHandle } : {}),
+          // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
+          signal: AbortSignal.timeout(budgetMs),
+        });
+        const { r } = response;
+        usageHandle = response.usageHandle;
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+        }
+        j = (await r.json()) as typeof j;
+      } catch (err) {
+        if (isConstructionTimeout(err)) return timedOut(budgetMs, err);
+        throw err;
       }
-      j = (await r.json()) as typeof j;
-    } catch (err) {
-      if (isConstructionTimeout(err)) return timedOut(budgetMs, err);
-      throw err;
-    }
-    let text = '';
-    for (const item of j.output ?? []) {
-      if (item.type !== 'message') continue;
-      for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
-    }
-    // Same contract as the conversation path: never throws, and records nothing for a
-    // malformed payload, so measuring a call cannot turn a successful one into a failure.
-    recordProviderUsage(usageHandle, j.usage);
-    // ⛔ COMPLETION STATUS IS PART OF THE CONTRACT HERE TOO (AIX-001, as `callModel`). It was dropped, so an answer the
-    // output cap cut off (served 770a477: output_tokens 6000 exactly, 2/14 first briefs) read as a parse error.
-    const incompleteReason = typeof j.incomplete_details?.reason === 'string' ? j.incomplete_details.reason : undefined;
-    if (j.status === 'incomplete') {
-      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
-    }
-    return {
-      text,
-      usage: j.usage,
-      ...(typeof j.status === 'string' ? { status: j.status } : {}),
-      ...(incompleteReason !== undefined ? { incomplete_reason: incompleteReason } : {}),
-    };
-  }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
+      let text = '';
+      for (const item of j.output ?? []) {
+        if (item.type !== 'message') continue;
+        for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
+      }
+      // Same contract as the conversation path: never throws, and records nothing for a
+      // malformed payload, so measuring a call cannot turn a successful one into a failure.
+      recordProviderUsage(usageHandle, j.usage);
+      // ⛔ COMPLETION STATUS IS PART OF THE CONTRACT HERE TOO (AIX-001, as `callModel`). It was dropped, so an answer the
+      // output cap cut off (served 770a477: output_tokens 6000 exactly, 2/14 first briefs) read as a parse error.
+      const incompleteReason = typeof j.incomplete_details?.reason === 'string' ? j.incomplete_details.reason : undefined;
+      if (j.status === 'incomplete') {
+        log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
+      }
+      return {
+        text,
+        usage: j.usage,
+        ...(typeof j.status === 'string' ? { status: j.status } : {}),
+        ...(incompleteReason !== undefined ? { incomplete_reason: incompleteReason } : {}),
+      };
+    }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
+  };
 
   /**
    * ⭐ C6-2: the ONE brief-reading call (`agent-lane/brief-reading.ts`). Same provider policy and usage ledger as every
@@ -1985,13 +1988,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       max_output_tokens: 600,
       text: { format: { type: 'json_schema', name: 'brief_spans', strict: true, schema: reqBody.schema } },
     };
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callBriefReading', {
-      model: reqBody.model, purpose: 'brief_reading', ...agentRequestIdentity('agent.read_brief', sentBody),
-    });
-    const r = await fetch(OPENAI_RESPONSES_URL, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify(sentBody),
+    const { r, usageHandle } = await postResponses(sentBody, {
+      site: 'agent-v1-turn.callBriefReading',
+      detail: { model: reqBody.model, purpose: 'brief_reading', ...agentRequestIdentity('agent.read_brief', sentBody) },
+      preserveResponseErrors: true,
+      readHttpErrorBody: false,
       signal: AbortSignal.timeout(BRIEF_READING_TIMEOUT_MS),
     });
     if (!r.ok) throw new Error(`openai_${r.status}`);
@@ -2769,6 +2770,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       countingDispatch, proposals, (reqBody, deadlineAt) => callStructured(reqBody, deadlineAt ?? constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       {
+        turnAuthority: true,
         deadlineAt: constructionDeadlineAt,
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
         /**
@@ -2797,6 +2799,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             schema_version: 'v3',
             elapsed_ms: Date.now() - startedAt,
           });
+        },
+        // S8 durable human reasoning: the scenario-wide `finding_dissent` read (NOT a conversation-history read, no turn
+        // window: a dissent older than the window still reaches the model) + the existing projector. A store WITHOUT the
+        // read cannot say whether the user stated an objection: that is UNKNOWN, not a successful empty read, so it takes
+        // the same path as a failed read (the capability raises `stated_objections_unreadable`; the turn never fails).
+        readStatedObjections: async (sid: string) => {
+          if (typeof store.readStatedObjectionFactsFor !== 'function') throw new Error('stated_objections_reader_unavailable');
+          return projectStatedObjections(await store.readStatedObjectionFactsFor(sid, STATED_OBJECTION_FACT_ROWS_READ, STATED_OBJECTIONS_CAP));
         },
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'
@@ -2932,7 +2942,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? { typed_approval_of: approvedProposal,
         ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
-    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    // A composer's explicit approval is bound here, before the model sees this turn, to ONE
+    // previously offered structural-link proposal. Card-only readings/holds still need their card.
+    let composerApproval: string | undefined;
+    if (approvedProposal === undefined && typedNow !== null
+      && isComposerApprovalWords(typedNow)) {
+      const waiting = proposals.outstanding(scenarioId, userId);
+      const offered = lastApproveOffer.get(approveKey) ?? carriedProposals.get(approveKey)?.chip;
+      const id = offered === undefined ? undefined : typedApprovalOf({ chip: { id: offered.id } });
+      const proposal = id === undefined ? undefined : proposals.get(id);
+      if (waiting.length === 1 && waiting[0]?.proposal_id === id && proposal !== undefined
+        && proposal.operations.length > 0 && proposal.operations.every(op => op.op === 'add_edge' || op.op === 'update_edge')) {
+        composerApproval = id;
+      }
+    }
+    // Client turn_id controls durable replay when supplied. Every request also has a host
+    // identity for the writer, including valid approvals from clients that omit turn_id.
+    const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
     // Publishing typed words to in-memory session history is not a durable save, but "Nothing was saved" can't cover it.
     if (typedNow !== null) recordUnsavableEffect();
@@ -3892,6 +3918,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       return reply.code(502).send({
         error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
+        _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
         ...(turnId !== undefined ? { retry_safe: released } : {}),
       });
     } finally {
@@ -5609,7 +5637,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     });
   };
   app.post('/agent/v1/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, (req: FastifyRequest, reply: FastifyReply) =>
-    runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () => agentTurnHandler(req, reply)));
+    runWithProviderPolicy({ ...OPENAI_ONLY('agent_v1_turn'), request_id: String(req.id),
+      scenario_id: (req.body as { scenario_id?: string })?.scenario_id, turn_id: (req.body as { turn_id?: string })?.turn_id }, () => agentTurnHandler(req, reply)));
 
   log.info({ event: 'agent_lane.route_mounted' }, 'POST /agent/v1/turn mounted');
 }

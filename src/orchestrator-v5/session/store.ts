@@ -618,6 +618,21 @@ export interface SessionStore {
     limit: number,
   ): Promise<readonly IdentifiedHandlerFact[]>;
   /**
+   * The scenario's newest durable `finding_dissent` facts (the user's own stated disagreement with a finding),
+   * newest-first, NOT constrained to {@link readRecent}'s conversation window and NOT a conversation-history read:
+   * the served Agent turn reads this and nothing else for what the user has objected to, so a dissent recorded more
+   * than the window's turns ago still reaches the model (the same cliff `readScenarioRunAnalysisFactsFor` closes
+   * for analysis). `noop = false` rows only; a failed or malformed read throws so the caller reports "unknown",
+   * never "no objections". Optional so existing test doubles are not forced to implement it; production
+   * (`SupabaseSessionStore`) always does and callers read omission as "not available", never as "none stated".
+   */
+  readStatedObjectionFactsFor?(
+    scenarioId: string,
+    limit: number,
+    /** Stop paging once this many DIFFERENT findings are covered (a rewritten reason must not starve the others). */
+    distinctFindings?: number,
+  ): Promise<readonly HandlerFact[]>;
+  /**
    * Load the bounded, scenario-wide `run_analysis` fact set used by the
    * existing freshness/analysis selectors.
    *

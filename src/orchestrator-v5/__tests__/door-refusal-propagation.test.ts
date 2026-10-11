@@ -46,6 +46,7 @@ import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js'
 import { computeProposalId, type StructuredProposal } from '../agent-lane/proposal.js';
 import { proposalPendingAction } from '../agent-lane/durable-proposal.js';
 import { approvalChipIdFor } from '../agent-lane/approval-chips.js';
+import { agentProposals } from '../agent-lane/held-approval-offers.js';
 import * as adoption from '../system-events/olumi-option-adoption.js';
 import { assertDoorOwnership, bindWriteCaller, readWriteRefusal, readSuccessfulDoorEntries } from '../ownership/door-ownership.js';
 import { runFencedInProcessWrite } from '../../orchestrator/turn-fence-prehandler.js';
@@ -140,6 +141,9 @@ async function harness(family: string, afterCommit = false, hanging = false, opt
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  // The process-wide proposal store memoises an approved operation by (scenario, turn, proposal): this file reuses one
+  // fixed request id and proposal across apps, so each test starts with that proposal's memo forgotten (isolation only).
+  agentProposals.discard(adoptionProposal().proposal_id);
   provider.draft.mockResolvedValue({ blocks: [], assistantText: 'A shared model.', latencyMs: 0, strengthenItems: [],
     coachingSummary: null, coachingWideningLog: null, coachingBiasSignals: null, draftWarnings: [], graphOutput: GRAPH });
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed',

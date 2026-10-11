@@ -72,6 +72,7 @@ import { canonicaliseUnitForDisplay, ratePeriodOf, ratePeriodWord, unitCompariso
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
+import type { StatedObjection } from '../../context/stated-objections.js';
 
 /**
  * The durable operation identity for authorising a proposal.
@@ -207,7 +208,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 }
 
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
-import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
+import { createProposal, computeProposalId, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
@@ -1346,6 +1347,9 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
  * provenance as stored. Today's limit fact uses the same predicate and proven frame as analysis.
  * Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
  */
+/** How the model uses `stated_objections` (AIE-ACKed wording; carried beside the data, as `left_out[].use` is). */
+const STATED_OBJECTIONS_USE = "These are the user's own stated disagreements with findings, verbatim and newest first. They do not by themselves change the model or existing analysis. Engage with the reasons in their words; never present them as Olumi's findings, as agreement or as resolved.";
+
 export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_ready'>): Record<string, unknown> {
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
   const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -2118,6 +2122,8 @@ export function createAgentCapabilities(
    */
   opts: {
     /** Absolute end of this turn's drafter call, shared with optional draft widening. */
+    /** Ordinary agent-turn authority cut; legacy callers remain inventoried separately. */
+    readonly turnAuthority?: boolean;
     readonly deadlineAt?: number;
     readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome>;
     /**
@@ -2136,6 +2142,12 @@ export function createAgentCapabilities(
      * store actually holds — never against a copy this process remembered. Absent ⇒ a held approval refuses.
      */
     readonly readPendingActions?: (scenarioId: string) => Promise<readonly PendingAction[]>;
+    /**
+     * ⭐ S8 DURABLE HUMAN REASONING: the user's standing objections ("I disagree with this finding, because…"), read by
+     * the ROUTE from the existing turn-window facts through the existing projector (`projectStatedObjections`: newest per
+     * finding wins, at most 3, verbatim). Absent or throwing ⇒ none; the canonical state is then byte-identical to before.
+     */
+    readonly readStatedObjections?: (scenarioId: string, requestId: string) => Promise<readonly StatedObjection[]>;
     /**
      * ⭐ ONE approved batch of option levels — each with the option → factor link it needs — as ONE atomic commit
      * (ChatGPT #70 5847200462): the product's own level writer, reached in-process (`commitOptionLevelsInProcess`).
@@ -3709,6 +3721,14 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
       const delta = await selectedRunDeltaForModel(ctx.scenario_id, g, g.run_delta);
+      // S8: what the user has said they do not accept, in their words. An unreadable list never fails the turn, but it is
+      // UNKNOWN, never "none": the model is told the list could not be read (the `receipt_unreadable` convention).
+      let statedObjectionsUnreadable = false;
+      const statedObjections = opts.readStatedObjections === undefined ? []
+        : await opts.readStatedObjections(ctx.scenario_id, ctx.request_id).catch(() => {
+          statedObjectionsUnreadable = true;
+          return [] as readonly StatedObjection[];
+        });
       const { run_delta: _wireDelta, ...readWithoutDelta } = g;
       const modelRead = { ...readWithoutDelta, ...(delta === undefined ? {} : { run_delta: delta }) };
       const scopeIssues = g.goal_scope_reconciliation ?? [];
@@ -3776,6 +3796,10 @@ export function createAgentCapabilities(
         // not in memory. An approval with nothing to bind to is an approval that
         // silently does nothing.
         awaiting_your_approval: [...await liveHeldAwaiting(ctx.scenario_id), ...proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)],
+        // S8: durable human reasoning. Present only when the user has stated an objection (default bytes unchanged).
+        ...(statedObjections.length > 0 ? { stated_objections: statedObjections, stated_objections_use: STATED_OBJECTIONS_USE } : {}),
+        // Present ONLY when the read failed: the user may have stated objections that could not be read this turn.
+        ...(statedObjectionsUnreadable ? { stated_objections_unreadable: true } : {}),
       };
     },
 
@@ -6054,6 +6078,14 @@ export function createAgentCapabilities(
           ok: false, mutated: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,
           detail: 'That offer to add an option was prepared before an update and can no longer be applied. Nothing was changed. Offer to prepare it again.',
         };
+      }
+
+      // Preserve the existing validation/card refusals before the ordinary-turn consent fence.
+      // These card writers check the same host-bound identity before any write of their own.
+      if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
+        if (ops.some(o => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
+        if (ops.some(o => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
+        return { ok: false, mutated: false, refusal: 'approval_required' };
       }
 
       /**
@@ -9588,7 +9620,61 @@ export function createAgentCapabilities(
     },
     // The approval guard's writer: every return path of `authoriseChange`, one place.
     async authoriseChange(ctx, args): Promise<ToolResult> {
-      const r = await caps.authoriseChange(ctx, args);
+      // Run existing validation and card-specific refusals unchanged. The inner writer's
+      // consent fence refuses an otherwise executable ordinary proposal before any write.
+      if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
+        return caps.authoriseChange(ctx, args);
+      }
+      if (opts.turnAuthority === true && !ctx.turn_id) {
+        return { ok: false, mutated: false, refusal: 'turn_identity_required' };
+      }
+      const p = proposals.get(args.proposal_id);
+      if (opts.turnAuthority === true && p !== undefined) {
+        if (p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) {
+          return { ok: false, mutated: false, refusal: 'not_authorised' };
+        }
+        if (computeProposalId(p) !== p.proposal_id) {
+          return { ok: false, mutated: false, refusal: 'integrity_failed' };
+        }
+      }
+      const reconcile = async (): Promise<ToolResult> => {
+        // Only this cut's single structural-link write has a complete one-receipt identity.
+        // Other operation families may have several commits: a partial receipt must never imply whole approval.
+        if (p?.operations.length === 1 && p.operations[0].op === 'add_edge'
+          && (p.operations[0].value as { author?: unknown } | undefined)?.author !== 'model_proposed') {
+          const operationId = authorisationTurnId(p.proposal_id);
+          let cursor: string | undefined;
+          try {
+            for (let page = 0; page < 5; page += 1) {
+              const found = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/versions`, { limit: 200,
+                ...(cursor !== undefined ? { cursor } : {}) });
+              if (found.status !== 200 || !Array.isArray(found.json.versions)) break;
+              const hit = found.json.versions.find((v: { creation?: { source_turn_id?: unknown; kind?: unknown; mutation_id?: unknown } }) =>
+                v.creation?.source_turn_id === operationId && v.creation?.kind === 'committed_mutation');
+              if (hit !== undefined && typeof hit.version_id === 'string' && hit.version_id.length > 0
+                && Number.isInteger(hit.sequence) && hit.sequence > 0
+                && typeof hit.creation.mutation_id === 'string' && hit.creation.mutation_id.length > 0) {
+                const receipts = [{ version: hit.sequence, version_id: hit.version_id,
+                  mutation_id: hit.creation.mutation_id, source_turn_id: operationId }];
+                proposals.markApplied(p.proposal_id, receipts);
+                return { ok: true, mutated: false, applied: true, already_applied: true,
+                  proposal_id: p.proposal_id, operation_id: operationId, receipts };
+              }
+              cursor = typeof found.json.next_cursor === 'string' ? found.json.next_cursor : undefined;
+              if (cursor === undefined) break;
+            }
+          } catch { /* an unavailable receipt reader is an unknown outcome */ }
+        }
+        return { ok: false, mutated: false, refusal: 'not_confirmed', outcome: 'outcome_unknown', proposal_id: args.proposal_id };
+      };
+      const execute = () => caps.authoriseChange(ctx, args);
+      const r = opts.turnAuthority === true && p !== undefined
+        ? await proposals.executeApproved(p, ctx.turn_id ?? ctx.request_id, execute,
+            result => result.applied === true && proposals.isApplied(p.proposal_id) ? 'applied'
+              // A refusal that provably wrote nothing (mutated:false, and not the "could not confirm" outcome) is released.
+              : result.mutated === false && result.refusal !== 'not_confirmed' && result.outcome !== 'outcome_unknown' ? 'none' : 'unknown',
+            reconcile)
+        : await execute();
       if (r.applied === true || r.mutated === true) {
         approvalAppliedThisRequest = true;
         // ⭐ (B) WHAT THE MODEL NEEDS NOW, from the graph as stored after the write — one place for every
