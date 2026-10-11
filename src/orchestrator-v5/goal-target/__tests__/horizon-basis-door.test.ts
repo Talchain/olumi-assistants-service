@@ -12,6 +12,7 @@ import * as turnContextReads from '../../build-turn-context.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { _resetConfigCache } from '../../../config/index.js';
+import { bindWriteCaller } from '../../ownership/door-ownership.js';
 import { appendCheckedGraphWrite } from '../../persist-graph-write.js';
 import { prepareHorizonBasisForWrite, assertDoorProvenance } from '../horizon-basis-provenance.js';
 import { toOutboundGraph } from '../outbound-graph.js';
@@ -1346,11 +1347,24 @@ describe('S5 r8 server proof', () => {
         source_turn_id: null, graph: w.read(), deduped: false, replayed: false,
         analysis_invalidated_at: '2026-10-09T00:00:00.000Z', event_id: 'restore-event' } };
     });
-    const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc } as never),
+    // Direct service caller (no Fastify lifecycle): mirror the admitted u-1
+    // fixture identity; version history requires an owned, non-guest row.
+    const from = vi.fn((table: string) => {
+      expect(table).toBe('scenarios');
+      return { select: (columns: string) => {
+        expect(columns).toBe('user_id');
+        return { eq: (key: string, id: string) => {
+          expect(key).toBe('id'); expect(id).toBe(SCENARIO);
+          return { maybeSingle: async () => ({ data: { user_id: 'u-1' }, error: null }) };
+        } };
+      } };
+    });
+    const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc, from } as never),
       isEnabled: () => true, eventSink: { emit: vi.fn() } as never });
-    const result = await service.restoreVersionAtomic({ expected_revision: 31, scenario_id: SCENARIO, version_id: version,
+    const result = await bindWriteCaller({ userId: 'u-1', verified: true }, () => service.restoreVersionAtomic({ expected_revision: 31, scenario_id: SCENARIO, version_id: version,
       mutation_id: TURN, graph: snapshot, current_graph: seed(), expected_graph_identity_hash: null,
-      source_graph_identity_hash: computeGraphIdentityHash(snapshot as never)!.value });
+      source_graph_identity_hash: computeGraphIdentityHash(snapshot as never)!.value }));
+    expect(from).toHaveBeenCalledExactlyOnceWith('scenarios');
     expect(result.status).toBe('ok');
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(w.read()).toEqual(snapshot);

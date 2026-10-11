@@ -3,11 +3,11 @@
  * an RPC writing scenarios.graph or model_versions (including SQL delegates),
  * (b) updates/upserts scenarios.graph or inserts/updates/upserts model_versions,
  * or (c) calls a store method wrapping (a)/(b) from outside the session store.
- * OUTSIDE THE DOOR: not lexically inside appendCheckedGraphWrite in its real
- * implementation, nor in the session store implementation reachable from that
+ * OUTSIDE THE DOOR: not lexically inside appendCheckedGraphWrite/commitModelChange in their real
+ * implementation, nor in the session/version adapter implementation reachable from that
  * door. Store methods not reached by the door are NOT exempt. Door callers are
  * counted separately. Counts are expressions, not files or unique RPC names.
- * commitModelChange is planned; today's door is appendCheckedGraphWrite.
+ * appendCheckedGraphWrite and commitModelChange share the existing door module.
  * TypeScript calls, constants, payloads, aliases and wrappers use the TS AST
  * and checker, never source regexes. SQL is a read-only migration-text census;
  * delegation is conservatively followed even when a wrapper forbids p_graph.
@@ -22,7 +22,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const DOOR_FILE = 'src/orchestrator-v5/persist-graph-write.ts';
 const STORE_FILE = 'src/orchestrator-v5/session/supabase-store.ts';
-const DOOR = 'appendCheckedGraphWrite';
+const DOORS = new Set(['appendCheckedGraphWrite', 'commitModelChange']);
+const VERSION_STORE_FILE = 'src/orchestrator-v5/model-management/store-adapter.ts';
 // Read-only pg_proc evidence measured by af (8 Oct ~23:3xZ, project below); see PR #2891.
 // These definitions live in another repo; this is not a blanket SQL exemption.
 export const DEPLOYED_ONLY_RPCS = {
@@ -286,7 +287,9 @@ export function census({ root = ROOT, extraFiles = [], doorFile = DOOR_FILE } = 
     for (const next of equivalents.get(sym) ?? []) mark(next);
     return true;
   }
-  // Only methods are propagated as store/adapter wrappers. Route registration
+  // Only direct-write methods are propagated as store/adapter wrappers.
+  // A façade that calls the real door has no primitive: its callers are controlled,
+  // while a direct call to its underlying adapter remains a counted bypass. Route registration
   // functions do not become writers merely because they register a handler.
   for (const call of calls) if (primitive.has(call.node) && ts.isMethodDeclaration(call.owner ?? {})) {
     mark(symbol(call.owner.name));
@@ -298,21 +301,21 @@ export function census({ root = ROOT, extraFiles = [], doorFile = DOOR_FILE } = 
       changed = mark(symbol(call.owner.name)) || changed;
     }
   }
-  // Derive the private session implementation reachable from the real door.
+  // Derive only the session/version adapter methods reachable from the real door.
   // No file-wide exemption: a direct draft-graph RPC remains outside the door.
-  const sessionReachable = new Set();
-  for (const call of calls) if (call.file === doorFile && named(call.owner) === DOOR) {
-    if (writers.has(call.sym)) sessionReachable.add(call.sym);
+  const dispatchReachable = new Set();
+  for (const call of calls) if (call.file === doorFile && DOORS.has(named(call.owner))) {
+    if (writers.has(call.sym)) dispatchReachable.add(call.sym);
   }
   changed = true;
   while (changed) {
     changed = false;
-    for (const sym of [...sessionReachable]) for (const next of equivalents.get(sym) ?? []) {
-      if (!sessionReachable.has(next)) { sessionReachable.add(next); changed = true; }
+    for (const sym of [...dispatchReachable]) for (const next of equivalents.get(sym) ?? []) {
+      if (!dispatchReachable.has(next)) { dispatchReachable.add(next); changed = true; }
     }
-    for (const call of calls) if (call.file === STORE_FILE
-      && sessionReachable.has(call.owner?.name && symbol(call.owner.name)) && call.sym) {
-      if (!sessionReachable.has(call.sym)) { sessionReachable.add(call.sym); changed = true; }
+    for (const call of calls) if ([STORE_FILE, VERSION_STORE_FILE].includes(call.file)
+      && dispatchReachable.has(call.owner?.name && symbol(call.owner.name)) && call.sym) {
+      if (!dispatchReachable.has(call.sym)) { dispatchReachable.add(call.sym); changed = true; }
     }
   }
   const sites = [];
@@ -320,23 +323,24 @@ export function census({ root = ROOT, extraFiles = [], doorFile = DOOR_FILE } = 
   const doorSymbols = new Set();
   for (const source of program.getSourceFiles()) if (relative(root, source.fileName) === doorFile) {
     source.forEachChild(node => {
-      if (ts.isFunctionDeclaration(node) && named(node) === DOOR) doorSymbols.add(symbol(node.name));
+      if (ts.isFunctionDeclaration(node) && DOORS.has(named(node))) doorSymbols.add(symbol(node.name));
     });
   }
   for (const call of calls) {
     let inDoor = false;
     for (let ancestor = call.node.parent; ancestor; ancestor = ancestor.parent) {
-      if (call.file === doorFile && ts.isFunctionDeclaration(ancestor) && named(ancestor) === DOOR) inDoor = true;
+      if (call.file === doorFile && ts.isFunctionDeclaration(ancestor) && DOORS.has(named(ancestor))) inDoor = true;
     }
-    const inSession = call.file === STORE_FILE
-      && sessionReachable.has(call.owner?.name && symbol(call.owner.name));
+    const inSession = [STORE_FILE, VERSION_STORE_FILE].includes(call.file)
+      && dispatchReachable.has(call.owner?.name && symbol(call.owner.name));
     const isDoor = doorSymbols.has(call.sym);
-    const detail = isDoor ? { kind: 'door_caller', callee: DOOR } : primitive.get(call.node)
+    const detail = isDoor ? { kind: 'door_caller', callee: call.sym.name } : primitive.get(call.node)
       ?? (writers.has(call.sym) ? { kind: 'store_method', callee: call.node.expression.getText() } : undefined);
     if (!detail) continue;
     const site = { file: call.file, line: call.line, ...detail };
     if (inDoor || inSession) {
-      excluded.push({ ...site, reason: inDoor ? 'inside door implementation' : 'session implementation reached by door' });
+      excluded.push({ ...site, reason: inDoor ? 'inside door implementation' : call.file === STORE_FILE
+        ? 'session implementation reached by door' : 'version adapter reached by door' });
     } else sites.push(site);
   }
   const sort = (a, b) => a.file.localeCompare(b.file) || a.line - b.line;
