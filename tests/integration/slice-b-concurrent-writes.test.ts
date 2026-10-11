@@ -18,6 +18,11 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { SessionLRUCache } from '../../src/orchestrator-v5/session/cache.js';
 import { SupabaseSessionStore } from '../../src/orchestrator-v5/session/supabase-store.js';
+import { ModelManagementService } from '../../src/orchestrator-v5/model-management/service.js';
+import { SupabaseModelVersionStore } from '../../src/orchestrator-v5/model-management/store-adapter.js';
+import { bindWriteCaller } from '../../src/orchestrator-v5/ownership/door-ownership.js';
+import { computeGraphIdentityHash } from '../../src/orchestrator-v5/context/graph-identity.js';
+import type { VersionWriteOutcome, AtomicRestoreVersionOutcome } from '../../src/orchestrator-v5/model-management/types.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -122,3 +127,178 @@ suite('Slice B concurrent-writes — idempotency under real concurrency', () => 
 });
 
 // describe.skip above already handles the env-missing case.
+
+// SYS10 A/B transaction bodies replace the empty physical-spec skip. Reuse
+// the EXISTING Supabase gate/credentials above, without a new skip construct.
+// This WRITES to SUPABASE_URL's project when the service-role environment is
+// supplied (normally shared staging). TEST_SCENARIO_ID is read only, for its
+// authenticated owner; all writes and cleanup use our random scenario IDs.
+// No DDL/failure triggers: failures use existing SQL operations/constraints.
+// UNRUN locally; a green advisory job without these env vars is not DB proof.
+suite('SYS10 version door — real CAS, rollback/retry and cold reload', () => {
+  const ownScenarioIds: string[] = [];
+  const currentGraph = { nodes: [{ id: 'factor', kind: 'factor', label: 'Current working bytes' }], edges: [] };
+  const targetGraph = { nodes: [{ id: 'factor', kind: 'factor', label: 'Target snapshot bytes' }], edges: [] };
+  let db: SupabaseClient;
+
+  beforeEach(() => {
+    db = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  });
+
+  afterEach(async () => {
+    // Clear the scenario's head reference before deleting its version lineage.
+    // Each mutation is constrained to this test's IDs, never TEST_SCENARIO_ID.
+    for (const id of ownScenarioIds.splice(0)) {
+      const head = await db.from('scenarios').update({ current_model_version_id: null }).eq('id', id);
+      expect(head.error, `cleanup head ${id}`).toBeNull();
+      const versions = await db.from('model_versions').delete().eq('scenario_id', id);
+      expect(versions.error, `cleanup versions ${id}`).toBeNull();
+      const scenario = await db.from('scenarios').delete().eq('id', id);
+      expect(scenario.error, `cleanup scenario ${id}`).toBeNull();
+      const leftovers = await db.from('scenarios').select('id').eq('id', id);
+      expect(leftovers.error).toBeNull(); expect(leftovers.data).toEqual([]);
+    }
+  });
+
+  function service() {
+    // Fresh real adapter/service for each writer and reload; no storage double.
+    return new ModelManagementService({ store: new SupabaseModelVersionStore(db), isEnabled: () => true });
+  }
+  function asOwner<T>(owner: string, run: () => T) {
+    return bindWriteCaller({ userId: owner, verified: true }, run);
+  }
+  async function scenario(id: string) {
+    const read = await db.from('scenarios').select('*').eq('id', id).single();
+    expect(read.error).toBeNull(); expect(read.data).not.toBeNull();
+    return read.data!;
+  }
+  async function snapshot(id: string) {
+    const row = await scenario(id);
+    const versions = await db.from('model_versions').select('*').eq('scenario_id', id).order('version_number');
+    expect(versions.error).toBeNull();
+    return { scenario: row, versions: versions.data! };
+  }
+  async function fixture(op: 'A' | 'B') {
+    const ownerRead = await db.from('scenarios').select('user_id').eq('id', TEST_SCENARIO_ID!).single();
+    expect(ownerRead.error).toBeNull();
+    const owner: unknown = ownerRead.data?.user_id;
+    expect(typeof owner, 'version fixture requires an OWNED TEST_SCENARIO_ID').toBe('string');
+    if (typeof owner !== 'string') throw new Error('Owned integration fixture unavailable');
+    const id = randomUUID(); ownScenarioIds.push(id);
+    const graph = op === 'A' ? currentGraph : targetGraph;
+    const inserted = await db.from('scenarios').insert({ id, user_id: owner, graph,
+      graph_identity_hash: computeGraphIdentityHash(graph)!.value,
+      brief_text: `sys10-version-door-${id}` });
+    expect(inserted.error).toBeNull();
+    let targetId: string | null = null;
+    if (op === 'B') {
+      const initial = await scenario(id);
+      const saved = await asOwner(owner, () => service().saveVersion({ scenario_id: id,
+        expected_revision: initial.revision, graph: targetGraph, expected_head_version_id: null }));
+      expect(saved.status).toBe('ok');
+      if (saved.status !== 'ok') throw new Error(`fixture version refused: ${JSON.stringify(saved)}`);
+      targetId = saved.value.version_id;
+      // Force a real undo INSERT: the saved head does not capture these bytes.
+      const working = await db.from('scenarios').update({ graph: currentGraph,
+        graph_identity_hash: computeGraphIdentityHash(currentGraph)!.value }).eq('id', id);
+      expect(working.error).toBeNull();
+    }
+    const base = await snapshot(id);
+    return { id, owner, targetId, base, mutation: randomUUID() };
+  }
+  type Fixture = Awaited<ReturnType<typeof fixture>>;
+  async function write(f: Fixture, op: 'A' | 'B', mutation = f.mutation, authoredBy = 'owner') {
+    return asOwner(f.owner, () => op === 'A'
+      ? service().saveVersion({ scenario_id: f.id, graph: currentGraph,
+        expected_revision: f.base.scenario.revision,
+        expected_head_version_id: f.base.scenario.current_model_version_id })
+      : service().restoreVersionAtomic({ scenario_id: f.id, version_id: f.targetId!, mutation_id: mutation,
+        expected_revision: f.base.scenario.revision, graph: targetGraph, current_graph: currentGraph,
+        expected_graph_identity_hash: computeGraphIdentityHash(currentGraph)!.value,
+        source_graph_identity_hash: computeGraphIdentityHash(targetGraph)!.value,
+        actor_kind: 'known', authored_by: authoredBy }));
+  }
+  type Receipt = VersionWriteOutcome | AtomicRestoreVersionOutcome;
+  async function coldReload(f: Fixture, op: 'A' | 'B', receipt: Receipt) {
+    const cold = service();
+    const list = await cold.listVersions(f.id);
+    expect(list.status).toBe('ok');
+    if (list.status !== 'ok') throw new Error('cold version list unavailable');
+    const head = await cold.getCurrentVersion(f.id);
+    expect(head.status).toBe('ok');
+    if (head.status !== 'ok' || head.value === null) throw new Error('cold head unavailable');
+    expect(head.value.id).toBe(receipt.version_id);
+    expect(head.value.graph).toEqual(op === 'A' ? currentGraph : targetGraph);
+    expect(head.value.graph_identity_hash).toBe(receipt.graph_identity_hash);
+    expect(list.value.map(v => v.id)).toContain(receipt.version_id);
+    const reloaded = await snapshot(f.id);
+    expect(reloaded.scenario.current_model_version_id).toBe(receipt.version_id);
+    expect(reloaded.scenario.graph).toEqual(op === 'A' ? currentGraph : targetGraph);
+    expect(reloaded.scenario.revision).toBe(f.base.scenario.revision + 1);
+    const event = reloaded.scenario.events.find((e: { event_id: string }) => e.event_id === receipt.event_id);
+    expect(event).toMatchObject({ event_type: op === 'A' ? 'model_version_created' : 'model_version_restored',
+      details: { version_id: receipt.version_id }, hashes: { graph_identity_hash: receipt.graph_identity_hash } });
+    expect(reloaded.scenario.events).toHaveLength(f.base.scenario.events.length + 1);
+    expect(reloaded.versions).toHaveLength(f.base.versions.length + (op === 'A' ? 1 : 2));
+    if (op === 'B') {
+      if (!('undo_version_id' in receipt) || receipt.undo_version_id === null) throw new Error('restore omitted its undo');
+      const undo = await cold.getVersion(f.id, receipt.undo_version_id);
+      expect(undo.status).toBe('ok');
+      if (undo.status !== 'ok') throw new Error('cold undo unavailable');
+      expect(undo.value.graph).toEqual(currentGraph);
+      expect(undo.value.provenance).toBe('pre_restore');
+      expect(head.value.parent_version_id).toBe(undo.value.id);
+      expect(event.details.undo_version_id).toBe(undo.value.id);
+      expect(reloaded.scenario.analysis_invalidated_at).not.toBeNull();
+    }
+  }
+
+  for (const op of ['A', 'B'] as const) {
+    it(`${op}: concurrent writers on one expected revision have exactly one winner, no partial rows`, async () => {
+      const f = await fixture(op);
+      const replies = await Promise.all([write(f, op, randomUUID()), write(f, op, randomUUID())]);
+      const wins = replies.filter(r => r.status === 'ok');
+      const losses = replies.filter(r => r.status === 'conflict');
+      expect(wins).toHaveLength(1); expect(losses).toHaveLength(1);
+      expect(losses[0]!.conflict.kind).toBe('revision_conflict');
+      expect(losses[0]!.conflict).toMatchObject({ expected: f.base.scenario.revision, current: f.base.scenario.revision + 1 });
+      await coldReload(f, op, wins[0]!.value);
+    });
+
+    it(`${op}: SQL failure after checked admission rolls back all rows; same-revision retry works`, async () => {
+      const f = await fixture(op);
+      if (op === 'A') {
+        // jsonb_array_elements fails AFTER version INSERT + head UPDATE in the
+        // save RPC. Only this throwaway row's events are affected; no DDL.
+        const injected = await db.from('scenarios').update({ events: {} }).eq('id', f.id);
+        expect(injected.error).toBeNull();
+      }
+      const before = await snapshot(f.id);
+      // For B this value passes RPC's non-null actor guard but violates the
+      // EXISTING model_versions_actor_consistency_ck after the undo INSERT.
+      const failed = await write(f, op, f.mutation, 'sys10-invalid-author');
+      expect(failed.status).toBe('error');
+      if (failed.status !== 'error') throw new Error('failure control did not fire');
+      expect(failed.error.code).toBe('store_error');
+      expect(await snapshot(f.id)).toEqual(before); // Includes graph/head/undo/event/revision and all version columns.
+      if (op === 'A') {
+        const reset = await db.from('scenarios').update({ events: [] }).eq('id', f.id);
+        expect(reset.error).toBeNull();
+      }
+      const retry = await write(f, op); // Same expected revision; same B mutation id, valid actor.
+      expect(retry.status).toBe('ok');
+      if (retry.status !== 'ok') throw new Error(`retry refused: ${JSON.stringify(retry)}`);
+      await coldReload(f, op, retry.value);
+    });
+
+    it(`${op}: cold version list/head/graph/undo/event equal the committed receipt`, async () => {
+      const f = await fixture(op);
+      const accepted = await write(f, op);
+      expect(accepted.status).toBe('ok');
+      if (accepted.status !== 'ok') throw new Error('cold reload write refused');
+      await coldReload(f, op, accepted.value);
+    });
+  }
+});

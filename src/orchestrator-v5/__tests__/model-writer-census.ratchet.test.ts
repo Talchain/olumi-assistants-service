@@ -8,27 +8,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const SCRIPT = join(ROOT, 'scripts/census/model-writer-census.mjs');
 
-// RATCHET: the outside-door count may ONLY DECREASE. Never raise it to admit a writer.
-// A PR that moves a writer through the door must lower BASELINE in the same PR (stale-baseline row).
-// Door callers are reported, not capped: routing a writer through the door raises that count.
-const BASELINE = 10;
-
-// SYS10 shrink-only exemptions, one CALL SITE per file:symbol, not a file-wide
-// permission. Remove an entry (and lower BASELINE) when its writer takes the
-// door. Never add/rename an entry to admit a new bypass. The exact multiset
-// check also refuses a second write using an already-exempted symbol.
-const BYPASS_EXEMPTIONS = [
-  'src/collab/rounds-service.ts:store.createModelVersion',
-  'src/collab/store.ts:service.saveVersion',
-  'src/orchestrator-v5/guest-copy/index.ts:copy_guest_scenario',
-  'src/orchestrator-v5/model-management/service.ts:this.store.saveVersion',
-  'src/orchestrator-v5/model-management/service.ts:this.store.restoreVersionAtomic!',
-  'src/orchestrator-v5/model-management/store-adapter.ts:create_model_version_cas_v1',
-  'src/orchestrator-v5/model-management/store-adapter.ts:restore_model_version_atomic_cas_v1',
-  'src/routes/assist.v1.scenario-copy.ts:resolveStore().copyGuestScenario',
-  'src/routes/assist.v1.scenario-versions.ts:service.saveVersion',
-  'src/routes/assist.v1.scenario-versions.ts:service.restoreVersionAtomic',
-] as const;
+// Shared with the SYS10 physical spec: one assertion, one shrink-only list.
+import { BASELINE, BYPASS_EXEMPTIONS, requireOnlyExemptedWrites } from '../../../scripts/census/model-writer-exemptions.mjs';
 
 interface Site { file: string; line: number; kind: string; callee: string; reason?: string }
 interface Census {
@@ -41,19 +22,6 @@ interface Census {
 }
 
 let measured: Census;
-
-function requireOnlyExemptedWrites(census: Census): void {
-  const sites = census.sites.filter(s => s.kind !== 'door_caller');
-  const allowance = new Map<string, number>(BYPASS_EXEMPTIONS.map(key => [key, 1]));
-  for (const site of sites) {
-    const key = `${site.file}:${site.callee}`;
-    const remaining = allowance.get(key) ?? 0;
-    if (remaining === 0) throw new Error(`Unexempted graph write: ${key} (line ${site.line})`);
-    allowance.set(key, remaining - 1);
-  }
-  const stale = [...allowance].filter(([, count]) => count > 0).map(([key]) => key);
-  if (stale.length > 0) throw new Error(`Remove migrated graph-write exemptions: ${stale.join(', ')}`);
-}
 
 describe('model writer census ratchet', () => {
   beforeAll(() => {
