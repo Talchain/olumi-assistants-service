@@ -1464,16 +1464,43 @@ describe('S5 r8 server proof', () => {
       'INSERT INTO public.scenarios (user_id, title, graph, source_scenario_id) VALUES (p_user_id, v_title, v_graph, p_source_scenario_id)');
     const g = attested(), source = JSON.stringify(g), copyId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     let copied: Rec | undefined;
-    // CURRENT SQL: SELECT s.graph INTO v_graph; INSERT ... VALUES (..., v_graph, ...).
-    // DL 87114 rules this residual; the reviewed SQL identity above and inherited-proof assertion pin it.
-    const rpc = vi.fn(async (name: string, args: Rec) => {
+    // Captured legacy SQL outcome only; the transport below accepts the checked RPC exclusively.
+    // Keep the original SQL/proof assertions while supplying the door's source-read contract.
+    const legacyCopyResult = async (name: string, args: Rec) => {
       expect(name).toBe('copy_guest_scenario');
       expect(args).toEqual({ p_source_scenario_id: SCENARIO, p_user_id: 'u-1' });
       copied = JSON.parse(source);
       return { error: null, data: { scenario_id: copyId, created: true } };
+    };
+    const rpc = vi.fn(async (name: string, args: Rec) => {
+      expect(name).toBe('copy_guest_scenario_checked');
+      expect(args).toEqual({ p_source_scenario_id: SCENARIO, p_user_id: 'u-1',
+        p_checked_source_graph: g, p_checked_source_revision: 31 });
+      return legacyCopyResult('copy_guest_scenario', {
+        p_source_scenario_id: args.p_source_scenario_id, p_user_id: args.p_user_id,
+      });
     });
-    expect(await new SupabaseGuestCopyStore({ rpc } as never).copyGuestScenario(SCENARIO, 'u-1'))
-      .toEqual({ kind: 'copied', scenarioId: copyId, created: true });
+    const from = (table: string) => {
+      expect(table).toBe('scenarios');
+      const filters: Rec = {};
+      const query = {
+        select: (columns: string) => { expect(columns).toBe('user_id, graph, revision'); return query; },
+        eq: (column: string, value: string) => { filters[column] = value; return query; },
+        order: () => query, limit: () => query,
+        maybeSingle: async () => {
+          expect(filters).toEqual(filters.id === undefined
+            ? { source_scenario_id: SCENARIO, user_id: 'u-1' } : { id: SCENARIO });
+          return { error: null, data: filters.id === undefined ? null
+            : { user_id: null, graph: JSON.parse(source), revision: 31 } };
+        },
+      };
+      return query;
+    };
+    // Production's preHandler binds this caller (scenario-ownership.ts:312).
+    await bindWriteCaller({ userId: 'u-1', verified: true }, async () => {
+      expect(await new SupabaseGuestCopyStore({ rpc, from } as never).copyGuestScenario(SCENARIO, 'u-1'))
+        .toEqual({ kind: 'copied', scenarioId: copyId, created: true });
+    });
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(copied).toEqual(g);
     expect(horizonSteadyAttested(copied)).toBe(true);
