@@ -1,5 +1,6 @@
 import { goalHorizonVerdict } from '../../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
+import { modelVersionDoorOutcome } from "../../../tests/utils/model-version-door-outcome.js";
 /**
  * Model Management v1 — THE WIRING SLICE (versions list / save / restore).
  *
@@ -162,8 +163,13 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
     getModelManagementService: () => ({
       listVersions,
       getVersion,
-      saveVersion,
-      restoreVersionAtomic,
+      // The service façade was the old test seam. Checks now live at the
+      // controlled door, so keep the outcome spies behind that real boundary.
+      saveVersion: (request: any) => modelVersionDoorOutcome(() => commitModelChange({ operation: 'SAVE_VERSION',
+        store: { getScenarioOwner, saveVersion: () => saveVersion(request) } as any, write: request })),
+      restoreVersionAtomic: (request: any) => modelVersionDoorOutcome(() => commitModelChange({ operation: 'RESTORE_VERSION',
+        store: { getScenarioOwner, restoreVersionAtomic: () => restoreVersionAtomic(request) } as any,
+        write: request, restoreHead: request.restore_head })),
       getCurrentVersionPointer,
       getCurrentVersion,
       compareVersions,
@@ -172,6 +178,7 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
 });
 
 import scenarioVersionsRoute from "../assist.v1.scenario-versions.js";
+import { commitModelChange } from "../../orchestrator-v5/persist-graph-write.js";
 import { ModelManagementService, SupabaseModelVersionStore } from "../../orchestrator-v5/model-management/index.js";
 // The REAL identity authority — the return-leg fixtures build the head's
 // envelope with the same function the route compares against, so the fixture

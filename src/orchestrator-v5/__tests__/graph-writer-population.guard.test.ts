@@ -158,9 +158,8 @@ describe('C8 — the `scenarios.graph` writer population is EXACTLY these call s
     const callers = filesMatching(
       /(?<!function\s)\bassertNoIntroducedGraphViolations\s*\(/,
     ).filter((p) => p !== 'orchestrator-v5/persist-graph-write.ts');
-    // ⭐ THE C8 CLOSURE ITSELF. If `assist.v1.scenario-versions.ts` drops out of
-    // this list, the restore tier is silently writing unchecked graphs again —
-    // which is exactly the state this pin was written to make impossible.
+    // SYS10 checks explicit restore in commitModelChange as well. The HTTP
+    // preflight retains structural-before-receipt refusal ordering.
     // The registration route ALSO calls the check on its own, as a PREFLIGHT
     // before it claims a turn-fence generation (#1706 review): a structurally
     // refused import must not advance the scenario's order. It still writes
@@ -179,7 +178,7 @@ describe('C8 — the `scenarios.graph` writer population is EXACTLY these call s
     expect(route!.code).toMatch(/assertNoIntroducedGraphViolations\(\{\s*graph:\s*graphForStore\b/);
   });
 
-  it('the restore route hands the CHECK the SAME projected object it hands the RPC', () => {
+  it('the restore route hands the door the projected graph and the door checks the dispatch bytes', () => {
     // ⚠ THE CALL-SITE PINS ABOVE PROVE THE CHECK IS WIRED, NEVER THAT IT IS
     // WIRED TO THE RIGHT BYTES. Swapping the check's argument to the raw,
     // unprojected `parsedGraph.data` left this whole file GREEN 11/11 and the
@@ -194,28 +193,34 @@ describe('C8 — the `scenarios.graph` writer population is EXACTLY these call s
     // Both consumers must name the PROJECTED binding. `graphForStore` is the
     // output of `projectGraphForPersistence`; `parsedGraph.data` is the raw
     // stored version and must reach NEITHER.
+    const door = PRODUCTION_TS.find(f => f.path === 'orchestrator-v5/persist-graph-write.ts')!.code;
     expect(code).toMatch(/assertNoIntroducedGraphViolations\(\{\s*graph:\s*graphForStore\b/);
+    expect(door).toMatch(/assertNoIntroducedGraphViolations\(\{\s*graph:\s*params\.write\.graph\b/);
+    expect(door).toMatch(/store\.restoreVersionAtomic\(params\.write\)/);
     expect(code).toMatch(/restoreVersionAtomic\(\{[\s\S]{0,400}?\bgraph:\s*graphForStore\b/);
     expect(code).not.toMatch(/graph:\s*parsedGraph\.data\b/);
   });
 
-  it('`restoreVersionAtomic(` — the third writer has exactly one caller', () => {
+  it('`restoreVersionAtomic(` — the façade and controlled dispatch are the only callers', () => {
     expect(filesMatching(/\.restoreVersionAtomic\s*\(/)).toEqual([
+      'orchestrator-v5/persist-graph-write.ts',
       'routes/assist.v1.scenario-versions.ts',
     ]);
   });
 
-  it('EVERY production file that writes a graph is one of the three known writers', () => {
+  it('EVERY production file that writes a graph is in the known writer set', () => {
     // The union assertion. The three sets above each pin one symbol; this pins
     // that no file reaches persistence by a combination none of them names.
     const writers = new Set([
       ...filesMatching(/\bstore\.append\s*\(/),
       ...filesMatching(/(?<!function\s)\bappendCheckedGraphWrite\s*\(/),
+      ...filesMatching(/(?<!function\s)\bcommitModelChange\s*\(/),
       ...filesMatching(/\.restoreVersionAtomic\s*\(/),
       ...filesMatching(/\.storeDraftGraph\s*\(/),
     ]);
     expect([...writers].sort()).toEqual([
       'orchestrator-v5/commit.ts',
+      'orchestrator-v5/model-management/service.ts',
       'orchestrator-v5/persist-graph-write.ts',
       'routes/agent-v1-turn.ts',
       'routes/assist.v1.scenario-graph-register.ts',

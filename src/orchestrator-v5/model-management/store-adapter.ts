@@ -140,6 +140,8 @@ export interface ModelVersionListReadOptions extends ModelVersionReadOptions {
 /** Store port — the service depends on this interface, not the class, so
  *  tests inject hand-rolled fakes without a Supabase client. */
 export interface ModelVersionStorePort {
+  /** Existing door ownership port; absent only on storage doubles without ownership. */
+  getScenarioOwner?(scenarioId: string): Promise<string | null>;
   saveVersion(write: SaveVersionWrite): Promise<VersionWriteOutcome>;
   listVersions(
     scenarioId: string,
@@ -192,6 +194,14 @@ export const MODEL_VERSION_LIST_DEFAULT_LIMIT = 50;
 
 export class SupabaseModelVersionStore implements ModelVersionStorePort {
   constructor(private readonly client: SupabaseClient) {}
+
+  async getScenarioOwner(scenarioId: string): Promise<string | null> {
+    const { data, error } = await this.client.from('scenarios').select('user_id').eq('id', scenarioId).maybeSingle();
+    if (error || data === null) throw new ModelVersionStoreError('Scenario owner unreadable');
+    const owner: unknown = data.user_id;
+    if (owner !== null && typeof owner !== 'string') throw new ModelVersionStoreError('Scenario owner unreadable');
+    return owner;
+  }
 
   async saveVersion(write: SaveVersionWrite): Promise<VersionWriteOutcome> {
     requireExpectedRevision(write.expected_revision);

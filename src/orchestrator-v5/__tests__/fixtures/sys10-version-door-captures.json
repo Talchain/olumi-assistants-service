@@ -1,0 +1,3418 @@
+{
+  "base": "b8ca7448e",
+  "cases": {
+    "A:success": {
+      "result": {
+        "status": "ok",
+        "value": {
+          "version_id": "33333333-3333-4333-8333-333333333333",
+          "version_number": 3,
+          "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+          "deduped": false,
+          "event_id": "sys10-saved-event"
+        }
+      },
+      "calls": [
+        {
+          "fn": "create_model_version_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_label": "Panel round",
+            "p_provenance": "elicitation_round_mint",
+            "p_event_id": "sys10-saved-event",
+            "p_expected_graph_identity_hash": null,
+            "p_base_known": true,
+            "p_expected_head_version_id": null,
+            "p_expected_working_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": "33333333-3333-4333-8333-333333333333",
+        "versions": [
+          {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 3,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": "Panel round",
+            "provenance": "elicitation_round_mint",
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": [
+          "sys10-saved-event"
+        ]
+      },
+      "events": [
+        {
+          "event_version": "model_version_event.v1",
+          "event_id": "sys10-saved-event",
+          "event_type": "model_version_created",
+          "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "version_id": "33333333-3333-4333-8333-333333333333",
+          "version_number": 3,
+          "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+          "restored_from_version_id": null,
+          "occurred_at_iso": "<runtime clock>"
+        }
+      ]
+    },
+    "A:userSave": {
+      "result": {
+        "status": "ok",
+        "value": {
+          "version_id": "33333333-3333-4333-8333-333333333333",
+          "version_number": 3,
+          "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+          "deduped": false,
+          "event_id": "model_version_created_33333333-3333-4333-8333-333333333333"
+        }
+      },
+      "calls": [
+        {
+          "fn": "create_model_version_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_label": "My version",
+            "p_provenance": "user_save",
+            "p_event_id": null,
+            "p_expected_graph_identity_hash": null,
+            "p_base_known": true,
+            "p_expected_head_version_id": null,
+            "p_expected_working_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": "33333333-3333-4333-8333-333333333333",
+        "versions": [
+          {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 3,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": "My version",
+            "provenance": "user_save",
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": [
+          "model_version_created_33333333-3333-4333-8333-333333333333"
+        ]
+      },
+      "events": [
+        {
+          "event_version": "model_version_event.v1",
+          "event_id": "model_version_created_33333333-3333-4333-8333-333333333333",
+          "event_type": "model_version_created",
+          "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "version_id": "33333333-3333-4333-8333-333333333333",
+          "version_number": 3,
+          "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+          "restored_from_version_id": null,
+          "occurred_at_iso": "<runtime clock>"
+        }
+      ]
+    },
+    "A:dedupe": {
+      "result": {
+        "status": "ok",
+        "value": {
+          "version_id": "33333333-3333-4333-8333-333333333333",
+          "version_number": 3,
+          "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+          "deduped": true,
+          "event_id": null
+        }
+      },
+      "calls": [
+        {
+          "fn": "create_model_version_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_label": "Panel round",
+            "p_provenance": "elicitation_round_mint",
+            "p_event_id": "sys10-saved-event",
+            "p_expected_graph_identity_hash": null,
+            "p_base_known": true,
+            "p_expected_head_version_id": "33333333-3333-4333-8333-333333333333",
+            "p_expected_working_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": "33333333-3333-4333-8333-333333333333",
+        "versions": [
+          {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 3,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": "Panel round",
+            "provenance": "elicitation_round_mint",
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": []
+      },
+      "events": []
+    },
+    "A:fail": {
+      "result": {
+        "status": "error",
+        "error": {
+          "code": "store_error",
+          "recoverable": false,
+          "message": "create_model_version_cas_v1 RPC failed: scripted storage refusal"
+        }
+      },
+      "calls": [
+        {
+          "fn": "create_model_version_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_label": "Panel round",
+            "p_provenance": "elicitation_round_mint",
+            "p_event_id": "sys10-saved-event",
+            "p_expected_graph_identity_hash": null,
+            "p_base_known": true,
+            "p_expected_head_version_id": null,
+            "p_expected_working_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": null,
+        "versions": [],
+        "events": []
+      },
+      "events": []
+    },
+    "A:throw": {
+      "result": {
+        "status": "error",
+        "error": {
+          "code": "store_error",
+          "recoverable": false,
+          "message": "wire disconnected"
+        }
+      },
+      "calls": [
+        {
+          "fn": "create_model_version_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_label": "Panel round",
+            "p_provenance": "elicitation_round_mint",
+            "p_event_id": "sys10-saved-event",
+            "p_expected_graph_identity_hash": null,
+            "p_base_known": true,
+            "p_expected_head_version_id": null,
+            "p_expected_working_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": null,
+        "versions": [],
+        "events": []
+      },
+      "events": []
+    },
+    "A:conflict": {
+      "result": {
+        "status": "conflict",
+        "conflict": {
+          "kind": "analysis_affecting_conflict",
+          "expected_graph_identity_hash": null,
+          "message": "Version write rejected: the model changed since the expected state was read."
+        }
+      },
+      "calls": [
+        {
+          "fn": "create_model_version_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_label": "Panel round",
+            "p_provenance": "elicitation_round_mint",
+            "p_event_id": "sys10-saved-event",
+            "p_expected_graph_identity_hash": null,
+            "p_base_known": true,
+            "p_expected_head_version_id": null,
+            "p_expected_working_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": null,
+        "versions": [],
+        "events": []
+      },
+      "events": []
+    },
+    "B:success": {
+      "result": {
+        "status": "ok",
+        "value": {
+          "mutation_id": "44444444-4444-4444-8444-444444444444",
+          "version_id": "33333333-3333-4333-8333-333333333333",
+          "version_number": 3,
+          "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+          "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+          "hash_algorithm": "sha256",
+          "identity_projection_version": "identity.v1",
+          "identity_normaliser_version": "1",
+          "graph_schema_version": "graph_v3",
+          "restored_from_version_id": "11111111-1111-4111-8111-111111111111",
+          "undo_version_id": "22222222-2222-4222-8222-222222222222",
+          "parent_version_id": "22222222-2222-4222-8222-222222222222",
+          "root_version_id": "22222222-2222-4222-8222-222222222222",
+          "actor_kind": "known",
+          "authored_by": "owner",
+          "creation_kind": "restore",
+          "source_version_id": "11111111-1111-4111-8111-111111111111",
+          "source_turn_id": null,
+          "graph": {
+            "nodes": [
+              {
+                "id": "n_price",
+                "kind": "factor",
+                "label": "Unit Price"
+              },
+              {
+                "id": "n_demand",
+                "kind": "factor",
+                "label": "Demand"
+              },
+              {
+                "id": "n_revenue",
+                "kind": "outcome",
+                "label": "Revenue"
+              }
+            ],
+            "edges": [
+              {
+                "id": "e_price_rev",
+                "from": "n_price",
+                "to": "n_revenue",
+                "strength": {
+                  "mean": 0.4,
+                  "std": 0.1
+                },
+                "exists_probability": 0.9,
+                "effect_direction": "positive"
+              },
+              {
+                "id": "e_demand_rev",
+                "from": "n_demand",
+                "to": "n_revenue",
+                "strength": {
+                  "mean": 0.4,
+                  "std": 0.1
+                },
+                "exists_probability": 0.9,
+                "effect_direction": "positive"
+              }
+            ]
+          },
+          "deduped": false,
+          "replayed": false,
+          "analysis_invalidated_at": "2026-10-11T12:00:00.000Z",
+          "event_id": "model_version_restored_mutation_44444444-4444-4444-8444-444444444444"
+        }
+      },
+      "calls": [
+        {
+          "fn": "restore_model_version_atomic_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_version_id": "11111111-1111-4111-8111-111111111111",
+            "p_mutation_id": "44444444-4444-4444-8444-444444444444",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_source_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_current_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_current_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_current_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_expected_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_actor_kind": "known",
+            "p_authored_by": "owner",
+            "p_source_turn_id": null,
+            "p_label": "Restore pricing"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Unit Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": "33333333-3333-4333-8333-333333333333",
+        "versions": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 1,
+            "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          },
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 2,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": "22222222-2222-4222-8222-222222222222",
+            "actor_kind": "known",
+            "authored_by": "owner",
+            "creation_kind": "initial",
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          },
+          {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 3,
+            "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": "44444444-4444-4444-8444-444444444444",
+            "parent_version_id": "22222222-2222-4222-8222-222222222222",
+            "root_version_id": "22222222-2222-4222-8222-222222222222",
+            "actor_kind": "known",
+            "authored_by": "owner",
+            "creation_kind": "restore",
+            "source_version_id": "11111111-1111-4111-8111-111111111111",
+            "source_turn_id": null,
+            "label": null,
+            "provenance": "restore",
+            "restored_from_version_id": "11111111-1111-4111-8111-111111111111",
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": [
+          "model_version_restored_mutation_44444444-4444-4444-8444-444444444444"
+        ]
+      },
+      "events": [
+        {
+          "event_version": "model_version_event.v1",
+          "event_id": "model_version_restored_mutation_44444444-4444-4444-8444-444444444444",
+          "event_type": "model_version_restored",
+          "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "version_id": "33333333-3333-4333-8333-333333333333",
+          "version_number": 3,
+          "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+          "restored_from_version_id": "11111111-1111-4111-8111-111111111111",
+          "occurred_at_iso": "<runtime clock>"
+        }
+      ]
+    },
+    "B:replay": {
+      "result": {
+        "status": "ok",
+        "value": {
+          "mutation_id": "44444444-4444-4444-8444-444444444444",
+          "version_id": "33333333-3333-4333-8333-333333333333",
+          "version_number": 3,
+          "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+          "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+          "hash_algorithm": "sha256",
+          "identity_projection_version": "identity.v1",
+          "identity_normaliser_version": "1",
+          "graph_schema_version": "graph_v3",
+          "restored_from_version_id": "11111111-1111-4111-8111-111111111111",
+          "undo_version_id": "22222222-2222-4222-8222-222222222222",
+          "parent_version_id": "22222222-2222-4222-8222-222222222222",
+          "root_version_id": "22222222-2222-4222-8222-222222222222",
+          "actor_kind": "known",
+          "authored_by": "owner",
+          "creation_kind": "restore",
+          "source_version_id": "11111111-1111-4111-8111-111111111111",
+          "source_turn_id": null,
+          "graph": {
+            "nodes": [
+              {
+                "id": "n_price",
+                "kind": "factor",
+                "label": "Unit Price"
+              },
+              {
+                "id": "n_demand",
+                "kind": "factor",
+                "label": "Demand"
+              },
+              {
+                "id": "n_revenue",
+                "kind": "outcome",
+                "label": "Revenue"
+              }
+            ],
+            "edges": [
+              {
+                "id": "e_price_rev",
+                "from": "n_price",
+                "to": "n_revenue",
+                "strength": {
+                  "mean": 0.4,
+                  "std": 0.1
+                },
+                "exists_probability": 0.9,
+                "effect_direction": "positive"
+              },
+              {
+                "id": "e_demand_rev",
+                "from": "n_demand",
+                "to": "n_revenue",
+                "strength": {
+                  "mean": 0.4,
+                  "std": 0.1
+                },
+                "exists_probability": 0.9,
+                "effect_direction": "positive"
+              }
+            ]
+          },
+          "deduped": false,
+          "replayed": true,
+          "analysis_invalidated_at": "2026-10-11T12:00:00.000Z",
+          "event_id": "model_version_restored_mutation_44444444-4444-4444-8444-444444444444"
+        }
+      },
+      "calls": [
+        {
+          "fn": "restore_model_version_atomic_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_version_id": "11111111-1111-4111-8111-111111111111",
+            "p_mutation_id": "44444444-4444-4444-8444-444444444444",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_source_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_current_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_current_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_current_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_expected_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_actor_kind": "known",
+            "p_authored_by": "owner",
+            "p_source_turn_id": null,
+            "p_label": "Restore pricing"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Unit Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 8,
+        "head": "33333333-3333-4333-8333-333333333333",
+        "versions": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 1,
+            "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          },
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 2,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": "22222222-2222-4222-8222-222222222222",
+            "actor_kind": "known",
+            "authored_by": "owner",
+            "creation_kind": "initial",
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          },
+          {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 3,
+            "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": "44444444-4444-4444-8444-444444444444",
+            "parent_version_id": "22222222-2222-4222-8222-222222222222",
+            "root_version_id": "22222222-2222-4222-8222-222222222222",
+            "actor_kind": "known",
+            "authored_by": "owner",
+            "creation_kind": "restore",
+            "source_version_id": "11111111-1111-4111-8111-111111111111",
+            "source_turn_id": null,
+            "label": null,
+            "provenance": "restore",
+            "restored_from_version_id": "11111111-1111-4111-8111-111111111111",
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": [
+          "model_version_restored_mutation_44444444-4444-4444-8444-444444444444"
+        ]
+      },
+      "events": []
+    },
+    "B:fail": {
+      "result": {
+        "status": "error",
+        "error": {
+          "code": "store_error",
+          "recoverable": false,
+          "message": "restore_model_version_atomic_cas_v1 RPC failed: scripted storage refusal"
+        }
+      },
+      "calls": [
+        {
+          "fn": "restore_model_version_atomic_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_version_id": "11111111-1111-4111-8111-111111111111",
+            "p_mutation_id": "44444444-4444-4444-8444-444444444444",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_source_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_current_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_current_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_current_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_expected_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_actor_kind": "known",
+            "p_authored_by": "owner",
+            "p_source_turn_id": null,
+            "p_label": "Restore pricing"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": "22222222-2222-4222-8222-222222222222",
+        "versions": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 1,
+            "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          },
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 2,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": "22222222-2222-4222-8222-222222222222",
+            "actor_kind": "known",
+            "authored_by": "owner",
+            "creation_kind": "initial",
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": []
+      },
+      "events": []
+    },
+    "B:throw": {
+      "result": {
+        "status": "error",
+        "error": {
+          "code": "store_error",
+          "recoverable": false,
+          "message": "wire disconnected"
+        }
+      },
+      "calls": [
+        {
+          "fn": "restore_model_version_atomic_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_version_id": "11111111-1111-4111-8111-111111111111",
+            "p_mutation_id": "44444444-4444-4444-8444-444444444444",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_source_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_current_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_current_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_current_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_expected_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_actor_kind": "known",
+            "p_authored_by": "owner",
+            "p_source_turn_id": null,
+            "p_label": "Restore pricing"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": "22222222-2222-4222-8222-222222222222",
+        "versions": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 1,
+            "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          },
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 2,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": "22222222-2222-4222-8222-222222222222",
+            "actor_kind": "known",
+            "authored_by": "owner",
+            "creation_kind": "initial",
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": []
+      },
+      "events": []
+    },
+    "B:conflict": {
+      "result": {
+        "status": "conflict",
+        "conflict": {
+          "kind": "revision_conflict",
+          "expected_graph_identity_hash": null,
+          "message": "The scenario changed while I was saving, so nothing was saved. Try again.",
+          "expected": 7,
+          "current": 8
+        }
+      },
+      "calls": [
+        {
+          "fn": "restore_model_version_atomic_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_version_id": "11111111-1111-4111-8111-111111111111",
+            "p_mutation_id": "44444444-4444-4444-8444-444444444444",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_source_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_current_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_current_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_current_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_expected_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_actor_kind": "known",
+            "p_authored_by": "owner",
+            "p_source_turn_id": null,
+            "p_label": "Restore pricing"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": "22222222-2222-4222-8222-222222222222",
+        "versions": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 1,
+            "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          },
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 2,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": "22222222-2222-4222-8222-222222222222",
+            "actor_kind": "known",
+            "authored_by": "owner",
+            "creation_kind": "initial",
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": []
+      },
+      "events": []
+    },
+    "B:missing": {
+      "result": {
+        "status": "error",
+        "error": {
+          "code": "version_not_found",
+          "recoverable": true,
+          "message": "restore_model_version_atomic_cas_v1 RPC failed: scripted storage refusal"
+        }
+      },
+      "calls": [
+        {
+          "fn": "restore_model_version_atomic_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_version_id": "11111111-1111-4111-8111-111111111111",
+            "p_mutation_id": "44444444-4444-4444-8444-444444444444",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_source_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_current_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_current_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_current_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_expected_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_actor_kind": "known",
+            "p_authored_by": "owner",
+            "p_source_turn_id": null,
+            "p_label": "Restore pricing"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": "22222222-2222-4222-8222-222222222222",
+        "versions": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 1,
+            "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          },
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 2,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": "22222222-2222-4222-8222-222222222222",
+            "actor_kind": "known",
+            "authored_by": "owner",
+            "creation_kind": "initial",
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": []
+      },
+      "events": []
+    },
+    "B:reuse": {
+      "result": {
+        "status": "error",
+        "error": {
+          "code": "mutation_id_reused",
+          "recoverable": false,
+          "message": "That mutation id was already used for a different restore target."
+        }
+      },
+      "calls": [
+        {
+          "fn": "restore_model_version_atomic_cas_v1",
+          "args": {
+            "p_expected_revision": 7,
+            "p_scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "p_version_id": "11111111-1111-4111-8111-111111111111",
+            "p_mutation_id": "44444444-4444-4444-8444-444444444444",
+            "p_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_projection_version": "identity.v1",
+            "p_normaliser_version": "1",
+            "p_graph_schema_version": "graph_v3",
+            "p_hash_algorithm": "sha256",
+            "p_source_graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "p_current_graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            },
+            "p_current_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_current_analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "p_expected_graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "p_actor_kind": "known",
+            "p_authored_by": "owner",
+            "p_source_turn_id": null,
+            "p_label": "Restore pricing"
+          }
+        }
+      ],
+      "state": {
+        "owner": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_price",
+              "kind": "factor",
+              "label": "Price"
+            },
+            {
+              "id": "n_demand",
+              "kind": "factor",
+              "label": "Demand"
+            },
+            {
+              "id": "n_revenue",
+              "kind": "outcome",
+              "label": "Revenue"
+            }
+          ],
+          "edges": [
+            {
+              "id": "e_price_rev",
+              "from": "n_price",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            },
+            {
+              "id": "e_demand_rev",
+              "from": "n_demand",
+              "to": "n_revenue",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        "revision": 7,
+        "head": "22222222-2222-4222-8222-222222222222",
+        "versions": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 1,
+            "graph_identity_hash": "116348dd34467bf908b9fc6c0c5f49f1137ba7b7c819ffb171e43d3919b212da",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": null,
+            "actor_kind": null,
+            "authored_by": null,
+            "creation_kind": null,
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Unit Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          },
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "scenario_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "owner_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "version_number": 2,
+            "graph_identity_hash": "a4c5a605967d228250c002776921534dd6c1e45a5df858b0eaa3fe5e9e88a515",
+            "hash_algorithm": "sha256",
+            "identity_projection_version": "identity.v1",
+            "identity_normaliser_version": "1",
+            "graph_schema_version": "graph_v3",
+            "analysis_affecting_hash": "7bea50404aef8244a9be666b81922c9e56a25e79d4de7833db564d859f674094",
+            "mutation_id": null,
+            "parent_version_id": null,
+            "root_version_id": "22222222-2222-4222-8222-222222222222",
+            "actor_kind": "known",
+            "authored_by": "owner",
+            "creation_kind": "initial",
+            "source_version_id": null,
+            "source_turn_id": null,
+            "label": null,
+            "provenance": null,
+            "restored_from_version_id": null,
+            "created_at": "2026-07-06T10:00:00.000+00:00",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "n_price",
+                  "kind": "factor",
+                  "label": "Price"
+                },
+                {
+                  "id": "n_demand",
+                  "kind": "factor",
+                  "label": "Demand"
+                },
+                {
+                  "id": "n_revenue",
+                  "kind": "outcome",
+                  "label": "Revenue"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "e_price_rev",
+                  "from": "n_price",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                },
+                {
+                  "id": "e_demand_rev",
+                  "from": "n_demand",
+                  "to": "n_revenue",
+                  "strength": {
+                    "mean": 0.4,
+                    "std": 0.1
+                  },
+                  "exists_probability": 0.9,
+                  "effect_direction": "positive"
+                }
+              ]
+            }
+          }
+        ],
+        "events": []
+      },
+      "events": []
+    }
+  }
+}
