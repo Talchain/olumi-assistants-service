@@ -21,8 +21,8 @@
  *   R11 a node label only (PLoT's binary classifier reads labels) → partial, [].
  * WRITER → RUN (DL ruling #2482 r3, schemas 0.72.0 `authorship_digest`) — the REAL `adjust_edge_strength` writer:
  *   W1  the user names a band → the band's own σ + authorship → strength + sizing rows, complete (the investor step).
- *   W2  the Accept of Olumi's placeholder → ONE sizing row, complete.
- *   W3  the Accept of a PREVIOUSLY REVIEWED placeholder → ONE sizing row, complete (review metadata on neither end).
+ *   W2  approval of a genuine Olumi estimate → ONE sizing row, complete (Batch A ruling 6).
+ *   W3  confirmation of a PREVIOUSLY REVIEWED placeholder → no sizing row, complete (Batch A ruling 2).
  *   W4  a user-owned link confirmed as it is → only the review moves → complete, [].
  *   W5  a factor confirmed as it is → complete, [].
  * FACTOR AUTHORSHIP (F1b lease #85 5945475375, schemas 0.73.0) — the REAL `factor_value_edit` writer:
@@ -289,17 +289,21 @@ describe('0.71.0 residual on the real wire — complete means verified', () => {
     expect(p.complete).toBe(true);
   });
 
-  it('W2 (the Accept): Olumi\'s placeholder approved at its own band → ONE sizing row, complete', async () => {
-    const p = await pair(async (g) => writeStrength(g, 0.1, 'weak'), (g) => { edge(g, ...LINK).provenance.magnitude = 'olumi_placeholder'; });
-    expect(p.rows.map((r) => [r.entity_id, r.field, r.before, r.after])).toEqual([[LINK_ID, 'sizing', { raw: 'placeholder' }, { raw: 'olumi_accepted' }]]);
+  it('Batch A W2: a genuine Olumi estimate approved at its own band → ONE sizing row, complete', async () => {
+    const p = await pair(async (g) => writeStrength(g, 0.1, 'weak'), (g) => { edge(g, ...LINK).provenance.magnitude = 'olumi_estimate'; });
+    // Batch A rulings 2 and 6: review stays unsized; genuine accepted estimates still license.
+    expect(p.rows.map((r) => [r.entity_id, r.field, r.before, r.after])).toEqual([[LINK_ID, 'sizing', { raw: 'olumi_estimate' }, { raw: 'olumi_accepted' }]]);
     expect(p.complete).toBe(true);
   });
 
-  it('W3 (P1-2): Accept of a PREVIOUSLY REVIEWED placeholder (served 96c6f5f4 09:25 shape) → ONE sizing row, complete', async () => {
+  it('Batch A W3: confirming a previously reviewed placeholder leaves it unsized, complete with no sizing row', async () => {
     const p = await pair(async (g) => writeStrength(g, 0.1, 'weak'), (g) => {
       edge(g, ...LINK).provenance = { ...edge(g, ...LINK).provenance, magnitude: 'olumi_placeholder', reviewed_by_user: { intent: 'confirm', at: '2026-10-01T09:25:10.219Z' } };
     });
-    expect(p.rows.map((r) => [r.entity_id, r.field, r.before, r.after])).toEqual([[LINK_ID, 'sizing', { raw: 'placeholder' }, { raw: 'olumi_accepted' }]]);
+    // Batch A rulings 2 and 6: review stays unsized; genuine accepted estimates still license.
+    expect(p.rows).toEqual([]);
+    // Batch A rulings 2 and 6: review stays unsized; genuine accepted estimates still license.
+    expect(edge(p.bGraph, ...LINK).provenance.magnitude).toBe('olumi_placeholder');
     expect(p.complete).toBe(true);
   });
 

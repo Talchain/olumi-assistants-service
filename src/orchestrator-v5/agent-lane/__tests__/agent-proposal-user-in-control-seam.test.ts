@@ -251,8 +251,8 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(r.assistant_text).toContain('Left as Olumi\'s estimate: "Cost" (£200).');
   }, 120_000);
   // ⛔ P03 served blocker (8 Oct, scenario 072cc1d0): after a Run the frame projection leaves Olumi's links as
-  // `{ source: 'cee_hypothesis', mean_projected: true }` (no magnitude). Approving one sizes it (`sizedByApproval`), and the
-  // confirm guard refused that as a non-provenance change, so the whole card was not_applied, edited or not.
+  // `{ source: 'cee_hypothesis', mean_projected: true }` (no magnitude). Batch A ruling 1 supersedes promotion:
+  // approving one records review, keeps the projection, and commits the card atomically.
   const projectLinks = () => {
     const g = graphNow() as unknown as { edges: Record<string, unknown>[] };
     for (const e of g.edges) if (e.to === 'goal_x' && (e.from === 'fac_hours' || e.from === 'fac_cost')) {
@@ -261,25 +261,28 @@ describe('S-D slice 2 Agent proposals', () => {
     }
     graphOf.set(SCENARIO, projectGraphForPersistence(g as never));
   };
-  it('A6-projected RED: plain approval of Olumi\'s projected-mean links records them as accepted estimates in one commit', async () => {
+  it('Batch A: plain approval reviews projected-mean links in one commit and keeps them unsized', async () => {
     seed(); projectLinks(); const b = await links(); const p = shown(b);
     const before = graphNow().edges.filter(x => x.to === 'goal_x').map(x => [x.from, x.strength]);
     const r = await turn(press(p));
     expect(r._agent.tool_calls).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
     for (const id of ['fac_hours', 'fac_cost']) {
       const e = graphNow().edges.find(x => x.from === id && x.to === 'goal_x')!;
-      expect(e.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } });
-      expect(e.provenance).not.toHaveProperty('mean_projected');
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(e.provenance).toMatchObject({ source: 'cee_hypothesis', mean_projected: true, reviewed_by_user: { intent: 'confirm' } });
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(e.provenance).not.toHaveProperty('magnitude');
     }
     expect(graphNow().edges.filter(x => x.to === 'goal_x').map(x => [x.from, x.strength])).toEqual(before);
     expect(graphWrites.get(SCENARIO)).toBe(1);
   }, 120_000);
-  it('A6-projected edits RED: one edited projected link is the user\'s, the untouched one is Olumi\'s accepted estimate', async () => {
+  it('Batch A: one edited projected link is the user\'s, the untouched one stays unsized', async () => {
     seed(); projectLinks(); const b = await links();
     await submit(b, [{ field_id: 'link_strength:fac_hours::goal_x', band: 'very_strong' }]);
     const e = (id: string) => graphNow().edges.find(x => x.from === id && x.to === 'goal_x')!;
     expect(e('fac_hours').provenance).toMatchObject({ source: 'user_specified' });
-    expect(e('fac_cost').provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } });
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(e('fac_cost').provenance).toMatchObject({ source: 'cee_hypothesis', mean_projected: true, reviewed_by_user: { intent: 'confirm' } });
     expect(graphWrites.get(SCENARIO)).toBe(1);
   }, 120_000);
   it('A6 RED: projected Olumi bands, one edited user link and one untouched estimate with receipts', async () => {
