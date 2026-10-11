@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
+import { ReadableStream } from 'node:stream/web';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
