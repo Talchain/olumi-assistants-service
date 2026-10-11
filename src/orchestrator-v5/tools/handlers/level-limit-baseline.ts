@@ -348,8 +348,9 @@ export function withholdUnprovablePercentFrames<C>(graph: unknown, goalConstrain
 /**
  * ⭐ A2 FOLLOW-UP (DL verdict on #2180): THE ONE CASE WHERE "LESS THAN" AND "AT MOST" DIFFER. An option whose limited
  * quantity stays at EXACTLY a strict limit's threshold does not meet it: "keep churn under 4%" is not met by an option
- * that sets churn at 4%, or leaves today's 4% alone. The store holds `operator: "<="` + `operator_as_stated: "<"`, and PLoT/ISL get
- * `<=` only (`run-analysis.ts` `withholdStatedOperator`), so the engine counts that option as meeting it. Over continuous
+ * that sets churn at 4%, or leaves today's 4% alone. The store holds `operator: "<="` + `operator_as_stated: "<"`. Until recovery
+ * Batch C PLoT/ISL got `<=` only, so the engine counted that option as meeting it; they now get `<` (`run-analysis.ts`
+ * `wireGoalConstraints`) and score the tie exactly, and this withhold stays as a conservative guard. Over continuous
  * draws P(X < 4) = P(X <= 4) and the engine's score IS the stated limit's; the pinned level is the exception.
  *
  * Returned per option (option id → the constraint ids it pins at the threshold) for the verdict's one owner,

@@ -222,7 +222,8 @@ describe('Paul\'s exact limit: keeping monthly churn UNDER 4%', () => {
   it('R3 NO-PATH: carry-on and a price option with no directed path to churn inherit today\'s 4% strict tie', async () => {
     const r = await plotLimit([underFour], undefined, 0.04, undefined, { priceMovesChurn: false });
     expect(r.todayWithinLimit, 'R2: the reply uses the same graph as this R3 analysis').toBe('at_threshold');
-    expect(r.wireLimit).toMatchObject({ constraint_id: LIMIT_ID, operator: '<=', value: 4, unit: '%' });
+    // Batch C: ruling 16 — the strict comparator reaches the engine; the pinned-tie withhold below is kept (conservative).
+    expect(r.wireLimit).toMatchObject({ constraint_id: LIMIT_ID, operator: '<', value: 4, unit: '%' });
     expect(r.wireLimit).not.toHaveProperty('operator_as_stated');
     expect(r.wireChurn).toEqual({ opt_hold: undefined, opt_raise: undefined });
     expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'unevaluated', mayName: false });
@@ -334,10 +335,11 @@ describe('Paul\'s exact limit: keeping monthly churn UNDER 4%', () => {
 });
 
 describe('the DL row — the leading option pins churn at EXACTLY a strict limit ("under 10%")', () => {
-  it('PREMISE: PLoT receives the pin at 0.10 on the leader and "<=" only (the wire is unchanged: nothing is modelled)', async () => {
+  it('PREMISE: PLoT receives the pin at 0.10 on the leader and the stated "<" (Batch C: the engine scores the tie exactly)', async () => {
     const r = await plotLimit([strictRow], { option: 'opt_raise', level: 0.1 });
     expect(r.wireChurn).toEqual({ opt_hold: undefined, opt_raise: 0.1 });
-    expect(r.wireLimit).toMatchObject({ operator: '<=', value: 10, unit: '%' });
+    // Batch C: ruling 16 — preserve strict comparisons on the wire.
+    expect(r.wireLimit).toMatchObject({ operator: '<', value: 10, unit: '%' });
     expect(r.wireLimit).not.toHaveProperty('operator_as_stated');
   });
 

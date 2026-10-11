@@ -7,7 +7,25 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.82.0.tgz` ← **THE CURRENT PIN** (event_risk.v1 pilot; DL 0fd71f, 7 Oct)
+### `talchain-schemas-0.83.0.tgz` ← **THE CURRENT PIN** (recovery Batch C: strict constraint operators + goal-chance precision; 12 Oct)
+
+**Provenance: A LOCAL PACK, NOT YET A REGISTRY ARTEFACT.** Packed by the Batch C schemas builder from olumi-schemas branch
+`recovery/batchC-strict-ops` @ `674014c75191744aec7f82c74708725f0d5f41b6` (byte-identical to
+`recovery/bC/olumi-schemas/talchain-schemas-0.83.0.tgz`). **873,415 bytes.** Verified, all exact:
+
+```
+sha1               d328fd018a4ca52859dc83167ae5a2cf457fc161
+integrity (sha512) sha512-NI4v+eriPoLB1rd39PDPcJSdN6QEon2YIW12l0vl2zgCRHC7TIKv/Nbttkl8KKJ2XT2Os8fZVRhJ2OCYxk03Vw==
+sha256             2f468b3b4cde7168653e02013f2e073ebb9400c7e6499a15dc2c44952281652c   (the .sha256 sidecar)
+```
+
+0.83.0 widens every constraint `operator` enum to `'>=' | '<=' | '>' | '<'` (the Run-input snapshot's
+`RunInputConstraintSchema` included, so a strict target is recorded as stated), and adds the optional
+`EnrichmentProbabilityPrecisionSchema` `{n_informative, standard_error}` beside the joint and per-constraint chances.
+Additive: a 0.82.0 reader keeps parsing every 0.82.0 payload. ⚠ Replace with the registry artefact once the DL publishes
+0.83.0; the sha256 must then be re-verified against the published bytes.
+
+### `talchain-schemas-0.82.0.tgz` (previous pin; still vendored until 0.83.0 is published) (event_risk.v1 pilot; DL 0fd71f, 7 Oct)
 
 **Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
 `https://npm.pkg.github.com/download/@talchain/schemas/0.82.0/3c18c6453ba15df76cd309058aff06fef885d12d`; registry gitHead

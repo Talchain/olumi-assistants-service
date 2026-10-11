@@ -413,8 +413,9 @@ export const GoalConstraintSchema = z.object({
    * beside `">="`. Absent means the operator is as stated.
    *
    * ⛔ NOT A WIDER `operator` ENUM: `GraphV3.safeParse` fails the WHOLE graph on an unknown operator (Canonical
-   * 5860723311), and PLoT's preflight refuses anything but `>=`/`<=`. The engine still gets `operator` only; the
-   * PLoT wire copy withholds this field (`run-analysis.ts`, `withholdStatedOperator`).
+   * 5860723311), so a reader on an older pin must still parse the stored row. Recovery Batch C (ruling 16): PLoT and ISL
+   * now score `>` / `<` exactly, so the PLoT wire copy sends THIS comparator in `operator` when the pair is consistent
+   * (`run-analysis.ts`, `wireGoalConstraints`); the stored row is unchanged.
    *
    * ⚠ DECLARED, NOT LEFT TO PASSTHROUGH: this is a plain `z.object`, so an undeclared stamp is deleted at the first
    * `GraphV3` parse hop — every later D1 edit (`apply-graph-mutation.ts`) writes the parsed rows. An older reader
