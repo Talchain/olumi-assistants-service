@@ -287,21 +287,30 @@ export class ProposalStore {
   /** Proposals whose own write landed only in part, with what landed and the revision it left. */
   private readonly partial = new Map<string, PartialProgress>();
   private order: string[] = [];
-  /** Single-flight only. This does not establish durable exactly-once. Unknown writes stay blocked. */
-  private readonly executions = new Map<string, Promise<boolean>>();
+  /**
+   * Single-flight only. This does not establish durable exactly-once. Unknown writes stay blocked.
+   * Keyed by proposal id, then by the approved-operation key, so discarding a proposal also forgets its memo
+   * and the map is bounded by the same cap as the proposals themselves (oldest proposal's memo evicted first).
+   */
+  private readonly executions = new Map<string, Map<string, Promise<boolean>>>();
 
   async executeApproved<T>(
     p: StructuredProposal, turnId: string, execute: () => Promise<T>,
     confirmed: (result: T) => boolean, reconcile: () => Promise<T>,
   ): Promise<T> {
     const key = approvedOperationKey(p, turnId);
-    const prior = this.executions.get(key);
+    const memo = this.executions.get(p.proposal_id) ?? new Map<string, Promise<boolean>>();
+    const prior = memo.get(key);
     if (prior !== undefined) {
       if (!await prior) return reconcile();
       return execute(); // the existing applied-receipt arm answers without a write
     }
     let close!: (known: boolean) => void;
-    this.executions.set(key, new Promise<boolean>(resolve => { close = resolve; }));
+    memo.set(key, new Promise<boolean>(resolve => { close = resolve; }));
+    if (!this.executions.has(p.proposal_id)) {
+      this.executions.set(p.proposal_id, memo);
+      if (this.executions.size > MAX_PROPOSALS) this.executions.delete(this.executions.keys().next().value as string);
+    }
     try {
       const result = await execute();
       close(confirmed(result));
@@ -353,6 +362,7 @@ export class ProposalStore {
    */
   discard(id: string): void {
     this.items.delete(id);
+    this.executions.delete(id);
     this.order = this.order.filter((x) => x !== id);
   }
 
