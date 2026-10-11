@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
 import { ReadableStream } from 'node:stream/web';
@@ -8,10 +8,20 @@ import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } f
 import { ProposalStore, createProposal, approvedOperationKey, MAX_EXECUTIONS_PER_PROPOSAL, type ProposalContent } from '../../src/orchestrator-v5/agent-lane/proposal.js';
 import { isComposerApprovalWords } from '../../src/orchestrator-v5/agent-lane/composer-approval-words.js';
 import * as adapter from '../../src/adapters/llm/openai.js';
+import * as capabilitiesModule from '../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import * as policyModule from '../../src/adapters/llm/provider-policy.js';
+import * as briefModule from '../../src/orchestrator-v5/agent-lane/brief-reading.js';
+import * as researchModule from '../../src/orchestrator-v5/agent-lane/runtime/public-research.js';
+import { runWithStageStream } from '../../src/cee/unified-pipeline/stage-stream-context.js';
 import { OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../src/adapters/llm/provider-policy.js';
 import { agentRequestIdentity } from '../../src/orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { narrateWriteOutcome } from '../../src/orchestrator-v5/agent-lane/write-outcome.js';
 import { RUN_INTERPRETATION_FORMAT } from '../../src/orchestrator-v5/agent-lane/provisional-view.js';
+import { onceMoreOnTransportFailure } from '../../src/orchestrator-v5/agent-lane/runtime/transport-retry.js';
+import { strictForTheDrafter, type CallStructuredModel } from '../../src/orchestrator-v5/agent-lane/runtime/build-model.js';
+import { budgetFor, callEffortFor, type CallBudget } from '../../src/orchestrator-v5/agent-lane/model-budgets.js';
+import type { CallModel } from '../../src/orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { conversationPromptAlias } from '../../src/orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 const sha = (v: string) => createHash('sha256').update(v).digest('hex');
 const jsonSha = (v: unknown) => sha(JSON.stringify(v));
 // Golden baselines captured before the production edit (SYS1-RUN1); evidence dumps write only when SYS1_EVIDENCE is set.
@@ -57,7 +67,7 @@ const BASELINE = [
   'src/routes/agent-v1-turn.ts:callStructured',
   'src/routes/agent-v1-turn.ts:callBriefReading',
 ];
-const EXEMPTIONS = [...BASELINE];
+const EXEMPTIONS = BASELINE.filter(entry => !entry.startsWith('src/routes/agent-v1-turn.ts:'));
 vi.setConfig({ testTimeout: 60_000 });
 function symbol(n: ts.Node): string {
   for (let p: ts.Node | undefined = n; p; p = p.parent) {
@@ -183,7 +193,8 @@ describe('SYS1 ordinary-turn authority', () => {
 });
 
 // The real ordinary-turn route is exercised with local responses only.
-const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })), readCommittedTurn: vi.fn(async () => null), append: vi.fn(async () => ({ id: 'row-1' })) };
+// `readStatedObjectionFactsFor` is a SUCCESSFUL empty read: a store without it is "unknown" to the route (S8 row 2) and the golden bytes would carry the flag.
+const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })), readCommittedTurn: vi.fn(async () => null), append: vi.fn(async () => ({ id: 'row-1' })), readStatedObjectionFactsFor: vi.fn(async () => []) };
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../src/orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 describe('SYS1 ordinary Responses transport', () => {
@@ -283,4 +294,319 @@ describe('SYS1 ordinary Responses transport', () => {
     expect(rows[0].prompt_sha256).toBe(rows[1].prompt_sha256); expect(rows[0].tools_sha256).toBe(rows[1].tools_sha256);
   });
 
+});
+
+// S1 task 2: real route, fixture-only provider and storage boundaries. Golden capture precedes transport edits.
+const residualSites = ['callResearch', 'callStructured', 'callBriefReading'] as const;
+type ResidualSite = typeof residualSites[number];
+type SiteGolden = { body: string; instructions: string; tools: string; schema: string; consumed: string };
+describe('S1T2 residual Responses sites', () => {
+  let app: FastifyInstance;
+  let active: ResidualSite;
+  let failure: '429' | '503' | 'transport' | 'terminal' | 'TimeoutError' | 'undiciTimeout' | 'unreadableHTTP' | 'malformed' | undefined;
+  let attempts: string[] = [];
+  let consumed: string[] = [];
+  let sequence = 0;
+  let discovery = false;
+  const captured: Partial<Record<ResidualSite, SiteGolden[]>> = {};
+  const usage = { input_tokens: 23, output_tokens: 7 };
+  const brief = 'Reach 90% delivery reliability within 6 months. Hire a tech lead or hire two developers. Team capacity is 5 people.';
+  const query = 'typical churn after a SaaS price rise of about 20%';
+  const candidate = {
+    goal: { metric: 'Delivery reliability', operator: '>=', value: 90, unit: '%', horizon_months: 6, provenance: 'explicit' }, constraints: [],
+    options: [{ label: 'Hire a tech lead', provenance: 'explicit', interventions: [] }],
+    factors: [{ label: 'Team capacity', role: 'controllable', baseline_known: true, baseline_value: 5, unit: 'people', provenance: 'explicit' }],
+    risks: [], outcomes: [{ label: 'Delivery reliability', provenance: 'inferred' }],
+    links: [{ from: 'Team capacity', to: 'Delivery reliability', direction: 'positive', provenance: 'inferred' }], unknowns: [],
+  };
+  const nativeResearch = (JSON.parse(readFileSync('src/orchestrator-v5/agent-lane/__tests__/fixtures/native-research-ne02.json', 'utf8')) as { response: Record<string, unknown> }).response;
+  const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }], status: 'completed', usage });
+  const responseFor = (site: ResidualSite) => site === 'callResearch' ? { ...nativeResearch, usage }
+    : say(site === 'callStructured' ? JSON.stringify(candidate) : JSON.stringify({ goal: '90% delivery reliability', limits: [], options: ['Hire a tech lead', 'hire two developers'], build: false }));
+  beforeAll(async () => {
+    process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
+    // Observe exactly what the EXISTING caller consumes, without changing its execution.
+    const makeCaps = capabilitiesModule.createAgentCapabilities;
+    vi.spyOn(capabilitiesModule, 'createAgentCapabilities').mockImplementation((...args) => {
+      const call = args[2];
+      if (call) args[2] = async (...input) => { const result = await call(...input); consumed.push(JSON.stringify(result)); return result; };
+      return makeCaps(...args);
+    });
+    const readBrief = briefModule.readBrief;
+    vi.spyOn(briefModule, 'readBrief').mockImplementation((message, call) => readBrief(message, async input => {
+      const result = await call(input); consumed.push(JSON.stringify(result)); return result;
+    }));
+    const readResearch = researchModule.readResearchResponse;
+    vi.spyOn(researchModule, 'readResearchResponse').mockImplementation(input => { consumed.push(JSON.stringify(input)); return readResearch(input); });
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const bytes = String(init?.body); const body = JSON.parse(bytes);
+      const site: ResidualSite | undefined = body.text?.format?.name === 'brief_spans' ? 'callBriefReading'
+        : body.text?.format?.name === 'whole_candidate' ? 'callStructured'
+        : body.tools?.some((t: { type?: string }) => t.type === 'web_search') ? 'callResearch' : undefined;
+      if (site) {
+        expect(site).toBe(active); attempts.push(bytes);
+        if (failure === '429' || failure === '503') return new Response('fixture refusal', { status: Number(failure) });
+        if (failure === 'terminal' || failure === 'transport' && attempts.length === 1) throw new TypeError('fetch failed');
+        if (failure === 'TimeoutError') { const error = new Error('fixture timeout'); error.name = 'TimeoutError'; throw error; }
+        if (failure === 'undiciTimeout') throw new TypeError('fetch failed', { cause: { code: 'UND_ERR_HEADERS_TIMEOUT' } });
+        if (failure === 'unreadableHTTP') return new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('fixture body lost')); } }), { status: 503 });
+        if (failure === 'malformed') return new Response('{broken', { status: 200 });
+        return new Response(JSON.stringify(responseFor(site)), { status: 200 });
+      }
+      if (!discovery && body.max_output_tokens !== 16 && active !== 'callBriefReading') {
+        discovery = true;
+        const name = active === 'callResearch' ? 'offer_public_research' : 'build_model_from_brief';
+        const args = active === 'callResearch' ? { query } : { brief };
+        return new Response(JSON.stringify({ output: [{ type: 'function_call', name, call_id: 'site-discovery', arguments: JSON.stringify(args) }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify(say('Here is where the model stands.')), { status: 200 });
+    }));
+    const { agentV1TurnRoute } = await import('../../src/routes/agent-v1-turn.js');
+    app = Fastify({ logger: false });
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: active === 'callResearch' ? nodes : [], edges: [] }, graph_hash: active === 'callResearch' ? 'h0' : null }));
+    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
+    app.post('/assist/v1/scenarios/:id/graph/register', async () => ({ registered: true, graph_hash: 'h1' }));
+    app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'Fixture state.', blocks: [], suggested_actions: [], insights: [] }));
+    await app.register(agentV1TurnRoute); await app.ready();
+  });
+  afterAll(async () => { await app.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { attempts = []; consumed = []; discovery = false; failure = undefined; });
+  const drive = async (site: ResidualSite, refuse = false) => {
+    active = site;
+    const sid = `22222222-2222-4222-8222-${String(++sequence).padStart(12, '0')}`;
+    const inject = (extra: Record<string, unknown> = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: sid, message: site === 'callResearch' ? 'What churn do SaaS firms see after a price rise?' : brief, ...extra,
+    } });
+    if (site === 'callResearch') { await inject(); attempts = []; consumed = []; }
+    const originalPolicy = policyModule.runWithProviderPolicy;
+    const originalAssert = policyModule.assertProviderAllowed;
+    // Refuse the target site only: construction's preceding conversation must still reach its tool.
+    const policySpy = refuse ? vi.spyOn(policyModule, 'assertProviderAllowed').mockImplementation((provider, at, detail) => {
+      if (at !== `agent-v1-turn.${site}`) return originalAssert(provider, at, detail);
+      const policy = policyModule.currentProviderPolicy();
+      if (policy === undefined) throw new Error('Expected the real route provider policy');
+      return originalPolicy({ ...policy, allowed: new Set() }, () => originalAssert(provider, at, detail));
+    }) : undefined;
+    try {
+      const chip = researchModule.researchChipFor(query)!;
+      const response = site === 'callResearch' ? await inject({ message: chip.message, source: 'chip_click', chip: { id: chip.id } })
+        : site === 'callBriefReading' ? await runWithStageStream(() => undefined, async () => await inject()) : await inject();
+      return { response, sid, rows: (response.json()._provider_calls ?? []) as policyModule.GenerativeCall[] };
+    } finally { policySpy?.mockRestore(); }
+  };
+  it.each(residualSites)('%s happy-path bytes equal the BEFORE golden', async site => {
+    const { response } = await drive(site);
+    expect(response.statusCode, response.body).toBe(200); expect(attempts).toHaveLength(site === 'callStructured' ? 2 : 1); expect(consumed).toHaveLength(attempts.length);
+    const proof = attempts.map((bytes, i) => {
+      const body = JSON.parse(bytes);
+      return { body: sha(bytes), instructions: sha(body.instructions), tools: jsonSha(body.tools ?? null), schema: jsonSha(body.text?.format?.schema ?? null), consumed: consumed[i] };
+    });
+    if (process.env.SYS1_CAPTURE_SITES === '1') {
+      captured[site] = proof;
+      if (residualSites.every(s => captured[s])) writeFileSync(`${golden}/sites-before.json`, JSON.stringify(captured, null, 2) + '\n');
+    } else expect(proof).toEqual(JSON.parse(readFileSync(`${golden}/sites-before.json`, 'utf8'))[site]);
+  });
+  it.each(residualSites)('%s has one host-bound physical success receipt and usage', async site => {
+    const { rows, sid } = await drive(site);
+    const calls = rows.filter(r => r.site === `agent-v1-turn.${site}`);
+    expect(calls).toHaveLength(attempts.length); expect(calls).toHaveLength(site === 'callStructured' ? 2 : 1);
+    calls.forEach((call, i) => {
+      const body = JSON.parse(attempts[i]);
+      expect(call).toMatchObject({ request_id: expect.any(String), scenario_id: sid,
+        attempt: { outcome: 'success', transport_status: 200, retry: false, response_sha256: sha(JSON.stringify(responseFor(site))) }, usage: { raw: usage } });
+      expect(call.settings).toEqual(Object.fromEntries(['reasoning', 'max_output_tokens', 'tool_choice', 'temperature', 'max_tool_calls'].filter(k => body[k] !== undefined).map(k => [k, body[k]])));
+    });
+  });
+  it.each(residualSites)('%s provider policy refuses before network', async site => {
+    const { rows } = await drive(site, true);
+    expect(attempts).toHaveLength(0); expect(consumed).toHaveLength(0);
+    const calls = rows.filter(r => r.site === `agent-v1-turn.${site}`);
+    expect(calls.length).toBeGreaterThan(0); expect(calls.every(r => r.outcome === 'refused_before_network' && r.attempt === undefined)).toBe(true);
+  });
+  for (const site of residualSites) {
+    it.each(['429', '503', 'transport', 'terminal', 'TimeoutError', 'undiciTimeout', 'unreadableHTTP', 'malformed'] as const)(`${site} %s is receipted with the existing attempt count`, async kind => {
+      failure = kind;
+      const { rows } = await drive(site);
+      const calls = rows.filter(r => r.site === `agent-v1-turn.${site}`);
+      const retried = site === 'callStructured' && ['transport', 'terminal', 'malformed', 'unreadableHTTP'].includes(kind);
+      expect(attempts).toHaveLength(retried ? kind === 'transport' ? 3 : 2 : 1); expect(calls).toHaveLength(attempts.length);
+      const expectedOutcome = kind === '429' ? 'rate_limited' : kind === '503' || kind === 'unreadableHTTP' ? 'http_error' : kind === 'TimeoutError' || kind === 'undiciTimeout' ? 'timeout' : kind === 'malformed' ? 'invalid_response' : 'transport_error';
+      expect(calls[0].attempt).toMatchObject({ outcome: expectedOutcome, transport_status: kind === '429' || kind === '503' ? Number(kind) : kind === 'unreadableHTTP' ? 503 : kind === 'malformed' ? 200 : null, retry: retried });
+      if (kind === 'unreadableHTTP') expect(calls[0].attempt?.result).toBe(site === 'callBriefReading' ? 'http_error' : 'http_error_body_unreadable');
+      if (retried) expect(calls[1].attempt).toMatchObject({ outcome: kind === 'transport' ? 'success' : expectedOutcome, retry: false });
+      if (kind !== 'transport' || !retried) expect(consumed).toHaveLength((kind === 'TimeoutError' || kind === 'undiciTimeout') && site === 'callStructured' ? 1 : 0);
+    });
+  }
+});
+
+// Extract the production closures, not a copy of their retry/parse/deadline logic.
+function routeContract<T>(name: string, dependencies: Record<string, unknown>): T {
+  const source = ts.createSourceFile('agent-v1-turn.ts', readFileSync('src/routes/agent-v1-turn.ts', 'utf8'), ts.ScriptTarget.Latest, true);
+  let expression: string | undefined;
+  function visit(node: ts.Node): void {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name) expression = node.initializer?.getText(source);
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) expression = node.getText(source).replace(/^export\s+/, '');
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  if (expression === undefined) throw new Error(`Missing production closure ${name}`);
+  const script = ts.transpileModule(`const extracted = ${expression};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return new Function('dependencies', `let { ${Object.keys(dependencies).join(', ')} } = dependencies; ${script}; return extracted;`)(dependencies) as T;
+}
+
+describe('S1T2 R2 actual resend receipts', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  type Site = 'callStructured' | 'callModel';
+  const contractDependencies = () => ({
+    ...policyModule, postResponses: adapter.postResponses, agentRequestIdentity, onceMoreOnTransportFailure,
+    strictForTheDrafter, CONSTRUCTION_TIMEOUT_REASON: 'construction_timeout',
+    isConstructionTimeout: routeContract<(err: unknown) => boolean>('isConstructionTimeout', {}),
+    log: { warn: vi.fn(), error: vi.fn() }, conversationPromptAlias, callEffortFor,
+    forcedToolOf: routeContract<(req: unknown) => string | undefined>('forcedToolOf', {}),
+    withInstructionsBreakpoint: routeContract<(body: Record<string, unknown>) => Record<string, unknown>>('withInstructionsBreakpoint', {}),
+    refusesInstructionsBreakpoint: routeContract<(status: number, text: string) => boolean>('refusesInstructionsBreakpoint', {}),
+    instructionsBreakpointRefused: false,
+    withTransportRetry: routeContract<(req: unknown, call: () => Promise<unknown>) => Promise<unknown>>('withTransportRetry', { onceMoreOnTransportFailure }),
+  });
+  const drive = async (site: Site, first: 'null' | '{}' | 'transport' | '{broken', expired = false, deadlined = false, revoke = false) => {
+    let now = 1_000;
+    const deadline = 2_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const physical: policyModule.GenerativeCall[] = [];
+    const policy = { ...OPENAI_ONLY('receipt-contract'), allowed: new Set<policyModule.LlmProvider>(['openai']), request_id: `contract-${site}-${first}-${expired}-${deadlined}`, scenario_id: scenario };
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      const receipt = policyModule.currentProviderPolicy()!.calls.at(-1)!;
+      physical.push(receipt); // Identity of the ledger row guarded immediately before THIS physical send.
+      if (physical.length === 1 && first === 'transport') {
+        if (expired) now = deadline;
+        if (revoke) policy.allowed.delete('openai');
+        throw new TypeError('fetch failed');
+      }
+      return new Response(physical.length === 1 ? first : '{}', { status: 200 });
+    }));
+    const dependencies = contractDependencies();
+    let result: unknown; let error: unknown;
+    await runWithProviderPolicy(policy, async () => {
+      try {
+        result = site === 'callStructured'
+          ? await routeContract<CallStructuredModel>('callStructured', dependencies)({ model: 'gpt-x', instructions: 'fixture', input: 'fixture', max_output_tokens: 100, schema: { type: 'object', properties: {}, additionalProperties: false } }, deadline)
+          : await routeContract<(budget: CallBudget) => CallModel>('callModelFor', dependencies)(budgetFor('gpt-6.1-sol', 'conversation'))({ instructions: 'fixture', input: [], tools: [], max_output_tokens: 100, ...(deadlined ? { deadline_ms: deadline - now } : {}) });
+      } catch (err) { error = err; }
+    });
+    return { physical, policy, result, error };
+  };
+  const assertFirst = (run: Awaited<ReturnType<typeof drive>>, site: Site, count: number, retry: boolean): void => {
+    expect(run.physical).toHaveLength(count); expect(run.policy.calls).toHaveLength(count);
+    const first = run.physical[0];
+    expect(first).toBe(run.policy.calls[0]);
+    expect(first).toMatchObject({ site: `agent-v1-turn.${site}`, request_id: run.policy.request_id, scenario_id: scenario });
+    expect(first.attempt?.retry, 'receipt of physical request #1').toBe(retry);
+    expect(first.attempt?.retry_reason, 'reason on physical request #1').toBe(retry ? 'transport' : undefined);
+    if (count > 1) { expect(run.physical[1].attempt?.retry).toBe(false); expect(run.physical[1].attempt?.retry_reason).toBeUndefined(); }
+  };
+  for (const site of ['callStructured', 'callModel'] as const) {
+    it(`${site} F1 negative: null then object marks request #1 when request #2 is sent`, async () => {
+      const run = await drive(site, 'null'); assertFirst(run, site, 2, true); expect(run.error).toBeUndefined();
+    });
+    it(`${site} F1 control: object makes one request without a retry`, async () => {
+      const run = await drive(site, '{}'); assertFirst(run, site, 1, false); expect(run.error).toBeUndefined();
+    });
+  }
+  it('callStructured F1 malformed: original JSON error still resends', async () => {
+    const run = await drive('callStructured', '{broken'); assertFirst(run, 'callStructured', 2, true); expect(run.error).toBeUndefined();
+  });
+  it('callStructured F2 negative: expired retry deadline leaves request #1 unmarked', async () => {
+    const run = await drive('callStructured', 'transport', true); assertFirst(run, 'callStructured', 1, false);
+    expect(run.result).toEqual({ text: '', status: 'incomplete', incomplete_reason: 'construction_timeout' }); expect(run.error).toBeUndefined();
+  });
+  it('callStructured F2 control: budget left sends request #2 and marks request #1', async () => {
+    const run = await drive('callStructured', 'transport'); assertFirst(run, 'callStructured', 2, true); expect(run.error).toBeUndefined();
+  });
+  it('callModel F2 deadlined: no retry even when fetch consumes the remaining deadline', async () => {
+    const run = await drive('callModel', 'transport', true, true); assertFirst(run, 'callModel', 1, false); expect(run.error).toBeInstanceOf(TypeError);
+  });
+  it('callModel F2 control: ordinary transport retry has no absolute deadline guard', async () => {
+    const run = await drive('callModel', 'transport', true); assertFirst(run, 'callModel', 2, true); expect(run.error).toBeUndefined();
+  });
+  for (const site of ['callStructured', 'callModel'] as const) {
+    it(`R3 ${site} admission negative: revoked permission cannot mark request #1 as retried`, async () => {
+      const run = await drive(site, 'transport', false, false, true);
+      dump(`r3-${site}-admission-negative.json`, JSON.stringify({ physical: run.physical.length, rows: run.policy.calls }));
+      expect(run.physical).toHaveLength(1); expect(run.policy.calls).toHaveLength(2);
+      expect(run.physical[0]).toBe(run.policy.calls[0]);
+      expect(run.physical[0].attempt?.retry, 'request #1 after refused retry').toBe(false);
+      expect(run.physical[0].attempt?.retry_reason).toBeUndefined();
+      expect(run.policy.calls[1]).toMatchObject({ site: `agent-v1-turn.${site}`, outcome: 'refused_before_network', request_id: run.policy.request_id });
+      expect(run.policy.calls[1].attempt).toBeUndefined(); expect(run.error).toBeInstanceOf(policyModule.ForbiddenProviderError);
+    });
+    it(`R3 ${site} admission control: kept permission marks the admitted retry`, async () => {
+      const run = await drive(site, 'transport');
+      dump(`r3-${site}-admission-control.json`, JSON.stringify({ physical: run.physical.length, rows: run.policy.calls }));
+      assertFirst(run, site, 2, true); expect(run.error).toBeUndefined();
+    });
+  }
+  it.each([true, false])('R3 construction overlap=%s keeps A and B physical receipt identities', async overlap => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const policy = { ...OPENAI_ONLY('overlap-contract'), request_id: 'overlap', scenario_id: scenario };
+    const physical: Array<{ invocation: string; row: policyModule.GenerativeCall }> = [];
+    let rejectA!: (error: Error) => void;
+    const blockedA = new Promise<Response>((_resolve, reject) => { rejectA = reject; });
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const invocation = JSON.parse(String(init?.body)).input;
+      const row = policyModule.currentProviderPolicy()!.calls.at(-1)!;
+      physical.push({ invocation, row });
+      if (physical.length === 1) return blockedA;
+      return new Response('{}', { status: 200 });
+    }));
+    // One extracted function, two invocations: handles must belong to each invocation, not the shared site/function.
+    const call = routeContract<CallStructuredModel>('callStructured', contractDependencies());
+    const request = { model: 'gpt-x', instructions: 'fixture', max_output_tokens: 100, schema: { type: 'object', properties: {}, additionalProperties: false } };
+    await runWithProviderPolicy(policy, async () => {
+      const a = call({ ...request, input: 'A' }, 2_000);
+      expect(physical).toHaveLength(1);
+      if (overlap) await call({ ...request, input: 'B' }, 2_000);
+      rejectA(new TypeError('fetch failed'));
+      await a;
+    });
+    dump(`r3-overlap-${overlap}.json`, JSON.stringify({ physical: physical.length, rows: physical }));
+    expect(physical).toHaveLength(overlap ? 3 : 2); expect(policy.calls).toHaveLength(physical.length);
+    physical.forEach(({ row }, i) => expect(row).toBe(policy.calls[i]));
+    const a = physical.filter(p => p.invocation === 'A').map(p => p.row);
+    expect(a).toHaveLength(2);
+    expect(a[0].attempt?.retry, 'A physical request #1').toBe(true); expect(a[0].attempt?.retry_reason).toBe('transport');
+    expect(a[1].attempt?.retry).toBe(false); expect(a[1].attempt?.retry_reason).toBeUndefined();
+    if (overlap) {
+      const b = physical.find(p => p.invocation === 'B')!.row;
+      expect(b.attempt).toMatchObject({ outcome: 'success', retry: false }); expect(b.attempt?.retry_reason).toBeUndefined();
+    }
+  });
+  it('R3 callModel carrier fallback inside a transport retry keeps its own reason', async () => {
+    const physical: policyModule.GenerativeCall[] = [];
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      physical.push(policyModule.currentProviderPolicy()!.calls.at(-1)!);
+      if (physical.length === 1) throw new TypeError('fetch failed');
+      if (physical.length === 2) return new Response(JSON.stringify({ error: { param: 'input[0].content[0].prompt_cache_breakpoint' } }), { status: 400 });
+      return new Response('{}', { status: 200 });
+    }));
+    const call = routeContract<(budget: CallBudget) => CallModel>('callModelFor', contractDependencies())(budgetFor('gpt-6.1-sol', 'conversation'));
+    await runWithProviderPolicy(OPENAI_ONLY('carrier-after-transport'), () => call({ instructions: 'fixture', input: [], tools: [], max_output_tokens: 100 }));
+    expect(physical).toHaveLength(3);
+    expect(physical.map(p => [p.attempt?.retry, p.attempt?.retry_reason])).toEqual([[true, 'transport'], [true, 'instructions_carrier_fallback'], [false, undefined]]);
+  });
+  it('adapter absent option records false; explicit legacy retry prediction retains its semantics', async () => {
+    for (const kind of ['transport', 'unreadableHTTP', 'invalidJSON'] as const) for (const optIn of [false, true]) {
+      const physical: policyModule.GenerativeCall[] = [];
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        physical.push(policyModule.currentProviderPolicy()!.calls.at(-1)!);
+        if (kind === 'transport') throw new TypeError('fetch failed');
+        if (kind === 'unreadableHTTP') return new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('body lost')); } }), { status: 503 });
+        return new Response('{broken', { status: 200 });
+      }));
+      await runWithProviderPolicy(OPENAI_ONLY('adapter-options'), async () => {
+        try { await adapter.postResponses({ model: 'gpt-x' }, { detail: {}, preserveResponseErrors: true, ...(optIn ? { retryOnTransportFailure: true } : {}) }); } catch { /* The transport error remains the caller's. */ }
+        expect(physical).toHaveLength(1);
+        expect(physical[0].attempt?.retry).toBe(optIn); expect(physical[0].attempt?.retry_reason).toBe(optIn ? 'transport' : undefined);
+      });
+    }
+  });
 });

@@ -72,6 +72,7 @@ import { canonicaliseUnitForDisplay, ratePeriodOf, ratePeriodWord, unitCompariso
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
+import type { StatedObjection } from '../../context/stated-objections.js';
 
 /**
  * The durable operation identity for authorising a proposal.
@@ -1346,6 +1347,9 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
  * provenance as stored. Today's limit fact uses the same predicate and proven frame as analysis.
  * Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
  */
+/** How the model uses `stated_objections` (AIE-ACKed wording; carried beside the data, as `left_out[].use` is). */
+const STATED_OBJECTIONS_USE = "These are the user's own stated disagreements with findings, verbatim and newest first. They do not by themselves change the model or existing analysis. Engage with the reasons in their words; never present them as Olumi's findings, as agreement or as resolved.";
+
 export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_ready'>): Record<string, unknown> {
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
   const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -2138,6 +2142,12 @@ export function createAgentCapabilities(
      * store actually holds — never against a copy this process remembered. Absent ⇒ a held approval refuses.
      */
     readonly readPendingActions?: (scenarioId: string) => Promise<readonly PendingAction[]>;
+    /**
+     * ⭐ S8 DURABLE HUMAN REASONING: the user's standing objections ("I disagree with this finding, because…"), read by
+     * the ROUTE from the existing turn-window facts through the existing projector (`projectStatedObjections`: newest per
+     * finding wins, at most 3, verbatim). Absent or throwing ⇒ none; the canonical state is then byte-identical to before.
+     */
+    readonly readStatedObjections?: (scenarioId: string, requestId: string) => Promise<readonly StatedObjection[]>;
     /**
      * ⭐ ONE approved batch of option levels — each with the option → factor link it needs — as ONE atomic commit
      * (ChatGPT #70 5847200462): the product's own level writer, reached in-process (`commitOptionLevelsInProcess`).
@@ -3711,6 +3721,14 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
       const delta = await selectedRunDeltaForModel(ctx.scenario_id, g, g.run_delta);
+      // S8: what the user has said they do not accept, in their words. An unreadable list never fails the turn, but it is
+      // UNKNOWN, never "none": the model is told the list could not be read (the `receipt_unreadable` convention).
+      let statedObjectionsUnreadable = false;
+      const statedObjections = opts.readStatedObjections === undefined ? []
+        : await opts.readStatedObjections(ctx.scenario_id, ctx.request_id).catch(() => {
+          statedObjectionsUnreadable = true;
+          return [] as readonly StatedObjection[];
+        });
       const { run_delta: _wireDelta, ...readWithoutDelta } = g;
       const modelRead = { ...readWithoutDelta, ...(delta === undefined ? {} : { run_delta: delta }) };
       const scopeIssues = g.goal_scope_reconciliation ?? [];
@@ -3778,6 +3796,10 @@ export function createAgentCapabilities(
         // not in memory. An approval with nothing to bind to is an approval that
         // silently does nothing.
         awaiting_your_approval: [...await liveHeldAwaiting(ctx.scenario_id), ...proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)],
+        // S8: durable human reasoning. Present only when the user has stated an objection (default bytes unchanged).
+        ...(statedObjections.length > 0 ? { stated_objections: statedObjections, stated_objections_use: STATED_OBJECTIONS_USE } : {}),
+        // Present ONLY when the read failed: the user may have stated objections that could not be read this turn.
+        ...(statedObjectionsUnreadable ? { stated_objections_unreadable: true } : {}),
       };
     },
 

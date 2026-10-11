@@ -196,6 +196,8 @@ export async function capture(turn: Turn, variant: Variant, options: {
   ports.store = {
     readRecent: read([]), readFactsFor: read([]), readFactsWithTurnFor: read([]),
     readScenarioRunAnalysisFactsFor: read({ facts: [], total_count: 0 }),
+    // A SUCCESSFUL empty read of the stated objections; a double that omits it is "unreadable" to the route (S8 row 2).
+    readStatedObjectionFactsFor: read([]),
     readMostRecentPendingActions: read(question == null ? [] : [question]), readLatestAnswerOffers: read(null),
     readCommittedTurn: read(null), readGuidanceHistory: read({}),
     readExistingScenario: read({ userId: null, graph: snapshot.graph, briefText: null, analysisInvalidatedAt: null, revision: snapshot.scenario_revision }),
