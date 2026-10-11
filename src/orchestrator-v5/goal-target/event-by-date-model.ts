@@ -299,25 +299,32 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
       ...(o.is_status_quo === true ? { is_baseline: true } : {}), interventions: {} });
     edges.push({ from: 'event_decision', to: id, exists_probability: 1, strength: { mean: 1, std: 0.01 }, effect_direction: 'positive' });
     if (o.is_status_quo === true) return;
-    if (!capacity) { unresolved.push(id); return; }
-    const { monthly_share_pct, lead_months_low, lead_months_high } = capacity;
-    if (!validEventCapacity(capacity)) {
-      unresolved.push(id);
+    const supported = validEventCapacity(capacity);
+    if (!supported) unresolved.push(id);
+    if (capacity && !supported) {
+      const { monthly_share_pct } = capacity;
       const reason = !Number.isFinite(monthly_share_pct) || monthly_share_pct < 0 || monthly_share_pct > 100
         ? `Olumi's added-capacity pace for "${o.label}" is not used. Enter a pace between 0% and 100% of ${deliverable} a month.`
         : `Olumi's lead time for "${o.label}" is not used. Enter the soonest and latest start times in months, with the soonest first.`;
       loss.push({ field_path: `nodes[${id}].added_capacity`, before: capacity, after: null, reason, severity: 'warn' });
-      return;
     }
     const sw = `event_capacity_${i + 1}`;
     switches.push(sw);
     nodes.push({ id: sw, kind: 'factor', category: 'controllable', label: `${o.label} adds capacity`, provenance: 'ai_inferred',
-      observed_state: { value: 0, source: 'cee_inference', extra_share_by_date: { monthly_share: monthly_share_pct,
-        lead_low: lead_months_low, lead_high: lead_months_high, unit: `${unit} per month` } } });
-    // Without a date the required edge fields stay explicitly defaulted, never an estimate of extra share.
+      observed_state: { value: 0, source: 'cee_inference', ...(supported ? {
+        extra_share_by_date: { monthly_share: capacity!.monthly_share_pct,
+          lead_low: capacity!.lead_months_low, lead_high: capacity!.lead_months_high, unit: `${unit} per month` },
+      } : {}) } });
+    // Keep the drafter's pace/lead-time basis while the date is unresolved. A monthly pace is not the
+    // dated total natural_effect: withEventShareDate writes that only when the deadline is held.
     edges.push({ from: sw, to: 'event_goal', exists_probability: 1, effect_direction: 'positive',
       strength: { mean: 0.5, std: 0.125 }, defaulted: true,
-      provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } });
+      provenance: { source: 'cee_hypothesis', magnitude: supported ? 'olumi_estimate' : 'olumi_placeholder',
+        ...(supported ? { basis: `Olumi provisional added-capacity estimate for "${o.label}": ${capacity!.monthly_share_pct}% of ${deliverable} per month, after ${capacity!.lead_months_low}–${capacity!.lead_months_high} months of lead time.` } : {}) } });
+    if (!supported) loss.push({ code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE, layer: 'cee',
+      field_path: `edges[${sw}::event_goal].magnitude_question`, before: capacity ?? null, after: 0.5,
+      reason: `Olumi placeholder, unsized: how much extra percentage of ${deliverable} per month would "${o.label}" add, and what are its soonest and latest start times in months?`,
+      severity: 'warn' });
     nodes.find(n => n.id === id)!.interventions[sw] = { value: 1 };
   });
   const options = nodes.filter(n => n.kind === 'option');
