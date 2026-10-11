@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
 import { ReadableStream } from 'node:stream/web';
@@ -17,6 +17,11 @@ import { OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../..
 import { agentRequestIdentity } from '../../src/orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { narrateWriteOutcome } from '../../src/orchestrator-v5/agent-lane/write-outcome.js';
 import { RUN_INTERPRETATION_FORMAT } from '../../src/orchestrator-v5/agent-lane/provisional-view.js';
+import { onceMoreOnTransportFailure } from '../../src/orchestrator-v5/agent-lane/runtime/transport-retry.js';
+import { strictForTheDrafter, type CallStructuredModel } from '../../src/orchestrator-v5/agent-lane/runtime/build-model.js';
+import { budgetFor, callEffortFor, type CallBudget } from '../../src/orchestrator-v5/agent-lane/model-budgets.js';
+import type { CallModel } from '../../src/orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { conversationPromptAlias } from '../../src/orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 const sha = (v: string) => createHash('sha256').update(v).digest('hex');
 const jsonSha = (v: unknown) => sha(JSON.stringify(v));
 // Golden baselines captured before the production edit (SYS1-RUN1); evidence dumps write only when SYS1_EVIDENCE is set.
@@ -431,4 +436,134 @@ describe('S1T2 residual Responses sites', () => {
       if (kind !== 'transport' || !retried) expect(consumed).toHaveLength((kind === 'TimeoutError' || kind === 'undiciTimeout') && site === 'callStructured' ? 1 : 0);
     });
   }
+});
+
+// Extract the production closures, not a copy of their retry/parse/deadline logic.
+function routeContract<T>(name: string, dependencies: Record<string, unknown>): T {
+  const source = ts.createSourceFile('agent-v1-turn.ts', readFileSync('src/routes/agent-v1-turn.ts', 'utf8'), ts.ScriptTarget.Latest, true);
+  let expression: string | undefined;
+  function visit(node: ts.Node): void {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name) expression = node.initializer?.getText(source);
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) expression = node.getText(source).replace(/^export\s+/, '');
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  if (expression === undefined) throw new Error(`Missing production closure ${name}`);
+  const script = ts.transpileModule(`const extracted = ${expression};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return new Function('dependencies', `const { ${Object.keys(dependencies).join(', ')} } = dependencies; ${script}; return extracted;`)(dependencies) as T;
+}
+
+describe('S1T2 R2 actual resend receipts', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  type Site = 'callStructured' | 'callModel';
+  const drive = async (site: Site, first: 'null' | '{}' | 'transport' | '{broken', expired = false, deadlined = false) => {
+    let now = 1_000;
+    const deadline = 2_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const physical: policyModule.GenerativeCall[] = [];
+    const policy = { ...OPENAI_ONLY('receipt-contract'), request_id: `contract-${site}-${first}-${expired}-${deadlined}`, scenario_id: scenario };
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      const receipt = policyModule.currentProviderPolicy()!.calls.at(-1)!;
+      physical.push(receipt); // Identity of the ledger row guarded immediately before THIS physical send.
+      if (physical.length === 1 && first === 'transport') { if (expired) now = deadline; throw new TypeError('fetch failed'); }
+      return new Response(physical.length === 1 ? first : '{}', { status: 200 });
+    }));
+    const dependencies = {
+      ...policyModule, postResponses: adapter.postResponses, agentRequestIdentity, onceMoreOnTransportFailure,
+      strictForTheDrafter, CONSTRUCTION_TIMEOUT_REASON: 'construction_timeout',
+      isConstructionTimeout: routeContract<(err: unknown) => boolean>('isConstructionTimeout', {}),
+      log: { warn: vi.fn(), error: vi.fn() }, conversationPromptAlias, callEffortFor,
+      forcedToolOf: routeContract<(req: unknown) => string | undefined>('forcedToolOf', {}),
+      withInstructionsBreakpoint: routeContract<(body: Record<string, unknown>) => Record<string, unknown>>('withInstructionsBreakpoint', {}),
+      refusesInstructionsBreakpoint: routeContract<(status: number, text: string) => boolean>('refusesInstructionsBreakpoint', {}),
+      instructionsBreakpointRefused: false,
+      withTransportRetry: routeContract<(req: unknown, call: () => Promise<unknown>) => Promise<unknown>>('withTransportRetry', { onceMoreOnTransportFailure }),
+    };
+    let result: unknown; let error: unknown;
+    await runWithProviderPolicy(policy, async () => {
+      try {
+        result = site === 'callStructured'
+          ? await routeContract<CallStructuredModel>('callStructured', dependencies)({ model: 'gpt-x', instructions: 'fixture', input: 'fixture', max_output_tokens: 100, schema: { type: 'object', properties: {}, additionalProperties: false } }, deadline)
+          : await routeContract<(budget: CallBudget) => CallModel>('callModelFor', dependencies)(budgetFor('gpt-6.1-sol', 'conversation'))({ instructions: 'fixture', input: [], tools: [], max_output_tokens: 100, ...(deadlined ? { deadline_ms: deadline - now } : {}) });
+      } catch (err) { error = err; }
+    });
+    return { physical, policy, result, error };
+  };
+  const assertFirst = (run: Awaited<ReturnType<typeof drive>>, site: Site, count: number, retry: boolean): void => {
+    expect(run.physical).toHaveLength(count); expect(run.policy.calls).toHaveLength(count);
+    const first = run.physical[0];
+    expect(first).toBe(run.policy.calls[0]);
+    expect(first).toMatchObject({ site: `agent-v1-turn.${site}`, request_id: run.policy.request_id, scenario_id: scenario });
+    expect(first.attempt?.retry, 'receipt of physical request #1').toBe(retry);
+    expect(first.attempt?.retry_reason, 'reason on physical request #1').toBe(retry ? 'transport' : undefined);
+    if (count > 1) { expect(run.physical[1].attempt?.retry).toBe(false); expect(run.physical[1].attempt?.retry_reason).toBeUndefined(); }
+  };
+  for (const site of ['callStructured', 'callModel'] as const) {
+    it(`${site} F1 negative: null then object marks request #1 when request #2 is sent`, async () => {
+      const run = await drive(site, 'null'); assertFirst(run, site, 2, true); expect(run.error).toBeUndefined();
+    });
+    it(`${site} F1 control: object makes one request without a retry`, async () => {
+      const run = await drive(site, '{}'); assertFirst(run, site, 1, false); expect(run.error).toBeUndefined();
+    });
+  }
+  it('callStructured F1 malformed: original JSON error still resends', async () => {
+    const run = await drive('callStructured', '{broken'); assertFirst(run, 'callStructured', 2, true); expect(run.error).toBeUndefined();
+  });
+  it('callStructured F2 negative: expired retry deadline leaves request #1 unmarked', async () => {
+    const run = await drive('callStructured', 'transport', true); assertFirst(run, 'callStructured', 1, false);
+    expect(run.result).toEqual({ text: '', status: 'incomplete', incomplete_reason: 'construction_timeout' }); expect(run.error).toBeUndefined();
+  });
+  it('callStructured F2 control: budget left sends request #2 and marks request #1', async () => {
+    const run = await drive('callStructured', 'transport'); assertFirst(run, 'callStructured', 2, true); expect(run.error).toBeUndefined();
+  });
+  it('callModel F2 deadlined: no retry even when fetch consumes the remaining deadline', async () => {
+    const run = await drive('callModel', 'transport', true, true); assertFirst(run, 'callModel', 1, false); expect(run.error).toBeInstanceOf(TypeError);
+  });
+  it('callModel F2 control: ordinary transport retry has no absolute deadline guard', async () => {
+    const run = await drive('callModel', 'transport', true); assertFirst(run, 'callModel', 2, true); expect(run.error).toBeUndefined();
+  });
+  const receipt = (site: string): policyModule.GenerativeCall => ({ site, provider: 'openai', model: 'gpt-x', purpose: 'fixture', outcome: 'allowed',
+    attempt: { transport_status: 200, result: 'completed', outcome: 'success', retry: false } });
+  it('last-attempt marker marks the LATEST row at its own site, and only a row that completed', () => {
+    const older = receipt('target'); const latest = receipt('target'); const other = receipt('other');
+    runWithProviderPolicy({ ...OPENAI_ONLY('marker'), calls: [older, latest, other] }, () => policyModule.recordProviderRetryOfLastAttempt('target', 'transport'));
+    expect(latest.attempt).toMatchObject({ retry: true, retry_reason: 'transport' });
+    for (const untouched of [older, other]) expect(untouched.attempt).toMatchObject({ retry: false });
+  });
+  it('last-attempt marker never reclaims an OLDER answered attempt when the latest row at the site was refused or unfinished', () => {
+    for (const shape of ['refused', 'unfinished'] as const) {
+      const older = receipt('target'); const answered = receipt('target');
+      const last = shape === 'refused' ? { ...receipt('target'), outcome: 'refused_before_network' as const } : receipt('target');
+      if (shape === 'unfinished') delete last.attempt;
+      runWithProviderPolicy({ ...OPENAI_ONLY('marker-' + shape), calls: [older, answered, last] }, () => policyModule.recordProviderRetryOfLastAttempt('target', 'transport'));
+      for (const untouched of [older, answered]) expect(untouched.attempt).toMatchObject({ retry: false });
+      if (shape === 'unfinished') expect(last.attempt).toBeUndefined();
+    }
+  });
+  it('last-attempt marker is a no-op outside policy, without a matching attempt, or after truncation', () => {
+    expect(() => policyModule.recordProviderRetryOfLastAttempt('target', 'transport')).not.toThrow();
+    const row = receipt('target');
+    const incomplete = receipt('target'); delete incomplete.attempt;
+    for (const policy of [OPENAI_ONLY('empty'), { ...OPENAI_ONLY('different'), calls: [row] },
+      { ...OPENAI_ONLY('unfinished'), calls: [incomplete] }, { ...OPENAI_ONLY('truncated'), calls: [row], truncated: true }]) {
+      runWithProviderPolicy(policy, () => policyModule.recordProviderRetryOfLastAttempt(policy.route === 'different' ? 'other' : 'target', 'transport'));
+    }
+    expect(row.attempt).toMatchObject({ retry: false }); expect(row.attempt?.retry_reason).toBeUndefined(); expect(incomplete.attempt).toBeUndefined();
+  });
+  it('adapter absent option records false; explicit legacy retry prediction retains its semantics', async () => {
+    for (const kind of ['transport', 'unreadableHTTP', 'invalidJSON'] as const) for (const optIn of [false, true]) {
+      const physical: policyModule.GenerativeCall[] = [];
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        physical.push(policyModule.currentProviderPolicy()!.calls.at(-1)!);
+        if (kind === 'transport') throw new TypeError('fetch failed');
+        if (kind === 'unreadableHTTP') return new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('body lost')); } }), { status: 503 });
+        return new Response('{broken', { status: 200 });
+      }));
+      await runWithProviderPolicy(OPENAI_ONLY('adapter-options'), async () => {
+        try { await adapter.postResponses({ model: 'gpt-x' }, { detail: {}, preserveResponseErrors: true, ...(optIn ? { retryOnTransportFailure: true } : {}) }); } catch { /* The transport error remains the caller's. */ }
+        expect(physical).toHaveLength(1);
+        expect(physical[0].attempt?.retry).toBe(optIn); expect(physical[0].attempt?.retry_reason).toBe(optIn ? 'transport' : undefined);
+      });
+    }
+  });
 });

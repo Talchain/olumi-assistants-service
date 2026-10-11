@@ -2002,6 +2002,7 @@ export async function postResponses(
     readonly detail: ProviderCallDetail;
     readonly site?: string;
     readonly signal?: AbortSignal;
+    /** Legacy opt-in prediction; Agent retry owners leave absent and mark the actual resend themselves. */
     readonly retryOnTransportFailure?: boolean;
     /** Status-only callers must not wait for an error body they never consume. */
     readonly readHttpErrorBody?: boolean;

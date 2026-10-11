@@ -49,7 +49,7 @@ import { readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOp
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
-import { OPENAI_ONLY, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordProviderRetry, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
+import { OPENAI_ONLY, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordProviderRetry, recordProviderRetryOfLastAttempt, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, withResearchControlTruth, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { composeHeldResultReply, composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
@@ -1798,9 +1798,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           instructions_carrier: carrier,
         },
         ...(typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
-        retryOnTransportFailure: !(typeof deadlineMs === 'number' && deadlineMs > 0) && transportAttempt === 1,
       });
       const breakpoint = alias === 'agent.converse' && !instructionsBreakpointRefused;
+      if (transportAttempt > 1) recordProviderRetryOfLastAttempt('agent-v1-turn.callModel', 'transport');
       let { r, usageHandle } = breakpoint
         ? await post(withInstructionsBreakpoint(plainBody), 'developer_breakpoint')
         : await post(plainBody, 'instructions');
@@ -1927,10 +1927,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         incomplete_details?: { reason?: unknown } | null;
       };
       try {
+        if (transportAttempt > 1) recordProviderRetryOfLastAttempt('agent-v1-turn.callStructured', 'transport');
         const response = await postResponses(sentBody, {
           site: 'agent-v1-turn.callStructured',
           detail: { model: reqBody.model, purpose: 'construction', ...agentRequestIdentity('agent.construct', sentBody) },
-          retryOnTransportFailure: transportAttempt === 1,
           preserveResponseErrors: true,
           // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
           signal: AbortSignal.timeout(budgetMs),
