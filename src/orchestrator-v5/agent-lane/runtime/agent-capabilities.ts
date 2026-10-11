@@ -253,7 +253,7 @@ import { levelLimitNodeDecision, thresholdOnNodeLevel } from '../../tools/handle
 import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participation-guard.js';
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
 import { goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
-import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
+import { lastWeekdayNamedIn, readStatedDeadline, readStatedWeekdayDate, sayDate, sayDeadlineFromToday, todayInLondon, weekdayDatedIn, type Weekday } from '../../goal-target/deadline-date.js';
 import { draftReferenceDate } from '../../goal-target/draft-reference.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
@@ -3659,13 +3659,24 @@ export function createAgentCapabilities(
     }
   };
 
-  const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown }, g: GraphRead, words: string, reference: string | undefined): Promise<ToolResult> => {
+  const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown }, g: GraphRead, words: string, reference: string | undefined,
+    dating?: { readonly turnText: string; readonly required?: Weekday }): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
-      const stated = readStatedDeadline(words, reference ?? todayInLondon((opts.now ?? (() => new Date()))()));
+      const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
+      // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
+      // accepted only when that date IS that weekday. With no recorded reference day, "last <weekday>" is never counted back.
+      const datedWeekday = dating === undefined ? null : readStatedWeekdayDate(dating.turnText, today);
+      const named = lastWeekdayNamedIn(words);
+      const stated = dating?.required !== undefined && datedWeekday?.weekday !== dating.required ? null
+        : readStatedDeadline(words, today, { ...(datedWeekday !== null ? { lastWeekday: datedWeekday } : {}), relativeWeekdays: reference !== undefined });
       if (stated === null) {
         return { ok: false, mutated: false, refusal: 'deadline_not_placed',
-          detail: `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
-            + 'Ask the user which date they mean, and never offer a date of your own.' };
+          detail: named !== null
+            ? `Olumi cannot tell which date "last ${named}" in "${words}" is without guessing, so nothing was prepared. Ask the user which date it was `
+              + `(for example "Last ${named[0]!.toUpperCase()}${named.slice(1)} was the 9th of October"), never offering a date of your own; when they say, call `
+              + 'propose_goal_deadline again with these same deadline_words.'
+            : `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
+              + 'Ask the user which date they mean, and never offer a date of your own.' };
       }
       const goals = g.nodes.filter((n) => n.kind === 'goal');
       if (goals.length !== 1) {
@@ -4901,7 +4912,14 @@ export function createAgentCapabilities(
       const plainOf = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
       const phrase = plainOf(words).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const typed = typeof ctx.user_turn_text === 'string' ? plainOf(ctx.user_turn_text) : '';
-      if (typed === '' || !new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').test(typed)) {
+      const writes = (text: string): boolean => text !== '' && new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').test(text);
+      // ⭐ Recovery Batch B (Paul's marketing test, 11 Oct): "We have 6 months to launch our new features from last Friday" in one
+      // message, "Last Friday was the 9th of October." in the next. An EARLIER message's phrase is the user's deadline only when
+      // THIS message dates its "last <weekday>" — never otherwise (an earlier duration never stands in for today's: Codex r1).
+      const named = lastWeekdayNamedIn(words);
+      const datedNow = named !== null && weekdayDatedIn(typed) === named;
+      const fromEarlier = !writes(typed) && datedNow && writes(typeof ctx.user_text === 'string' ? plainOf(ctx.user_text) : '');
+      if (!writes(typed) && !fromEarlier) {
         return { ok: false, mutated: false, refusal: 'deadline_not_stated',
           detail: `"${words}" is not something the user wrote in this message, so nothing was prepared: it would be recorded as their deadline. Ask them for the date, in their own words.` };
       }
@@ -4914,7 +4932,9 @@ export function createAgentCapabilities(
           detail: deadlineRefusalDetail.reference_not_stated };
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
       const reference = draftReferenceDate({ ...(typeof asOf === 'string' ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
-      return proposePlacedDeadline(ctx, args, g, words, reference);
+      return proposePlacedDeadline(ctx, args, g, words, reference,
+        // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
+        datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined);
     },
 
     async proposeModelChange(ctx, args): Promise<ToolResult> {
