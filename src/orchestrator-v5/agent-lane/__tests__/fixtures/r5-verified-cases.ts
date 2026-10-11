@@ -98,12 +98,8 @@ integrityRows.push(
   { name: 'F: duplicate factor refuses', run: () => { const i = positive(); Object.assign(i.model, { factors: [...i.model.factors, structuredClone(i.model.factors.find(f => f.label === census[0]!.factor)!)] }); const o = i.model.options.find(o => o.label === census[0]!.option)!; assert.equal(verifiedOptionSetting(i.model, o, level(i.model, census[0]!.option, census[0]!.factor), i.brief), false); } },
 );
 export const seamRows: Row[] = [
-  { name: 'verified receipt credits with nonzero/null estimated baseline', run: () => {
-    // RUN48: absolute receipt authority is independent of whether the baseline is known or zero.
-    for (const value of [5, null]) { const i = positive(); Object.assign(i.model.factors.find(f => f.label === census[0]!.factor)!, { baseline_value: value });
-      const o = i.model.options.find(o => o.label === census[0]!.option)!;
-      assert.equal(verifiedOptionSetting(i.model, o, level(i.model, census[0]!.option, census[0]!.factor), i.brief), true);
-      assertCell(i.model, i.brief, census[0]!.option, census[0]!.factor, 'explicit'); }
+  { name: 'zero is required; nonzero/null estimated baseline demotes', run: () => {
+    for (const value of [5, null]) { const i = positive(); Object.assign(i.model.factors.find(f => f.label === census[0]!.factor)!, { baseline_value: value }); mustDemote(i); }
   } },
   { name: 'known-baseline null receipt demotes; missing-kind stored carrier stays explicit', run: () => {
     const i = positive(); const iv = level(i.model, census[0]!.option, census[0]!.factor);

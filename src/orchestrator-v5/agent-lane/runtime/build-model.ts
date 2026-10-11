@@ -803,8 +803,17 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       const factors = factorsByLabel(intervention.factor_label);
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
-        // RUN46: only the shared receipt verdict grants drafter-authored absolute credit, including known baselines.
-        if (intervention.provenance === 'explicit' && !verifiedOptionSetting(model, option, intervention, brief)) {
+        // ONE authority, scoped to the defect: a drafter-`explicit` absolute level on a factor whose baseline is KNOWN keeps
+        // its credit only if the shared option receipt verifies it (the known-baseline path used to skip the receipt, so
+        // admission stamped brief_extraction on figures the public verifier refuses). The UNKNOWN-baseline rule is exactly
+        // as before (credit only for a verified zero-stock setting), and an ambiguous/absent factor is untouched.
+        // The receipt is consulted only when the brief it verifies AGAINST was supplied (production always supplies it,
+        // build-model :1696/:1711/:1854); with no brief there is no authority to consult and the stored level is untouched.
+        const solo = factors.length === 1 ? factors[0]! : undefined;
+        const refused = solo === undefined ? false
+          : solo.baseline_known === true ? brief !== undefined && !verifiedOptionSetting(model, option, intervention, brief)
+            : !(solo.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief));
+        if (intervention.provenance === 'explicit' && refused) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed' });
         } else {
@@ -836,7 +845,7 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       const receipt = verifiedOptionTotal(model, option, intervention, brief);
       const verifiedTotal = receipt.verified;
       const statedFigure = verifiedTotal && !receipt.derived;
-      if (!verifiedTotal && intervention.provenance === 'explicit' && factor.baseline_known === true) {
+      if (brief !== undefined && !verifiedTotal && intervention.provenance === 'explicit' && factor.baseline_known === true) {
         provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
       }
       // Withholding credit does not remove the existing uncertainty of a claimed-user operand computation.
