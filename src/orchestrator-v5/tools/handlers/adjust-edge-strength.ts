@@ -21,7 +21,7 @@
  */
 
 import { drawnLinkAdoptionFor } from '../../agent-lane/drawn-link-adoption-context.js';
-import { isPlaceholderLink, sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
+import { isPlaceholderLink, linkSizing, sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
 import { z } from 'zod';
 
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
@@ -466,6 +466,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       };
       // R11: the strength the user would author is unchanged (mean and direction as stored), so this write is a review.
       const reviewOnly = drawn === undefined && !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction;
+      // Batch A ruling 2: placeholder confirmation succeeds as review and preserves its sizing.
       // ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a write that MOVES the strength of a link holding the user's
       // own figure would drop that figure (below: the magnitude contract strips `natural_effect` + `magnitude`). Refused
       // for every caller, nothing written, the figure quoted — unless the approval carried the user's explicit replace
@@ -511,11 +512,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // has no source to keep, and none may be invented, so nothing is recorded on it.
         if (reviewOnly) {
           if (edge.provenance !== undefined) {
-            // ⭐ L4 (DL 5929790081): a review on a PLACEHOLDER sizes it — Olumi's band, now chosen and accepted
-            // (`sizedByApproval`: `olumi_placeholder` → `olumi_estimate`, authorship untouched). Paul's 09:25 approval
-            // of 8 links kept every placeholder, and three Runs repeated "Olumi hasn't sized…" (`96c6f5f4`).
+            // Batch A ruling 2: confirmation records review only, including unsized placeholders.
             edge.provenance = {
-              ...sizedByApproval(edge.provenance, edge),
+              ...edge.provenance,
               reviewed_by_user: {
                 intent: 'confirm',
                 at: new Date().toISOString(),
@@ -555,8 +554,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           // #2848 buddy r2 #2: Olumi's `basis` justified the OLD size, so it goes with `natural_effect` (this branch is a real write).
           const { natural_effect: _oldNaturalEffect, clamped_from: _oldClamp, basis: _oldBasis, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
           const reviewed: Record<string, unknown> = {
-            // L4: the same rule as the review branch above — an adopted band on a placeholder sizes it.
-            ...sizedByApproval(keptProvenance, edge),
+            // A newly supplied, different band can size a placeholder; confirmation cannot.
+            ...sizedByApproval(keptProvenance, targetEdge, newMean),
             ...(drawn !== undefined ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {}),
             reviewed_by_user: { intent: 'confirm', at: new Date().toISOString(), band: adopted.band },
           };
@@ -645,9 +644,11 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         ?.find((e) => e.from === parsed.from && e.to === parsed.to);
       const assistantText = replacesHeldFigure && heldFigure !== null
         ? userFigureReplacedReceipt(heldFigure, resultBandWord)
+        : noop && reviewOnly && linkSizing(savedEdge) === 'olumi_accepted'
+        ? `Confirmed Olumi's estimate for the link between ${fromLabel} and ${toLabel} without a numerical change.`
         : noop
         ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean,
-            // The SAVED sizing (a review may size a placeholder as Olumi's accepted estimate, `sizedByApproval`).
+            // The saved sizing governs the receipt.
             edge: savedEdge })
         : formatEdgeAdjustment({
             fromLabel,

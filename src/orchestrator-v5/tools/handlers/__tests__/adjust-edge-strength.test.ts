@@ -1,3 +1,4 @@
+import { sizedByApproval } from '../../../../cee/magnitude/link-sizing.js';
 import { describe, expect, it } from 'vitest';
 
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
@@ -629,4 +630,51 @@ describe('R3-9 × AIQ 5867435409 (1): the handler refuses only while the last Ru
     const kept = { ...buildInvocation(withProduct(), proposal()), identityRunUseAuthority: null };
     await expect(createAdjustEdgeStrengthHandler()(kept)).rejects.toMatchObject({ cause_kind: 'precondition_unmet_at_execute' });
   });
+});
+
+describe('Batch A: confirming an estimate never approves a placeholder', () => {
+  it.each([
+    { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' },
+    { source: 'cee_hypothesis', magnitude: 'olumi_estimate', mean_projected: true },
+    { source: 'user_specified', mean_projected: true },
+  ])('Batch A: a placeholder confirm succeeds as review and preserves sizing: %j', async provenance => {
+    const graph = buildD1Fixture();
+    graph.edges[0]!.provenance = provenance as never;
+    graph.edges[0]!.defaulted = true;
+    const before = structuredClone(graph);
+    const outcome = await createAdjustEdgeStrengthHandler()(buildInvocation(graph,
+      makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.4, operator: 'set' }),
+    ));
+    const saved = (outcome.mutated_graph as GraphV3T).edges.find(e => e.from === 'f-budget' && e.to === 'g-revenue')!;
+    const { reviewed_by_user: review, ...kept } = saved.provenance as Record<string, unknown>;
+    // Batch A ruling 2: a successful confirm records review.
+    expect(review).toMatchObject({ intent: 'confirm', at: expect.any(String) });
+    // Batch A ruling 2: every sizing and authorship byte is preserved.
+    expect({ ...saved, provenance: kept }).toStrictEqual(before.edges[0]);
+    // Batch A ruling 2: the caller's graph remains unchanged.
+    expect(graph).toStrictEqual(before);
+  });
+
+  it('confirms a genuine estimate without numerical change and says what was confirmed', async () => {
+    const graph = buildD1Fixture();
+    graph.edges[0]!.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate' };
+    const beforeStrength = structuredClone(graph.edges[0]!.strength);
+    const outcome = await createAdjustEdgeStrengthHandler()(buildInvocation(graph,
+      makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.4, operator: 'set' }),
+    ));
+    const saved = (outcome.mutated_graph as GraphV3T).edges.find(e => e.from === 'f-budget' && e.to === 'g-revenue')!;
+    expect(saved.strength).toEqual(beforeStrength);
+    expect(saved.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } });
+    expect(outcome.assistant_text).toMatch(/confirmed.*Olumi.*estimate.*without.*numerical change/i);
+    expect(outcome.assistant_text).not.toMatch(/already|no change/i);
+  });
+});
+
+// The helper is also used by approval previews: a confirmation must not promise a sized postimage.
+it('a no-change approval preview cannot relabel or clear a placeholder', () => {
+  const provenance = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', mean_projected: true };
+  const edge = { provenance, strength: { mean: 0.5, std: 0.125 } };
+  expect(sizedByApproval(provenance, edge)).toStrictEqual(provenance);
+  expect(sizedByApproval(provenance, edge, 0.5)).toStrictEqual(provenance);
+  expect(sizedByApproval(provenance, edge, 0.85)).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
 });

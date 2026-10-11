@@ -122,8 +122,8 @@ export function isAcceptedOlumiSize(edge: unknown): boolean {
 }
 
 /**
- * The links an approval SIZES (L4 design 2): nobody sized them — Olumi's placeholder, or Olumi's older default (no sizing
- * mark at all, `defaulted: true`, not the user's: Paul's 4 magnitude-less links approved at 09:25, `96c6f5f4`).
+ * Links that need a new size before approval can size them: a placeholder or an older unmarked default.
+ * Confirmation of their stored default supplies no estimate; only a different, newly adopted size can replace it.
  */
 export function approvalSizes(edge: unknown): boolean {
   const s = linkSizing(edge);
@@ -131,12 +131,12 @@ export function approvalSizes(edge: unknown): boolean {
 }
 
 /**
- * The approval rule (L4 design 2): a review recorded on a link nobody sized ({@link approvalSizes}) sizes it — Olumi's
- * band, now chosen and accepted — and on any other link changes nothing. Authorship is untouched (`source`, `reasoning`
- * and the rest are kept by the caller): an accepted Olumi estimate is still Olumi's figure. Returns the provenance to
- * store. `edge` is the link as stored BEFORE this write.
+ * Only adoption of a newly supplied, different estimate may replace an unsized default. A confirmation alone
+ * never supplies a size. `newMean` is passed only by the trusted adoption writer; `edge` is its stored preimage.
  */
-export function sizedByApproval<P extends object>(provenance: P, edge: unknown): P {
+export function sizedByApproval<P extends object>(provenance: P, edge: unknown, newMean?: number): P {
+  if (newMean === undefined || !Number.isFinite(newMean) || !isRec(edge) || !isRec(edge.strength)
+    || newMean === edge.strength.mean) return provenance;
   if (!approvalSizes(edge)) return provenance;
   // Science 393023 LICENCE ruling 1 / R3 B1: `user_specified` on a projected mean records who drew the link, not who
   // sized it. A review must keep that carrier: clearing it would make the unchanged prior read `user` under the ONE

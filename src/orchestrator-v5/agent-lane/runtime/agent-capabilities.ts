@@ -4440,7 +4440,8 @@ export function createAgentCapabilities(
         // records must remain unsized after review; their card must not promise an estimate that review cannot store.
         const provenance = isPlainRecord(edge.provenance) ? edge.provenance : {};
         const sizedAfterApproval = linkSizing({ ...edge, provenance: sizedByApproval({ ...provenance,
-          reviewed_by_user: { intent: 'confirm' } }, edge) });
+          reviewed_by_user: { intent: 'confirm' } }, edge,
+          currentBand === band ? undefined : (direction === 'negative' ? -1 : 1) * bandMidpoint(band)) });
         /**
          * ⭐ F1 (#87 6006627551; DL lease c6): a band that MOVES a link holding the user's own figure would drop it — for
          * the user's band and Olumi's estimate alike (a brief figure is `brief_extraction` + `user_stated`, so the
@@ -4480,7 +4481,7 @@ export function createAgentCapabilities(
         // ⛔ R3 DEFECT 1 (5936673643, served dcd72dc3; DL GO 1 Oct): approving the band a link ALREADY SITS IN keeps its
         // figure. Matching only the band's midpoint re-set a sized estimate μ 0.6 → 0.55 (σ 0.3 → 0.275, its sizing note
         // dropped) and Paul's placeholders 0.5 → 0.55 on a no-change approval, staling the Run. Kept, it is a REVIEW
-        // (`confirm_current`); on a PLACEHOLDER that review is what sizes it (L4 (c), DL 5929790081: `sizedByApproval`).
+        // (`confirm_current`); a placeholder confirmation is refused by the canonical writer because no estimate exists.
         // An estimate already accepted in that band is "already". Only a band that MOVES the link sets its midpoint.
         const keeps = currentBand === band;
         const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);

@@ -1,0 +1,325 @@
+{
+  "source": "j1-new-recordings-20261011/0003-openai.json",
+  "brief": "We are a B2B software company with \u00a3120,000 monthly recurring revenue from 400 customers paying \u00a3300 a month. Decision: raise prices by 10%, launch a starter tier at \u00a349 a month, or keep pricing as it is. Goal: reach at least \u00a3150,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds \u00a31,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes \u00a3300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds \u00a349 a month to monthly recurring revenue. Each starter subscriber costs about \u00a36 a month in support. Keeping pricing as it is adds nothing.",
+  "candidate": {
+    "goal": {
+      "kind": null,
+      "deliverable": null,
+      "metric": "monthly recurring revenue",
+      "operator": ">=",
+      "target_stated": true,
+      "value": 150000,
+      "unit": "\u00a3/month",
+      "horizon_months": 9,
+      "provenance": "explicit",
+      "frame": "level",
+      "baseline_known": true,
+      "baseline_value": 120000,
+      "baseline_provenance": "explicit",
+      "scope": null
+    },
+    "constraints": [],
+    "options": [
+      {
+        "label": "Raise prices 10%",
+        "provenance": "explicit",
+        "changes": [],
+        "interventions": [
+          {
+            "factor_label": "Price rise from current",
+            "value": 10,
+            "value_kind": "absolute",
+            "unit": "%",
+            "provenance": "explicit",
+            "stated_evidence": {
+              "quote": "Decision: raise prices by 10%, launch a starter tier at \u00a349 a month, or keep pricing as it is.",
+              "start": 110,
+              "end": 204,
+              "amount_start": 136,
+              "option_quote": "raise prices by 10%",
+              "option_start": 120,
+              "option_end": 139
+            }
+          },
+          {
+            "factor_label": "Existing customer monthly price",
+            "value": 330,
+            "value_kind": "absolute",
+            "unit": "\u00a3/customer/month",
+            "provenance": "inferred",
+            "stated_evidence": null
+          }
+        ],
+        "added_capacity": null,
+        "is_status_quo": null
+      },
+      {
+        "label": "Launch starter tier",
+        "provenance": "explicit",
+        "changes": [],
+        "interventions": [
+          {
+            "factor_label": "Starter-tier subscribers",
+            "value": 150,
+            "value_kind": "absolute",
+            "unit": "subscribers",
+            "provenance": "explicit",
+            "stated_evidence": null
+          },
+          {
+            "factor_label": "Starter-tier monthly price",
+            "value": 49,
+            "value_kind": "absolute",
+            "unit": "\u00a3/subscriber/month",
+            "provenance": "explicit",
+            "stated_evidence": {
+              "quote": "Decision: raise prices by 10%, launch a starter tier at \u00a349 a month, or keep pricing as it is.",
+              "start": 110,
+              "end": 204,
+              "amount_start": 166,
+              "option_quote": "launch a starter tier at \u00a349 a month",
+              "option_start": 141,
+              "option_end": 177
+            }
+          }
+        ],
+        "added_capacity": null,
+        "is_status_quo": null
+      },
+      {
+        "label": "Keep current pricing",
+        "provenance": "explicit",
+        "changes": [],
+        "interventions": [],
+        "added_capacity": null,
+        "is_status_quo": true
+      }
+    ],
+    "factors": [
+      {
+        "label": "Price rise from current",
+        "role": "controllable",
+        "baseline_known": true,
+        "baseline_evidence": null,
+        "baseline_value": 0,
+        "unit": "%",
+        "provenance": "inferred",
+        "plausible_max": 100
+      },
+      {
+        "label": "Existing customers",
+        "role": "observable",
+        "baseline_known": true,
+        "baseline_evidence": {
+          "quote": "We are a B2B software company with \u00a3120,000 monthly recurring revenue from 400 customers paying \u00a3300 a month."
+        },
+        "baseline_value": 400,
+        "unit": "customers",
+        "provenance": "explicit",
+        "plausible_max": 2000
+      },
+      {
+        "label": "Existing customer monthly price",
+        "role": "controllable",
+        "baseline_known": true,
+        "baseline_evidence": {
+          "quote": "We are a B2B software company with \u00a3120,000 monthly recurring revenue from 400 customers paying \u00a3300 a month."
+        },
+        "baseline_value": 300,
+        "unit": "\u00a3/customer/month",
+        "provenance": "explicit",
+        "plausible_max": 1000
+      },
+      {
+        "label": "Starter-tier subscribers",
+        "role": "controllable",
+        "baseline_known": true,
+        "baseline_evidence": null,
+        "baseline_value": 0,
+        "unit": "subscribers",
+        "provenance": "inferred",
+        "plausible_max": 1000
+      },
+      {
+        "label": "Starter-tier monthly price",
+        "role": "controllable",
+        "baseline_known": true,
+        "baseline_evidence": null,
+        "baseline_value": 0,
+        "unit": "\u00a3/subscriber/month",
+        "provenance": "inferred",
+        "plausible_max": 200
+      }
+    ],
+    "risks": [
+      {
+        "label": "Higher-than-expected price churn",
+        "provenance": "inferred",
+        "unit": null,
+        "plausible_max": null
+      }
+    ],
+    "outcomes": [
+      {
+        "label": "Customers lost from price rise",
+        "provenance": "explicit",
+        "unit": "customers",
+        "plausible_max": 500
+      },
+      {
+        "label": "Existing-customer monthly recurring revenue",
+        "provenance": "inferred",
+        "unit": "\u00a3/month",
+        "plausible_max": 500000
+      },
+      {
+        "label": "Starter-tier monthly recurring revenue",
+        "provenance": "inferred",
+        "unit": "\u00a3/month",
+        "plausible_max": 200000
+      }
+    ],
+    "links": [
+      {
+        "from": "Price rise from current",
+        "to": "Existing customer monthly price",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 3,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred",
+        "definitional": null,
+        "basis": "One percent of the stated \u00a3300 current monthly price is \u00a33."
+      },
+      {
+        "from": "Price rise from current",
+        "to": "Customers lost from price rise",
+        "direction": "positive",
+        "provenance": "explicit",
+        "effect_amount": 2,
+        "effect_per_source_change": 1,
+        "effect_provenance": "explicit",
+        "definitional": null,
+        "basis": "Each 1% price rise loses about 2 customers, with a stated range of 1 to 4."
+      },
+      {
+        "from": "Price rise from current",
+        "to": "Higher-than-expected price churn",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null
+      },
+      {
+        "from": "Higher-than-expected price churn",
+        "to": "Customers lost from price rise",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null
+      },
+      {
+        "from": "Existing customers",
+        "to": "Existing-customer monthly recurring revenue",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 300,
+        "effect_per_source_change": 1,
+        "effect_provenance": "explicit",
+        "definitional": null,
+        "basis": "Each current customer pays \u00a3300 per month."
+      },
+      {
+        "from": "Existing customer monthly price",
+        "to": "Existing-customer monthly recurring revenue",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 400,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred",
+        "definitional": null,
+        "basis": "At the stated base of 400 customers, each \u00a31 monthly price change changes MRR by \u00a3400 before churn."
+      },
+      {
+        "from": "Customers lost from price rise",
+        "to": "Existing-customer monthly recurring revenue",
+        "direction": "negative",
+        "provenance": "explicit",
+        "effect_amount": -300,
+        "effect_per_source_change": 1,
+        "effect_provenance": "explicit",
+        "definitional": null,
+        "basis": "Each lost customer removes \u00a3300 a month of monthly recurring revenue."
+      },
+      {
+        "from": "Existing-customer monthly recurring revenue",
+        "to": "monthly recurring revenue",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 1,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred",
+        "definitional": true,
+        "basis": "Existing-customer MRR is part of total monthly recurring revenue."
+      },
+      {
+        "from": "Starter-tier subscribers",
+        "to": "Starter-tier monthly recurring revenue",
+        "direction": "positive",
+        "provenance": "explicit",
+        "effect_amount": 49,
+        "effect_per_source_change": 1,
+        "effect_provenance": "explicit",
+        "definitional": null,
+        "basis": "Each starter subscriber adds \u00a349 a month to monthly recurring revenue."
+      },
+      {
+        "from": "Starter-tier monthly price",
+        "to": "Starter-tier monthly recurring revenue",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null
+      },
+      {
+        "from": "Starter-tier monthly recurring revenue",
+        "to": "monthly recurring revenue",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 1,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred",
+        "definitional": true,
+        "basis": "Starter-tier MRR is part of total monthly recurring revenue."
+      }
+    ],
+    "identities": [
+      {
+        "outcome": "Starter-tier monthly recurring revenue",
+        "operation": "product",
+        "factors": [
+          "Starter-tier subscribers",
+          "Starter-tier monthly price"
+        ],
+        "provenance": "inferred",
+        "reading": null
+      }
+    ],
+    "unknowns": [
+      "The stated \u00a36 monthly support cost per starter subscriber affects profit or contribution margin, not monthly recurring revenue. Should it be added as a separate decision constraint or should the goal instead measure net recurring contribution?",
+      "The price-rise churn estimate ranges from 1 to 4 lost customers per 1% increase; the provisional calculation uses the stated central estimate of 2.",
+      "The starter-tier uptake estimate ranges from 80 to 250 subscribers; the provisional calculation uses the stated central estimate of 150.",
+      "It is not stated whether price-rise churn continues over the full nine months or occurs once at the price change."
+    ],
+    "decision_question": null
+  }
+}
