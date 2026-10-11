@@ -1,0 +1,58 @@
+{
+  "success": {
+    "value": {
+      "kind": "copied",
+      "scenarioId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "created": true
+    }
+  },
+  "replay": {
+    "value": {
+      "kind": "copied",
+      "scenarioId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "created": false
+    }
+  },
+  "owned": {
+    "value": {
+      "kind": "refused",
+      "reason": "not_copyable"
+    }
+  },
+  "missing": {
+    "value": {
+      "kind": "refused",
+      "reason": "not_copyable"
+    }
+  },
+  "no_model": {
+    "value": {
+      "kind": "refused",
+      "reason": "no_model"
+    }
+  },
+  "too_large": {
+    "value": {
+      "kind": "refused",
+      "reason": "too_large"
+    }
+  },
+  "unknown_user": {
+    "value": {
+      "kind": "refused",
+      "reason": "unknown_user"
+    }
+  },
+  "fail": {
+    "error": {
+      "name": "GuestCopyStoreError",
+      "message": "copy_guest_scenario failed: XX000"
+    }
+  },
+  "throw": {
+    "error": {
+      "name": "Error",
+      "message": "original transport throw"
+    }
+  }
+}

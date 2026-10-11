@@ -28,6 +28,8 @@
  * changing IP. A request whose token does not verify is answered 401 before it reaches the limiter (verification is a
  * local signature check against the cached JWKS).
  */
+import type {} from '@fastify/rate-limit';
+import { commitModelChange } from '../orchestrator-v5/persist-graph-write.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import { getGuestCopyStore } from '../orchestrator-v5/guest-copy/index.js';
@@ -50,6 +52,7 @@ const REFUSAL_REPLY: Readonly<Record<GuestCopyRefusal, readonly [number, string,
   not_copyable: NOT_COPYABLE,
   no_model: NOT_COPYABLE,
   too_large: NOT_COPYABLE,
+  stale_source: [409, 'copy_conflict', 'The guest decision changed. Retry copying it.'],
   unknown_user: [401, 'sign_in_required', 'Your account could not be found. Sign in again and retry.'],
 };
 
@@ -99,7 +102,7 @@ export default async function route(
 
       let outcome;
       try {
-        outcome = await resolveStore().copyGuestScenario(sourceId, userId);
+        outcome = await commitModelChange({ operation: 'COPY_GUEST_SCENARIO', store: resolveStore(), sourceScenarioId: sourceId, userId });
       } catch (err) {
         log.warn({ event: 'scenario_guest_copy.store_failed', request_id: getRequestId(req), error: err instanceof Error ? err.message : String(err) }, 'guest copy store failed');
         return refuse(reply, req, 503, 'copy_unavailable', 'Your decision could not be copied just now. Try again shortly.');
@@ -109,7 +112,8 @@ export default async function route(
         log.info({ event: 'scenario_guest_copy.refused', request_id: getRequestId(req), reason: outcome.reason }, 'guest copy refused');
         return refuse(reply, req, status, code, message);
       }
-      log.info({ event: 'scenario_guest_copy.copied', request_id: getRequestId(req), created: outcome.created }, 'guest copy');
+      log.info({ event: outcome.created ? 'scenario_guest_copy.copied' : 'scenario_guest_copy.replayed',
+        request_id: getRequestId(req), created: outcome.created }, outcome.created ? 'guest copy created' : 'guest copy recovered');
       return reply.code(200).send({ scenario_id: outcome.scenarioId, created: outcome.created });
     },
   );

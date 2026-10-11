@@ -1,9 +1,6 @@
 // Shrink-only: remove migrated sites and lower the ceiling together. Never add or rename to admit a bypass.
-export const BASELINE = 2;
-export const BYPASS_EXEMPTIONS = Object.freeze([
-  'src/orchestrator-v5/guest-copy/index.ts:copy_guest_scenario',
-  'src/routes/assist.v1.scenario-copy.ts:resolveStore().copyGuestScenario',
-]);
+export const BASELINE = 0;
+export const BYPASS_EXEMPTIONS = Object.freeze([]);
 
 export function requireOnlyExemptedWrites(census) {
   const allowance = new Map(BYPASS_EXEMPTIONS.map(key => [key, 1]));

@@ -218,11 +218,15 @@ describe('C8 — the `scenarios.graph` writer population is EXACTLY these call s
       ...filesMatching(/\.restoreVersionAtomic\s*\(/),
       ...filesMatching(/\.storeDraftGraph\s*\(/),
     ]);
+    // guest-copy/index.ts and assist.v1.scenario-copy.ts create a new scenarios row
+    // through commitModelChange's authorised COPY_GUEST_SCENARIO operation.
     expect([...writers].sort()).toEqual([
       'orchestrator-v5/commit.ts',
+      'orchestrator-v5/guest-copy/index.ts',
       'orchestrator-v5/model-management/service.ts',
       'orchestrator-v5/persist-graph-write.ts',
       'routes/agent-v1-turn.ts',
+      'routes/assist.v1.scenario-copy.ts',
       'routes/assist.v1.scenario-graph-register.ts',
       'routes/assist.v1.scenario-versions.ts',
     ]);

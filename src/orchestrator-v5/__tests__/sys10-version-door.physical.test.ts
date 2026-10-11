@@ -240,13 +240,9 @@ describe('SYS10 real door → real service → real adapter; storage transport d
     } finally { await app.close(); }
   });
 
-  it('the same shrink-only assertion certifies only the two OPEN guest-copy residual sites', () => {
-    expect(BASELINE).toBe(2); expect(BYPASS_EXEMPTIONS).toHaveLength(2);
-    expect(BYPASS_EXEMPTIONS).toEqual([
-      'src/orchestrator-v5/guest-copy/index.ts:copy_guest_scenario',
-      'src/routes/assist.v1.scenario-copy.ts:resolveStore().copyGuestScenario',
-    ]);
-    expect(measured.outside_door).toBe(2); expect(measured.diagnostics).toEqual([]);
+  it('the same shrink-only assertion certifies zero residual bypasses after C', () => {
+    expect(BASELINE).toBe(0); expect(BYPASS_EXEMPTIONS).toEqual([]);
+    expect(measured.outside_door).toBe(0); expect(measured.diagnostics).toEqual([]);
     requireOnlyExemptedWrites(measured);
     expect(measured.excluded.filter((s: any) => s.reason === 'version adapter reached by door').map((s: any) => s.callee))
       .toEqual(['create_model_version_cas_v1', 'restore_model_version_atomic_cas_v1']);
