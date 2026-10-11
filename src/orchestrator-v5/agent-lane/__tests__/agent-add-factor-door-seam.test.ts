@@ -649,4 +649,98 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);
   }, 120_000);
+
+  /**
+   * ⭐ RECOVERY BATCH B (B1, factor → goal: ONE rule). Paul's hiring test, 11 Oct (`third-party-review/test1-hiring-transcript.txt`
+   * l.210–218): he chose capacity and typed "I was defining it as a capacity. Let's go with 25%." The served answer was
+   * "the factor update was refused … the available update cannot connect a new factor directly to the goal", because this door
+   * refused the goal as a target while the drafter had itself linked three factors straight to ‘productivity’ (the goal), and
+   * `propose_new_option` takes the goal. The model below is that drafted shape: the hiring levers → ‘productivity’ directly.
+   */
+  const HIRING_MSG = "I was defining it as a capacity. Let's go with 25%.";
+  const hiringGraph = (): G => {
+    const e = (from: string, to: string, mean = 0.5, dir: 'positive' | 'negative' = 'positive') =>
+      ({ from, to, strength: { mean: dir === 'negative' ? -mean : mean, std: 0.1 }, exists_probability: 1, effect_direction: dir });
+    return {
+      nodes: [
+        { id: 'dec_hire', kind: 'decision', label: 'Hire a Tech lead or two developers' },
+        { id: 'goal_productivity', kind: 'goal', label: 'productivity' },
+        { id: 'fac_leads', kind: 'factor', label: 'Additional Tech leads hired', category: 'controllable', observed_state: { value: 0, raw_value: 0, unit: 'people', cap: 5 } },
+        { id: 'fac_devs', kind: 'factor', label: 'Additional developers hired', category: 'controllable', observed_state: { value: 0, raw_value: 0, unit: 'people', cap: 5 } },
+        { id: 'fac_quality', kind: 'factor', label: 'Code-quality degradation', category: 'external' },
+        { id: 'risk_onboarding', kind: 'risk', label: 'Onboarding capacity strain' },
+        { id: 'opt_lead', kind: 'option', label: 'Hire a Tech lead', interventions: { fac_leads: { value: 0.2, raw_value: 1, unit: 'people' } } },
+        { id: 'opt_devs', kind: 'option', label: 'Hire two developers', interventions: { fac_devs: { value: 0.4, raw_value: 2, unit: 'people' } } },
+      ],
+      edges: [e('dec_hire', 'opt_lead', 1), e('dec_hire', 'opt_devs', 1), e('opt_lead', 'fac_leads', 1), e('opt_devs', 'fac_devs', 1),
+        e('fac_leads', 'goal_productivity'), e('fac_devs', 'goal_productivity'), e('fac_devs', 'fac_quality'),
+        e('fac_quality', 'goal_productivity', 0.5, 'negative'), e('fac_devs', 'risk_onboarding'), e('risk_onboarding', 'goal_productivity', 0.3, 'negative')],
+    };
+  };
+  const capacityArgs = (affects: string) => [{ label: 'Non-development time', unit: '%', today: { value: 25 }, affects, direction: 'negative' }];
+
+  it('(q) RED (Batch B, Paul\'s hiring words): a new factor linked to the GOAL is held → approved → committed with ONE placeholder link new factor → goal and the user\'s 25%', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(capacityArgs('productivity'), HIRING_MSG, (o) => { out = o; });
+    expect(callOf(t1), `${JSON.stringify(t1._agent.tool_calls)} ${JSON.stringify(out)}`).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const held = await heldOnLatestRow();
+    expect(held, 'exactly ONE live hold').toHaveLength(1);
+    const ops = held[0]!.action.inline_patch!.operations!;
+    expect(ops.map((o) => o.op), JSON.stringify(ops)).toEqual(['add_node', 'add_edge']);
+    const id = ops[0]!.path;
+    expect(ops[1]!.path).toBe(`${id}::goal_productivity`);
+    expect(bytes(), 'nothing is written before the approval').toBe(before);
+
+    const approve = approveChipOf(t1)!;
+    expect(approve, 'the approve chip is offered').toBeDefined();
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow();
+    const node = g.nodes.find((x) => x.id === id)!;
+    expect(node).toMatchObject({ kind: 'factor', label: 'Non-development time', category: 'external' });
+    expect((node['observed_state'] as Record<string, unknown>)['raw_value']).toBe(25);
+    expect((node['observed_state'] as Record<string, unknown>)['source']).toBe(USER_SOURCE);
+    const { hypothesisEdgeValue } = await import('../../routing/add-option-transaction.js');
+    const outEdges = g.edges.filter((x) => x.from === id);
+    expect(outEdges, JSON.stringify(outEdges)).toHaveLength(1);
+    expect(outEdges[0]).toMatchObject(hypothesisEdgeValue(id, 'goal_productivity', 'negative'));
+    expect(await heldOnLatestRow(), 'the hold is consumed').toEqual([]);
+  }, 180_000);
+
+  it('(q‴) Batch B: what Paul is shown — the ONE-call composed card names the factor, his 25 % and that it affects productivity', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    script = [() => fnCall('propose_new_factor', { factors: capacityArgs('productivity'), rationale: 'The user chose 25%.', whole_request: true })];
+    const t1 = await turn({ message: HIRING_MSG });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Non-development time’ is 25 ?%, the figure you gave, and affects productivity \(lowers it\)\./);
+    expect(t1.assistant_text, t1.assistant_text).not.toMatch(/cannot connect|refused|nothing was prepared/i);
+    expect(approveChipOf(t1), 'the approve chip is offered').toBeDefined();
+  }, 120_000);
+
+  it.each([
+    ['an option', 'Hire two developers', 'is an option'],
+    ['a risk', 'Onboarding capacity strain', 'is a risk'],
+    ['the decision', 'Hire a Tech lead or two developers', 'is a decision'],
+  ])('(q′) CONTRAST (Batch B): on the same hiring model a link INTO %s is still refused — nothing held, byte-identical', async (_what, target, said) => {
+    graphOf.set(SCENARIO, hiringGraph());
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(capacityArgs(target), HIRING_MSG, (o) => { out = o; });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'target_not_allowed' }));
+    expect(String(out['detail']), JSON.stringify(out)).toContain(said);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  it('(q″) CONTRAST (Batch B): a lever the options set is still refused as a target on the hiring model', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    const before = bytes();
+    const t1 = await propose(capacityArgs('Additional developers hired'), HIRING_MSG);
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'target_is_a_lever' }));
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
 });

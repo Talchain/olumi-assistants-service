@@ -585,7 +585,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           label: { type: 'string' },
           unit: { type: 'string', description: 'The user\u2019s unit, e.g. "GBP/year per engineer".' },
           today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' } }, ['value']),
-          affects: { type: 'string', description: 'ONE existing outcome, or a factor no option sets, that it drives, as the CURRENT MODEL STATE labels it.' },
+          affects: { type: 'string', description: 'ONE existing outcome, the goal, or a factor no option sets, that it drives, as the CURRENT MODEL STATE labels it.' },
           direction: { type: 'string', enum: ['positive', 'negative'] },
         }, ['label', 'unit', 'today', 'affects', 'direction']),
       },
