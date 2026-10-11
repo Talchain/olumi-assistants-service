@@ -15,10 +15,11 @@
  *   · then ONE `add_edge` per factor, new factor → its target, Olumi's PLACEHOLDER (`hypothesisEdgeValue`: default
  *     strength, `defaulted`, `cee_hypothesis`) — never `user_specified`: nobody sized the link.
  *
- * ⛔ THE TARGET KINDS ARE DECIDED HERE. A new factor links to an outcome or a non-lever factor (one no option sets:
- * observable or external) — the add-option new-factor rule (`isAffectsTarget`) without risks or the goal, and NEVER the
- * goal (no validator admits factor → goal), an option, a decision, a risk or a lever the options set
- * (`INVALID_FACTOR_TO_CONTROLLABLE`). Any other target is refused with nothing built.
+ * ⛔ THE TARGET KINDS ARE DECIDED HERE. A new factor links to the goal, an outcome or a non-lever factor (one no option
+ * sets: observable or external) — the add-option new-factor rule (`isAffectsTarget`) less risks — and NEVER an option, a
+ * decision, a risk or a lever the options set (`INVALID_FACTOR_TO_CONTROLLABLE`). Any other target is refused with nothing
+ * built. (Recovery Batch B, B1: the goal was refused here while the drafter wrote factor → goal itself and the add-option
+ * door took it; Paul's hiring test, 11 Oct, was refused "a new factor directly to the goal".)
  *
  * THE USER'S FIGURE rides the hold, not the ops: a CEE-written member (`GM_HELD_USER_TODAY_KEY`) the confirm stamps into
  * each factor's `add_node` after the re-referee and before the apply (`stampNewUserTodayLevels`), exactly where the
@@ -30,7 +31,7 @@ import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../graph-management/types.js';
-import { hypothesisEdgeValue, isStatedTodayObservedState, reachesGoal, sameLabel, type AddOptionGraphView } from './add-option-transaction.js';
+import { hypothesisEdgeValue, isAffectsTarget, isStatedTodayObservedState, reachesGoal, sameLabel, type AddOptionGraphView } from './add-option-transaction.js';
 
 /** At most this many new factors in ONE change (the ruling: 1..3). */
 export const MAX_FACTORS_PER_ADD = 3;
@@ -80,13 +81,19 @@ export type AddFactorBuildResult =
 const CANONICAL_ID_RE = /^[a-z0-9_:-]+$/;
 const fail = (reason: AddFactorSkipReason): AddFactorBuildResult => ({ matched: false, reason });
 
-/** What a new factor may drive: an outcome or a non-lever factor (one no option sets). Never the goal, an option, decision, risk or lever. */
+/**
+ * What a new factor may drive: the goal, an outcome or a non-lever factor (one no option sets). Never an option, decision,
+ * risk or lever.
+ *
+ * ⭐ ONE RULE (Recovery Batch B, B1): DERIVED from the add-option new-factor rule (`isAffectsTarget`), never restated, so
+ * the two doors that add a factor cannot disagree on a target again. The served drafter writes factor → goal itself
+ * (`build-model.ts`: "straight to the goal metric"; `admit-model.ts` keeps it, its factor → goal repair having been removed
+ * by ruling) and the analysis runs it. The one difference is kept and named: a risk, which this door has never taken
+ * (Canonical #72's door rule; not in Batch B's scope).
+ */
 export function isNewFactorTarget(node: { kind: string; category?: string } | undefined): boolean {
-  if (node === undefined) return false;
-  // Canonical (#72, the door's review): NOT the goal. factor → goal is in neither validator allow-list (v3-validator,
-  // graph-validator ALLOWED_EDGES) and no served path has run it; an outcome or a non-lever factor is.
-  if (node.kind === 'outcome') return true;
-  return node.kind === 'factor' && (node.category === 'observable' || node.category === 'external');
+  if (node === undefined || node.kind === 'risk') return false;
+  return isAffectsTarget(node);
 }
 
 /** Build the atomic add-factor batch against the current graph, or a classified refusal. A refusal builds nothing. */

@@ -9064,13 +9064,13 @@ export function createAgentCapabilities(
         if (res.kind === 'other' && res.node.kind === 'factor') {
           return { ok: false, mutated: false, refusal: 'target_is_a_lever',
             detail: `Nothing was prepared: "${res.node.label}" is set by the options, so nothing else may drive it. Link "${label}" to `
-              + 'the outcome or the non-lever factor (one no option sets) it affects instead, from the user’s words; if it is unclear, ask.' };
+              + 'the goal, the outcome or the non-lever factor (one no option sets) it affects instead, from the user’s words; if it is unclear, ask.' };
         }
         if (res.kind !== 'one') {
           return { ok: false, mutated: false, refusal: res.kind === 'none' ? 'target_not_found' : 'target_not_allowed',
             detail: res.kind === 'none'
-              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets).`
-              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets) — never the goal, a risk, an option or a decision.` };
+              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives the goal, an outcome or a non-lever factor (one no option sets).`
+              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives the goal, an outcome or a non-lever factor (one no option sets) — never a risk, an option or a decision.` };
         }
         const direction = f.direction === 'positive' || f.direction === 'negative' ? f.direction : null;
         if (direction === null) {
@@ -9170,7 +9170,7 @@ export function createAgentCapabilities(
       if (!heldOk || res.status !== 'held') {
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(res.status === 'refused' ? { reason: res.reason } : {}),
           detail: res.status === 'refused' && res.reason === 'target_not_allowed'
-            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives an outcome or a non-lever factor (one no option sets). Tell the user plainly.'
+            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives the goal, an outcome or a non-lever factor (one no option sets). Tell the user plainly.'
             : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);
