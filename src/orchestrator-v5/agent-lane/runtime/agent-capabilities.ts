@@ -207,7 +207,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 }
 
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
-import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
+import { createProposal, computeProposalId, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
@@ -2118,6 +2118,8 @@ export function createAgentCapabilities(
    */
   opts: {
     /** Absolute end of this turn's drafter call, shared with optional draft widening. */
+    /** Ordinary agent-turn authority cut; legacy callers remain inventoried separately. */
+    readonly turnAuthority?: boolean;
     readonly deadlineAt?: number;
     readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome>;
     /**
@@ -6056,6 +6058,14 @@ export function createAgentCapabilities(
         };
       }
 
+      // Preserve the existing validation/card refusals before the ordinary-turn consent fence.
+      // These card writers check the same host-bound identity before any write of their own.
+      if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
+        if (ops.some(o => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
+        if (ops.some(o => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
+        return { ok: false, mutated: false, refusal: 'approval_required' };
+      }
+
       /**
        * ⭐ A LINK'S STRENGTH, AS THE USER STATED IT — ONE typed `edge_strength_edit`, the product's own link writer
        * (the inspector's canonical D1 path, with its expected-before tuple). Reported as applied ONLY when this
@@ -9588,7 +9598,61 @@ export function createAgentCapabilities(
     },
     // The approval guard's writer: every return path of `authoriseChange`, one place.
     async authoriseChange(ctx, args): Promise<ToolResult> {
-      const r = await caps.authoriseChange(ctx, args);
+      // Run existing validation and card-specific refusals unchanged. The inner writer's
+      // consent fence refuses an otherwise executable ordinary proposal before any write.
+      if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
+        return caps.authoriseChange(ctx, args);
+      }
+      if (opts.turnAuthority === true && !ctx.turn_id) {
+        return { ok: false, mutated: false, refusal: 'turn_identity_required' };
+      }
+      const p = proposals.get(args.proposal_id);
+      if (opts.turnAuthority === true && p !== undefined) {
+        if (p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) {
+          return { ok: false, mutated: false, refusal: 'not_authorised' };
+        }
+        if (computeProposalId(p) !== p.proposal_id) {
+          return { ok: false, mutated: false, refusal: 'integrity_failed' };
+        }
+      }
+      const reconcile = async (): Promise<ToolResult> => {
+        // Only this cut's single structural-link write has a complete one-receipt identity.
+        // Other operation families may have several commits: a partial receipt must never imply whole approval.
+        if (p?.operations.length === 1 && p.operations[0].op === 'add_edge'
+          && (p.operations[0].value as { author?: unknown } | undefined)?.author !== 'model_proposed') {
+          const operationId = authorisationTurnId(p.proposal_id);
+          let cursor: string | undefined;
+          try {
+            for (let page = 0; page < 5; page += 1) {
+              const found = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/versions`, { limit: 200,
+                ...(cursor !== undefined ? { cursor } : {}) });
+              if (found.status !== 200 || !Array.isArray(found.json.versions)) break;
+              const hit = found.json.versions.find((v: { creation?: { source_turn_id?: unknown; kind?: unknown; mutation_id?: unknown } }) =>
+                v.creation?.source_turn_id === operationId && v.creation?.kind === 'committed_mutation');
+              if (hit !== undefined && typeof hit.version_id === 'string' && hit.version_id.length > 0
+                && Number.isInteger(hit.sequence) && hit.sequence > 0
+                && typeof hit.creation.mutation_id === 'string' && hit.creation.mutation_id.length > 0) {
+                const receipts = [{ version: hit.sequence, version_id: hit.version_id,
+                  mutation_id: hit.creation.mutation_id, source_turn_id: operationId }];
+                proposals.markApplied(p.proposal_id, receipts);
+                return { ok: true, mutated: false, applied: true, already_applied: true,
+                  proposal_id: p.proposal_id, operation_id: operationId, receipts };
+              }
+              cursor = typeof found.json.next_cursor === 'string' ? found.json.next_cursor : undefined;
+              if (cursor === undefined) break;
+            }
+          } catch { /* an unavailable receipt reader is an unknown outcome */ }
+        }
+        return { ok: false, mutated: false, refusal: 'not_confirmed', outcome: 'outcome_unknown', proposal_id: args.proposal_id };
+      };
+      const execute = () => caps.authoriseChange(ctx, args);
+      const r = opts.turnAuthority === true && p !== undefined
+        ? await proposals.executeApproved(p, ctx.turn_id ?? ctx.request_id, execute,
+            result => result.applied === true && proposals.isApplied(p.proposal_id) ? 'applied'
+              // A refusal that provably wrote nothing (mutated:false, and not the "could not confirm" outcome) is released.
+              : result.mutated === false && result.refusal !== 'not_confirmed' && result.outcome !== 'outcome_unknown' ? 'none' : 'unknown',
+            reconcile)
+        : await execute();
       if (r.applied === true || r.mutated === true) {
         approvalAppliedThisRequest = true;
         // ⭐ (B) WHAT THE MODEL NEEDS NOW, from the graph as stored after the write — one place for every
