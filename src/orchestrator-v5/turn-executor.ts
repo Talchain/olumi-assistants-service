@@ -1090,10 +1090,16 @@ function deriveCanonicalReadiness(
   canonicalReadinessGraph: unknown,
   requestGraph: GraphStateIngress | null,
   requestReadiness: NonNullable<GraphPatchBlockData['analysis_ready']> | undefined,
+  authorityContext: Pick<Awaited<ReturnType<typeof buildTurnContext>>, 'persistedGraph' | 'humanAuthority'>,
 ): NonNullable<GraphPatchBlockData['analysis_ready']> | undefined {
   if (canonicalReadinessGraph == null) return undefined;
-  if (canonicalReadinessGraph === requestGraph) return requestReadiness;
-  return buildCanonicalAnalysisReadyFromGraph(canonicalReadinessGraph);
+  const current = GraphStateIngressSchema.safeParse(canonicalReadinessGraph);
+  const approved = GraphStateIngressSchema.safeParse(authorityContext.persistedGraph);
+  const authority = current.success && approved.success
+    && computeAnalysisAffectingGraphHash(current.data) === computeAnalysisAffectingGraphHash(approved.data)
+    ? authorityContext.humanAuthority ?? [] : [];
+  if (authority.length === 0 && canonicalReadinessGraph === requestGraph) return requestReadiness;
+  return buildCanonicalAnalysisReadyFromGraph(canonicalReadinessGraph, authority);
 }
 
 const ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT =
@@ -2322,6 +2328,7 @@ export async function runTurnExecutor(
                 canonicalReadinessGraphForRun,
                 graphStateForTurn,
                 analysisReadyForTurn,
+                context,
               ),
               currentGraphHash: currentAnalysisGraphHashForTurn,
               currentGraph: canonicalReadinessGraphForRun,
@@ -2368,6 +2375,7 @@ export async function runTurnExecutor(
                 canonicalReadinessGraphForRun,
                 graphStateForTurn,
                 analysisReadyForTurn,
+                context,
               ),
               currentGraphHash: currentAnalysisGraphHashForTurn,
               currentGraph: canonicalReadinessGraphForRun,
@@ -2985,6 +2993,7 @@ export async function runTurnExecutor(
       canonicalReadinessGraphForRun,
       contextGraphForReasoning,
       analysisReadyForTurn,
+      context,
     );
     // Option-identity guard inputs (CEE_OPTION_IDENTITY_FRESHNESS_GUARD). Read
     // option IDs from the RAW current graph — persisted when present (even when
@@ -13419,6 +13428,7 @@ export async function runTurnExecutor(
         canonicalReadinessGraphForRun,
         graphStateForTurn,
         analysisReadyForTurn,
+        context,
       );
       canonicalStateForRun = selectCanonicalAnalysisState({
         handlerFacts: handlerFactsForCommit,

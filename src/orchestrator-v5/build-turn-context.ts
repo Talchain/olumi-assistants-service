@@ -1,3 +1,4 @@
+import { readDurableHumanAuthority, resolveDurableHumanAuthority } from './context/durable-human-authority.js';
 import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
 import { ANALYSIS_REREAD_TIMEOUT_MS } from './session/analysis-read-deadline.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
@@ -51,7 +52,7 @@ import {
 import {
   assessAnalysisReadiness,
   canonicaliseForAnalysis,
-  resolveRunAdmission,
+  resolveHumanRunAdmission,
   admittedVerdict,
   refusedVerdict,
   AnalysisNotReadyError,
@@ -350,6 +351,7 @@ export interface EnrichedTurnContext extends TurnContext {
   readonly persistedGraph: unknown | null;
   /** Same turn-start scenario read as persistedGraph; absent on legacy/degraded reads. */
   readonly persistedRevision?: number;
+  readonly humanAuthority?: import('../orchestrator/tools/encode-option-interventions.js').InterventionHumanAuthority;
   /**
    * F2 (Codex deep-review) — the discriminated result of the canonical
    * `scenarios.graph` read that produced {@link persistedGraph}. Consumed by
@@ -615,6 +617,7 @@ export interface BuildTurnContextOptions {
 }
 
 export interface RunAnalysisScenarioSnapshot {
+  readonly humanAuthority?: import('../orchestrator/tools/encode-option-interventions.js').InterventionHumanAuthority;
   /** Scenario revision from the same persisted read as the analysed graph (B2). */
   readonly evaluatedScenarioRevision?: number;
   readonly goalScopeClaimInput: GoalScopeClaimInput;
@@ -948,6 +951,10 @@ export async function buildTurnContext(
   // as before.
   // Read in the parallel batch above (batch 5 A).
   const scenarioState = persistedScenarioStateRead;
+  const humanAuthority = durableMutationFactRead.status === 'ok'
+    ? resolveDurableHumanAuthority(scenarioState.graph, payload.scenario_id, scenarioState.revision,
+      durableMutationFactRead.facts, durableMutationFactRead.facts.length < durableMutationFactRead.query_limit)
+    : [];
 
   // ── ARE WE ENTITLED TO SAY THIS USER HAS NO MODEL? ─────────────────────
   // `fetchPersistedScenarioState` answers "did the read succeed?"; this
@@ -1250,6 +1257,7 @@ export async function buildTurnContext(
     prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
+    humanAuthority,
     persistedGraphRead: canonicalGraphRead,
     ...(scenarioState.revision !== undefined ? { persistedRevision: scenarioState.revision } : {}),
     most_recent_pending_actions: mostRecentPendingActions,
@@ -3033,7 +3041,9 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // returns `can_run_analysis:false` WITH `will_scaffold_options:true`, which is
   // the state a FRESH DRAFT lands in. `resolveRunAdmission` reads the same
   // projection the panel publishes, so offer and admission are now one answer.
-  const admission = resolveRunAdmission(sigmaFloor.graph);
+  const authorityStore = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
+  const humanAuthority = await readDurableHumanAuthority(authorityStore, persistedGraph, scenarioId, revision);
+  const admission = resolveHumanRunAdmission(sigmaFloor.graph, humanAuthority);
   if (!admission.willProceed) {
     // ⭐ HAND OVER THE IDENTITY THIS ASSESSMENT ALREADY COMPUTED, rather than
     // discarding it one line before the user needs it.
@@ -3106,7 +3116,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new Error(`Canonical graph failed GraphV3 validation for scenario ${scenarioId}`);
   }
 
-  const readiness = buildCanonicalAnalysisReadyFromGraph(graphForSnapshot);
+  const readiness = buildCanonicalAnalysisReadyFromGraph(graphForSnapshot, humanAuthority);
   if (!readiness?.goal_node_id) {
     throw new Error(`Could not derive analysis_ready.goal_node_id for scenario ${scenarioId}`);
   }
@@ -3131,6 +3141,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
 
   return {
     goalScopeClaimInput: scopeInput,
+    humanAuthority,
     ...(typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0
       ? { evaluatedScenarioRevision: revision } : {}),
     graph: parsedGraph.data,

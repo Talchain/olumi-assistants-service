@@ -1,3 +1,4 @@
+import type { InterventionHumanAuthority } from '../../../orchestrator/tools/encode-option-interventions.js';
 import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
 import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
@@ -337,6 +338,8 @@ function withholdStatedOperator<C>(goalConstraints: C): C {
  * The reader produces them; PLoT consumes them; the handler is the conduit.
  */
 export interface RunAnalysisScenarioSnapshot {
+  /** Server-resolved applied approval receipts for this exact loaded revision. */
+  readonly humanAuthority?: InterventionHumanAuthority;
   readonly evaluatedScenarioRevision?: number;
   /** Production reader attests current scope; a failed pending read throws before PLoT. */
   readonly goalScopeClaimInput?: GoalScopeClaimInput;
@@ -2386,8 +2389,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ratifiedConstraints,
       leadingOptionId ?? null,
       { options: submittedOptions, held: gate.held,
-        // This run carries no exact intervention approval/receipt context. Stored source is not new proof.
-        humanAuthority: [], unattributedTargetIds: leaderUnattributedTargetIds },
+        // Only the snapshot loader's exact applied approval receipts provide durable proof.
+        humanAuthority: snapshot.humanAuthority ?? [], unattributedTargetIds: leaderUnattributedTargetIds },
     );
     if ([...leaderEstimatedTargetIds].some(id => !leaderUnattributedTargetIds.has(id))) {
       log.info(
@@ -2815,6 +2818,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // blocker (see the ⚠⚠ block above `deriveConstraintVerdict`).
     const optionCostAsk = decideOptionCostAsk({
       notDecisionGrade: constraintVerdict.state === 'unevaluated',
+      humanAuthority: snapshot.humanAuthority,
       ratified: ratifiedConstraints,
       nodes: readGraphNodesForCostAsk(snapshot.rawPersistedGraph ?? snapshot.graph),
       options: readOptionEntriesForCostAsk(snapshot),

@@ -28,6 +28,12 @@ export const MODEL_WRITE_OWNERSHIP_REFUSAL_BODY = Object.freeze({
     message: "Nothing was saved. I couldn't check access to this model. Try again." }),
 });
 
+/** The authenticated request caller, never an operation-payload or stored-source assertion. */
+export function readCheckedWriteUser(): string | null {
+  const caller = writeCallerStorage.getStore();
+  return caller?.verified === true ? caller.userId : null;
+}
+
 export function readWriteRefusal(request?: object): Readonly<WriteRefusal> | undefined {
   return writeContext(request)?.refusal;
 }

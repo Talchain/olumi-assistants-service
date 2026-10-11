@@ -1,3 +1,4 @@
+import { DurableHandlerFactSchema } from '../context/durable-human-authority.js';
 import { bindRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 import { toTypedRunRows, type TypedRunRows, type TypedRunOptionRow } from '../runs/typed-run-rows.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
@@ -35,7 +36,6 @@ export { USE_APPEND_V6, useAppendV6, __setUseAppendV6ForTest } from '../append-v
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
-  HandlerFactSchema,
   SessionTurnSchema,
   type HandlerFact,
   type RunDeliveryHandlerFact,
@@ -2449,7 +2449,7 @@ export class SupabaseSessionStore implements SessionStore {
             ? (payloadObj.noop as boolean)
             : false;
       const hydrated = { ...payloadObj, noop };
-      const parsed = HandlerFactSchema.safeParse(hydrated);
+      const parsed = DurableHandlerFactSchema.safeParse(hydrated);
       if (!parsed.success) {
         throw new SessionReadError(
           `readFactsWithTurnFor: payload failed HandlerFactSchema — ${parsed.error.message}`,
@@ -2552,7 +2552,7 @@ export class SupabaseSessionStore implements SessionStore {
         row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
           ? (row.payload as Record<string, unknown>)
           : {};
-      const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop: row.noop });
+      const parsed = DurableHandlerFactSchema.safeParse({ ...payloadObj, noop: row.noop });
       if (!parsed.success) {
         throw new SessionReadError(
           `readRecentAppliedMutationFactsFor(${scenarioId}): payload failed HandlerFactSchema — ${parsed.error.message}`,
@@ -2649,7 +2649,7 @@ export class SupabaseSessionStore implements SessionStore {
           row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
             ? (row.payload as Record<string, unknown>)
             : {};
-        const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop: row.noop });
+        const parsed = DurableHandlerFactSchema.safeParse({ ...payloadObj, noop: row.noop });
         if (
           !parsed.success ||
           parsed.data.fact_type !== 'finding_dissent' ||
@@ -2828,7 +2828,7 @@ export class SupabaseSessionStore implements SessionStore {
         : typeof payloadObj.noop === 'boolean'
           ? (payloadObj.noop as boolean)
           : false;
-    const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop });
+    const parsed = DurableHandlerFactSchema.safeParse({ ...payloadObj, noop });
     if (!parsed.success) {
       throw new SessionReadError(
         `readNewestAnalysisFactFor(${scenarioId}): payload failed HandlerFactSchema — ${parsed.error.message}`,
@@ -2871,7 +2871,7 @@ export class SupabaseSessionStore implements SessionStore {
         ? (row.payload as Record<string, unknown>)
         : {};
     const noop = typeof row.noop === 'boolean' ? row.noop : false;
-    const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop });
+    const parsed = DurableHandlerFactSchema.safeParse({ ...payloadObj, noop });
     if (!parsed.success || parsed.data.fact_type !== 'run_delivery' || parsed.data.result.run_id !== runId) {
       throw new SessionReadError(
         `readNewestRunDeliveryFor(${scenarioId}): row is not a run_delivery for this Run`
@@ -3326,7 +3326,7 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handl
       row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
         ? (row.payload as Record<string, unknown>)
         : {};
-    const parsed = HandlerFactSchema.safeParse({
+    const parsed = DurableHandlerFactSchema.safeParse({
       ...payloadObj,
       noop: row.noop,
     });

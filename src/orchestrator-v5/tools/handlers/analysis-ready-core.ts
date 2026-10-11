@@ -621,7 +621,16 @@ export const NO_COMPARISON_NEXT_STEP =
 /**
  * Resolve the two-term admission for a graph. Pure and total.
  */
-export function resolveRunAdmission(rawGraph: unknown, humanAuthority: InterventionHumanAuthority = []): RunAdmission {
+export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
+  return admissionForSnapshot(rawGraph, []);
+}
+
+/** Explicit checked-operation adapter; snapshot admission itself accepts no authority/mode argument. */
+export function resolveHumanRunAdmission(rawGraph: unknown, humanAuthority: InterventionHumanAuthority): RunAdmission {
+  return admissionForSnapshot(rawGraph, humanAuthority);
+}
+
+function admissionForSnapshot(rawGraph: unknown, humanAuthority: InterventionHumanAuthority): RunAdmission {
   // ⭐ ONE DERIVATION OF THE COHERENCE RULE, wrapping the seven return sites
   // below rather than adding an eighth thing each of them must remember. Every
   // one of those returns already sets `willProceed`; deriving

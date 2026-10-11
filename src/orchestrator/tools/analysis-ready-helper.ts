@@ -38,7 +38,7 @@ import {
 // both are hoisted function declarations, used only at call time. The
 // alternative was to re-derive `willProceed` here, which would mint the second
 // admission predicate this estate keeps paying for.
-import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
+import { resolveRunAdmission, resolveHumanRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { encodeOptionInterventionsForEdit, interventionPreimageScope, type InterventionHumanAuthority } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
@@ -1764,7 +1764,7 @@ export function buildCanonicalAnalysisReadyFromGraph(
   graph: unknown,
   humanAuthority: InterventionHumanAuthority = [],
 ): AnalysisReadyPayload | undefined {
-  return canonicalAnalysisReadyFrom(resolveRunAdmission(graph, humanAuthority), graph);
+  return canonicalAnalysisReadyFrom(resolveHumanRunAdmission(graph, humanAuthority), graph);
 }
 
 /**

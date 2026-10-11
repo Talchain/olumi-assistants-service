@@ -1,3 +1,5 @@
+import { attachCheckedCellApproval } from '../context/durable-human-authority.js';
+import { readCheckedWriteUser } from '../ownership/door-ownership.js';
 import { interventionPreimageScope, type InterventionHumanAuthority } from '../../orchestrator/tools/encode-option-interventions.js';
 import { prepareHorizonBasisForWrite } from '../goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
@@ -5815,6 +5817,12 @@ export async function dispatchEditGraph(
       site: 'edit_graph_dispatch',
     });
     const expectedRevision = useAppendV6() ? editBase?.revision : undefined;
+    const approvingUser = readCheckedWriteUser();
+    if (editGraphFact && approvingUser && expectedRevision !== undefined) {
+      const approvedFact = attachCheckedCellApproval(editGraphFact, graphForCommit, operationHumanAuthority,
+        { scenarioId: payload.scenario_id, turnId: payload.turn_id, userId: approvingUser, revision: expectedRevision });
+      if (approvedFact.fact_type === 'edit_graph') editGraphFact = approvedFact;
+    }
     const commitResult = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
