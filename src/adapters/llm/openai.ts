@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import OpenAI from "openai";
 import { Agent, setGlobalDispatcher } from "undici";
 import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS } from "../../config/timeouts.js";
@@ -7,7 +8,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
-import { assertProviderAllowed } from "./provider-policy.js";
+import { assertProviderAllowed, recordProviderAttempt, recordProviderUsage, type ProviderCallDetail } from "./provider-policy.js";
 import { captureLlmPhysicalAttempt, withLlmInvocationCapture } from '../../utils/request-timing.js';
 import {
   retryConfigForLiveEval,
@@ -1990,4 +1991,58 @@ export function clampRationaleWhy(why: string): string {
   // away; a 280-char run with no space at all still has to be cut somewhere.
   const body = lastSpace > room * 0.6 ? slice.slice(0, lastSpace) : slice;
   return `${body.trimEnd()}\u2026`;
+}
+
+/** Responses transport for the ordinary agent turn. The caller's body and success Response are untouched.
+ * Retries remain owned by the existing turn retry policy; this adapter records each physical attempt.
+ */
+export async function postResponses(
+  body: Readonly<Record<string, unknown>>,
+  options: { readonly detail: ProviderCallDetail; readonly signal?: AbortSignal; readonly retryOnTransportFailure?: boolean },
+): Promise<{ r: Response; usageHandle: number | undefined }> {
+  const handle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
+    ...options.detail, model: String(body.model),
+    settings: Object.fromEntries(['reasoning', 'max_output_tokens', 'tool_choice'].filter(k => body[k] !== undefined).map(k => [k, body[k]])),
+  });
+  let r: Response;
+  try {
+    r = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+    });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    const outcome = name === 'TimeoutError' ? 'timeout' : name === 'AbortError' ? 'cancelled' : 'transport_error';
+    recordProviderAttempt(handle, { transport_status: null, result: name || 'transport_failure', outcome,
+      retry: outcome === 'transport_error' && options.retryOnTransportFailure === true,
+      ...(outcome === 'transport_error' && options.retryOnTransportFailure === true ? { retry_reason: 'transport' as const } : {}) });
+    throw err;
+  }
+  if (!r.ok) {
+    // The route reads this body next; an unreadable error body is a transport failure it retries, so the receipt must
+    // say so (a received status with retry:false but a second request would be a false receipt).
+    let bodyUnreadable = false;
+    try { await r.clone().text(); } catch { bodyUnreadable = true; }
+    const willRetry = bodyUnreadable && options.retryOnTransportFailure === true;
+    recordProviderAttempt(handle, { transport_status: r.status, result: bodyUnreadable ? 'http_error_body_unreadable' : 'http_error',
+      outcome: r.status === 429 ? 'rate_limited' : 'http_error', retry: willRetry,
+      ...(willRetry ? { retry_reason: 'transport' as const } : {}) });
+    return { r, usageHandle: handle };
+  }
+  try {
+    const responseBytes = await r.clone().text();
+    const j = JSON.parse(responseBytes) as { usage?: unknown; status?: unknown };
+    recordProviderUsage(handle, j?.usage);
+    recordProviderAttempt(handle, { transport_status: r.status, result: typeof j?.status === 'string' ? j.status : 'response', outcome: 'success', retry: false,
+      response_sha256: createHash('sha256').update(responseBytes).digest('hex') });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    recordProviderAttempt(handle, { transport_status: r.status, result: name || 'invalid_json',
+      outcome: name === 'TimeoutError' ? 'timeout' : name === 'AbortError' ? 'cancelled' : 'invalid_response', retry: false });
+    // A received response with unreadable JSON is not a no-response transport failure.
+    throw new Error('openai_invalid_response');
+  }
+  return { r, usageHandle: handle };
 }

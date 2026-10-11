@@ -275,7 +275,7 @@ export function census({ root = ROOT, extraFiles = [], doorFile = DOOR_FILE } = 
       const hasGraph = types.some(t => t.getProperty('graph')
         || (t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown))
         || checker.getIndexTypeOfType(t, ts.IndexKind.String));
-      if (from.has('model_versions') || (from.has('scenarios') && call.name !== 'insert' && hasGraph)) {
+      if (from.has('model_versions') || (from.has('scenarios') && hasGraph)) {
         primitive.set(call.node, { kind: 'table', callee: `${[...from].join('|')}.${call.name}` });
       }
     }
@@ -337,9 +337,7 @@ export function census({ root = ROOT, extraFiles = [], doorFile = DOOR_FILE } = 
     const site = { file: call.file, line: call.line, ...detail };
     if (inDoor || inSession) {
       excluded.push({ ...site, reason: inDoor ? 'inside door implementation' : 'session implementation reached by door' });
-    } else if (detail.kind !== 'store_method' || !call.file.startsWith('src/orchestrator-v5/session/')) {
-      sites.push(site);
-    } else if (primitive.has(call.node)) sites.push(site);
+    } else sites.push(site);
   }
   const sort = (a, b) => a.file.localeCompare(b.file) || a.line - b.line;
   const rpcNames = new Set([...sql.definitions.keys(), ...Object.keys(DEPLOYED_ONLY_RPCS), ...rpcCalls.flatMap(c => c.names)]);
