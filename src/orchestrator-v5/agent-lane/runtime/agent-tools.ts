@@ -93,6 +93,8 @@ export interface AgentToolContext {
   readonly scenario_id: string;
   readonly authenticated_user_id: string | null;
   readonly request_id: string;
+  /** Host turn identity; never a model argument. */
+  readonly turn_id?: string;
   /** RT-1 selection, resolved from the REQUEST against canonical state, never tool args or model output. */
   readonly grounded_selection?: { readonly element_ids: readonly string[]; readonly unresolved: 'none' | 'not_in_model' | 'could_not_check' };
   /** The drawn tuple resolved by the host press, never model output. */
