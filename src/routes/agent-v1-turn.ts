@@ -1,7 +1,7 @@
 import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
-import { projectStatedObjections } from '../orchestrator-v5/context/stated-objections.js';
-/** Dissent facts read per turn: enough that THREE distinct findings survive newest-per-finding supersession. */
-const STATED_OBJECTION_FACT_ROWS_READ = 25;
+import { projectStatedObjections, STATED_OBJECTIONS_CAP } from '../orchestrator-v5/context/stated-objections.js';
+/** Hard cap on dissent facts read per turn; paging stops earlier once STATED_OBJECTIONS_CAP different findings are covered. */
+const STATED_OBJECTION_FACT_ROWS_READ = 200;
 import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-card.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -2806,7 +2806,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // read has no objections to report, never a failed turn.
         readStatedObjections: async (sid: string) =>
           typeof store.readStatedObjectionFactsFor === 'function'
-            ? projectStatedObjections(await store.readStatedObjectionFactsFor(sid, STATED_OBJECTION_FACT_ROWS_READ))
+            ? projectStatedObjections(await store.readStatedObjectionFactsFor(sid, STATED_OBJECTION_FACT_ROWS_READ, STATED_OBJECTIONS_CAP))
             : [],
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'

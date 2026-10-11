@@ -629,6 +629,8 @@ export interface SessionStore {
   readStatedObjectionFactsFor?(
     scenarioId: string,
     limit: number,
+    /** Stop paging once this many DIFFERENT findings are covered (a rewritten reason must not starve the others). */
+    distinctFindings?: number,
   ): Promise<readonly HandlerFact[]>;
   /**
    * Load the bounded, scenario-wide `run_analysis` fact set used by the

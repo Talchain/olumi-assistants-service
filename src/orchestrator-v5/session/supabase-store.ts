@@ -2602,12 +2602,15 @@ export class SupabaseSessionStore implements SessionStore {
 
   /**
    * See {@link SessionStore.readStatedObjectionFactsFor}. Scenario-scoped, uncached, newest-first with a stable
-   * tie-break; `finding_dissent` and `noop = false` only. A read error, a non-array payload or a row that is not a
-   * valid `finding_dissent` fact THROWS: the caller must be able to say "unknown", never "no objections".
+   * tie-break; `finding_dissent` and `noop = false` only. Read in pages of 50 so a user who rewrote ONE finding's reason
+   * many times cannot starve the others: paging stops at the first short page, at `limit` rows, or once `distinctFindings`
+   * different findings are covered. A read error, a non-array payload or a row that is not a valid `finding_dissent` fact
+   * THROWS: the caller must be able to say "unknown", never "no objections".
    */
   async readStatedObjectionFactsFor(
     scenarioId: string,
     limit: number,
+    distinctFindings?: number,
   ): Promise<readonly HandlerFact[]> {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new SessionReadError(
@@ -2615,46 +2618,54 @@ export class SupabaseSessionStore implements SessionStore {
         { code: 'stated_objection_limit_invalid' },
       );
     }
-    const { data, error } = await this.client
-      .from('v5_handler_facts')
-      .select('id, payload, handler_id, noop, created_at')
-      .eq('scenario_id', scenarioId)
-      .eq('handler_id', 'finding_dissent')
-      .eq('noop', false)
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(limit);
-    if (error) {
-      throw new SessionReadError(
-        `readStatedObjectionFactsFor(${scenarioId}) failed: ${errMsg(error)}`,
-        { cause: error, code: errCode(error) },
-      );
-    }
-    if (!Array.isArray(data)) {
-      throw new SessionReadError(
-        `readStatedObjectionFactsFor(${scenarioId}): PostgREST returned a non-array payload`,
-        { code: 'stated_objection_corrupt' },
-      );
-    }
+    const PAGE = 50;
     const out: HandlerFact[] = [];
-    for (const row of data as Array<{ payload?: unknown; handler_id?: unknown; noop?: unknown }>) {
-      const payloadObj =
-        row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
-          ? (row.payload as Record<string, unknown>)
-          : {};
-      const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop: row.noop });
-      if (
-        !parsed.success ||
-        parsed.data.fact_type !== 'finding_dissent' ||
-        row.handler_id !== 'finding_dissent' ||
-        parsed.data.noop !== false
-      ) {
+    const findings = new Set<string>();
+    for (let from = 0; from < limit; from += PAGE) {
+      const to = Math.min(from + PAGE, limit) - 1;
+      const { data, error } = await this.client
+        .from('v5_handler_facts')
+        .select('id, payload, handler_id, noop, created_at')
+        .eq('scenario_id', scenarioId)
+        .eq('handler_id', 'finding_dissent')
+        .eq('noop', false)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to);
+      if (error) {
         throw new SessionReadError(
-          `readStatedObjectionFactsFor(${scenarioId}): eligible row is not a valid finding_dissent fact`,
+          `readStatedObjectionFactsFor(${scenarioId}) failed: ${errMsg(error)}`,
+          { cause: error, code: errCode(error) },
+        );
+      }
+      if (!Array.isArray(data)) {
+        throw new SessionReadError(
+          `readStatedObjectionFactsFor(${scenarioId}): PostgREST returned a non-array payload`,
           { code: 'stated_objection_corrupt' },
         );
       }
-      out.push(parsed.data);
+      for (const row of data as Array<{ payload?: unknown; handler_id?: unknown; noop?: unknown }>) {
+        const payloadObj =
+          row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+            ? (row.payload as Record<string, unknown>)
+            : {};
+        const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop: row.noop });
+        if (
+          !parsed.success ||
+          parsed.data.fact_type !== 'finding_dissent' ||
+          row.handler_id !== 'finding_dissent' ||
+          parsed.data.noop !== false
+        ) {
+          throw new SessionReadError(
+            `readStatedObjectionFactsFor(${scenarioId}): eligible row is not a valid finding_dissent fact`,
+            { code: 'stated_objection_corrupt' },
+          );
+        }
+        out.push(parsed.data);
+        findings.add(parsed.data.result.finding_id);
+      }
+      if (data.length < to - from + 1) break;
+      if (distinctFindings !== undefined && findings.size >= distinctFindings) break;
     }
     return out;
   }

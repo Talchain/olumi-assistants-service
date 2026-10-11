@@ -74,6 +74,8 @@ interface MockConfig {
     error?: { message: string; code?: string } | null;
     count?: unknown;
   };
+  /** Successive `.range()` pages (paged reads); falls back to `selectResult` once exhausted. */
+  rangePages?: Array<{ data?: unknown; error?: { message: string; code?: string } | null }>;
 }
 
 function makeClient(cfg: MockConfig = {}): {
@@ -88,6 +90,7 @@ function makeClient(cfg: MockConfig = {}): {
     options?: unknown;
     filters: unknown;
   }> = [];
+  let rangeCalls = 0;
 
   const client = {
     rpc: vi.fn(async (fn: string, args: unknown) => {
@@ -127,6 +130,11 @@ function makeClient(cfg: MockConfig = {}): {
           return filters['eq:handler_id'] === 'edit_graph' && cfg.editSelectPromise !== undefined
             ? cfg.editSelectPromise
             : Promise.resolve((filters['eq:handler_id'] === 'edit_graph' ? cfg.editSelectResult : undefined) ?? cfg.selectResult ?? { data: [], error: null });
+        },
+        range: (from: number, to: number) => {
+          filters.range = [from, to];
+          const pageIndex = rangeCalls++;
+          return Promise.resolve(cfg.rangePages?.[pageIndex] ?? cfg.selectResult ?? { data: [], error: null });
         },
         maybeSingle: () =>
           Promise.resolve(cfg.selectResult ?? { data: null, error: null }),
@@ -2007,6 +2015,7 @@ describe('SupabaseSessionStore.readStatedObjectionFactsFor (S8: the user\'s stat
       error: null,
     });
     const facts = await store.readStatedObjectionFactsFor(SCENARIO, 25);
+    expect(selectCalls).toHaveLength(1); // a short page ends the read
     expect(facts.map((f) => (f as { result: { statement: string } }).result.statement)).toEqual(['Newest reason.', 'Older reason.']);
     expect(selectCalls).toHaveLength(1);
     expect(selectCalls[0]!.table).toBe('v5_handler_facts');
@@ -2016,7 +2025,7 @@ describe('SupabaseSessionStore.readStatedObjectionFactsFor (S8: the user\'s stat
     expect(filters['eq:noop']).toBe(false);
     expect(filters['order:created_at']).toEqual({ ascending: false });
     expect(filters['order:id']).toEqual({ ascending: false });
-    expect(filters.limit).toBe(25);
+    expect(filters.range).toEqual([0, 24]);
     // No turn-window read: the conversation table is never touched.
     expect(selectCalls.some((c) => c.table === 'v5_conversation_turns')).toBe(false);
   });
@@ -2036,5 +2045,30 @@ describe('SupabaseSessionStore.readStatedObjectionFactsFor (S8: the user\'s stat
     const { store, selectCalls } = storeOf({ data: [], error: null });
     await expect(store.readStatedObjectionFactsFor(SCENARIO, 0)).rejects.toMatchObject({ code: 'stated_objection_limit_invalid' });
     expect(selectCalls).toHaveLength(0);
+  });
+
+  it('a finding rewritten many times cannot starve the others: pages until THREE different findings are covered (or rows run out)', async () => {
+    const row = (id: string, finding: string, at: string) => ({
+      ...dissentRow(id, at, `Reason for ${finding} (${id}).`),
+      payload: { ...dissentRow(id, at, `Reason for ${finding} (${id}).`).payload,
+        result: { ...dissentRow(id, at, 'x').payload.result, finding_id: finding, statement: `Reason for ${finding} (${id}).` } },
+    });
+    const pageOfF1 = Array.from({ length: 50 }, (_, i) => row(`f1-${i}`, 'finding-1', `2026-10-10T10:${String(59 - (i % 60)).padStart(2, '0')}:00.000Z`));
+    const page2 = [row('f2-0', 'finding-2', '2026-10-09T10:00:00.000Z'), row('f3-0', 'finding-3', '2026-10-08T10:00:00.000Z')];
+    const { client, selectCalls } = makeClient({ rangePages: [{ data: pageOfF1, error: null }, { data: page2, error: null }] });
+    const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    const facts = await store.readStatedObjectionFactsFor(SCENARIO, 200, 3);
+    const findings = new Set(facts.map((f) => (f as { result: { finding_id: string } }).result.finding_id));
+    expect([...findings].sort()).toEqual(['finding-1', 'finding-2', 'finding-3']);
+    expect(selectCalls).toHaveLength(2);
+    expect((selectCalls[0]!.filters as Record<string, unknown>).range).toEqual([0, 49]);
+    expect((selectCalls[1]!.filters as Record<string, unknown>).range).toEqual([50, 99]);
+    // CONTRAST: three findings already on the first full page → no second query.
+    const mixed = [row('a', 'finding-1', '2026-10-10T10:00:00.000Z'), row('b', 'finding-2', '2026-10-10T09:00:00.000Z'), row('c', 'finding-3', '2026-10-10T08:00:00.000Z'),
+      ...Array.from({ length: 47 }, (_, i) => row(`d-${i}`, 'finding-1', '2026-10-09T10:00:00.000Z'))];
+    const second = makeClient({ rangePages: [{ data: mixed, error: null }] });
+    const s2 = new SupabaseSessionStore(second.client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    await s2.readStatedObjectionFactsFor(SCENARIO, 200, 3);
+    expect(second.selectCalls).toHaveLength(1);
   });
 });
