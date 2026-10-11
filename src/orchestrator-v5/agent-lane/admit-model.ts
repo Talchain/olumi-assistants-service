@@ -77,7 +77,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { verifiedFactorLevel, verifiedGoalLevel } from './verified-option-setting.js';
+import { verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting, verifiedOptionTotal } from './verified-option-setting.js';
 
 const MAX_ID = 100;
 
@@ -406,8 +406,8 @@ export interface ConstructedLevel {
   basis?: string;
 }
 
-const levelSourceFor = (provenance: string): ConstructedLevelSource =>
-  provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
+const levelSourceFor = (provenance: string, verifiedReceipt: boolean): ConstructedLevelSource =>
+  provenance === 'explicit' && verifiedReceipt ? 'brief_extraction' : 'cee_hypothesis';
 
 /**
  * ⭐ ONE FORM FOR AN OPTION'S LEVEL, WHICHEVER WRITER WROTE IT (P2 A5; DL #70 order 5858777018 item 3).
@@ -3328,7 +3328,26 @@ function admitOnce(
   sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean,
   sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null,
 ): AdmittedModel {
+  // RUN52: establish receipt authority on native figures BEFORE the existing affine conversion.
+  const receiptVerdicts = new WeakMap<NonNullable<CandidateModel['options'][number]['interventions']>[number], boolean>();
   const { model: restatedModel, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
+  for (const option of restatedModel.options) {
+    const originals = candidateModel.options.filter(o => o.label === option.label);
+    for (const iv of option.interventions ?? []) {
+      const nativeOption = originals.length === 1 ? originals[0]! : undefined;
+      const originalsForFactor = nativeOption?.interventions?.filter(i => i.factor_label === iv.factor_label) ?? [];
+      const native = originalsForFactor.length === 1 ? originalsForFactor[0]! : undefined;
+      if (nativeOption === undefined || native === undefined) { receiptVerdicts.set(iv, false); continue; }
+      const factors = candidateModel.factors.filter(f => f.label === native.factor_label);
+      const baseline = factors.length === 1 ? factors[0]!.baseline_value : null;
+      const derived = 'derived_total' in native && native.derived_total === true;
+      const operand = derived && typeof baseline === 'number'
+        ? { ...native, value_kind: 'additional' as const, value: native.value - baseline, basis: undefined } : native;
+      receiptVerdicts.set(iv, derived
+        ? verifiedOptionTotal(candidateModel, nativeOption, operand, brief).verified
+        : verifiedOptionSetting(candidateModel, nativeOption, native, brief));
+    }
+  }
   // ⛔ A two-part product goal's rate is the user's own price when Olumi's rate only passes it on (shape 2,
   // `product-goal-rate-operand.ts`, DL 5902949807) — first, so the parts below are the user's.
   const { model: foldedModel, found: rateOperandFolds } = foldPassThroughRateOntoUsersPrice(restatedModel);
@@ -4095,7 +4114,7 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId),
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance, receiptVerdicts.get(iv) === true), nodes.find((n) => n.id === factorId), unitById.get(factorId),
         (iv as { derived_total?: unknown }).derived_total === true, iv.value_confidence);
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;

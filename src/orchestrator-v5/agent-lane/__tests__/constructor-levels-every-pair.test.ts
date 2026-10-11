@@ -124,6 +124,11 @@ async function construct(...drafts: ReturnType<typeof c22>[]) {
       return { text: JSON.stringify(drafts[Math.min(inputs.length - 1, drafts.length - 1)]) };
     }) as Record<string, unknown>;
   expect(result.ok, JSON.stringify(result)).toBe(true);
+  // DL 6104308425 / test purpose: the absent 52-point receipt is withheld and disclosed, while retry arithmetic is preserved.
+  if (drafts[0]?.options[0]?.interventions?.some(iv => iv.factor_label === 'Engineering delivery capacity'
+    && iv.value === 52 && iv.provenance === 'explicit')) {
+    expect(result.not_represented).toContain('"Engineering delivery capacity": Not confirmed from your brief');
+  }
   return { result, graph: GraphV3.parse(graph) as unknown as Graph, inputs };
 }
 
@@ -311,7 +316,8 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     const retry = stated40(covered(), 40, true);
     retry.options[0] = { ...retry.options[0]!, interventions: [est('Engineering delivery capacity', 60, 'story points'), est('Hiring cost', 140000, 'GBP')] };
     const { graph } = await construct(first, retry);
-    expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity).toMatchObject({ value: 0.52, source: 'brief_extraction' });
+    // DL 6104308425 / test purpose: 52 is absent from this brief; preserve the retry's numeric guard without user credit.
+    expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity).toMatchObject({ value: 0.52, source: 'cee_hypothesis' });
   });
 
   /** Pre-review 5829120255: the stated 52 must survive as the REGISTERED level, and as the user's. */
@@ -330,7 +336,8 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
   // (known baseline 40, cap 100, "story points"), and the factor it is keyed by.
   const userLevelKept = (graph: Graph) =>
     expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity).toStrictEqual({
-      value: 0.52, source: 'brief_extraction', raw_value: 52, unit: 'story points',
+      // DL 6104308425 / test purpose: computation and retry preservation are distinct from receipt authority.
+      value: 0.52, source: 'cee_hypothesis', raw_value: 52, unit: 'story points',
       target_match: { node_id: 'engineering_delivery_capacity', match_type: 'exact_id', confidence: 'high' },
     });
 

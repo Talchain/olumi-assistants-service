@@ -1,3 +1,4 @@
+import { withOriginalReceipt } from './fixtures/original-receipt.js';
 /**
  * ⛔ A FIRST MODEL WITH A LOOP IN IT CAN NEVER BE ANALYSED — AND NOTHING SAID WHY.
  *
@@ -149,7 +150,7 @@ const quoted = (m: CandidateModel): CandidateModel => ({ ...m, factors: m.factor
   f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 49
     ? { ...f, baseline_evidence: { quote: PRICE_QUOTE } } : f) });
 async function build(...drafts: CandidateModel[]): Promise<Built> {
-  drafts = drafts.map(quoted);
+  drafts = drafts.map(d => withOriginalReceipt(quoted(d), SERVED.brief, SERVED.brief, [['Pro plan price', 59]]));
   const brief = `${PRICE_QUOTE}\n\n${SERVED.brief}`;
   let body: unknown = null;
   const inputs: string[] = [];

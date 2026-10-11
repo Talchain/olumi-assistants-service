@@ -1,3 +1,4 @@
+import { withOriginalReceipt } from './fixtures/original-receipt.js';
 /**
  * ⛔ A LIMIT THE USER STATED ON A LEVEL NAMES A QUANTITY THAT CAN HOLD ONE (R&C 5842795947, DL 5842800634).
  *
@@ -199,6 +200,7 @@ function factorDraft() {
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 async function register(wire: Record<string, unknown>): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+  wire = withOriginalReceipt(wire, BRIEF, BRIEF, [['Pro plan price', 59]]);
   for (const f of wire.factors as Record<string, unknown>[]) {
     if (f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit') {
       f.baseline_evidence = { quote: 'Our Pro price is £49 a month.' };

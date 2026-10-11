@@ -732,7 +732,9 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     // `nearOnly` skips the far words ONLY when a comparator opens them (R3 CR on #2330): "25% cheaper THAN AWS for our
     // workload" names what the figure is compared with; "3% for our enterprise customers" still names its owner.
     const comparatorOpens = afterRate.slice(0, rightAfter.length + 1).some((w) => /^(?:than|versus|vs|compared)$/.test(w));
-    const about = firstMention(rightAfter) ?? firstMention([...left].reverse())
+    // RUN52: a complete typed frame can also explicitly name the quantity (e.g. £120,000 MRR).
+    // Unit/denominator words still pass through mentionOf's existing exclusions; rivals still decide ownership.
+    const about = firstMention(right.slice(0, frameWords)) ?? firstMention(rightAfter) ?? firstMention([...left].reverse())
       ?? (scope.nearOnly === true && comparatorOpens ? null : firstMention(afterRate.slice(rightAfter.length)));
     // ⛔ STRICT, FAIL CLOSED (DL ruling (b)): among two figures or more, one no label word attributes is nobody's, never
     // "the user's, for any target" — that fallthrough let a SWAP through the door. The user is asked.
@@ -1439,6 +1441,8 @@ function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: 
       || /(?:s|ed|ing)$/i.test(modifier) || beforeModifier === undefined
       || (!/^(?:our|the|their|its|your|my|a|an|this|that|these|those)$/i.test(beforeModifier)
         && (!CHANGE_STATED.test(beforeModifier) || (beforeThat !== undefined && /^(?:i|we|you|they|he|she|it)$/i.test(beforeThat)))));
+    // A grammatical subject before a verb-shaped label head is not another quantity ("we hire" / "engineers hired").
+    if (/^(?:i|we|you|they|he|she|it)$/i.test(modifier)) return undefined;
     if (label.some(t => sameWord(t, modifier.toLowerCase())) || /^(?:our|the|their|its|your|my|a|an)$/i.test(modifier) || modifierIsTheChange) return undefined;
     return `${modifier} ${last}`;
   }

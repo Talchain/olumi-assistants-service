@@ -1,3 +1,4 @@
+import { withOriginalReceipt } from './fixtures/original-receipt.js';
 /**
  * ⛔ A USER'S LIMIT IS NEVER AN OPTION'S ACTION, AND THE DRAFTER'S WORD ALONE NEVER MAKES AN OPTION LINK THE USER'S
  * (AIQ role rule 5909030106; PTL 5909397701: B's executable counterexample becomes a regression fixture on the served
@@ -57,6 +58,8 @@ const limitAsAction = (m: Rec) => {
 
 /** The served path, 0 provider calls: each call returns the next drafter answer (a retry that repeats the last one). */
 async function register(answers: string[]): Promise<Rec> {
+  const original = 'Should we raise our Pro plan price from £49 to £59 a month?';
+  answers = answers.map(raw => JSON.stringify(withOriginalReceipt(JSON.parse(raw), FIXTURE.brief, original, [['Pro plan monthly price', 59]])));
   let registered: Rec | null = null; let i = 0;
   const call = (async () => ({ text: answers[Math.min(i++, answers.length - 1)], status: 'completed' })) as unknown as CallStructuredModel;
   const dispatch = (async (path: string, body: Rec) => {

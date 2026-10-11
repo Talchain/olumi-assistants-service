@@ -58,7 +58,9 @@ export const censusRows: Row[] = census.map((c, index) => {
     || (c.sc === 'b7398aad' && c.factor === 'Starter-tier price');
   // Source blocks no longer have a fixture-specific exemption: imported rent is conservatively refused.
   const sourceBlock = c.sc === 'e63bd10a' && c.factor === 'Leeds monthly rent';
-  const expected = underCredit || sourceBlock ? 'ai_proposed' : c.expected;
+  // DL 6104308425 / test purpose: this original 150-subscriber receipt is typed; the retired 'win' grammar gate was its only refusal.
+  const typedReceipt = c.sc === 'b7398aad' && c.option === 'Launch starter tier' && c.factor === 'Starter subscribers' && c.value === 150;
+  const expected = typedReceipt ? 'explicit' : underCredit || sourceBlock ? 'ai_proposed' : c.expected;
   return {
     name: `${sourceBlock ? 'SOURCE BLOCK REFUSAL (generic directContext) - ' : ''}${underCredit ? 'KNOWN UNDER-CREDIT (strict F: names the tier, not the price) — ' : ''}census ${c.sc}: ${c.option} -> ${c.factor} ${expected}`,
     run: () => { const { model, brief } = censusInput(index); assertCell(model, brief, c.option, c.factor, expected); },

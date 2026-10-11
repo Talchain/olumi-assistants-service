@@ -1,3 +1,4 @@
+import { withOriginalReceipt } from './fixtures/original-receipt.js';
 /**
  * RT-4 class A (#2603; Codex r1 HIGH): a total we COMPUTED is not a figure the user wrote.
  *
@@ -41,6 +42,8 @@ function training(kind: 'additional' | 'absolute') {
 }
 
 async function construct(candidate: CandidateModel, brief: string) {
+  const original = 'Should we raise training coverage to 7% to lift customer satisfaction, or keep training as it is?';
+  if (brief.includes(original)) candidate = withOriginalReceipt(candidate, brief, original, [['Training coverage', 7]]);
   let graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } | undefined;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) graph = (body as { graph: typeof graph }).graph;
