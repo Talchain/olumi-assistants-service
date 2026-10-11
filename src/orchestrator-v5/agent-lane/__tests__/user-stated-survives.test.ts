@@ -6,7 +6,8 @@ import { prepareProvisionalCandidate } from '../runtime/build-model.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { countsInWords } from '../stated-by-user.js';
 import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
-import { slugId, type CandidateModel } from '../admit-model.js';
+import { slugId, type CandidateModel, type StatedOptionEvidence } from '../admit-model.js';
+import { verifiedFactorLevel, verifiedOptionSetting, verifiedOptionTotal } from '../verified-option-setting.js';
 
 type Rec = Record<string, unknown>;
 type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
@@ -42,12 +43,15 @@ function pendingAndAmount(row: Row, option: CandidateModel['options'][number], i
     && row.brief.indexOf(e.quote) === row.brief.lastIndexOf(e.quote)
     && e.quote.indexOf(e.option_quote) >= 0 && e.quote.indexOf(e.option_quote) === e.quote.lastIndexOf(e.option_quote);
 }
-function losses(row: Row, graph: Rec | null, result: unknown): string[] {
+interface PreservationOutcomes { LOST: string[]; MISCREDITED: string[]; PRESERVED_UNVERIFIED: string[] }
+function preservationOutcomes(row: Row, graph: Rec | null, result: unknown): PreservationOutcomes {
   const draft = JSON.parse(row.drafter_texts[0]!) as CandidateModel;
   const nodes = (graph?.nodes ?? []) as Rec[];
-  const demoted = (result as { provenance_demoted?: {option: string; factor: string}[] }).provenance_demoted ?? [];
-  return draft.options.flatMap(o => (o.interventions ?? []).flatMap(i => {
-    if (i.provenance !== 'explicit' || (!valid(i, row.brief) && !pendingAndAmount(row, o, i))) return [];
+  const r = result as { provenance_demoted?: { option: string; factor: string; value: number }[];
+    open_questions?: string[]; not_represented?: string[] };
+  const outcomes: PreservationOutcomes = { LOST: [], MISCREDITED: [], PRESERVED_UNVERIFIED: [] };
+  for (const o of draft.options) for (const i of o.interventions ?? []) {
+    if (i.provenance !== 'explicit' || (!valid(i, row.brief) && !pendingAndAmount(row, o, i))) continue;
     const option = nodes.find(n => n.label === o.label);
     const factor = nodes.find(n => n.label === i.factor_label);
     const served = (option?.interventions as Record<string, Rec> | undefined)?.[String(factor?.id)];
@@ -55,25 +59,42 @@ function losses(row: Row, graph: Rec | null, result: unknown): string[] {
     const f = draft.factors.find(f => f.label === i.factor_label);
     const stockMember = draft.identities?.some(d => d.factors.includes(i.factor_label)
       || (d.operation === 'accumulation' && d.outcome === i.factor_label));
-    const addition = (i as Iv & { value_kind?: string }).value_kind === 'additional';
-    if (addition) {
-      // Typed known zero licenses amount-as-level; identity/accumulation membership wins.
-      const flow = f?.baseline_known === true && f.baseline_value === 0 && !stockMember;
-      const baseline = factor?.observed_state as Rec | undefined;
-      const userBaseline = f?.baseline_known === true && f.provenance === 'explicit'
-        && baseline?.source === 'brief_extraction';
-      const r = result as { open_questions?: string[]; not_represented?: string[] };
-      const asks = [...(r.open_questions ?? []), ...(r.not_represented ?? [])]
-        .some(q => q.includes(`Tell me the current level of "${i.factor_label}"`));
-      const preserved = flow ? served?.raw_value === i.value && served.source === 'brief_extraction'
-        : userBaseline ? served?.raw_value === Number(baseline?.raw_value ?? baseline?.value) + i.value
-          && served.source === 'brief_extraction'
-        : asks && !served;
-      return preserved ? [] : [id];
+    const addition = i.value_kind === 'additional';
+    const baseline = factor?.observed_state as Rec | undefined;
+    const flow = addition && f?.baseline_known === true && f.baseline_value === 0 && !stockMember;
+    const userBaseline = f?.baseline_known === true && f.provenance === 'explicit'
+      && baseline?.source === 'brief_extraction' && verifiedFactorLevel(draft, f, row.brief);
+    const asks = [...(r.open_questions ?? []), ...(r.not_represented ?? [])]
+      .some(q => q.includes(`Tell me the current level of "${i.factor_label}"`));
+    // No claimed total exists without S0: asking it and inventing no total remains the existing honest withholding.
+    if (addition && !flow && !userBaseline && asks && !served) continue;
+    const expected = !addition || flow ? i.value : userBaseline
+      ? Number(baseline?.raw_value ?? baseline?.value) + i.value : undefined;
+    const cap = baseline?.cap ?? factor?.scale_frame;
+    const numeric = served !== undefined && expected !== undefined && served.raw_value === expected
+      && served.value === (typeof cap === 'number' ? expected / cap : expected);
+    const credited = served?.source === 'brief_extraction' || served?.source === 'user_specified';
+    const verified = addition ? verifiedOptionTotal(draft, o, i, row.brief).verified
+      : verifiedOptionSetting(draft, o, i, row.brief);
+    if (!numeric) { outcomes.LOST.push(id); continue; }
+    if (credited) {
+      if (!verified) outcomes.MISCREDITED.push(id);
+      continue;
     }
-    return !served || served.source !== 'brief_extraction' || served.raw_value !== i.value
-      || demoted.some(d => d.option === o.label && d.factor === i.factor_label) ? [id] : [];
-  }));
+    // Carrier AND existing narrated readback must identify this operand; a baseline marker is never borrowed.
+    const disclosed = served.user_material_unverified === true
+      || ((r.provenance_demoted ?? []).some(d => d.option === o.label && d.factor === i.factor_label && d.value === i.value)
+        && (r.not_represented ?? []).some(q => q === `"${i.factor_label}": Not confirmed from your brief`
+          || (q.includes(`"${o.label}"`) && q.includes(`"${i.factor_label}"`)
+            && q.includes('as a working figure') && q.includes("confirm it and I'll mark it as yours"))));
+    if ((served.source === 'cee_hypothesis' || served.source === undefined) && disclosed) {
+      outcomes.PRESERVED_UNVERIFIED.push(id);
+    } else outcomes.LOST.push(id);
+  }
+  return outcomes;
+}
+function losses(row: Row, graph: Rec | null, result: unknown): string[] {
+  return preservationOutcomes(row, graph, result).LOST;
 }
 const r2 = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/s7-user-stated-r2.json'), 'utf8')) as Row[];
 /** Ship cut: all six ×2 are user-stated; the two split 3s stay demoted.
@@ -111,8 +132,20 @@ it('served property census', async () => {
   expect(corpus).toHaveLength(116); expect(r2).toHaveLength(8);
   const counts: Record<string, number> = {};
   const ids: Record<string, string[]> = {};
-  for (const row of [...r2, ...corpus]) { const s = await replay(row); ids[row.id] = losses(row, s.graph, s.result); counts[row.id] = ids[row.id]!.length; }
-  console.log('USER-STATED LOSS', JSON.stringify(counts));
+  const outcomesByCase: Record<string, PreservationOutcomes> = {};
+  for (const row of [...r2, ...corpus]) {
+    const s = await replay(row); const outcomes = preservationOutcomes(row, s.graph, s.result);
+    outcomesByCase[row.id] = outcomes;
+    // The retained quality-gap baseline still names every gap; disclosed retention is reported separately, not erased.
+    ids[row.id] = [...outcomes.LOST, ...outcomes.PRESERVED_UNVERIFIED]; counts[row.id] = ids[row.id]!.length;
+  }
+  console.log('USER-STATED OUTCOMES', JSON.stringify(Object.fromEntries(Object.entries(outcomesByCase)
+    .map(([id, o]) => [id, { LOST: o.LOST.length, MISCREDITED: o.MISCREDITED.length,
+      PRESERVED_UNVERIFIED: o.PRESERVED_UNVERIFIED.length }]))));
+  expect.soft(Object.fromEntries(Object.entries(outcomesByCase).filter(([, o]) => o.MISCREDITED.length)
+    .map(([id, o]) => [id, o.MISCREDITED]))).toStrictEqual({});
+  expect(Object.fromEntries(Object.entries(outcomesByCase).filter(([, o]) => o.PRESERVED_UNVERIFIED.length)
+    .map(([id, o]) => [id, o.PRESERVED_UNVERIFIED]))).toStrictEqual(PRESERVED_UNVERIFIED_BY_CASE);
   const failing = Object.entries(counts).filter(([,n]) => n > 0).map(([id]) => id);
   const baseline = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../../scripts/ci/user-stated-survives-baseline.json'), 'utf8')) as Baseline;
   expect(baseline.failing_ids).toHaveLength(baseline.failing_count);
@@ -120,6 +153,111 @@ it('served property census', async () => {
   expect(countRegressions(counts, baseline.loss_counts ?? {})).toEqual([]);
   expect(Object.fromEntries(Object.entries(ids).filter(([, pairs]) => pairs.length))).toEqual(baseline.residual_ids);
 }, 120_000);
+
+// MISCREDITED → PRESERVED_UNVERIFIED under the one receipt authority, RUN 46; RUN47 adds exactly the 28 named RUN45 cells.
+const PRESERVED_UNVERIFIED_BY_CASE: Record<string, string[]> = {
+  "compound-A": [
+    "all_reliability.engineers_on_reliability_work",
+    "all_prototype.engineers_on_prototype",
+    "three_and_three_split.engineers_on_reliability_work",
+    "three_and_three_split.engineers_on_prototype"
+  ],
+  "compound-B": [
+    "all_reliability.engineers_on_reliability_work",
+    "all_prototype.engineers_on_prototype",
+    "three_three_split.engineers_on_reliability_work",
+    "three_three_split.engineers_on_prototype"
+  ],
+  "arm-mechanism-2842/sealedR-d2.json": [
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "arm-mechanism/sealedR-d2.json": [
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "arm-mechanism/sealedR-d3.json": [
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d1.json": [
+    "raise_prices_10.price_change",
+    "launch_starter_tier.starter_tier_monthly_price"
+  ],
+  "p44-lab-two-risks-20261008/sealed-d1.json": [
+    "raise_prices_10.price_increase_from_current_price",
+    "launch_starter_tier.starter_tier_monthly_price"
+  ],
+  "B1-A": [
+    "raise_pro_price_to_59.pro_plan_price"
+  ],
+  "B1-B": [
+    "raise_pro_price_to_59.pro_plan_monthly_price"
+  ],
+  "B2-A": [
+    "raise_prices_10.price_rise",
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "B2-B": [
+    "raise_prices_10.price_rise_from_current_pricing",
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "arm-mechanism-2842/B1-d1.json": [
+    "raise_pro_price_to_59.pro_plan_price"
+  ],
+  "arm-mechanism-2842/B1-d2.json": [
+    "59_at_next_pro_release.pro_plan_price"
+  ],
+  "arm-mechanism-2842/B1-d3.json": [
+    "raise_pro_price_to_59.pro_plan_price"
+  ],
+  "arm-mechanism-2842/sealedR-d1.json": [
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "arm-mechanism-2842/sealedR-d3.json": [
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "arm-mechanism/B1-d1.json": [
+    "raise_pro_to_59.pro_plan_price"
+  ],
+  "arm-mechanism/B1-d2.json": [
+    "raise_pro_price_to_59.pro_plan_price"
+  ],
+  "arm-mechanism/B1-d3.json": [
+    "raise_pro_price_to_59.pro_plan_price"
+  ],
+  "arm-mechanism/sealedR-d1.json": [
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "p44-lab-two-risks-20261008/B1-d1.json": [
+    "raise_pro_price_to_59.pro_monthly_price"
+  ],
+  "p44-lab-two-risks-20261008/B1-d2.json": [
+    "raise_pro_price_to_59.pro_plan_price"
+  ],
+  "p44-lab-two-risks-20261008/B1-d3.json": [
+    "raise_pro_to_59.pro_plan_price"
+  ],
+  "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d1.json": [
+    "59_with_next_release.pro_plan_price"
+  ],
+  "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d2.json": [
+    "raise_pro_price_to_59.pro_plan_price"
+  ],
+  "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d3.json": [
+    "raise_pro_price_to_59.pro_plan_monthly_price"
+  ],
+  "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d2.json": [
+    "launch_49_starter_tier.starter_tier_monthly_price"
+  ],
+  "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d3.json": [
+    "raise_prices_10.price_increase",
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "p44-lab-two-risks-20261008/sealed-d2.json": [
+    "launch_starter_tier.starter_monthly_price"
+  ],
+  "p44-lab-two-risks-20261008/sealed-d3.json": [
+    "launch_starter_tier.starter_tier_monthly_price"
+  ]
+};
 
 interface Baseline { failing_count: number; failing_ids: string[]; loss_counts?: Record<string, number>; residual_ids?: Record<string, string[]> }
 function countRegressions(counts: Record<string, number>, baseline: Record<string, number>): string[] {
@@ -151,13 +289,40 @@ function plantedRow(label: string): Row {
   return { id: label, brief, drafter_texts: [JSON.stringify({ ...draft, options: [{ ...option, label,
     interventions: [{ ...i, stated_evidence: evidence }] }] })] };
 }
+async function verifiedPlantRow(label: string) {
+  const probes: { id: string; model: CandidateModel; brief: string; option: string; factor: string; evidence: StatedOptionEvidence }[] = JSON.parse(
+    fs.readFileSync(path.join(__dirname, 'fixtures/r5-verified-probes.json'), 'utf8'));
+  const p = probes.find(p => p.id === 'N0')!; const model = structuredClone(p.model);
+  const option = model.options.find(o => o.label === p.option)!;
+  const iv = option.interventions!.find(i => i.factor_label === p.factor)!;
+  iv.stated_evidence = p.evidence;
+  model.factors.find(f => f.label === iv.factor_label)!.baseline_known = true;
+  expect(verifiedOptionSetting(model, option, iv, p.brief)).toBe(true);
+  expect(prepareProvisionalCandidate(model, p.brief).candidate.options.find(o => o.label === option.label)!
+    .interventions!.find(i => i.factor_label === iv.factor_label)?.provenance).toBe('explicit');
+  const row: Row = { id: label, brief: p.brief, drafter_texts: [JSON.stringify(model)] };
+  const served = await replay(row); const nodes = served.graph!.nodes as Rec[];
+  expect((nodes.find(n => n.label === option.label)!.interventions as Record<string, Rec>)[slugId(p.factor)]!.source)
+    .toBe('brief_extraction');
+  // Re-key graph slots only, including references. Actual N0 names, quantities, units, receipt and authorship stay intact.
+  const aliases: Record<string, string> = { [slugId(p.factor)]: 'engineers_on_reliability_work', [slugId(p.option)]: slugId(label) };
+  for (const n of nodes) {
+    n.id = aliases[String(n.id)] ?? n.id;
+    if (n.interventions) n.interventions = Object.fromEntries(Object.entries(n.interventions as Record<string, Rec>)
+      .map(([id, cell]) => [aliases[id] ?? id, { ...cell, ...(cell.target_match ? { target_match: { ...(cell.target_match as Rec),
+        node_id: aliases[String((cell.target_match as Rec).node_id)] ?? (cell.target_match as Rec).node_id } } : {}) }]));
+  }
+  for (const e of served.graph!.edges as Rec[]) { e.from = aliases[String(e.from)] ?? e.from; e.to = aliases[String(e.to)] ?? e.to; }
+  return { row, served };
+}
 it('planted loss is detected in the served object, including shared goal/limit words', async () => {
   for (const label of ['Reliability allocation', 'Annual support contract total allocated engineers reliability allocation']) {
-    // A known baseline keeps the stated level the user's at today's behaviour, so the planted loss starts from a kept level.
-    const row = plantedRow(label); const draft = JSON.parse(row.drafter_texts[0]!) as CandidateModel;
-    row.drafter_texts = [JSON.stringify({ ...draft, factors: draft.factors.map(f => ({ ...f, baseline_known: true, baseline_value: 2, provenance: 'explicit' })) })];
-    const s = await replay(row);
+    // RUN47: a real N0 receipt survives preparation; arbitrary graph IDs retain the existing detector's exact matchers.
+    const { row, served: s } = await verifiedPlantRow(label);
     expect(losses(row, s.graph, s.result)).toEqual([]);
+    // Embedded plant-removal mutant: the unchanged LOST matcher MUST be RED against the untouched credited graph.
+    expect(() => expect(losses(row, s.graph, s.result)).toEqual([`${slugId(label)}.engineers_on_reliability_work`])).toThrow();
+    console.log('RUN47 plant-removal mutant RED; unplanted contrast preserved', label);
     const graph = structuredClone(s.graph)!;
     const option = (graph.nodes as Rec[]).find(n => n.id === slugId(label))!;
     const iv = option.interventions as Record<string, Rec>;
@@ -225,6 +390,10 @@ it('Science af: flow count stores 2 with no baseline ask; stock stores user 8 + 
     // Operand receipts are unproved; arithmetic and no-baseline ask stay exact — #94 6102610518(4).
     expect((option?.interventions as Record<string, Rec>)[factorId]).toMatchObject({ raw_value: stock ? 10 : 2, source: 'cee_hypothesis' });
     expect(losses(row, s.graph, s.result)).toEqual([]);
+    expect(preservationOutcomes(row, s.graph, s.result)).toStrictEqual({ LOST: [], MISCREDITED: [],
+      PRESERVED_UNVERIFIED: [stock ? 'add_capacity.team_headcount' : 'add_capacity.senior_hires'] });
+    if (stock) expect((option?.interventions as Record<string, Rec>)[factorId])
+      .toMatchObject({ raw_value: 10, value: 0.5, value_confidence: 'medium' });
     if (!stock) expect([...(s.result as { open_questions?: string[] }).open_questions ?? [],
       ...(s.result as { not_represented?: string[] }).not_represented ?? []]
       .some(q => q.includes('current level of "Senior hires"'))).toBe(false);
@@ -263,4 +432,99 @@ it('Science af edge (parked): an estimate-only S0 keeps the old collapsed hypoth
   const option = (s.graph?.nodes as Rec[]).find(n => n.id === 'add_capacity');
   expect((option?.interventions as Record<string, Rec> | undefined)?.team_headcount).toMatchObject({ raw_value: 6, source: 'cee_hypothesis' });
   expect(losses(row, s.graph, s.result)).not.toEqual([]);
+});
+
+// RUN44: a retained, unverified user operand must reach the existing disclosure carrier.
+it('RUN44 B unverified additional totals disclose their original operands', () => {
+  for (const stock of [false, true]) {
+    const row = additionRow(stock ? 8 : 0, true, stock);
+    const draft: CandidateModel = JSON.parse(row.drafter_texts[0]!);
+    expect(prepareProvisionalCandidate(draft, row.brief).provenance_demoted).toStrictEqual([
+      { option: 'Add capacity', factor: stock ? 'Team headcount' : 'Senior hires', value: 2 },
+    ]);
+  }
+});
+it('RUN44 B verified operand total is not demoted', () => {
+  const current = 'We have 5 developers today.'; const addition = 'We could hire 2 more developers.';
+  const brief = `${current} ${addition}`;
+  const template: CandidateModel = JSON.parse(r2[0]!.drafter_texts[0]!);
+  const draft: CandidateModel = { ...template, constraints: [], identities: [], outcomes: [], risks: [], links: [],
+    factors: [{ label: 'Developers', role: 'controllable', unit: 'people', baseline_known: true,
+      baseline_value: 5, provenance: 'explicit', baseline_evidence: { quote: current } }],
+    options: [{ label: 'Hire two developers', provenance: 'explicit', interventions: [{ factor_label: 'Developers',
+      value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit', stated_evidence: {
+        quote: addition, start: current.length + 1, end: brief.length, amount_start: brief.indexOf('2'),
+        option_quote: addition, option_start: current.length + 1, option_end: brief.length,
+      } }] }],
+  };
+  expect(verifiedOptionTotal(draft, draft.options[0]!, draft.options[0]!.interventions![0]!, brief))
+    .toMatchObject({ verified: true, derived: true });
+  const prepared = prepareProvisionalCandidate(draft, brief);
+  expect(prepared.provenance_demoted).toStrictEqual([]);
+  expect(prepared.candidate.options[0]!.interventions![0]).toMatchObject({ value: 7, provenance: 'explicit', derived_total: true });
+});
+
+it('RUN44 A clinic old-path acceptance stays monotone and coordinated B3-d2 still credits', () => {
+  const probes: { id: string; model: CandidateModel; brief: string; option: string; factor: string; evidence: StatedOptionEvidence }[] = JSON.parse(
+    fs.readFileSync(path.join(__dirname, 'fixtures/r5-verified-probes.json'), 'utf8'));
+  for (const id of ['N0', 'N3', 'N5', 'N10c', 'B-N0']) {
+    const p = probes.find(p => p.id === id)!; const model = structuredClone(p.model);
+    const option = model.options.find(o => o.label === p.option)!;
+    const iv = option.interventions!.find(i => i.factor_label === p.factor)!;
+    iv.stated_evidence = p.evidence;
+    expect(verifiedOptionSetting(model, option, iv, p.brief), id).toBe(true);
+  }
+  const bank: { brief: string; output_text: string } = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '../../goal-target/__tests__/fixtures/event-b3-d2-20261008.json'), 'utf8'));
+  const draft: CandidateModel = JSON.parse(bank.output_text);
+  for (const o of draft.options) for (const i of o.interventions ?? []) {
+    if (['Senior engineers hired', 'Junior engineers hired'].includes(i.factor_label) && i.stated_evidence != null)
+      expect(verifiedOptionSetting(draft, o, i, bank.brief), `${o.label}.${i.factor_label}`).toBe(true);
+  }
+});
+it('RUN44 outcomes detect unreceipted credit and disclosure removal without borrowing baseline markers', async () => {
+  const row = additionRow(8, true, true); const s = await replay(row);
+  const credited = structuredClone(s.graph)!;
+  const option = (credited.nodes as Rec[]).find(n => n.id === 'add_capacity')!;
+  (option.interventions as Record<string, Rec>).team_headcount!.source = 'brief_extraction';
+  expect(preservationOutcomes(row, credited, s.result)).toStrictEqual({ LOST: [],
+    MISCREDITED: ['add_capacity.team_headcount'], PRESERVED_UNVERIFIED: [] });
+  expect(preservationOutcomes(row, s.graph, { ...s.result, provenance_demoted: [], not_represented: [] }))
+    .toStrictEqual({ LOST: ['add_capacity.team_headcount'], MISCREDITED: [], PRESERVED_UNVERIFIED: [] });
+});
+
+it('RUN44 B Science af retained quantities have their own disclosure and exact preserved ids', async () => {
+  for (const stock of [false, true]) {
+    const row = additionRow(stock ? 8 : 0, true, stock); const s = await replay(row);
+    expect(preservationOutcomes(row, s.graph, s.result)).toStrictEqual({ LOST: [], MISCREDITED: [],
+      PRESERVED_UNVERIFIED: [stock ? 'add_capacity.team_headcount' : 'add_capacity.senior_hires'] });
+  }
+});
+
+// DL RUN46: known baselines cannot bypass the public option receipt authority.
+it('RUN46 known-baseline absolute refusal is demoted by identity; verified control stays explicit', () => {
+  const refused = r2.find(r => r.id === 'B1-A')!;
+  const draft: CandidateModel = JSON.parse(refused.drafter_texts[0]!);
+  const option = draft.options.find(o => o.label === 'Raise Pro price to £59')!;
+  const iv = option.interventions!.find(i => i.factor_label === 'Pro plan price')!;
+  expect(draft.factors.find(f => f.label === iv.factor_label)?.baseline_known).toBe(true);
+  expect(verifiedOptionSetting(draft, option, iv, refused.brief)).toBe(false);
+  const prepared = prepareProvisionalCandidate(draft, refused.brief);
+  expect(prepared.candidate.options.find(o => o.label === option.label)!.interventions!
+    .find(i => i.factor_label === iv.factor_label && i.value === iv.value)?.provenance).toBe('ai_proposed');
+  expect(prepared.provenance_demoted).toContainEqual({ option: option.label, factor: iv.factor_label, value: iv.value });
+
+  const probes: { id: string; model: CandidateModel; brief: string; option: string; factor: string; evidence: StatedOptionEvidence }[] = JSON.parse(
+    fs.readFileSync(path.join(__dirname, 'fixtures/r5-verified-probes.json'), 'utf8'));
+  const control = probes.find(p => p.id === 'N0')!; const model = structuredClone(control.model);
+  const o = model.options.find(o => o.label === control.option)!;
+  const i = o.interventions!.find(i => i.factor_label === control.factor)!;
+  i.stated_evidence = control.evidence;
+  model.factors.find(f => f.label === i.factor_label)!.baseline_known = true;
+  expect(i).toMatchObject({ value_kind: 'absolute', provenance: 'explicit' });
+  expect(verifiedOptionSetting(model, o, i, control.brief)).toBe(true);
+  const verified = prepareProvisionalCandidate(model, control.brief);
+  expect(verified.candidate.options.find(p => p.label === o.label)!.interventions!
+    .find(p => p.factor_label === i.factor_label && p.value === i.value)?.provenance).toBe('explicit');
+  expect(verified.provenance_demoted).not.toContainEqual({ option: o.label, factor: i.factor_label, value: i.value });
 });

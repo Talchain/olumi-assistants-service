@@ -90,7 +90,69 @@ function namedOption(model: CandidateModel, selected: Option, clause: string, va
  * A coordinated elliptical head must independently bind its own factor and full typed frame.
  * Only a range that brackets the figure ("between 80 and 250") may directly follow it.
  */
-function onlySiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean; bound?: boolean }[], value: number): boolean {
+function onlySiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean }[], value: number): boolean {
+  return others.every(({ text, next }) => {
+    const ws = words(text);
+    if (next && ws.length === 4 && ws[0] === 'between' && ws[2] === 'and') {
+      const low = figure(ws[1]!), high = figure(ws[3]!);
+      if (low !== null && high !== null && low < value && value < high) return true;
+    }
+    const arm = ws[0] === 'or' || ws[0] === 'and' || ws[0] === 'to' ? ws.slice(1) : ws;
+    if (!ARMS.has(arm[0] ?? '')) return false;
+    const figures = ws.flatMap(w => { const n = figure(w); return n === null ? [] : [n]; });
+    // DL 7 Oct (iii): an arm that writes the credited figure ("instead of the 4", "treat 4 as a ceiling") refuses.
+    if (figures.includes(value)) return false;
+    return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN));
+  });
+}
+
+function settingClause(a: Assertion, at: number, change = false, ownedStart?: number): { text: string; start: number; frame: string[]; bound?: boolean; others: { text: string; next: boolean }[] } | null {
+  const lead = /^(?:We (?:could|will) |Our options are to |One option is to |Decision: )/iu.exec(a.text);
+  // A labelled prospective assertion is also owned, e.g. "The premium plan would attract ...".
+  const prospective = /^The (?:[\p{L}]{1,64} ){1,6}would [\p{L}]{1,64} /iu.exec(a.text);
+  // DL #94 6101950357(c): this reader is exclusively for an option setting. An imperative proposal or
+  // a first-person question can name that option's quantity; the typed/named-option gates below still decide it.
+  // Current-level receipts never use this frame and retain their own ownership and assertion gates.
+  const opening = [...a.text.matchAll(/[\p{L}\p{N}]{1,64}/gu)];
+  const proposalStart = ACTIONS.has(opening[0]?.[0].toLowerCase() ?? '') ? 0
+    : linkEffectQuoteContextMiss(a.text, a.text) === 'question'
+      && opening[1]?.[0].toLowerCase() === 'we' && ACTIONS.has(opening[2]?.[0].toLowerCase() ?? '')
+      ? opening[2]!.index : undefined;
+  if (lead === null && prospective === null && ownedStart === undefined && proposalStart === undefined) return null;
+  if (FOREIGN_LEVEL.test(a.text) || ATTRIBUTION.test(a.text)
+    || linkEffectQuoteContextMiss(a.text, a.text) === 'denied'
+    || words(a.text).some(w => w === 'last' || w === 'previous' || w === 'not')) return null;
+  const bodyStart = ownedStart ?? lead?.[0].length ?? proposalStart ?? 0;
+  const body = a.text.slice(bodyStart);
+  let start = bodyStart;
+  let found: { text: string; start: number; frame: string[] } | null = null;
+  const others: { text: string; next: boolean }[] = [];
+  let before = 0;
+  // Keep numeric alternatives in the clause so the point gate refuses them, rather than selecting an endpoint.
+  for (const part of body.split(/, |; | or (?=[\p{L}])/iu)) {
+    const end = start + part.length;
+    if (found === null && at >= start && at < end) {
+      const ws = words(part);
+      const first = ws[0] === 'to' ? ws[1] : ws[0];
+      if (!(prospective !== null && start === 0) && !ACTIONS.has(first ?? '')) return null;
+      if (findStatedAmounts(part).length > 1) return null;
+      if (ws.some(w => NOT_POINT.has(w) && !(change && isChangeWord(w) && (!BOUNDS.has(w) || w === 'more'))) || /[+/()]|[0-9][ \t]{0,4}(?:or|and|-)[ \t]{0,4}[0-9]/iu.test(part)) return null;
+      // The complete local clause supplies the setting; a numeric alternative is never a point.
+      if (ws.includes('or') || ws.includes('but') || ws.includes('if')) return null;
+      found = { text: part, start, frame: prospective !== null && start === 0 ? ['would', ...words(prospective[0]).slice(-1)] : [first ?? ''] };
+    } else if (part.trim() !== '') {
+      // `next` marks only the clause directly after the setting (the one place a bracketing range may stand).
+      others.push({ text: part, next: found !== null && others.length === before });
+    }
+    if (found === null) before = others.length;
+    start = a.text.indexOf(part, start) + part.length;
+    const next = a.text.slice(start).match(/^(?:, |; | or )/iu);
+    start += next?.[0].length ?? 0;
+  }
+  return found === null ? null : { ...found, others };
+}
+
+function coordinatedSiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean; bound?: boolean }[], value: number): boolean {
   return others.every(({ text, next, bound }) => {
     const ws = words(text);
     if (next && ws.length === 4 && ws[0] === 'between' && ws[2] === 'and') {
@@ -107,7 +169,7 @@ function onlySiblingArms(model: CandidateModel, selected: Option, others: readon
   });
 }
 /** An option-setting frame. Current-level ownership stays separate; history, conditions and third-party claims abstain. */
-function settingClause(a: Assertion, at: number, change = false, ownedStart?: number, model?: CandidateModel, factor?: Factor): { text: string; start: number; frame: string[]; bound?: boolean; others: { text: string; next: boolean; bound?: boolean }[] } | null {
+function coordinatedSettingClause(a: Assertion, at: number, change = false, ownedStart?: number, model?: CandidateModel, factor?: Factor): { text: string; start: number; frame: string[]; bound?: boolean; others: { text: string; next: boolean; bound?: boolean }[] } | null {
   const lead = /^(?:We (?:could|will) |Our options are to |One option is to |Decision: )/iu.exec(a.text);
   // A labelled prospective assertion is also owned, e.g. "The premium plan would attract ...".
   const prospective = /^The (?:[\p{L}]{1,64} ){1,6}would [\p{L}]{1,64} /iu.exec(a.text);
@@ -299,7 +361,15 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
   const factors = model.factors.filter(f => f.label === intervention.factor_label);
   if (factors.length !== 1 || (option.interventions ?? []).filter(i => i.factor_label === intervention.factor_label).length !== 1) return false;
   const factor = factors[0]!;
-  if (intervention.value_kind === 'additional') return verifiedAddition(model, option, intervention, factor, brief, a, sentences);
+  // #94 RUN44: the established verdict is monotone; coordinated binding only adds receipts after refusal.
+  const attempt = (coordinated: boolean): boolean => intervention.value_kind === 'additional'
+    ? verifiedAddition(model, option, intervention, factor, brief, a, sentences, coordinated)
+    : verifiedPoint(model, option, intervention, factor, brief, a, sentences, coordinated);
+  if (attempt(false)) return true;
+  return attempt(true);
+}
+function verifiedPoint(model: CandidateModel, option: Option, intervention: Intervention, factor: Factor,
+  brief: string, a: Assertion, sentences: Assertion[], coordinated: boolean): boolean {
   const others = [model.goal.metric, ...model.factors.filter(f => f !== factor).map(f => f.label),
     ...model.outcomes.map(o => o.label), ...model.risks.map(r => r.label)];
   // Limit the entity reader to the located sentence, avoiding unrelated long source lines.
@@ -307,8 +377,8 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
   // It must have no rival using that noun; this does not relax money or anonymous count binding.
   const unitNamesFactor = labelStandsForCountUnit(factor.unit, factor.label, factor.unit)
     && !others.some(label => words(label).some(w => words(factor.label).some(t => sameName(w, t))));
-  const amounts = findLinkEffectAmounts(a.text).filter(n => n.magnitude === intervention.value);
-  const arm = amounts.length === 1 ? settingClause(a, amounts[0]!.index, false, undefined, model, factor) : null;
+  const amounts = coordinated ? findLinkEffectAmounts(a.text).filter(n => n.magnitude === intervention.value) : [];
+  const arm = amounts.length === 1 ? coordinatedSettingClause(a, amounts[0]!.index, false, undefined, model, factor) : null;
   const bound = arm?.bound === true;
   const text = bound ? arm.text : a.text;
   const localSpan = figureTheUserWroteForSpan(intervention.value,
@@ -316,9 +386,10 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
     { target: [factor.label], others, ...(!unitNamesFactor || bound ? { strict: true as const, requireNamed: true as const } : {}) });
   if (localSpan === null) return false;
   const span = { start: localSpan.start + (bound ? arm.start : 0), end: localSpan.end + (bound ? arm.start : 0) };
-  const clause = bound ? arm : settingClause(a, span.start, false, undefined, model, factor);
+  const clause = bound ? arm : coordinated ? coordinatedSettingClause(a, span.start, false, undefined, model, factor)
+    : settingClause(a, span.start);
   if (clause === null || !namedOption(model, option, clause.text, intervention.value)
-    || !onlySiblingArms(model, option, clause.others, intervention.value)) return false;
+    || !(coordinated ? coordinatedSiblingArms : onlySiblingArms)(model, option, clause.others, intervention.value)) return false;
   // Every word of the credited clause names the option, the factor or its unit, or is grammar of the frame: a bound
   // ("up to", "under"), a delta ("another"), a qualifier ("as a ceiling") or an attribution ("according to your
   // estimate") is outside that vocabulary and refuses. An allowlist, never a list of bad words.
@@ -347,7 +418,7 @@ function additiveCurrent(model: CandidateModel, factor: Factor, text: string): {
 }
 /** Additive receipts use the existing change grammar, with the full typed frame kept separate from its modifier. */
 function verifiedAddition(model: CandidateModel, option: Option, intervention: Intervention, factor: Factor,
-  brief: string, a: Assertion, sentences: Assertion[]): boolean {
+  brief: string, a: Assertion, sentences: Assertion[], coordinated: boolean): boolean {
   const expected = readUnitParts(factor.unit); const declared = readUnitParts(intervention.unit);
   if (expected === null || declared === null || JSON.stringify(expected) !== JSON.stringify(declared)
     || (expected.kind !== 'count' && expected.kind !== 'currency')) return false;
@@ -357,9 +428,10 @@ function verifiedAddition(model: CandidateModel, option: Option, intervention: I
   if (amounts.length !== 1) return false;
   const written = amounts[0]!; const offset = current?.start ?? 0;
   const amount = { ...written, index: written.index + offset };
-  const clause = settingClause(a, amount.index, true, current?.start, model, factor);
+  const clause = coordinated ? coordinatedSettingClause(a, amount.index, true, current?.start, model, factor)
+    : settingClause(a, amount.index, true, current?.start);
   if (clause === null || FOREIGN_LEVEL.test(a.text) || ATTRIBUTION.test(a.text)
-    || !onlySiblingArms(model, option, clause.others, intervention.value)) return false;
+    || !(coordinated ? coordinatedSiblingArms : onlySiblingArms)(model, option, clause.others, intervention.value)) return false;
   // A resulting level remains a point even when the candidate calls it additional.
   if (typeof intervention.unit !== 'string' || linkEffectFigureNotAChange(clause.text,
     { amount: intervention.value, amount_unit: intervention.unit, per_source_change: 1,
@@ -376,8 +448,8 @@ function verifiedAddition(model: CandidateModel, option: Option, intervention: I
   if (modifier !== undefined && !(modifier === 'more'
     || (NOT_POINT.has(modifier) && !BOUNDS.has(modifier) && isChangeWord(modifier)))) return false;
   const unmodified = a.text.slice(0, end) + tail;
-  const localUnmodified = unmodified.slice(clause.start, clause.start + clause.text.length
-    - (originalTail.length - tail.length));
+  const localUnmodified = coordinated ? unmodified.slice(clause.start, clause.start + clause.text.length
+    - (originalTail.length - tail.length)) : unmodified.slice(clause.start);
   if (!currentLevelRole(localUnmodified)) return false;
   const elliptical = current !== null && afterChangeWord(a.text.slice(end)) !== a.text.slice(end)
     && /^[.!?]?$/u.test(tail.trim());
@@ -396,7 +468,7 @@ function verifiedAddition(model: CandidateModel, option: Option, intervention: I
   if (!words(clause.text).every(w => figure(w) !== null || grammar(w) || CLAUSE.has(w) || isChangeWord(w)
     || vocab.some(v => sameName(v, w)))) return false;
   if (model.constraints.some(c => c.value === intervention.value && metricNamesLabel(c.metric, factor.label))) return false;
-  return safeNeighbours(brief, a, sentences, amount.matchedText, intervention.value);
+  return safeNeighbours(brief, a, sentences, coordinated ? amount.matchedText : a.text.slice(span.start, span.end), intervention.value);
 }
 
 /** Remove only a terminal current/date qualifier; the quantity's scope words remain. */

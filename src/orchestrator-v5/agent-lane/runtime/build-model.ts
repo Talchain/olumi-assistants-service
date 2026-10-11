@@ -670,10 +670,10 @@ export function retrySchemaPinningGoal(
  *   directed link, and no machine shortcut.
  *   A LOOP is not found here: it is admission's verdict (`loopIssues`, below).
  *
- * ⛔ An EXPLICIT `value_kind:"absolute"` level on a factor whose baseline is NOT
- * known is demoted to `ai_proposed`: with no known starting point it may be an
- * addition mislabelled as a total, derived from Olumi's estimate, and stamping it
- * as the user's would exempt a modelling guess from the money invariant's audit.
+ * ⛔ An EXPLICIT `value_kind:"absolute"` level is demoted to `ai_proposed` unless
+ * the shared option receipt authority verifies it, regardless of baseline knowledge.
+ * A known starting point alone cannot make an option's new level the user's;
+ * verified settings (including the known-zero stock case) retain their credit.
  * ⚠ BUT A USER'S OWN NUMBER MUST NEVER SILENTLY READ AS OLUMI'S (review 5822711266,
  * B2): every demotion is returned in `provenance_demoted` and said to the user, who
  * can confirm it. A candidate with no `value_kind` (stored before the field) is left
@@ -803,9 +803,8 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       const factors = factorsByLabel(intervention.factor_label);
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
-        const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
-        if (intervention.provenance === 'explicit' && unknownBaseline
-          && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
+        // RUN46: only the shared receipt verdict grants drafter-authored absolute credit, including known baselines.
+        if (intervention.provenance === 'explicit' && !verifiedOptionSetting(model, option, intervention, brief)) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed' });
         } else {
@@ -837,6 +836,9 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       const receipt = verifiedOptionTotal(model, option, intervention, brief);
       const verifiedTotal = receipt.verified;
       const statedFigure = verifiedTotal && !receipt.derived;
+      if (!verifiedTotal && intervention.provenance === 'explicit' && factor.baseline_known === true) {
+        provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
+      }
       // Withholding credit does not remove the existing uncertainty of a claimed-user operand computation.
       const uncertainty: Pick<Iv, 'value_confidence'> = !statedFigure && factor.baseline_known && factor.baseline_value !== 0
         && factor.provenance === 'explicit' && intervention.provenance === 'explicit'
@@ -2527,9 +2529,16 @@ export async function buildModelFromBrief(
       ...admitted.loss.filter((l) => /\.extra_parent\./.test(l.field_path)).map((l) => l.reason),
       ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
-      ...preparation.provenance_demoted.map((d) =>
-        `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
-        `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`),
+      ...preparation.provenance_demoted.map((d) => {
+        const factors = preparation.candidate.factors.filter((f) => f.label === d.factor);
+        if (factors.length === 1 && factors[0]!.baseline_known === true) {
+          // Existing conditional-input-basis level label; no claim that a known baseline is unknown.
+          const name = `"${d.factor}"`;
+          return `${name}: Not confirmed from your brief`;
+        }
+        return `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
+          `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`;
+      }),
       ...preparation.levels_over_own_levers.map(sayOptionLevelOverOwnLevers),
       directionless.length > 0
         ? `${directionless.length} relationship(s) were left out because nobody has stated which way they run.`
