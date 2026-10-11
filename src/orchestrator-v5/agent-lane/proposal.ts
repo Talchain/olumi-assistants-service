@@ -272,6 +272,8 @@ export interface AuthorisationRequest {
 }
 
 export const MAX_PROPOSALS = 200;
+/** Distinct approved-operation memos kept for ONE proposal (distinct turn ids); the oldest is forgotten first. */
+export const MAX_EXECUTIONS_PER_PROPOSAL = 32;
 
 /** B3's card-only approval authority also covers a level's temporal reading. */
 export function hasCardOnlyOperations(operations: readonly ProposalOperation[]): boolean {
@@ -296,7 +298,7 @@ export class ProposalStore {
 
   async executeApproved<T>(
     p: StructuredProposal, turnId: string, execute: () => Promise<T>,
-    confirmed: (result: T) => boolean, reconcile: () => Promise<T>,
+    classify: (result: T) => 'applied' | 'unknown' | 'none', reconcile: () => Promise<T>,
   ): Promise<T> {
     const key = approvedOperationKey(p, turnId);
     const memo = this.executions.get(p.proposal_id) ?? new Map<string, Promise<boolean>>();
@@ -307,20 +309,25 @@ export class ProposalStore {
     }
     let close!: (known: boolean) => void;
     memo.set(key, new Promise<boolean>(resolve => { close = resolve; }));
+    // Bounded per proposal as well as in total: the oldest turn's memo goes first.
+    if (memo.size > MAX_EXECUTIONS_PER_PROPOSAL) memo.delete(memo.keys().next().value as string);
     if (!this.executions.has(p.proposal_id)) {
       this.executions.set(p.proposal_id, memo);
       if (this.executions.size > MAX_PROPOSALS) this.executions.delete(this.executions.keys().next().value as string);
     }
     try {
       const result = await execute();
-      close(confirmed(result));
+      const kind = classify(result);
+      // A refusal that provably wrote nothing leaves nothing to block or reconcile: forget the key so the same
+      // approval can be retried once its precondition holds. Only an UNKNOWN outcome stays blocked.
+      if (kind === 'none' && memo.get(key) !== undefined) memo.delete(key);
+      close(kind !== 'unknown');
       return result;
     } catch (err) {
       close(false);
       throw err;
     }
   }
-
 
   put(p: StructuredProposal): StructuredProposal {
     if (this.items.size >= MAX_PROPOSALS && !this.items.has(p.proposal_id)) {

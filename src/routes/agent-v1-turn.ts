@@ -1,5 +1,6 @@
 import { postResponses } from '../adapters/llm/openai.js';
 import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
+import { isComposerApprovalWords } from '../orchestrator-v5/agent-lane/composer-approval-words.js';
 import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-card.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -2933,7 +2934,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // previously offered structural-link proposal. Card-only readings/holds still need their card.
     let composerApproval: string | undefined;
     if (approvedProposal === undefined && typedNow !== null
-      && /^yes[,!\s]+(?:apply (?:it|that)|add (?:it|that)|record (?:it|that)|make that change|go ahead with that)\s*(?:[.!]|$)/i.test(typedNow.trim())) {
+      && isComposerApprovalWords(typedNow)) {
       const waiting = proposals.outstanding(scenarioId, userId);
       const offered = lastApproveOffer.get(approveKey) ?? carriedProposals.get(approveKey)?.chip;
       const id = offered === undefined ? undefined : typedApprovalOf({ chip: { id: offered.id } });

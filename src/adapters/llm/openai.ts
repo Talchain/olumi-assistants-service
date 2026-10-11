@@ -2021,7 +2021,14 @@ export async function postResponses(
     throw err;
   }
   if (!r.ok) {
-    recordProviderAttempt(handle, { transport_status: r.status, result: 'http_error', outcome: r.status === 429 ? 'rate_limited' : 'http_error', retry: false });
+    // The route reads this body next; an unreadable error body is a transport failure it retries, so the receipt must
+    // say so (a received status with retry:false but a second request would be a false receipt).
+    let bodyUnreadable = false;
+    try { await r.clone().text(); } catch { bodyUnreadable = true; }
+    const willRetry = bodyUnreadable && options.retryOnTransportFailure === true;
+    recordProviderAttempt(handle, { transport_status: r.status, result: bodyUnreadable ? 'http_error_body_unreadable' : 'http_error',
+      outcome: r.status === 429 ? 'rate_limited' : 'http_error', retry: willRetry,
+      ...(willRetry ? { retry_reason: 'transport' as const } : {}) });
     return { r, usageHandle: handle };
   }
   try {

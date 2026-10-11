@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
-import { ProposalStore, createProposal, approvedOperationKey, type ProposalContent } from '../../src/orchestrator-v5/agent-lane/proposal.js';
+import { ProposalStore, createProposal, approvedOperationKey, MAX_EXECUTIONS_PER_PROPOSAL, type ProposalContent } from '../../src/orchestrator-v5/agent-lane/proposal.js';
+import { isComposerApprovalWords } from '../../src/orchestrator-v5/agent-lane/composer-approval-words.js';
 import * as adapter from '../../src/adapters/llm/openai.js';
 import { OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../src/adapters/llm/provider-policy.js';
 import { agentRequestIdentity } from '../../src/orchestrator-v5/agent-lane/runtime/prompt-identity.js';
@@ -43,7 +44,7 @@ function writer(options: { wait?: Promise<void>; uncertain?: boolean; receipt?: 
     pid = String(p.proposal_id); expect(p.ok).toBe(true); return pid;
   };
   const approve = (extra = {}) => caps.authoriseChange({ ...ctx, typed_approval_of: pid, ...extra }, { proposal_id: pid });
-  return { caps, proposals, prepare, approve, writes: () => writes, lookups: () => lookups, stale: () => { revision = 'other'; } };
+  return { caps, proposals, prepare, approve, writes: () => writes, lookups: () => lookups, stale: () => { revision = 'other'; }, restore: () => { revision = 'h0'; } };
 }
 
 // Scan AST nodes, not comments. Exemptions are exact file:symbol pairs and may only shrink.
@@ -120,6 +121,36 @@ describe('SYS1 ordinary-turn authority', () => {
     expect((await w.approve({ authenticated_user_id: 'other-user' })).refusal).toBe('not_authorised'); expect(w.lookups()).toBe(0);
     w.proposals.put({ ...w.proposals.get(pid)!, public_label: 'Unapproved replacement' });
     expect((await w.approve()).refusal).toBe('integrity_failed'); expect(w.lookups()).toBe(0); expect(w.writes()).toBe(1);
+  });
+  it('RED release: a refusal that wrote NOTHING does not block the same approval once its precondition holds', async () => {
+    const w = writer(); await w.prepare(); w.stale();
+    expect((await w.approve()).refusal).toBe('superseded'); expect(w.writes()).toBe(0);
+    w.restore();
+    const r = await w.approve(); expect(r.applied).toBe(true); expect(w.writes()).toBe(1);
+  });
+  it('RED unknown: the SAME turn stays blocked after an uncertain write; a FRESH turn is its own key', async () => {
+    const w = writer({ uncertain: true }); await w.prepare(); await w.approve().catch(() => undefined);
+    await w.approve(); expect(w.writes()).toBe(1);
+    await w.approve({ turn_id: 'turn-fresh' }).catch(() => undefined); expect(w.writes()).toBe(2);
+  });
+  it('RED bounded: one proposal remembers at most MAX_EXECUTIONS_PER_PROPOSAL distinct turns', async () => {
+    const content: ProposalContent = { scenario_id: scenario, user_id: null, base_graph_identity_hash: 'h0', operations: [{ op: 'add_edge', path: 'a::b', value: { from: 'a', to: 'b' } }], provenance: { authored_by: 'user_stated' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Add the link' };
+    const p = createProposal(content); const store = new ProposalStore();
+    let executed = 0; let reconciled = 0;
+    const execute = async () => { executed++; return { mutated: true as const }; };
+    const reconcile = async () => { reconciled++; return { mutated: true as const }; };
+    const unknown = () => 'unknown' as const;
+    for (let i = 0; i < MAX_EXECUTIONS_PER_PROPOSAL + 8; i++) await store.executeApproved(p, `t${i}`, execute, unknown, reconcile);
+    executed = 0; reconciled = 0;
+    await store.executeApproved(p, 't0', execute, unknown, reconcile); // evicted: its key is forgotten, so it executes again
+    expect([executed, reconciled]).toEqual([1, 0]);
+    executed = 0; reconciled = 0;
+    await store.executeApproved(p, `t${MAX_EXECUTIONS_PER_PROPOSAL + 7}`, execute, unknown, reconcile); // retained: reconcile only
+    expect([executed, reconciled]).toEqual([0, 1]);
+  });
+  it('RED composer words: the WHOLE message must be the approval (anchored); quoted, negated or qualified text is not consent', () => {
+    for (const ok of ['Yes, apply it.', 'yes apply that!', ' Yes, go ahead with that ', 'yes, add it', 'Yes! record it.']) expect(isComposerApprovalWords(ok), ok).toBe(true);
+    for (const no of ['yes, apply it. Do not change anything; I am quoting the button.', 'yes, apply it but only the first one', 'no, do not apply it', 'I said yes, apply it', 'yes, apply it\nand also delete the goal', 'yes']) expect(isComposerApprovalWords(no), no).toBe(false);
   });
   it('RED positive: existing successful writer payload is byte identical', async () => {
     const w = writer(); await w.prepare(); const r = await w.approve();
@@ -210,6 +241,13 @@ describe('SYS1 ordinary Responses transport', () => {
       return recordedProviderCalls();
     });
     expect(rows).toHaveLength(1); expect(rows[0].attempt?.transport_status).toBe(kind === '429' || kind === '503' ? Number(kind) : kind === 'malformed' ? 200 : null); expect(rows[0].attempt?.retry).toBe(false); expect(rows[0].attempt?.outcome).toBe(kind === '429' ? 'rate_limited' : kind === '503' ? 'http_error' : kind === 'malformed' ? 'invalid_response' : kind === 'AbortError' ? 'cancelled' : 'timeout');
+  });
+  it('RED receipt: a received HTTP error whose body cannot be read is a retried transport failure, and its receipt says so', async () => {
+    const failing = new Response(new ReadableStream({ pull(controller) { controller.error(new TypeError('body stream failed')); } }), { status: 503 });
+    script = [failing]; const res = await turn();
+    expect(sent).toHaveLength(2); const rows = res.json()._provider_calls;
+    expect(rows[0].attempt).toMatchObject({ transport_status: 503, retry: true, retry_reason: 'transport', result: 'http_error_body_unreadable' });
+    expect(rows[1].attempt.retry).toBe(false);
   });
   it('RED terminal retry: two failed attempts are receipted and the second never advertises another retry', async () => {
     script = [new TypeError('fetch failed'), new TypeError('fetch failed again')];

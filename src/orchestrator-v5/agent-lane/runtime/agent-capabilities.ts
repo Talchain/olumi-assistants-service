@@ -9648,7 +9648,10 @@ export function createAgentCapabilities(
       const execute = () => caps.authoriseChange(ctx, args);
       const r = opts.turnAuthority === true && p !== undefined
         ? await proposals.executeApproved(p, ctx.turn_id ?? ctx.request_id, execute,
-            result => result.applied === true && proposals.isApplied(p.proposal_id), reconcile)
+            result => result.applied === true && proposals.isApplied(p.proposal_id) ? 'applied'
+              // A refusal that provably wrote nothing (mutated:false, and not the "could not confirm" outcome) is released.
+              : result.mutated === false && result.refusal !== 'not_confirmed' && result.outcome !== 'outcome_unknown' ? 'none' : 'unknown',
+            reconcile)
         : await execute();
       if (r.applied === true || r.mutated === true) {
         approvalAppliedThisRequest = true;
