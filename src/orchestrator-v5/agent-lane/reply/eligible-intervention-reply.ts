@@ -24,25 +24,19 @@ export function composeEligibleIntervention(composed: ReplyComposition, interven
     const shape = { ...composed.shape, detail: [composed.shape.detail, disclosure].filter(Boolean).join('\n\n') };
     return { ...composed, shape, text: deriveAnswerTextFromShape(shape) };
   }
-  const lines = composed.text.split('\n');
-  const first = lines.findIndex(line => line.trim() !== '');
-  const shape: AnswerShape = composed.shape ?? { headline: lines[first] ?? composed.text, bullets: [],
-    detail: lines.slice(first + 1).join('\n').trim() };
-  if (words(shape.headline) > 80 && actionLabel !== undefined) {
-    const result = { headline: actionLabel, bullets: [], detail: whySaid ? composed.text : [composed.text, disclosure].join('\n\n') };
-    return { ...composed, text: deriveAnswerTextFromShape(result), shape: result, outcome: 'shaped' };
+  // Score run 3 (DL 12 Oct, R4): the answer stays where the composer put it, and only the Why sits below. The appender
+  // once split a reply the composer shipped whole into its first line and "More detail" (deadline 2), and moved a face
+  // bullet over eight words, the specific question, under it (deadline 8), while the action label took the face.
+  const action = actionLabel === undefined
+    || composed.text.split('\n').some(line => line.replace(/^\s*[-•*]\s+/, '').trim() === actionLabel) ? undefined : actionLabel;
+  if (composed.shape === null) {
+    // The composer shipped the reply whole (it is the face): every byte stays, then the action, then the Why.
+    return { ...composed, text: [composed.text, action === undefined ? '' : `- ${action}`, disclosure].filter(Boolean).join('\n\n') };
   }
-  const bullets = [...(shape.bullets ?? [])];
-  const detail = [shape.detail ?? ''];
-  // Retain every original line; long next moves and overflow remain whole in detail.
-  if (actionLabel !== undefined && !bullets.includes(actionLabel)) bullets.push(actionLabel);
-  const face: string[] = [];
-  let budget = words(shape.headline);
-  for (const bullet of bullets) {
-    if ((words(bullet) <= 8 || bullet === actionLabel) && face.length < 3 && budget + words(bullet) <= 80) {
-      face.push(bullet); budget += words(bullet);
-    } else detail.push(`- ${bullet}`);
-  }
-  const result = { ...shape, bullets: face, detail: [...detail, disclosure].filter(Boolean).join('\n\n') };
+  const shape: AnswerShape = composed.shape;
+  // The action joins the face only where it fits; otherwise it sits below, before the Why.
+  const fits = action !== undefined && shape.bullets.length < 3 && words([shape.headline, ...shape.bullets, action].join(' ')) <= 80;
+  const result = { ...shape, bullets: fits ? [...shape.bullets, action] : shape.bullets,
+    detail: [shape.detail ?? '', !fits && action !== undefined ? `- ${action}` : '', disclosure].filter(Boolean).join('\n\n') };
   return { ...composed, text: deriveAnswerTextFromShape(result), shape: result, outcome: 'shaped' };
 }
