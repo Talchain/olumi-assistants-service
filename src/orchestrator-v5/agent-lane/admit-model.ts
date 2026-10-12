@@ -81,7 +81,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, briefWritesGoalLevel, quoteBindsFactorFigure, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
 const MAX_ID = 100;
@@ -2881,8 +2881,6 @@ export function admitStatedGoalChange(
    * "was not stated". Absent ⇒ exactly as before.
    */
   fromBrief: BriefGoalLevel | null = null,
-  /** Recovery Batch B (DL 12 Oct): the user's level is V2-verified (`verifiedGoalLevel`) → typed `explicit`. */
-  verified = false,
 ): {
   readonly node: Partial<AdmittedNode>;
   readonly withheld?: string;
@@ -2955,8 +2953,7 @@ export function admitStatedGoalChange(
       return `"${goal.metric}" is a goal to change by ${change} from today, and its current level was not stated, so no chance of ` +
         `reaching it can be shown: a change is measured from today's level of "${goal.metric}".`;
     }
-    // DL 12 Oct (origin rule for goals): a drafter's estimate tag never withholds a level the brief writes for this goal.
-    if (goalLevelIsEstimated(goal) && !userWroteLevel(today, goal.unit)) {
+    if (goalLevelIsEstimated(goal)) {
       return `Olumi's own estimate of the current level of "${goal.metric}" (${today}) was not used, so no chance of a change of ` +
         `${change} is shown: that figure would rest on a guess, not on anything you said.`;
     }
@@ -3016,7 +3013,7 @@ export function admitStatedGoalChange(
   };
   if (notTheUsers === null) {
     // Only a level the user stated for this goal reaches here (`goalLevelIsEstimated`, `userWroteLevel` above).
-    return { node: withBasis({ ...withBase, observed_state: briefGoalObservedState(level / resolved.cap, goal.unit, level, resolved.cap, verified) }) };
+    return { node: withBasis({ ...withBase, observed_state: briefGoalObservedState(level / resolved.cap, goal.unit, level, resolved.cap) }) };
   }
   if (estimateOnly) {
     // OLUMI'S starting value, said as such by the licence (`estimate_only`); never `brief_extraction` / `user_stated`.
@@ -3173,8 +3170,6 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
    * this, a level the brief never states was stored `brief_extraction` and `minimise` was sent beside it. REQUIRED.
    */
   userWroteLevel: (value: number, unit: unknown) => boolean,
-  /** Recovery Batch B (DL 12 Oct): the user's level is V2-verified (`verifiedGoalLevel`) → typed `explicit`. */
-  verified = false,
 ): { readonly nodes: readonly N[]; readonly loss: readonly RepairEntry[] } {
   const unchanged = { nodes, loss };
   const goals = nodes.filter((n) => n.kind === 'goal');
@@ -3192,8 +3187,7 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
   const baselineRaw = goal.baseline_value;
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw !== goal.value) return unchanged;
   if (typeof cap !== 'number' || !Number.isFinite(cap)) return unchanged;
-  // DL 12 Oct (origin rule for goals): a drafter's estimate tag never withholds a level the brief writes for this goal.
-  if (typeof baselineRaw !== 'number' || !Number.isFinite(baselineRaw) || (goalLevelIsEstimated(goal) && !userWroteLevel(baselineRaw, goal.unit))) return unchanged;
+  if (typeof baselineRaw !== 'number' || !Number.isFinite(baselineRaw) || goalLevelIsEstimated(goal)) return unchanged;
   // DL E12: a level the brief never states is not the user's, however the drafter marked it — it stays withheld, as today.
   if (!userWroteLevel(baselineRaw, goal.unit)) return unchanged;
   const path = `nodes[${slugId(goal.metric)}].observed_state.baseline`;
@@ -3205,7 +3199,7 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
   if (!verdict.admitted) {
     return { nodes, loss: loss.map((l) => (l.field_path === path ? { ...l, reason: verdict.reason } : l)) };
   }
-  const observed_state = briefGoalObservedState(verdict.normalised, goal.unit, baselineRaw, cap, verified);
+  const observed_state = briefGoalObservedState(verdict.normalised, goal.unit, baselineRaw, cap);
   return {
     nodes: nodes.map((n) => (n === node ? { ...node, observed_state } : n)),
     loss: loss.filter((l) => l.field_path !== path),
@@ -3740,8 +3734,7 @@ function admitOnce(
         // ⭐ R1 S4-core: a target stated as a CHANGE from today is written as one (`admitStatedGoalChange`); a level
         // target takes the path below, unchanged.
         if (model.goal.frame === 'change_abs' || model.goal.frame === 'change_rel') {
-          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, (levelReading.value = goalLevelFromBrief(model)),
-            verifiedGoalLevel(model, brief));
+          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, (levelReading.value = goalLevelFromBrief(model)));
           if (change.reading !== undefined) {
             loss.push({
               field_path: `nodes[${slugId(model.goal.metric)}].goal_level_reading`,
@@ -3804,12 +3797,7 @@ function admitOnce(
         // ⛔ "Known" alone is not enough (verdict 5824647383): the strict schema cannot tie
         // `baseline_known` to its provenance, so a level the model marks known but
         // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
-        // DL 12 Oct (origin rule for goals): a drafter's estimate tag never withholds a level the brief writes for this goal
-        // (`goalLevelStated`, the change path's own check, or in the goal's frame: `briefWritesGoalLevel`); its role is then
-        // V2's (`verifiedGoalLevel`), label not withhold. A level the brief never writes stays withheld, with its line.
-        const estimated = goalLevelIsEstimated(model.goal)
-          && !(typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)
-            && (goalLevelStated(baselineRaw, model.goal.unit) || briefWritesGoalLevel(model, brief)));
+        const estimated = goalLevelIsEstimated(model.goal);
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
           withheld(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
