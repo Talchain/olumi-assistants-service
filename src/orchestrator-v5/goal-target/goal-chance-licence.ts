@@ -47,7 +47,7 @@ import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js'
 import { goalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import {
-  effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoMovedWords,
+  BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoMovedWords,
   statusQuoProjectionWords, statusQuoRowWords,
   targetChanceWords, type GoalTargetBasis,
 } from './goal-target-basis.js';
@@ -553,12 +553,25 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   const projection = c.sqReading === 'projection' && c.statusQuoLabel !== undefined && c.statusQuoId !== undefined
     && single.option_ids.includes(c.statusQuoId) ? [statusQuoProjectionWords(c.statusQuoLabel)] : [];
   const assumed = [...('status_quo' in statusQuo && goalLabel !== undefined ? [statusQuoAssumptionWords(goalLabel)] : []), ...projection];
+  // Amendment 4: what this target leaves out — every limit the Run did not include, and the brief's other stated conditions.
+  // ⛔ Re-scope (r2 BLOCKING 2): EVERY retained condition is said, in its kept words, on every path (a stored reading whose
+  // effects are not at the period's end, or whose words cannot be formed, keeps its conditions too). No condition is matched
+  // away by a figure it shares with a typed limit ("spend within £200,000 and no contractors" is not that limit; "by March
+  // 2026" is not "20"): both are said. With several targets the joint says them.
+  const covers = (label: string): string[] => {
+    if (sentTargetRows(c.constraints)) return [];
+    const limits = limitsOutsideTheChance(c.graph, c.constraints);
+    const partial = partialGoalWords(label, [...limits, ...alsoRequired]);
+    return partial === undefined ? [] : [partial];
+  };
+  // On the paths that say today's plain sentence, the line is added only where conditions were retained (unchanged otherwise).
+  const plainCovers = goalLabel !== undefined && alsoRequired.length > 0 ? covers(goalLabel) : [];
   if (goalLabel === undefined || (basis === undefined && changeFrame === undefined)) {
     // No stated basis: today's single-target sentence ("chance of meeting your goal"), with amendment 1's assumption and the
     // status quo's line where it is shown, and amendment 7's label; plus the several-targets block if the Run sent target rows.
     return withSeveralTargets({
       ...single,
-      ...(assumed.length > 0 ? { notes: assumed } : {}),
+      ...(assumed.length + plainCovers.length > 0 ? { notes: [...assumed, ...plainCovers] } : {}),
       ...statusQuo,
       ...(provisional ? { provisional: true as const } : {}),
     }, { ...c, basis, alsoRequired });
@@ -572,7 +585,7 @@ function withBatchCWords(single: GoalChanceLicence, c: {
     ...(basis !== undefined ? { basis } : {}),
   });
   if (words === undefined) {
-    return withSeveralTargets({ ...single, ...(assumed.length > 0 ? { notes: assumed } : {}), ...statusQuo,
+    return withSeveralTargets({ ...single, ...(assumed.length + plainCovers.length > 0 ? { notes: [...assumed, ...plainCovers] } : {}), ...statusQuo,
       ...(provisional ? { provisional: true as const } : {}) }, { ...c, basis, alsoRequired });
   }
   const notes: string[] = [];
@@ -588,12 +601,8 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   // Amendment 2 / DL hiring decision: the effects' timing basis and the additive reading.
   const effects = basis === undefined ? undefined : effectsBasisWords(basis);
   if (effects !== undefined) notes.push(effects);
-  // Amendment 4: what this target leaves out — the brief's other stated conditions and every limit the Run did not include.
-  const limits = limitsOutsideTheChance(c.graph, c.constraints);
-  // A drafter's free-text condition that restates a typed limit's figure is that limit: said once, in the limit's words.
-  const others = (basis?.also_required ?? []).filter((t) => !limits.some((l) => t.includes(l.figure)));
-  const partial = partialGoalWords(goalLabel, [...limits.map((l) => l.words), ...others]);
-  if (partial !== undefined && !sentTargetRows(c.constraints)) notes.push(partial);
+  // Amendment 4 (see `covers`): every limit the Run did not include and every retained condition.
+  notes.push(...covers(goalLabel));
   const out: GoalChanceLicence = {
     ...single,
     target: { ...single.target, ...(changeFrame !== undefined ? { frame: changeFrame } : {}) },
@@ -613,7 +622,7 @@ const sentTargetRows = (c: GoalChanceConstraintInputs): boolean => {
 };
 
 /** The labels of the limits the user set that this single-target chance does not include (amendment 4). */
-function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs): { words: string; figure: string }[] {
+function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs): string[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const stored = Array.isArray(c.storedConstraints) ? c.storedConstraints.filter(isRec) : [];
   return stored.flatMap((row) => {
@@ -622,8 +631,7 @@ function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs): 
     const bound = row.operator_as_stated ?? row.operator;
     const words = bound === '<' ? 'below' : bound === '<=' ? 'at most' : bound === '>' ? 'above' : bound === '>=' ? 'at least' : undefined;
     if (typeof label !== 'string' || label.trim() === '' || words === undefined || !finite(row.value)) return [];
-    const figure = sayFigureAsWritten(row.value, typeof row.unit === 'string' ? row.unit : '');
-    return [{ words: `‘${label.trim()}’ ${words} ${figure}`, figure }];
+    return [`‘${label.trim()}’ ${words} ${sayFigureAsWritten(row.value, typeof row.unit === 'string' ? row.unit : '')}`];
   });
 }
 
@@ -711,10 +719,9 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   }
   if (assumedNames.length > 0 && !assumptionSaid) notes.unshift(statusQuoAssumptionWords(assumedNames, c.basis));
   // ⭐ AIE C clause 3 (12 Oct): a condition the drafter RETAINED because this contract cannot represent it (a distinct
-  // period or reference) is said beside the joint, never claimed by it. One the joint already names (its figure) is not repeated.
-  const named = block.conditions.map((x) => sayFigureAsWritten(x.value, x.unit));
-  const retained = c.alsoRequired.filter((t) => !named.some((f) => t.includes(f)));
-  const covers = partialGoalWords(targetNames, retained);
+  // period or reference) is said beside the joint, never claimed by it. ⛔ Re-scope (r2 BLOCKING 2): EVERY one is said — a
+  // retained condition sharing a figure with a target the joint names (the same 15% over a distinct period) is not that target.
+  const covers = partialGoalWords(targetNames, c.alsoRequired);
   if (covers !== undefined && targetNames.length > 0) notes.push(covers);
   // The status quo's own line is said only where EVERY target's reference is the same-draw one (never universal by default);
   // a status quo whose own share disagrees with that reference is withheld with that reason.
@@ -1205,13 +1212,17 @@ export function goalChanceLicenceForAgent(result: unknown): {
   };
 }
 
+/** The longest stored note read back: every retained condition at its full kept length, plus the limits beside them. */
+const NOTE_MAX = BASIS_ALSO_REQUIRED_MAX * (BASIS_CONDITION_MAX + 2) + 2000;
+
 /** Batch C's stored sentence parts, each validated on its own; a malformed part is simply not read. */
 function batchCPartsOf(r: Rec, optionIds: readonly string[], withheld: readonly string[]): {
   chance_words?: string; notes?: readonly string[]; status_quo?: { option_id: string; line: string };
   estimate_only?: { base: number; unit: string }; provisional?: true; targets?: GoalTargetsBlock;
 } {
   const sayable = (v: unknown, max = 600): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= max && !/[\r\n]/.test(v);
-  const notes = Array.isArray(r.notes) && r.notes.length > 0 && r.notes.every((n) => sayable(n)) ? r.notes as string[] : undefined;
+  // A note may name every retained condition (up to 20 × 300 characters; re-scope r2 BLOCKING 2): its own, larger bound.
+  const notes = Array.isArray(r.notes) && r.notes.length > 0 && r.notes.every((n) => sayable(n, NOTE_MAX)) ? r.notes as string[] : undefined;
   const sq = isRec(r.status_quo) && typeof r.status_quo.option_id === 'string' && withheld.includes(r.status_quo.option_id)
     && sayable(r.status_quo.line) ? { option_id: r.status_quo.option_id, line: r.status_quo.line as string } : undefined;
   const est = isRec(r.estimate_only) && finite(r.estimate_only.base) && typeof r.estimate_only.unit === 'string'

@@ -518,6 +518,52 @@ describe('readback RESPONSE → LICENCE — the served capacity level brief (at 
   });
 });
 
+// ── CENSUS (DL re-scope after independent check r2, BLOCKING 2): goal conditions draft → admission → store → licence ──────
+// ONE RULE: a condition the drafter retained is never silently dropped. Six in → six at admission, six stored, six said in the
+// licence's "does not include" line, each by identity. A text over 300 characters is kept cut with "…"; markup is removed.
+const LONG_200 = `the release keeps every existing customer integration working without any change on their side, including the partner portal, the reporting exports and the single-sign-on flow, through the whole rollout`;
+const LONG_400 = `${'the support rota stays covered every weekday from eight in the morning until eight in the evening, '.repeat(4)}with no single person on call for more than two weeks running`;
+const SIX = ['code quality maintained', 'no weekend releases', 'the on-call load per person does not rise', LONG_200, LONG_400, 'docs updated {for every API} <change>'];
+const SIX_KEPT = ['code quality maintained', 'no weekend releases', 'the on-call load per person does not rise', LONG_200,
+  `${LONG_400.slice(0, 299).trimEnd()}…`, 'docs updated for every API change'];
+const hiringWith = (also: readonly string[]): CandidateModel => {
+  const h = hiringSized() as unknown as Rec;
+  h.goal = { ...h.goal, basis: { ...HIRING_BASIS, also_required: [...also] } };
+  return h as unknown as CandidateModel;
+};
+
+describe('CENSUS — goal conditions: six in → six at admission, in the store and in the licence (identities equal)', () => {
+  it('RED on 2ecbae5 (r2 BLOCKING 2): none of six conditions is dropped — not the sixth, not one over 120 characters', async () => {
+    expect(new Set(SIX).size).toBe(6);
+    expect(LONG_200.length).toBeGreaterThan(120);
+    expect(LONG_200.length).toBeLessThanOrEqual(300);
+    expect(LONG_400.length).toBeGreaterThan(300);
+    // admission
+    const admitted = admitCandidateModel(hiringWith(SIX)) as unknown as Rec;
+    expect(node(admitted, 'productivity').goal_target_basis.also_required).toEqual(SIX_KEPT);
+    // store (the graph contract's own parse) and the reader
+    const bytes = store(hiringWith(SIX));
+    const stored = node(JSON.parse(bytes), 'productivity');
+    expect(stored.goal_target_basis.also_required).toEqual(SIX_KEPT);
+    expect(goalTargetBasisOf(stored)?.also_required).toEqual(SIX_KEPT);
+    // licence: the stored Run's "does not include" line names every one, once, beside the limit
+    const { view } = await runAndRead(bytes, hiringAnswer);
+    const licence = goalChanceLicenceForAgent(view)!;
+    const covers = (licence.notes ?? []).filter((n) => n.startsWith('This chance covers '));
+    expect(covers).toEqual([`This chance covers ‘Productivity’ only. It does not include: ‘First-year hiring cost’ at most £200,000; ${SIX_KEPT.join('; ')}.`]);
+    for (const c of SIX_KEPT) expect(covers[0]!.split(c).length - 1, c).toBe(1);
+  });
+
+  it('more conditions than can be kept whole (21) refuse the WHOLE reading, with the reason — never a subset', async () => {
+    const many = Array.from({ length: 21 }, (_, i) => `condition number ${i + 1} holds`);
+    const admitted = admitCandidateModel(hiringWith(many)) as unknown as Rec;
+    const goal = node(admitted, 'productivity');
+    expect(goal.goal_target_basis).toBeUndefined();
+    expect(goal).not.toHaveProperty('goal_threshold');
+    expect(JSON.stringify(admitted.loss ?? admitted.not_represented ?? admitted)).toContain('as a list it can keep whole (at most 20), so that none is left out');
+  });
+});
+
 /** Marketing with every link into a target sized (one customer per point of conversion, on a 0–20% conversion frame). */
 const marketingSized = (): CandidateModel => {
   const m = marketing() as unknown as Rec;

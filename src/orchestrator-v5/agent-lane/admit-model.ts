@@ -68,7 +68,7 @@ import { sayFigure } from './say-figure.js';
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
-import { admitGoalTargetBasis, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
+import { admitGoalTargetBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
 import {
   admitCandidateConstraints,
   canonicalProvenance,
@@ -2934,6 +2934,10 @@ export function admitStatedGoalChange(
       goal_target_basis: basis!,
     } };
   }
+  // ⛔ Re-scope (r2 BLOCKING 2): a change of a LEVEL quantity whose reading is refused while the drafter retained conditions
+  // refuses the whole goal reading, with why (a change quantity's refusal above already writes no threshold and says why).
+  const conditionsRefused = goalReadingRefusedWords(goal.metric, basisVerdict, goal.basis);
+  if (conditionsRefused !== undefined) return { node, withheld: conditionsRefused };
   const sign = raw > 0 ? '+' : '';
   const change = frame === 'change_rel' ? `${sign}${raw}%` : `${sign}${raw}${unit ? ` ${unit}` : ''}`;
   const today = goal.baseline_value;
@@ -3799,11 +3803,16 @@ function admitOnce(
           drafted: model.goal.basis, quantityFrame: model.goal.quantity_frame === 'change' ? 'change' : 'level',
           targetFrame: 'level', targetRaw: raw, horizonMonths: model.goal.horizon_months,
         });
+        // ⛔ Recovery Batch C re-scope (r2 BLOCKING 2): goal conditions are never silently dropped. A reading refused while
+        // the drafter retained conditions beside the target would lose them here (the plain sentence names none), so the
+        // whole goal reading is refused instead: no threshold (no chance), and why is said. The user's level is kept.
+        const conditionsRefused = goalReadingRefusedWords(model.goal.metric, levelBasis, model.goal.basis);
+        if (conditionsRefused !== undefined) withheld(conditionsRefused);
         return {
           ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
           goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
           goal_threshold_raw: raw,
-          ...(resolved !== null
+          ...(resolved !== null && conditionsRefused === undefined
             ? {
                 goal_threshold_cap: resolved.cap,
                 goal_threshold_cap_provenance: resolved.provenance,

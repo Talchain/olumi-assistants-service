@@ -76,10 +76,20 @@ describe('hiring — a change of +10% from today has its ruled sentence (ruling 
       + 'with no diminishing returns, interactions or extra onboarding drag modelled.');
   });
 
-  it('RED (amendment 4): "productivity only" — the £200,000 limit said once (typed), and code quality from the brief', () => {
+  it('RED (amendment 4): "productivity only" — the £200,000 limit (typed), and every condition from the brief', () => {
     const g = hiringGraph();
     const l = goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
-    expect(l.notes).toContain('This chance covers ‘Productivity’ only. It does not include: ‘First-year hiring cost’ at most £200,000; code quality maintained.');
+    // Batch C re-scope (DL after independent check r2, BLOCKING 2): EVERY retained condition is said in its kept words — the
+    // drafter's "spend within £200,000" is no longer matched away by the typed limit's figure (said beside it, not dropped).
+    expect(l.notes).toContain('This chance covers ‘Productivity’ only. It does not include: ‘First-year hiring cost’ at most £200,000; '
+      + 'code quality maintained; spend within £200,000.');
+  });
+
+  it('RED on 2ecbae5 (r2 BLOCKING 2): a condition that shares the typed limit\'s figure but says more is never matched away', () => {
+    const g = hiringGraph({ goal_target_basis: { ...HIRING_BASIS, also_required: ['spend within £200,000 and no new contractors'] } });
+    const l = goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
+    expect(l.notes).toContain('This chance covers ‘Productivity’ only. It does not include: ‘First-year hiring cost’ at most £200,000; '
+      + 'spend within £200,000 and no new contractors.');
   });
 
   it('NEGATIVE (ruling 11): a change target with no stated basis is not licensed', () => {
@@ -463,6 +473,17 @@ describe('AIE clause 3: a target the joint cannot support is kept, named and ref
     const l = licenceFor(marketingRun(), g)!;
     expect(l.targets!.joint.status).toBe('licensed');
     expect(l.notes).toContain('This chance covers ‘New customers’ and ‘Conversion rate’ only. It does not include: repeat purchases from 30% of them within six months.');
+  });
+
+  it.each([
+    ['the same 15% over a DISTINCT period', 'conversion above 15% again over the first twelve months'],
+    ['another quantity quoting the same figure (15%)', 'a launch discount of no more than 15% in the first month'],
+  ])('RED on 2ecbae5 (r2 BLOCKING 2): a retained condition is said beside the joint even when it shares a figure (%s)', (_name, condition) => {
+    const g = marketingGraph();
+    (g.nodes as Rec[])[0] = { ...(g.nodes as Rec[])[0], goal_target_basis: { ...MARKETING_BASIS, also_required: [condition] } };
+    const l = licenceFor(marketingRun(), g)!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect(l.notes).toContain(`This chance covers ‘New customers’ and ‘Conversion rate’ only. It does not include: ${condition}.`);
   });
 
   it('CONTROL: the supported marketing AND (both level, same period) is unchanged — licensed, no "covers only" note', () => {
