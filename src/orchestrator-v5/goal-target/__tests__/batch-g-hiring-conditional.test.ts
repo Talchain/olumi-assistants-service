@@ -15,7 +15,7 @@ import {
   goalChanceLicenceForAgent, goalChanceLicenceOf, periodEndConditionalOf, sentGoalThresholdOf, withGoalChanceLicence,
   withholdForPeriodEndEffects,
 } from '../goal-chance-licence.js';
-import { PERIOD_END_ASSUMPTION_NOTE_TEMPLATE, statedEffectTiming } from '../period-end-assumption.js';
+import { PERIOD_END_ASSUMPTION_NOTE_TEMPLATE } from '../period-end-assumption.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../../agent-lane/goal-chance-screen-lines.js';
 import { toOutboundGraph } from '../outbound-graph.js';
@@ -59,14 +59,15 @@ function sentRunOf(graph: Rec): Rec {
 const earned = (id: string, p: 0 | 1): boolean => (FX.goal_certainty as Rec[]).some((d) => d.option_id === id && d.probability_of_goal === p && d.earned);
 
 /** The Run handler's own order: E's withhold, then the licence, with the same inputs (`run-analysis.ts`). */
-function runAsTheHandlerDoes(o: { graph?: Rec; brief?: string | null; sentRun?: Rec; envelope?: Rec } = {}): { envelope: Rec; view: Rec } {
+function runAsTheHandlerDoes(o: { graph?: Rec; brief?: string | null; sentRun?: Rec; envelope?: Rec; effects_timing?: unknown } = {}): { envelope: Rec; view: Rec } {
   const graph = o.graph ?? FX.graph;
   const served = o.envelope ?? FX.envelope;
   const sentRun = o.sentRun ?? sentRunOf(graph);
   const brief = 'brief' in o ? o.brief : FX.brief;
-  const withheld = withholdForPeriodEndEffects(served, graph, GOAL, { sentRun, brief });
+  const effects_timing = 'effects_timing' in o ? o.effects_timing : 'not_stated';
+  const withheld = withholdForPeriodEndEffects(served, graph, GOAL, { sentRun, brief, effects_timing });
   const envelope = withGoalChanceLicence(withheld, graph, GOAL, earned, sentGoalThresholdOf(withheld, sentRun.graph, GOAL, earned, sentRun),
-    graph, { storedConstraints: graph.goal_constraints, sentConstraints: graph.goal_constraints, sentRun, brief });
+    graph, { storedConstraints: graph.goal_constraints, sentConstraints: graph.goal_constraints, sentRun, brief, effects_timing });
   return { envelope, view: { type: 'analysis_result', enrichment: envelope } };
 }
 const cellsOf = (view: Rec, graph: Rec = FX.graph): Record<string, Rec> => Object.fromEntries(
@@ -247,17 +248,26 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
   });
 
   it('NEGATIVE (c): a stated PARTIAL effect by the period withholds with E\'s sentence', () => {
-    expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} We'd expect only half the productivity gain by month 3.` }), 'partial');
+    expectWithheld(runAsTheHandlerDoes({ effects_timing: 'later_or_partial', brief: `${FX.brief} We'd expect only half the productivity gain by month 3.` }), 'partial');
   });
 
   it('NEGATIVE (c): a stated LATE effect (the full gain only after the period) withholds with E\'s sentence', () => {
-    expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} We won't see the full gain until month 6.` }), 'late');
+    expectWithheld(runAsTheHandlerDoes({ effects_timing: 'later_or_partial', brief: `${FX.brief} We won't see the full gain until month 6.` }), 'late');
   });
 
-  it('NEGATIVE (c, fail safe — DL G r2): ANY stated start withholds with E\'s sentence, before the period or after it', () => {
-    // Round 1 licensed a start alone (AIE amendment (c)); CHECK-f46cd7c5 showed a later start escaping that way. Any timing withholds.
-    expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} The hires start in month 2.` }), 'start, month 2');
-    expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} The hires start in month four.` }), 'start, month four (the check)');
+  it.each(['The hires start in month four.', 'The hires cannot contribute during that window.'])(
+    'AI reads later_or_partial: %s → E withholds', (words) => {
+      expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} ${words}`, effects_timing: 'later_or_partial' }), words);
+    });
+
+  it.each([undefined, null, '', 'invalid', true])('missing/invalid AI reading %s → E withholds', (effects_timing) => {
+    expectWithheld(runAsTheHandlerDoes({ effects_timing }), String(effects_timing));
+  });
+
+  it.each(['not_stated', 'in_place_by_period'])('AI reads %s → conditional licence with unchanged note', (effects_timing) => {
+    const run = runAsTheHandlerDoes({ effects_timing });
+    expect(goalChanceLicenceForAgent(run.view)?.notes).toContain(NOTE);
+    expect(goalOf(FX.graph).goal_target_basis.effects_at_period_end).toBe(false);
   });
 
   it('NEGATIVE (a): a Run whose sent threshold, frame, unit or period is not the held target withholds with E\'s sentence', () => {
@@ -274,7 +284,7 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     // ... and the comparator PLoT scores (a minimised Run for the held "at least").
     expectWithheld(runAsTheHandlerDoes({ sentRun: { ...sent, goal_direction: 'minimise' } }), 'comparator');
     // No sent Run at all: a probability on the wire alone licenses nothing.
-    expect(periodEndConditionalOf(FX.envelope, FX.graph, GOAL, { brief: FX.brief })).toBeUndefined();
+    expect(periodEndConditionalOf(FX.envelope, FX.graph, GOAL, { brief: FX.brief, effects_timing: 'not_stated' })).toBeUndefined();
   });
 
   it('NEGATIVE (d): a brief that could not be read is never "no contradiction"', () => {
@@ -284,83 +294,7 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
 
   it('NEGATIVE (b): a held month (a producer reading of timing) is never given this note', () => {
     const held = withGoal(FX.graph, (g) => { g.goal_horizon_months = 3; });
-    expect(periodEndConditionalOf(FX.envelope, held, GOAL, { sentRun: sentRunOf(held), brief: FX.brief })).toBeUndefined();
+    expect(periodEndConditionalOf(FX.envelope, held, GOAL, { sentRun: sentRunOf(held), brief: FX.brief, effects_timing: 'not_stated' })).toBeUndefined();
     expect(JSON.stringify(runAsTheHandlerDoes({ graph: held }).envelope)).not.toContain('in place by month three');
-  });
-});
-
-/** The AIE's external timing corpus (#94 6133027121; AIE-G-TIMING-PHRASES-20261012.json, sha256 42b7a8f6…), verbatim. */
-const CORPUS = JSON.parse(readFileSync('tests/fixtures/batch-g/AIE-G-TIMING-PHRASES-20261012.json', 'utf8')) as {
-  cases: { id: string; text: string; expected: 'CONTRADICTS' | 'NOT_A_CONTRADICTION' }[] };
-/** The Run's own verdict on a brief: E's withhold sentence, or the conditional licence with its note; anything else is OTHER. */
-function verdictOf(run: { envelope: Rec; view: Rec }): 'CONTRADICTS' | 'NOT_A_CONTRADICTION' | 'OTHER' {
-  const withheld = (run.envelope.inference_warnings as Rec[]).some((w) => w.detail?.reason === 'effects_at_period_end_unstated' && w.message === WITHHOLD);
-  const licence = goalChanceLicenceForAgent(run.view);
-  if (withheld && licence === undefined) return 'CONTRADICTS';
-  return !withheld && licence?.notes?.includes(NOTE) === true ? 'NOT_A_CONTRADICTION' : 'OTHER';
-}
-
-/**
- * DL G r2 (fail safe): every corpus case states timing of the effects (a start, a share by a month, a duration, an upper bound,
- * a past programme's or another quantity's timing), so every case now WITHHOLDS. The AIE's NOT_A_CONTRADICTION positives that
- * now withhold are named here by id (listed in the handback for the AIE; the corpus file is unchanged and the rule is not tuned to it).
- */
-const CORPUS_POSITIVES_NOW_WITHHELD = ['GT05', 'GT06', 'GT07', 'GT08', 'GT09', 'GT10'];
-describe('G: the AIE timing corpus through the served run-4 Run (the brief as persisted, plus the case)', () => {
-  it('the corpus is the AIE\'s ten cases, and its positives are exactly the ones listed as now withheld', () => {
-    expect(CORPUS.cases.map((c) => c.id)).toEqual(['GT01', 'GT02', 'GT03', 'GT04', 'GT05', 'GT06', 'GT07', 'GT08', 'GT09', 'GT10']);
-    expect(CORPUS.cases.filter((c) => c.expected === 'NOT_A_CONTRADICTION').map((c) => c.id)).toEqual(CORPUS_POSITIVES_NOW_WITHHELD);
-  });
-  it.each(CORPUS.cases.map((c) => [c.id, c] as const))('%s', (_id, c) => {
-    const run = runAsTheHandlerDoes({ brief: `${FX.brief} ${c.text}` });
-    // Every case states timing: E's sentence, no licence, no note (the AIE's CONTRADICTS cases unchanged; its positives now withhold).
-    expect(statedEffectTiming(`${FX.brief} ${c.text}`, goalOf(FX.graph).goal_target_basis), c.text).toBeDefined();
-    expect(verdictOf(run), c.text).toBe('CONTRADICTS');
-    expect(goalOf(FX.graph).goal_target_basis.effects_at_period_end).toBe(false);
-  });
-});
-
-describe('G r2: the timing class (fail safe) — any stated timing withholds; only the goal\'s own period phrase is excused, by identity', () => {
-  const at3 = { period_months: 3, reference: 'today' as const, target_raw: 10, effect_unit: '% of today\'s productivity' };
-  it.each([
-    // Round 1's contradictions, still withheld.
-    'We expect only half the productivity gain by month 3.',
-    'Realistically just 50% of the improvement by the end of month three.',
-    'There will be a partial effect within three months.',
-    'We won’t see the full gain until month 6.',
-    'The full benefit only arrives after month 3.',
-    'New developers won’t be fully productive by month 3.',
-    // Round 1's "no contradiction" rows: each states timing, so each now withholds.
-    'The hires start in month 2.',
-    'Half the team is remote, and we need the full gain by month 3.',
-    'We would see half the gain by month 2.',
-    'Developers won’t be fully productive until month 2.',
-    // The check's sentence (CHECK-f46cd7c5 BLOCKING); the period phrase negated, or beside another figure, in its own clause.
-    'The hires start in month four.',
-    'The hires will not be productive by month 3.',
-    'The developers deliver a 5% gain in the next three months.',
-  ])('timing: %s', (brief) => { expect(statedEffectTiming(brief, at3)).toBeDefined(); });
-
-  it('the goal\'s own period phrase alone is excused — the served brief, the readback brief, a "by month 3" goal', () => {
-    for (const brief of [FX.brief as string, 'Should we hire a tech lead or two developers to raise productivity by at least 10% within three months?',
-      'We want a 10% productivity increase by month 3.']) expect(statedEffectTiming(brief, at3), brief).toBeUndefined();
-  });
-
-  it('IDENTITY, not text: the same words are excused only for the held basis\' own period and reference, and only once', () => {
-    // The served brief's "in the next three months" is the goal's period for a 3-month basis, never for a 6-month one.
-    expect(statedEffectTiming(FX.brief, at3)).toBeUndefined();
-    expect(statedEffectTiming(FX.brief, { ...at3, period_months: 6 })).toBeDefined();
-    // "within three months of launch" is a launch-referenced period, not today's.
-    expect(statedEffectTiming('Raise productivity 10% within three months of launch.', { ...at3, reference: 'launch' })).toBeUndefined();
-    expect(statedEffectTiming('Raise productivity 10% within three months of launch.', at3)).toBeDefined();
-    // "a year" is the period for a 12-month basis only.
-    expect(statedEffectTiming('Raise productivity 10% within a year.', { ...at3, period_months: 12 })).toBeUndefined();
-    expect(statedEffectTiming('Raise productivity 10% within a year.', at3)).toBeDefined();
-    // Beside a figure, only the held target's own: "at least 10% within three months" is the goal for a 10% target, not a 12% one.
-    const goal = 'Should we hire a tech lead or two developers to raise productivity by at least 10% within three months?';
-    expect(statedEffectTiming(goal, at3)).toBeUndefined();
-    expect(statedEffectTiming(goal, { ...at3, target_raw: 12 })).toBeDefined();
-    // Two phrases with the period's value: neither is excused (which one is the goal's cannot be told).
-    expect(statedEffectTiming('Raise productivity 10% in 3 months. The hires help within three months.', at3)).toBeDefined();
   });
 });

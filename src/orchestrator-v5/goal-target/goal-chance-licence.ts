@@ -46,7 +46,7 @@ import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { goalOwnConstraintChanceRecords, sentRunPairsChange, sentRunScoresHeldChange, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
-import { periodEndAssumptionNote, statedEffectTiming } from './period-end-assumption.js';
+import { periodEndAssumptionNote } from './period-end-assumption.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
@@ -235,6 +235,8 @@ export interface GoalChanceConstraintInputs {
    * it. `null` (it could not be read) and absent (not given) both read no conditional chance: never "no contradiction".
    */
   readonly brief?: string | null;
+  /** Olumi's AI reading for THIS Run. Missing or invalid readings withhold the conditional chance. */
+  readonly effects_timing?: unknown;
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -1543,15 +1545,13 @@ export function periodEndEffectsUnstatedOf(graph: unknown, goalId: unknown): { r
  *   · (a) THE Run: what CEE sent for this Run scored the held quantity, target, frame, unit, reference, comparator and period
  *     (`sentRunScoresHeldChange`); a `probability_of_goal` on the wire alone licenses nothing;
  *   · (d) the retained source was read: a brief that is absent or unreadable is never "no contradiction";
- *   · (c) FAIL SAFE (DL G r2, CHECK-f46cd7c5 BLOCKING): it states NOTHING about when, how fast or how much of the effects
- *     arrive beyond the goal's own period phrase, excused by identity with the held basis (`statedEffectTiming`): a start,
- *     onboarding, ramp, delay, month, share in place or pace — any of them withholds, a later start alone included;
+ *   · (c) the AI reads effects as in place by the period, or not stated. Later/partial, missing and invalid readings withhold;
  *   · (e) the target's own words can be said ("‘productivity’ being at least 10% higher than today at three months"), so a
  *     chance of this target alone is never worded as the chance of the whole goal (its other conditions stay in the notes).
  * The other guards (target, permission, currentness, condition) are the licence's own and run unchanged around this.
  */
 export function periodEndConditionalOf(
-  envelope: unknown, graph: unknown, goalId: unknown, inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief'> = {},
+  envelope: unknown, graph: unknown, goalId: unknown, inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief' | 'effects_timing'> = {},
 ): { readonly record: GoalRecord; readonly basis: GoalTargetBasis; readonly note: string } | undefined {
   const held = periodEndEffectsUnstatedOf(graph, goalId);
   if (held === undefined) return undefined;
@@ -1564,7 +1564,7 @@ export function periodEndConditionalOf(
   if (comparator === undefined || !sentRunScoresHeldChange(inputs.sentRun, graph, goalId, comparator)) return undefined;
   const brief = inputs.brief;
   if (typeof brief !== 'string' || brief.trim() === '') return undefined;
-  if (statedEffectTiming(brief, held.basis) !== undefined) return undefined;
+  if (inputs.effects_timing !== 'not_stated' && inputs.effects_timing !== 'in_place_by_period') return undefined;
   // Through the ONE goal record (S5): the label and the stated target the licence's words are formed from.
   const label = held.record.label.trim() !== '' && !/[\r\n]/.test(held.record.label) ? held.record.label.trim() : undefined;
   const frame = target?.frame === 'change_abs' || target?.frame === 'change_rel' ? target.frame : undefined;
@@ -1605,7 +1605,7 @@ export function periodEndEffectsWords(record: GoalRecord, basis: Pick<GoalTarget
 export const PERIOD_END_EFFECTS_UNSTATED = 'effects_at_period_end_unstated';
 
 export function withholdForPeriodEndEffects<E>(
-  envelope: E, graph: unknown, goalId: unknown, inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief'> = {},
+  envelope: E, graph: unknown, goalId: unknown, inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief' | 'effects_timing'> = {},
 ): E {
   if (!isRec(envelope)) return envelope;
   const held = periodEndEffectsUnstatedOf(graph, goalId);
