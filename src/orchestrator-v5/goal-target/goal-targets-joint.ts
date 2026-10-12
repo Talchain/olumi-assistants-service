@@ -475,7 +475,7 @@ export function goalTargetsBlockOf(args: {
       for (const o of options) {
         const f = placeholderPartsFinding(nodeId, nodes, edges, [o], units);
         if (f === null || f.reason !== reason) continue;
-        if (f.reason === PLACEHOLDER_PARTS_REASON || f.arm === 'link') {
+        if (f.arm === 'link') {
           const fromId = f.arm === 'link' ? f.link?.from : f.partId;
           const toId = f.arm === 'link' ? f.link?.to : nodeId;
           const [fromLabel, toLabel] = [labelOf(fromId), labelOf(toId)];
@@ -557,10 +557,8 @@ export function goalTargetsBlockOf(args: {
 
   const n = Math.max(ordered.length + unsupported.length + unsentTargets.length + (unnamed ? 1 : 0), 2);
   const withheld = (reason: JointWithholdReason, f: { readonly causes?: readonly WithheldConditionCause[]; readonly next?: WithholdNextStepRef } = {}): GoalJoint => {
-    // ⛔ "Run again" only where a fresh request is established to test the saved targets (AIE copy, binding guard 5; see the
-    // per-target note above): the Run's own stale request. Then the first olumi-base target's level step; else what was given.
-    const next = reason === 'strict_not_preserved' || reason === 'figure_not_preserved' ? RERUN
-      : reason === 'olumi_base' ? (() => { const t = targets.find((x) => olumiBase.has(x.constraint_id)); return t === undefined ? NONE : levelStep(t.node_id); })()
+    // The first olumi-base target's level step; else what was given.
+    const next = reason === 'olumi_base' ? (() => { const t = targets.find((x) => olumiBase.has(x.constraint_id)); return t === undefined ? NONE : levelStep(t.node_id); })()
         : f.next ?? NONE;
     return {
       status: 'withheld', reason,

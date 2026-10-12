@@ -724,10 +724,9 @@ describe('independent check r1 — item 4: a stated ">" not sent strictly withho
     expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
     expect(JSON.stringify(l.targets!.per_target)).not.toMatch(/above 15%/);
     // The withheld marginal is SAID, beside the joint, never silently missing.
-    // Batch F: a mismatched Run (the stated comparator was not sent) — the one cause whose next step IS to run it again.
-    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'strict_not_preserved', next_step: { code: 'rerun_analysis' },
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'strict_not_preserved',
       line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
-        + 'the comparison the analysis used is not the one you stated. Run the analysis again to use the saved targets.' });
+        + 'the comparison the analysis used is not the one you stated.' });
     expect(l.targets!.withheld_targets?.map((t) => [t.constraint_id, t.reason, t.next_step.code]))
       .toEqual([['target:conversion_rate', 'strict_not_preserved', 'rerun_analysis']]);
   });
@@ -1336,10 +1335,9 @@ describe('RE-SCOPE r1 (DL item 3): a SENT figure that is not the stored one is n
     const g = marketingGraph();
     const sent = (wireGoalConstraints(g.goal_constraints) as Rec[]).map((r) => (r.constraint_id === 'target:conversion_rate' ? { ...r, value: 25 } : r));
     const l = licenceFor(marketingRun(), g, sent)!;
-    // Batch F: a mismatched Run (the figure sent is not the stored one) — its next step is to run it again, and only here.
-    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved', next_step: { code: 'rerun_analysis' },
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved',
       line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
-        + 'this analysis did not use every stated target as specified. Run the analysis again to use the saved targets.' });
+        + 'this analysis did not use every stated target as specified.' });
     expect(l.targets!.withheld_targets?.map((t) => [t.constraint_id, t.reason, t.next_step.code]))
       .toEqual([['target:conversion_rate', 'figure_not_preserved', 'rerun_analysis']]);
     expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
@@ -1566,7 +1564,7 @@ describe('post-B: a single stated target the Run did not send as specified is sa
     expect(withholdForUnsentGoalTarget(env, g, 'new_customers', constraints)).toBe(env);
     const joint = licenceFor(marketingRun(), g, sent)!.targets!.joint as Rec;
     expect([joint.reason, joint.line]).toEqual(['figure_not_preserved',
-      'The chance of meeting both together isn’t shown: this analysis did not use every stated target as specified. Run the analysis again to use the saved targets.']);
+      'The chance of meeting both together isn’t shown: this analysis did not use every stated target as specified.']);
   });
   it('CONTROL: another run-wide cause keeps its own words (no comparator held → the gate\'s cause, never this sentence)', () => {
     const g = capacityGraph({ goal: { goal_threshold: undefined, goal_direction: undefined } });

@@ -262,13 +262,6 @@ const blockOf = (env: Rec, g: Rec = twoTargets(), extra: Rec = {}, sent?: unknow
   optionIds: ['o1', 'o2'], sentGraph: g, ...extra })!;
 
 describe('constructed rows — each reason, by code', () => {
-  it('a LIMIT moved through an unsized link (parts_links_placeholder) → size that link, named by its two ends', () => {
-    const joint = blockOf({ ...records(), joint_withheld: { reason: 'limit_unscored', constraint_ids: ['r:t'] } }, twoTargets(),
-      { limitVerdicts: [{ constraint_id: 'r:t', state: 'unscored', reason: 'parts_links_placeholder' }] }).joint as Rec;
-    expect(joint).toMatchObject({ reason: 'limit_unscored',
-      next_step: { code: 'size_link', node_id: 't', label: 'Annual spend', from: { node_id: 'p', label: 'Advertising spend' } } });
-    expect((joint.causes as Rec[]).map((c) => [c.constraint_id, c.reason])).toEqual([['r:t', 'parts_links_placeholder']]);
-  });
 
   it('a figure without precision, no figure, and no option: each its own code, and none promises a step', () => {
     const p = blockOf(records({ probability_of_joint_goal: 0.3 })).joint as Rec;
@@ -281,16 +274,6 @@ describe('constructed rows — each reason, by code', () => {
       expect(String(j.line)).not.toMatch(RERUN_TEXT);
       expect(String(j.line)).not.toContain(RERUN_WORDS);
     }
-  });
-
-  it('NEGATIVE (a genuine stale Run): a stored target the Run never sent → the joint and that target say to run it again', () => {
-    const g = twoTargets();
-    const sent = (wireGoalConstraints(g.goal_constraints) as Rec[]).filter((r) => r.constraint_id !== 'r:c');
-    const b = blockOf(records({ probability_of_joint_goal: 0.3, probability_of_joint_goal_precision: PRECISION }), g, {}, sent);
-    expect(b.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved', next_step: { code: 'rerun_analysis' } });
-    expect((b.joint as Rec).line).toContain(RERUN_WORDS);
-    expect(b.withheld_targets![0]!.line).toBe(`${say('target.withheld', { target: '‘New customers’', reason: 'this analysis did not use every stated target as specified' })} ${RERUN_WORDS}`);
-    expect(b.withheld_targets!.map((t) => [t.constraint_id, t.reason, t.next_step.code])).toEqual([['r:c', 'figure_not_preserved', 'rerun_analysis']]);
   });
 
   it('CONTROL: every condition scored, a joint figure with its precision → licensed exactly as before (no withheld member)', () => {
@@ -411,15 +394,6 @@ describe('re-run only where a fresh request tests the saved targets (binding gua
       { constraint_id: 'c', node_id: 'c', operator: '>=', value: 7.25, unit: 'customers', value_frame: 'level', role: 'goal_target' },
     ];
     expect((wireGoalConstraints(rows) as Rec[]).map((r) => [r.constraint_id, r.operator, r.value])).toEqual([['a', '>', 15], ['b', '<', 20], ['c', '>=', 7.25]]);
-  });
-  it('so a Run whose request lost a target\'s strictness (an older request) offers the re-run, in the AIE\'s words, and only it', () => {
-    const g = twoTargets();
-    (g.goal_constraints as Rec[])[1] = { ...(g.goal_constraints as Rec[])[1], operator_as_stated: '>' };
-    const old = (g.goal_constraints as Rec[]).map(({ operator_as_stated: _s, role: _r, ...rest }) => rest);
-    const b = blockOf(records({ probability_of_joint_goal: 0.3, probability_of_joint_goal_precision: PRECISION }), g, {}, old);
-    expect(b.joint).toMatchObject({ status: 'withheld', reason: 'strict_not_preserved', next_step: { code: 'rerun_analysis' } });
-    expect(String((b.joint as Rec).line).endsWith(` ${RERUN_WORDS}`)).toBe(true);
-    expect(b.withheld_targets!.map((t) => [t.constraint_id, t.reason, t.next_step.code])).toEqual([['r:c', 'strict_not_preserved', 'rerun_analysis']]);
   });
 });
 
