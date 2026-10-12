@@ -50,7 +50,7 @@ import { decisionInputAsk } from '../../agent-lane/decision-input-ask.js';
 import { draftedTeamPartOf } from '../event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../goal-kind.js';
 import { shareChanceRunBlock, sharePartsForOption } from '../share-by-date-run.js';
-import { normalChance } from '../event-by-date-share.js';
+import { extraShareMoments, momentsOfTeam, normalChance } from '../event-by-date-share.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
@@ -213,8 +213,13 @@ async function runOn(w: ReturnType<typeof world>): Promise<Rec> {
     option_comparison: options.map((o: Rec) => {
       const parts = sharePartsForOption(graph, o.id);
       if (parts === null) throw new Error(`no share parts for ${o.id}`);
+      // The option's share by the deadline, as the same moments the gate reads: team part plus its added capacity.
+      const team = momentsOfTeam(parts.team), extra = parts.extra === undefined ? { mean: 0, sd: 0 }
+        : extraShareMoments(parts.extra.monthlyShare, parts.extra.D, parts.extra.leadLow, parts.extra.leadHigh);
+      const mean = team.mean + extra.mean, std = Math.sqrt(team.sd ** 2 + extra.sd ** 2);
       return { id: o.id, option_id: o.id, label: o.label, option_label: o.label, status: 'computed',
-        outcome: { mean: 0.8, p10: 0.6, p50: 0.8, p90: 1, std: 0.1, n_samples: 10000, n_valid_samples: 10000, validity_ratio: 1, percentiles_source: 'samples' },
+        outcome: { mean, p10: mean - 1.2816 * std, p50: mean, p90: mean + 1.2816 * std, std, n_samples: 10000, n_valid_samples: 10000,
+          validity_ratio: 1, percentiles_source: 'samples' },
         win_probability: 1 / options.length, probability_of_goal: normalChance(parts, 1) };
     }),
     option_comparison_status: 'computed', analysis_status: 'completed', inference_warnings: [], factor_sensitivity: [],
@@ -296,7 +301,7 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     expect(lines.map(l => l.option_id).sort()).toEqual(['event_option_1', 'event_option_2', 'event_option_3']);
     for (const l of lines) {
       expect(l.chance).toContain('chance of launching by 12 April 2027, in this model');
-      expect(l.chance, l.chance).toContain("Olumi's range from your 7 months (7–10.5 months)");
+      expect(l.chance, l.chance).toContain("Olumi's estimate from your 7 months (7–10.5 months)");
     }
     for (const id of ['event_option_1', 'event_option_2']) {
       expect(lines.find(l => l.option_id === id)!.chance).toContain("Olumi's estimates of hiring time (2–4 months)");

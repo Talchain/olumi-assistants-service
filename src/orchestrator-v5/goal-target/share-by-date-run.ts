@@ -120,12 +120,18 @@ export function shareGateForOption(graph: unknown, optionId: string, displayedPo
   return gate(parts, share.threshold_raw / 100, displayedPoint, rounding);
 }
 
-/** Per-option words: only the active capacity contributes an Olumi estimate. */
+/** Per-option words: the active capacity's Olumi estimates and, for every option, Olumi's range from the user's single time. */
 export function shareOptionEstimateWords(graph: unknown, optionId: string): string {
   const share = shareByDateGoalForChanceOf(graph), parts = sharePartsForOption(graph, optionId);
-  if (share === null || parts?.extra === undefined) return '';
-  const extra = parts.extra, number = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+  if (share === null || parts === null) return '';
+  const number = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+  // EBD E2: a team time held as Olumi's estimate from the user's single figure is labelled as Olumi's on every option.
+  const stated = (graph as Rec).nodes.find((n: Rec) => n.id === share.team_part_id)?.observed_state?.stated_time;
+  const team = stated?.range_origin === 'olumi_estimate' && typeof stated.most_likely === 'number'
+    ? `Olumi's estimate from your ${number(stated.most_likely)} months (${number(stated.low)}–${number(stated.high)} months)` : '';
+  const extra = parts.extra;
+  if (extra === undefined) return team === '' ? '' : `using ${team}`;
   const lead = extra.leadLow === extra.leadHigh ? number(extra.leadLow) : `${number(extra.leadLow)}–${number(extra.leadHigh)}`;
   const deliverable = String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
-  return `using Olumi's estimates of hiring time (${lead} months) and the new team's pace (${number(extra.monthlyShare * 100)}% of ${deliverable} a month)`;
+  return `using ${team === '' ? '' : `${team}, and `}Olumi's estimates of hiring time (${lead} months) and the new team's pace (${number(extra.monthlyShare * 100)}% of ${deliverable} a month)`;
 }

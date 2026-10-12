@@ -2,7 +2,7 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { bindTeamTimeQuote, teamTimeCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
@@ -5119,21 +5119,23 @@ export function createAgentCapabilities(
       };
     },
 
-    /** Parse and propose this turn's current-team duration; a singleton is only the most likely time. */
+    /**
+     * The current-team duration, from the user's words in ANY of their messages, bound by quote (EBD E2,
+     * `bindTeamTimeQuote`); a single time carries Olumi's labelled range from it, on the same card.
+     */
     async proposeTeamTime(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const stated = readTeamTime(ctx.user_turn_text);
-      if (stated === null || !teamTimeArgumentsMatch(ctx.user_turn_text, args, stated)) {
-        return { ok: false, mutated: false, refusal: 'team_time_not_stated',
-          detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
-      }
+      const bound = bindTeamTimeQuote({ now: ctx.user_turn_text, conversation: ctx.user_text }, args as never);
+      if (bound.kind === 'refused') return { ok: false, mutated: false, refusal: 'team_time_not_stated', detail: bound.detail };
+      const stated = bound.time;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
-        detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
+        detail: 'The deadline is not held yet, so nothing was prepared. Ask the user for the deadline first; once they confirm it, call propose_team_time again with the same quote.' };
+      const read = teamTimeReadDigest(g.raw);
       const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
-        reference_date: todayInLondon((opts.now ?? (() => new Date()))()) };
+        reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}) };
       if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
         detail: 'That deadline has passed. Type a future deadline and confirm it, then give the soonest and latest times with your current team.' };
       if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), g.raw)) {
@@ -5143,7 +5145,7 @@ export function createAgentCapabilities(
       }
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
-        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
+        provenance: { authored_by: 'user_stated', basis: bound.quote },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
@@ -6280,6 +6282,10 @@ export function createAgentCapabilities(
         authenticated_user_id: ctx.authenticated_user_id,
         current_graph_identity_hash: before.graph_hash,
         typed_approval_of: ctx.typed_approval_of,
+        // EBD: a team-time card is stale only when what it read changed (hiring times landing never stale it).
+        // TODO(EBD×E5 combine, DL): `|| (op set_hiring_times && hiringTimesStillApply(value, before.raw))` from SYS1's
+        // goal-target/hiring-times.ts; skipped row "E5 combine" in ebd-input-loop.test.ts goes live with it.
+        scoped_precondition_holds: (p) => teamTimeReadHolds(p, before.raw),
       });
       if (decision.status === 'already_applied') {
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so

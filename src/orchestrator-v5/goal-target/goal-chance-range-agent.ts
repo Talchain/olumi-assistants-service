@@ -81,7 +81,12 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
       && typeof stated.high === 'number' && Number.isFinite(stated.high) && stated.high >= stated.low;
     const estimateUnit = time ? ' months' : typeof stated?.unit === 'string'
       ? `${stated.unit.startsWith('%') ? '' : ' '}${stated.unit}` : ' per month';
-    const estimate = hasEstimate
+    // EBD E2: a range Olumi widened from the user's single time is never called theirs ("from the slow end of your …").
+    const widened = hasEstimate && time && stated.range_origin === 'olumi_estimate' && typeof stated.most_likely === 'number'
+      && Number.isFinite(stated.most_likely);
+    const estimate = widened
+      ? `${(stated.most_likely as number).toLocaleString('en-GB')} months, which Olumi widened to ${(stated.low as number).toLocaleString('en-GB')}–${(stated.high as number).toLocaleString('en-GB')} months`
+      : hasEstimate
       ? `${(stated.low as number).toLocaleString('en-GB')}–${(stated.high as number).toLocaleString('en-GB')}${estimateUnit}`
       : time ? 'time estimate' : 'pace estimate';
     Object.defineProperty(out, optionId, { enumerable: true, configurable: true, value: {

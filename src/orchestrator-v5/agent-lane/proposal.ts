@@ -119,6 +119,8 @@ export interface ProposalOperation {
     /** The user's card-only temporal judgement for the held month; `value` is `{months}`. */
     | 'attest_goal_steady'
     | 'set_team_time'
+    /** E5 (SYS1): each capacity option's hiring times; field-scoped like `set_team_time` (`scoped_precondition_holds`). */
+    | 'set_hiring_times'
     /**
      * ⭐ B RESTATED GOAL (DL ruling (B); PL 6116779075; AIE 0244) — REPLACE AN UNREVIEWED DRAFT WITH THE REVISED ONE
      * PREPARED FROM THE STORED BRIEF AND THE USER'S TYPED GOAL. `path` is the scenario id; `value` is the prepared
@@ -276,6 +278,11 @@ export interface AuthorisationRequest {
   readonly authenticated_user_id: string | null;
   /** The model's CURRENT revision, read server-side. Never client-supplied. */
   readonly current_graph_identity_hash: string;
+  /**
+   * EBD: a FIELD-SCOPED precondition, read server-side from the current model. When it returns true the proposal executes
+   * although the whole-model revision moved (only what the proposal read is compared). Its writer stays CAS-fenced.
+   */
+  readonly scoped_precondition_holds?: (proposal: StructuredProposal) => boolean;
 }
 
 export const MAX_PROPOSALS = 200;
@@ -412,7 +419,7 @@ export class ProposalStore {
       if (partial.revision === req.current_graph_identity_hash) return { status: 'execute', proposal: p, continuation: partial };
       return { status: 'superseded', expected: partial.revision, actual: req.current_graph_identity_hash };
     }
-    if (p.base_graph_identity_hash !== req.current_graph_identity_hash) {
+    if (p.base_graph_identity_hash !== req.current_graph_identity_hash && req.scoped_precondition_holds?.(p) !== true) {
       return {
         status: 'superseded',
         expected: p.base_graph_identity_hash,

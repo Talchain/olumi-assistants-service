@@ -79,6 +79,7 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   set_goal_target: 'slice_3',
   set_limit: 'slice_3',
   set_team_time: 'slice_3',
+  set_hiring_times: 'slice_3', // E5: each capacity option's hiring times, like the team's time
   add_limit: 'slice_3',
   attest_goal_steady: 'none', // the user's temporal judgement is a card answer, not a numeric field
   set_goal_deadline: 'slice_3', // the goal's date (`goal_horizon.deadline`, new on staging 7 Oct): with goal target and limits (S3, S-E)
