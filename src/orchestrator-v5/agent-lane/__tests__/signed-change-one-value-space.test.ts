@@ -1,3 +1,4 @@
+import { withOriginalReceipt } from './fixtures/original-receipt.js';
 /**
  * ⛔ A SIGNED CHANGE KEEPS ITS SIGN, AND EVERY OPTION'S LEVEL ON ONE FACTOR LIVES IN ONE VALUE SPACE.
  *
@@ -90,6 +91,7 @@ type Node = Record<string, unknown> & { id: string; kind: string; interventions?
 type Graph = { nodes: Node[]; edges: { from: string; to: string }[] };
 
 async function build(c: CandidateModel): Promise<{ out: Record<string, unknown>; graph: Graph }> {
+  c = withOriginalReceipt(c, BRIEF, 'Should we cut our list price 15% or raise it 10%?', [['List price change', -15], ['List price change', 10]]);
   let registered: unknown = null;
   const d: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
@@ -268,8 +270,9 @@ describe('a signed change keeps its sign, and one factor carries one value space
     expect(level(graph, RAISE, HIRING)).toBeCloseTo(0.1, 10);
     // The option still ACTS on the factor: it is not silently disconnected.
     expect(graph.edges.some((e) => e.from === CUT && e.to === HIRING)).toBe(true);
-    expect(said(out, /Hiring change/)).toHaveLength(1);
-    expect(said(out, /Hiring change/)[0]).toMatch(/-3/);
+    // DL 6104308425 / test purpose: the unquoted 2 FTE also carries its existing not-confirmed disclosure.
+    expect(said(out, /Hiring change/)).toHaveLength(2);
+    expect(said(out, /Hiring change/).filter(s => !s.includes('Not confirmed from your brief'))[0]).toMatch(/-3/);
     const { refusal } = await runAnalysis(graph);
     expect(refusal).not.toBe('mixed_scale_unresolved');
   });
@@ -285,7 +288,9 @@ describe('a signed change keeps its sign, and one factor carries one value space
     expect(level(graph, CUT, PRICE)).toBeUndefined();
     expect(level(graph, RAISE, PRICE)).toBeCloseTo(0.1, 10);
     expect(said(out, /today is 100/)).toHaveLength(0);
-    expect(said(out, /List price change/)).toHaveLength(1);
+    // #94 6105226165 safe withholding: the retained 5 has no matching receipt; disclosure accompanies the unchanged negative-level refusal.
+    expect(said(out, /List price change/)).toHaveLength(2);
+    expect(out.not_represented).toContain('"List price change": Not confirmed from your brief');
     expect((await runAnalysis(graph)).refusal).not.toBe('mixed_scale_unresolved');
   });
 
@@ -293,7 +298,8 @@ describe('a signed change keeps its sign, and one factor carries one value space
     const { out, graph } = await build(candidate([iv('List price change', 5, '%')], [iv('List price change', 150, '%')]));
     oneSpace(graph, PRICE);
     expect(level(graph, RAISE, PRICE)! / level(graph, CUT, PRICE)!).toBeCloseTo(30, 8);
-    expect(said(out, /List price change/)).toHaveLength(1);
+    // DL 6104308425 / test purpose: neither 5 nor 150 is in the brief; keep widening and the honest disclosure.
+    expect(said(out, /List price change/)).toHaveLength(2);
     expect((await runAnalysis(graph)).refusal).toBeNull();
   });
 });

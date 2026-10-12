@@ -56,8 +56,10 @@ import { reconcileTopLevelOptionsFromNodes } from './reconcile-top-level-options
 import { reindexInterventionKeys } from './reindex-intervention-keys.js';
 import { refuseInadmissibleInterventionRanges } from './intervention-range.js';
 import { log } from '../utils/telemetry.js';
+import type { InterventionHumanAuthority } from '../orchestrator/tools/encode-option-interventions.js';
 
 export interface PersistedGraphProjectionContext {
+  readonly humanAuthority?: InterventionHumanAuthority;
   readonly scenarioId?: string;
   readonly turnId?: string;
   readonly turnClass?: string;

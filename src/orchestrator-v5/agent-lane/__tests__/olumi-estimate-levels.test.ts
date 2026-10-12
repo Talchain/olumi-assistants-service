@@ -53,7 +53,8 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
     await caps.proposeNewOption(ctxSaying('Add an option: raise to £64 with the AI release.'), suggested({ value: 64, unit: '£', estimate: true, basis: 'x' }) as never);
     const iv = priceLevelSent(sent);
     expect(iv?.raw_value).toBe(64);
-    expect(iv).not.toHaveProperty('source');
+    // DL RUN39 / #94 6099157525: checked user figures carry user_specified; absence is unattributed.
+    expect(iv).toHaveProperty('source', 'user_specified');
   });
 
   it('CONTRAST: "estimate" with no basis is not an explicit hypothesis → unset, and said', async () => {

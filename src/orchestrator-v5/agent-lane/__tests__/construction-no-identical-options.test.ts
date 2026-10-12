@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, BUILD_INSTRUCTIONS, prepareProvisionalCandidate, type CallStructuredModel } from '../runtime/build-model.js';
 import { admitCandidateModel, slugId, type CandidateModel } from '../admit-model.js';
+import { verifiedFactorLevel } from '../verified-option-setting.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import { assessConstructionSize, COMPACT_LIMITS } from '../construction-size-gate.js';
@@ -268,13 +269,31 @@ const withCreditedType = (n: SNode, key: string): SNode => {
   if (typed.extractionType === undefined) typed.extractionType = type;
   return { ...n, observed_state: typed } as SNode;
 };
+// #94 6105226165 safe withholding: scripted whole-graph diffs show ONLY these original cells/edges lost unproved credit.
+const WITHHELD_BY_CASE: Record<string, readonly (readonly [string, string])[]> = {
+  'f-20260926T020217Z': [['59_with_ai_release', 'pro_plan_price']],
+  'f-20260926T022404Z': [['raise_pro_price_to_59', 'pro_plan_price']],
+  'f-20260926T001627Z': [['raise_to_59_with_release', 'pro_plan_price']],
+  'f-20260926T022612Z': [['59_with_ai_release', 'pro_plan_price'], ['49_with_ai_release', 'pro_plan_price']],
+};
+const safeWithholding = <G extends SGraph>(g: G, key: string): G => ({
+  ...g,
+  nodes: g.nodes.map(n => {
+    const ids = (WITHHELD_BY_CASE[key] ?? []).filter(([option]) => option === n.id).map(([, factor]) => factor);
+    if (ids.length === 0 || n.interventions === undefined) return n;
+    return { ...n, interventions: Object.fromEntries(Object.entries(n.interventions)
+      .map(([id, level]) => [id, ids.includes(id) ? { ...level, source: 'cee_hypothesis' } : level])) };
+  }),
+  edges: g.edges.map(e => (WITHHELD_BY_CASE[key] ?? []).some(([option, factor]) => e.from === option && e.to === factor)
+    ? { ...e, provenance: { ...e.provenance, source: 'cee_hypothesis' } } : e),
+});
 const after2355 = <G extends SGraph>(g: G, key: string, beforeMagnitudeSubtraction: SGraph): G => {
   const projected = asProjectedMeanCapture({
     ...g,
     edges: g.edges.map((e) => ((RESTAMPED_BY_2355[key] ?? []).some(([f, t]) => e.from === f && e.to === t)
       ? { ...e, provenance: { ...e.provenance, source: 'cee_hypothesis' } } : e)),
   }, beforeMagnitudeSubtraction);
-  return { ...projected, nodes: projected.nodes.map(n => withCreditedType(n, key)) } as G;
+  return safeWithholding({ ...projected, nodes: projected.nodes.map(n => withCreditedType(n, key)) } as G, key);
 };
 /**
  * Base (cb1778b) predates the limit frame (#1919): admission now stamps each limit's `value_frame` right
@@ -469,7 +488,7 @@ describe('controls — what the rule must never touch', () => {
     const graph = { ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => n) } as typeof registered;
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
+    expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(safeWithholding({ ...run.brief.draft_graph, nodes: olumisKnownLevels(run.brief.draft_graph.nodes) }, key).nodes);
     expect(unsized(graph).edges).toEqual(after2355(run.brief.draft_graph, key, graph).edges);
     expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, after2355(baseGraph(key), key, graph)), G1_NO_HORIZON_WORDS)))).toBe(JSON.stringify(framedBase(after2355(baseGraph(key), key, graph), key)));
     expect(out).not.toHaveProperty('options_withheld');
@@ -669,7 +688,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     ]);
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['current_setup', '59_with_ai_release', '49_with_ai_release']);
-    expect(levelOf(graph, '49_with_ai_release', AT_49.brief.draft_graph)).toEqual(AT_49.brief.draft_graph.nodes.find((n) => n.id === '49_with_ai_release')!.interventions);
+    expect(levelOf(graph, '49_with_ai_release', AT_49.brief.draft_graph)).toEqual(safeWithholding(AT_49.brief.draft_graph, 'f-20260926T022612Z').nodes.find((n) => n.id === '49_with_ai_release')!.interventions);
     expect(out).not.toHaveProperty('options_withheld');
   });
 
@@ -877,7 +896,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
    */
   const GAP_54 = '£54 with AI release -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
     + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
-  const PRICE_54 = { factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' };
+  const PRICE_54: NonNullable<CandidateModel['options'][number]['interventions']>[number] = { factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' };
   type Opt = CandidateModel['options'][number];
   /** Within the limit: `padded(0, withTest)` (the user's option gap-free) plus Olumi's £54, AI availability open unless `o54` sets it. */
   const with54 = (withTest: boolean, o54: Partial<Opt> = {}) => {
@@ -1296,3 +1315,38 @@ describe('the construction contract names the shape (one sentence)', () => {
 //     writeFileSync(BASE_FIXTURE, `${JSON.stringify({ head: process.env.GEN_NO_DUP_BASE_HEAD, graphs }, null, 1)}\n`);
 //   });
 // });
+
+
+describe('RUN38 a bound receipt owns its abbreviated quantity, without conflicting qualifiers', () => {
+  function received(quote: string, label = 'Pro plan price', value = 49, unit = '£ per month') {
+    const model = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed' });
+    const factor = model.factors.find(f => f.label === 'Pro plan price')!;
+    Object.assign(factor, { label, baseline_value: value, unit, baseline_evidence: { quote } });
+    return verifiedFactorLevel(model, factor, quote);
+  }
+  it('credits the existing full-candidate £49/month receipt for Our Pro price', () => {
+    expect(received('Our Pro price is £49 a month.')).toBe(true);
+  });
+  it('an explicitly matching channel is owned', () => {
+    expect(received('Our taproom sales share is 70%.', 'Taproom sales share', 70, '%')).toBe(true);
+  });
+  it('a conflicting same-head channel does not own another channel', () => {
+    expect(received('Our pub sales share is 70%.', 'Taproom sales share', 70, '%')).toBe(false);
+  });
+  for (const quote of [
+    'Our supplier claims the Pro price is £49 a month.',
+    'Our competitor has a Pro price of £49 a month.',
+    'Our Pro price target is £49 a month.',
+    'Our Pro price forecast is £49 a month.',
+    'Pro price is £49 a month.',
+  ]) {
+    it(`withholds the adverse receipt: ${quote}`, () => { expect(received(quote)).toBe(false); });
+  }
+  it('a conflicting period stays uncredited', () => {
+    expect(received('Our Pro price is £49 a month.', 'Pro plan price', 49, 'GBP/year')).toBe(false);
+  });
+  it('no receipt remains uncredited', () => {
+    const model = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed' });
+    expect(verifiedFactorLevel(model, model.factors.find(f => f.label === 'Pro plan price')!, SHAPE_1.brief.message)).toBe(false);
+  });
+});

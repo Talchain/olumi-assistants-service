@@ -1,3 +1,4 @@
+import type { InterventionHumanAuthority } from '../../orchestrator/tools/encode-option-interventions.js';
 /**
  * ⭐ THE ONE AUTHORITY ON "MAY THIS GAP BE PUT TO THE USER AS AN OBLIGATION?"
  *
@@ -539,7 +540,7 @@ const INTERVENTION_CLASS_RESOLVES: Readonly<Record<StructureProvenance, boolean>
  * It does NOT read `NodeV3.provenance` (response-only display, regenerated every
  * response) and it does NOT infer authorship from the presence of a `prior`.
  */
-export function structureProvenance(element: unknown, graph?: unknown): StructureProvenance {
+export function structureProvenance(element: unknown, graph?: unknown, humanAuthority?: InterventionHumanAuthority): StructureProvenance {
   const node = asRecord(element);
   if (!node) return 'unattributed';
 
@@ -560,9 +561,12 @@ export function structureProvenance(element: unknown, graph?: unknown): Structur
     // working on this option, and the per-pair question is answered by
     // `structureProvenanceOfEffect` below, which is what the obligation rule
     // actually calls.
-    const classes = Object.values(interventions).map((entry) =>
-      classifyValueSource(asRecord(entry)?.source),
-    );
+    const classes = Object.entries(interventions).map(([factorId, entry]) => {
+      const stamped = classifyValueSource(asRecord(entry)?.source);
+      return humanAuthority !== undefined && stamped === 'user_stated'
+        && !humanAuthority.some(pair => pair.optionId === node.id && pair.factorId === factorId)
+        ? 'unattributed' : stamped;
+    });
     // The STRONGEST stated effect wins here — the opposite question to
     // `structureProvenanceOfEffect`'s, and named apart from it on purpose.
     //
@@ -616,6 +620,7 @@ export function structureProvenanceOfEffect(
   graph: unknown,
   optionId: string | undefined,
   factorId: string | undefined,
+  humanAuthority?: InterventionHumanAuthority,
 ): StructureProvenance {
   const option = optionId ? nodeById(graph, optionId) : null;
   const factor = factorId ? nodeById(graph, factorId) : null;
@@ -642,12 +647,16 @@ export function structureProvenanceOfEffect(
     const entry = interventions ? asRecord(interventions[factorId]) : null;
     if (entry) {
       const stamped = classifyValueSource(entry.source);
+      if (humanAuthority !== undefined && stamped === 'user_stated'
+        && !humanAuthority.some(pair => pair.optionId === optionId && pair.factorId === factorId)) return 'unattributed';
       if (stamped !== 'unattributed') return stamped;
     }
+    // A fresh exact-effect verdict cannot borrow an authorised sibling or a factor baseline.
+    if (humanAuthority !== undefined) return 'unattributed';
   }
 
   const ends: StructureProvenance[] = [];
-  if (option) ends.push(structureProvenance(option, graph));
+  if (option) ends.push(structureProvenance(option, graph, humanAuthority));
   if (factor) ends.push(structureProvenance(factor, graph));
 
   // The WEAKEST end wins: an obligation is only the user's when every element it
@@ -706,6 +715,7 @@ export function classifyIssueObligation(
   issue: CanonicalReadinessIssue,
   graph: unknown,
   waivedOptionIds: readonly string[] = [],
+  humanAuthority?: InterventionHumanAuthority,
 ): ObligationDecision {
   const waived =
     typeof issue.option_id === 'string' && waivedOptionIds.includes(issue.option_id);
@@ -716,13 +726,13 @@ export function classifyIssueObligation(
   // fill" a gap the Run is refused on.
   if (OBLIGATION_EXEMPT_CATEGORIES.has(issue.category) || issue.code === 'MISSING_FACTOR_LEVEL') {
     return {
-      provenance: structureProvenanceOfEffect(graph, issue.option_id, issue.factor_id),
+      provenance: structureProvenanceOfEffect(graph, issue.option_id, issue.factor_id, humanAuthority),
       obligation: 'required',
       waived_by_exclusion: waived,
     };
   }
 
-  const provenance = structureProvenanceOfEffect(graph, issue.option_id, issue.factor_id);
+  const provenance = structureProvenanceOfEffect(graph, issue.option_id, issue.factor_id, humanAuthority);
   return {
     provenance,
     obligation: obligationFor(provenance),

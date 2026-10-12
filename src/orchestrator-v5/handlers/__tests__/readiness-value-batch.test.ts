@@ -556,7 +556,8 @@ describe('readiness value batch — provenance survives the write', () => {
       (n) => n.id === cell.option_id,
     )!;
     const stored = (node.interventions as Record<string, Record<string, unknown>>)[cell.factor_id]!;
-    expect(stored.source).toBe('user_specified');
+    // DL #94 6099157525 + RUN25: absent/unpreserved provenance is unattributed, not a human default.
+    expect(stored.source).toBeUndefined();
   });
 
   it('an UNRECOGNISED source cannot be smuggled in, and cannot claim user authorship', () => {
@@ -587,7 +588,8 @@ describe('readiness value batch — provenance survives the write', () => {
       (n) => n.id === cell.option_id,
     )!;
     const stored = (node.interventions as Record<string, Record<string, unknown>>)[cell.factor_id]!;
-    expect(stored.source).toBe('user_specified');
+    // DL #94 6099157525 + RUN25: absent/unpreserved provenance is unattributed, not a human default.
+    expect(stored.source).toBeUndefined();
     // The confidence rides ONLY with a preserved provenance, never on its own.
     expect(stored.value_confidence).toBeUndefined();
   });
@@ -776,7 +778,8 @@ describe('readiness value batch — the mark survives persistence, and it change
       (n) => n.id === cell.option_id,
     )!;
     const stored = (node.interventions as Record<string, Record<string, unknown>>)[cell.factor_id]!;
-    expect(stored.source).toBe('user_specified');
+    // DL #94 6099157525 + RUN25: absent/unpreserved provenance is unattributed, not a human default.
+    expect(stored.source).toBeUndefined();
     expect(stored.value_confidence).toBeUndefined();
   });
 });

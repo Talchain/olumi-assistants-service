@@ -94,6 +94,7 @@ import { awaitRunRecording } from './run-recording.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isProviderAllowed } from '../adapters/llm/provider-policy.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
+import type { InterventionHumanAuthority } from '../orchestrator/tools/encode-option-interventions.js';
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -112,6 +113,8 @@ export interface CommitMetadata {
    * scenarios.graph unchanged when p_graph is null.
    */
   readonly graph?: unknown;
+  /** Exact cells checked by the direct human edit/approval caller, not inferred from the graph or handler name. */
+  readonly humanAuthority?: InterventionHumanAuthority;
   /**
    * User-supplied free-text decision brief to persist atomically with the
    * turn insert via append_turn_atomic(p_brief_text). Set by
@@ -1289,6 +1292,7 @@ export async function commitDirectAnswer(
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
+    humanAuthority: metadata.humanAuthority,
   }), baseForWrite).graph;
   if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, projectedGraphForStore);
   if (graphWasProvided(metadata.graph)) {

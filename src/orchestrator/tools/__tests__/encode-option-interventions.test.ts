@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  encodeOptionInterventionsForEdit,
+  encodeOptionInterventionsForEdit, interventionPreimageScope,
   optionIdsTouchedByOperations,
   optionIdsAddedWithInterventionIntent,
   clearInheritedInterventionSourceQuotes,
@@ -31,7 +31,7 @@ describe('encodeOptionInterventionsForEdit (add-option encoding)', () => {
       nodes: [goal(), cappedFactor(), { id: 'opt_x', kind: 'option', label: 'X', data: { interventions: { fac_annual_cost: { unit: '£', raw_value: 120000 } } } }],
       edges: [edge('opt_x', 'fac_annual_cost')],
     };
-    const { graph, unresolvedOptionIds } = encodeOptionInterventionsForEdit(g);
+    const { graph, unresolvedOptionIds } = encodeOptionInterventionsForEdit(g, undefined, undefined, [{ optionId: 'opt_x', factorId: 'fac_annual_cost' }]);
     expect(unresolvedOptionIds).toEqual([]);
     const opt = optionOf(graph as { nodes: Dict[] }, 'opt_x');
     expect(iv(opt, 'fac_annual_cost')).toEqual({
@@ -96,7 +96,7 @@ describe('encodeOptionInterventionsForEdit (add-option encoding)', () => {
       }],
       edges: [edge('opt_mix', 'fac_annual_cost')],
     };
-    const fac = iv(optionOf(encodeOptionInterventionsForEdit(g).graph as { nodes: Dict[] }, 'opt_mix'), 'fac_annual_cost');
+    const fac = iv(optionOf(encodeOptionInterventionsForEdit(g, undefined, undefined, [{ optionId: 'opt_mix', factorId: 'fac_annual_cost' }]).graph as { nodes: Dict[] }, 'opt_mix'), 'fac_annual_cost');
     expect(fac.value).toBe(0.55);                 // data wins
     expect(fac.source).toBe('user_specified');    // override → user edit
     expect(fac.reasoning).toBeUndefined();        // stale value-descriptive metadata dropped
@@ -206,7 +206,7 @@ describe('encodeOptionInterventionsForEdit (add-option encoding)', () => {
       nodes: [goal(), cappedFactor(), { id: 'opt_clean', kind: 'option', label: 'Clean', interventions: { fac_annual_cost: { value: 0.5, source: 'brief_extraction', target_match: { node_id: 'fac_annual_cost', match_type: 'exact_id', confidence: 'high' } } } }],
       edges: [edge('opt_clean', 'fac_annual_cost')],
     };
-    const out = encodeOptionInterventionsForEdit(g);
+    const out = encodeOptionInterventionsForEdit(g, undefined, undefined, [], g, interventionPreimageScope(g, g, 'stored-read'));
     expect(out).toEqual({ graph: g, unresolvedOptionIds: [] });
     expect(out.graph).toBe(g);
   });

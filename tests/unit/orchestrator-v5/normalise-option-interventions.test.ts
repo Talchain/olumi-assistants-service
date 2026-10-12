@@ -79,7 +79,11 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
   it('promotes object-form data.interventions to the canonical top-level InterventionV3 contract', () => {
     const info = vi.spyOn(log, 'info').mockImplementation(() => log as never);
     const g: AnyGraph = { nodes: [editAddedOption()], edges: [] };
-    const out = normaliseOptionInterventionContract(g) as AnyGraph;
+    const out = normaliseOptionInterventionContract(g, { humanAuthority: [
+      { optionId: 'opt_hybrid', factorId: 'fac_annual_cost' },
+      { optionId: 'opt_hybrid', factorId: 'fac_bpo_engagement' },
+      { optionId: 'opt_hybrid', factorId: 'fac_inhouse_capacity' },
+    ] }) as AnyGraph;
 
     const opt = nodeById(out, 'opt_hybrid');
     expect(opt.interventions).toEqual({
@@ -129,7 +133,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
       nodes: [{ id: 'opt_x', kind: 'option', label: 'X', data: { interventions: { fac_a: 0.4, fac_b: 0 } } }],
       edges: [],
     };
-    const out = normaliseOptionInterventionContract(g) as AnyGraph;
+    const out = normaliseOptionInterventionContract(g, { humanAuthority: [{ optionId: 'opt_x', factorId: 'fac_a' }, { optionId: 'opt_x', factorId: 'fac_b' }] }) as AnyGraph;
     expect(nodeById(out, 'opt_x').interventions).toEqual({
       fac_a: { value: 0.4, source: 'user_specified', target_match: { node_id: 'fac_a', match_type: 'exact_id', confidence: 'high' } },
       fac_b: { value: 0, source: 'user_specified', target_match: { node_id: 'fac_b', match_type: 'exact_id', confidence: 'high' } },
@@ -181,7 +185,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
       }],
       edges: [],
     };
-    const opt = nodeById(normaliseOptionInterventionContract(g) as AnyGraph, 'opt_mix');
+    const opt = nodeById(normaliseOptionInterventionContract(g, { humanAuthority: [{ optionId: 'opt_mix', factorId: 'fac_b' }] }) as AnyGraph, 'opt_mix');
     // existing top-level entry preserved verbatim
     expect(ivOf(opt, 'fac_a')).toEqual({
       value: 0.9, unit: '£', source: 'brief_extraction', reasoning: 'orig',
@@ -211,7 +215,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
       }],
       edges: [],
     };
-    const fac_a = ivOf(nodeById(normaliseOptionInterventionContract(g) as AnyGraph, 'opt_o'), 'fac_a');
+    const fac_a = ivOf(nodeById(normaliseOptionInterventionContract(g, { humanAuthority: [{ optionId: 'opt_o', factorId: 'fac_a' }] }) as AnyGraph, 'opt_o'), 'fac_a');
     expect(fac_a.value).toBe(0.55);        // edited value WINS (not the stale 0.9)
     expect(fac_a.raw_value).toBe(110000);  // newer raw_value applied
     expect(fac_a.unit).toBe('£');          // unit from the edit
@@ -236,7 +240,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
       }],
       edges: [],
     };
-    const opt = nodeById(normaliseOptionInterventionContract(g) as AnyGraph, 'opt_sl');
+    const opt = nodeById(normaliseOptionInterventionContract(g, { humanAuthority: [{ optionId: 'opt_sl', factorId: 'fac_a' }] }) as AnyGraph, 'opt_sl');
     expect(ivOf(opt, 'fac_a').value).toBe(0.25);              // slash edit wins
     expect(ivOf(opt, 'fac_a').source).toBe('user_specified'); // user edit, not stale provenance
     expect(ivOf(opt, 'fac_a').reasoning).toBeUndefined();
@@ -414,7 +418,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
       nodes: [{ id: 'opt_nr', kind: 'option', label: 'NR', interventions: null, data: { interventions: { fac_a: 0.4 } } }],
       edges: [],
     };
-    const out = normaliseOptionInterventionContract(g) as AnyGraph;
+    const out = normaliseOptionInterventionContract(g, { humanAuthority: [{ optionId: 'opt_nr', factorId: 'fac_a' }] }) as AnyGraph;
     expect(nodeById(out, 'opt_nr').interventions).toEqual({
       fac_a: { value: 0.4, source: 'user_specified', target_match: { node_id: 'fac_a', match_type: 'exact_id', confidence: 'high' } },
     });

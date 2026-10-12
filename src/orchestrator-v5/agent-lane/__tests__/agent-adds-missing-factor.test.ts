@@ -522,7 +522,8 @@ describe('PJ-A1 £49 — propose_new_option carries a new graded factor\'s today
     const { caps, sent, carried } = setup();
     await caps.proposeNewOption({ ...ctx, user_text: `${SAID} The add-on would be £12 a month under this option.` }, withLevel({ value: 12, unit: 'GBP/month' }) as never);
     expect(carried).toEqual([[{ label: 'AI add-on price', observed_state: TODAY_5_ON_100 }]]);
-    expect(ivsOf(sent)).toEqual([{ factor_key: 'ai_add_on_price', value: 0.12, raw_value: 12, unit: 'GBP/month' }]);
+    // DL RUN39 / #94 6099157525: checked user figures carry user_specified; absence is unattributed.
+    expect(ivsOf(sent)).toEqual([{ factor_key: 'ai_add_on_price', value: 0.12, raw_value: 12, unit: 'GBP/month', source: 'user_specified' }]);
   });
 
   it('[A1-59] RED: Olumi\'s own figure (estimate, with a basis) → the same change and frame, stamped as Olumi\'s estimate', async () => {

@@ -23,7 +23,7 @@ export function beforeDoorTag<G>(graph: G): G {
 }
 
 /** Builder operations and committed graphs share the same edge value; subtract that exact tag at either carrier. */
-export function beforeDoorTagsDeep<T>(value: T, previous: unknown): T {
+export function beforeDoorTagsDeep<T>(value: T, previous: unknown, confirmedCell?: { optionId: string; factorId: string }): T {
   const out = structuredClone(value);
   const walk = (v: unknown, old: unknown): void => {
     if (v === null || typeof v !== 'object') return;
@@ -34,6 +34,18 @@ export function beforeDoorTagsDeep<T>(value: T, previous: unknown): T {
       && prior.provenance?.magnitude === undefined && e.defaulted === true
       && e.provenance?.magnitude === 'olumi_placeholder' && e.provenance.natural_effect === undefined
       && Math.abs(e.strength?.mean) === 0.5 && e.strength?.std === 0.125) delete e.provenance.magnitude;
+    // #94 6102610518(8): the two recorded confirmed cells differ ONLY in source key position.
+    // Preserve the human marker and every value/key; reconcile order only at the original fixed cell.
+    if (confirmedCell !== undefined && e.kind === 'option' && e.id === confirmedCell.optionId) {
+      const cell = e.interventions?.[confirmedCell.factorId];
+      const oldCell = prior.interventions?.[confirmedCell.factorId];
+      if (cell?.source === 'user_specified' && oldCell?.source === cell.source
+        && JSON.stringify(Object.keys(cell).filter(k => k !== 'source'))
+          === JSON.stringify(Object.keys(oldCell).filter(k => k !== 'source'))
+        && Object.keys(oldCell).every(k => JSON.stringify(cell[k]) === JSON.stringify(oldCell[k]))) {
+        e.interventions[confirmedCell.factorId] = Object.fromEntries(Object.keys(oldCell).map(k => [k, cell[k]]));
+      }
+    }
     for (const [key, child] of Object.entries(e)) walk(child, prior[key]);
   };
   walk(out, previous);

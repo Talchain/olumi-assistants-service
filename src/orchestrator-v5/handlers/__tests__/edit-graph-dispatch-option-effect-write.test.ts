@@ -479,7 +479,8 @@ describe('recorded missing-effect answer survives the dispatcher boundary by ide
     const operation = editOpts()?.preComposedOperations?.[0];
     expect(operation).toMatchObject({ op: 'update_node', path: OPTION_ID });
     expect(operation?.value).toEqual({
-      [`data/interventions/${FACTOR_ID}`]: { value: 0.9 },
+      // Checked human cell — #94 6101950357(a).
+      [`data/interventions/${FACTOR_ID}`]: { value: 0.9, source: 'user_specified' },
     });
     const commit = commitMock().mock.calls[0]![1];
     expect(commit.graph).toBeDefined();
@@ -512,7 +513,8 @@ describe('recorded missing-effect answer survives the dispatcher boundary by ide
     const operation = editOpts()?.preComposedOperations?.[0];
     expect(operation?.path).toBe(OPTION_ID);
     expect(operation?.value).toEqual({
-      [`data/interventions/${FACTOR_ID}`]: { value: 0.9 },
+      // Checked human cell — #94 6101950357(a).
+      [`data/interventions/${FACTOR_ID}`]: { value: 0.9, source: 'user_specified' },
     });
   });
 

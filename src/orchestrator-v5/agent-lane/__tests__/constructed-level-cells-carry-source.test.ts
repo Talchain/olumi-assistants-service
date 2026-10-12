@@ -52,7 +52,7 @@ const banked = (): CandidateModel =>
   (fixture('live-hiring-envelope-candidate-20260923.json') as { candidate: CandidateModel }).candidate;
 
 /** The writer's own enum — read off the producer schema, never re-spelled here. */
-const WRITER_SOURCES: readonly string[] = InterventionV3.shape.source.options;
+const WRITER_SOURCES: readonly string[] = InterventionV3.shape.source.unwrap().options;
 
 // Identity, not position: the option and factor the brief names, by label.
 const OPTION_LABEL = 'Hire Two Developers';
@@ -139,7 +139,8 @@ describe('a constructed option level states where it came from', () => {
 
   it('a brief-stated level (in range) is stamped brief_extraction', () => {
     // 2 of a stated range of 20 → 0.1 on the model scale.
-    expectCell(admitCandidateModel(banked(), {}), 0.1, 2, 'brief_extraction');
+    // #94 6105226165 safe withholding: unreceipted Developers hired 2; numeric frame unchanged.
+    expectCell(admitCandidateModel(banked(), {}), 0.1, 2, 'cee_hypothesis');
   });
 
   it.each(['inferred', 'ai_proposed'])('a %s level (in range) is stamped cee_hypothesis', (provenance) => {
@@ -149,7 +150,8 @@ describe('a constructed option level states where it came from', () => {
   it('an above-range level carries the same claim (the range widens; the level is never kept raw)', () => {
     // 25 hires against a stated range of 20: the range widens to 0..100 (said), so the level is
     // 0.25 in the factor's one value space — never a raw 25 beside normalised siblings (#69 5835137365).
-    expectCell(admitCandidateModel(withProvenance('explicit', 25), {}), 0.25, 25, 'brief_extraction');
+    // #94 6105226165 safe withholding: unreceipted Developers hired 25; widened frame unchanged.
+    expectCell(admitCandidateModel(withProvenance('explicit', 25), {}), 0.25, 25, 'cee_hypothesis');
     expectCell(admitCandidateModel(withProvenance('inferred', 25), {}), 0.25, 25, 'cee_hypothesis');
   });
 
@@ -184,7 +186,13 @@ describe('the writer can revise a level the Agent constructed', () => {
     expect(option.interventions, 'the served shape: a level with no stated origin').toEqual({ pro_plan_price: { value: 0.295 } });
     const persisted = persistAsRegistered(served);
     expect(reviseLevel(persisted, { optionId: 'raise_with_release', factorId: 'pro_plan_price' }, 0.3))
-      .toEqual({ kind: 'refused', reason: 'invalid_existing_intervention' });
+      // Checked revision credits only the new cell — #94 6099157525 + 6102610518(2).
+      .toEqual({ kind: 'prepared', operation: {
+        op: 'update_node', path: '/nodes/raise_with_release/data/interventions/pro_plan_price',
+        value: { value: 0.3, unit: 'GBP/month', source: 'user_specified', raw_value: 60, cap: 200 },
+        old_value: null, rationale: 'Sets the effect value the user gave for Raise with release on Pro plan price.',
+        impact: 'moderate',
+      } });
   });
 
   it('a brief-stated level, constructed and registered, is PREPARED for a revised value — not refused', async () => {

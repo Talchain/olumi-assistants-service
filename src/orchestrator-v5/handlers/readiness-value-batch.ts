@@ -129,6 +129,7 @@
  * membership IDENTICAL (the cell still blocks) while changing what the approved
  * `0.4` MEANS by 10×. Only the hash catches that.
  */
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
@@ -844,6 +845,9 @@ export type ValueBatchExecuteOutcome =
 export function executeValueBatch(input: {
   readonly proposal: ValueBatchProposal;
   readonly currentGraph: unknown;
+  /** Checked caller's store scope and proposal pin, absent means no continuity. */
+  readonly scenarioId?: string;
+  readonly expectedGraphHash?: string;
 }): ValueBatchExecuteOutcome {
   const before = assessCanonicalAnalysisReadiness(input.currentGraph);
   const membership = selectValueBatchMembership(before);
@@ -891,6 +895,11 @@ export function executeValueBatch(input: {
   const { graph: encoded, unresolvedOptionIds } = encodeOptionInterventionsForEdit(
     applied,
     touched,
+    undefined,
+    [],
+    preParsed.data,
+    input.scenarioId && input.expectedGraphHash ? { scenarioId: input.scenarioId, persistedScenarioId: input.scenarioId,
+      modelRevision: computeAnalysisAffectingGraphHash(preParsed.data), expectedModelRevision: input.expectedGraphHash } : null,
   );
   // The encoder's own contract: a non-empty list means the caller MUST defer
   // without committing. Deferring the WHOLE batch is what atomicity means here.

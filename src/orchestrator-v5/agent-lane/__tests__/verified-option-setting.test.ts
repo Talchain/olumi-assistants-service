@@ -2,9 +2,10 @@ import { describe, it, vi } from 'vitest';
 import { scalingRatio, timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 import { censusRows, probeRows, integrityRows, seamRows, rawRows, registrationRows, probes, level, assertCell, type Row } from './fixtures/r5-verified-cases.js';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
-import type { CandidateModel } from '../admit-model.js';
-import { verifiedOptionSetting } from '../verified-option-setting.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { prepareProvisionalCandidate } from '../runtime/build-model.js';
 import { log } from '../../../utils/telemetry.js';
 
@@ -212,5 +213,112 @@ describe('DL 7 Oct (v): a malformed draft refuses and logs; a well-formed refusa
   });
   it('X control: R5 (well-formed, refused by the neighbour rule) does not log', () => {
     assert.deepEqual(run(clinicCase('Olumi suggested these options in its last reply. ' + S)), { verified: false, logged: false });
+  });
+});
+
+
+// RUN52 / DL 6104308425: role and typed receipts, rather than proposal grammar, confer credit.
+describe('RUN52 typed receipt contract', () => {
+  const priceQuote = 'Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?';
+  const price = (quote = priceQuote) => setting(quote, 'Raise Pro price to £59', 'Pro plan price', 59, 'GBP/month');
+  const verdict = (input: ReturnType<typeof setting>) => {
+    const option = input.model.options.find(o => o.label === input.option)!;
+    return verifiedOptionSetting(input.model, option, level(input.model, input.option, input.factor), input.brief);
+  };
+  it('B1 original price-transition question receipt credits the option quantity', () => {
+    assert.equal(verdict(price()), true);
+  });
+  it('B2 original MRR compound receipt binds the current total, not its customer/price operands', () => {
+    const quote = 'We have £120,000 MRR from 400 customers paying £300 a month.';
+    const input = setting(quote, 'Continue unchanged', 'Paying customers', 400, 'customers');
+    Object.assign(input.model.goal, { metric: 'MRR', unit: 'GBP/month', value: 150000,
+      baseline_value: 120000, baseline_known: true, baseline_evidence: { quote } });
+    assert.equal(verifiedGoalLevel(input.model, quote), true);
+  });
+  it('compound original coordinated receipt binds each independently typed action head', () => {
+    const bank: { brief: string; output_text: string } = JSON.parse(readFileSync(
+      new URL('../../goal-target/__tests__/fixtures/event-b3-d2-20261008.json', import.meta.url), 'utf8'));
+    const model: CandidateModel = JSON.parse(bank.output_text);
+    for (const option of model.options) for (const iv of option.interventions ?? []) {
+      if (iv.provenance === 'explicit' && iv.stated_evidence != null)
+        assert.equal(verifiedOptionSetting(model, option, iv, bank.brief), true);
+    }
+  });
+  it('original cut/raise alternatives retain the signed native changes', () => {
+    const quote = 'Should we cut our list price 15% or raise it 10%?';
+    const input = setting(quote, 'Cut List Price 15%', 'List price change', -15, '%');
+    Object.assign(input.model, { options: [...input.model.options, { ...input.model.options[0]!, label: 'Raise List Price 10%', interventions: [{
+      ...input.model.options[0]!.interventions![0]!, value: 10,
+    }] }] });
+    for (const option of input.model.options.filter(o => o.interventions?.length)) {
+      assert.equal(verifiedOptionSetting(input.model, option, option.interventions![0]!, quote), true);
+    }
+  });
+  for (const quote of [
+    'Should we increase the Pro plan price to £59 or £69 per month?',
+    'Our competitor claims the Pro plan price is £59 per month.',
+    'Should we increase the Pro plan price to £59 per month if the release succeeds?',
+    'Our Pro plan price target is £59 per month.',
+  ]) it(`negative receipt stays refused: ${quote}`, () => { assert.equal(verdict(price(quote)), false); });
+  it('a compatible rival quantity leaves the receipt ambiguous', () => {
+    const input = price(); Object.assign(input.model, { factors: [...input.model.factors, { ...input.model.factors[0]!, label: 'Pro plan price', unit: 'GBP/month' }] });
+    assert.equal(verdict(input), false);
+  });
+  it('an option question cannot attest a current factor level', () => {
+    const input = price(); const factor = input.model.factors[0]!;
+    Object.assign(factor, { baseline_value: 59, baseline_known: true, baseline_evidence: { quote: priceQuote } });
+    assert.equal(verifiedFactorLevel(input.model, factor, priceQuote), false);
+  });
+});
+
+
+// AIE 6104423411: candidate slots select claims; the source must evidence their role and owner.
+describe('RUN53 evidenced role and entity', () => {
+  const current = (quote: string, factor: string, value: number, unit: string) => {
+    const input = setting(quote, factor, factor, value, unit);
+    Object.assign(input.model.factors[0]!, { baseline_known: true, baseline_value: value, baseline_evidence: { quote } });
+    return verifiedFactorLevel(input.model, input.model.factors[0]!, quote);
+  };
+  const intervention = (quote: string, option: string, factor: string, value: number, unit: string) => {
+    const input = setting(quote, option, factor, value, unit);
+    return verifiedOptionSetting(input.model, input.model.options[0]!, input.model.options[0]!.interventions![0]!, quote);
+  };
+  it('a target cannot become CURRENT because the candidate calls it a baseline', () => {
+    assert.equal(current('We want 1,900 riders.', 'Riders', 1900, 'riders'), false);
+    assert.equal(current('We have 1,900 registered riders today.', 'Riders', 1900, 'riders'), true);
+  });
+  it('a predicted effect cannot become a controlled input', () => {
+    assert.equal(intervention('This should cut churn to 3%.', 'Cut churn to 3%', 'Churn', 3, '%'), false);
+    assert.equal(intervention('Cut price 15%.', 'Cut price 15%', 'Price change', -15, '%'), true);
+  });
+  it('depot capacity cannot become an allocation', () => {
+    assert.equal(intervention('The depot holds 400 riders.', 'Depot riders 400', 'Riders', 400, 'riders'), false);
+    assert.equal(intervention('Put 400 riders on the second depot.', 'Depot riders 400', 'Riders', 400, 'riders'), true);
+  });
+  it('a third-party charge cannot become the user’s own charge', () => {
+    // Charge is the quantity named in both original clauses, not an inferred synonym for a different label.
+    assert.equal(current('Our competitor says they charge £59.', 'Charge', 59, 'GBP'), false);
+    assert.equal(current('We charge £59.', 'Charge', 59, 'GBP'), true);
+  });
+  it('an option question’s from figure and a conditional are not CURRENT observations', () => {
+    const quote = 'Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?';
+    assert.equal(intervention(quote, 'Raise Pro price to £59', 'Pro plan price', 59, 'GBP/month'), true);
+    assert.equal(current(quote, 'Pro plan price', 49, 'GBP/month'), false);
+    assert.equal(current('What if our price were £59?', 'Price', 59, 'GBP'), false);
+  });
+  it('admission cannot grant brief credit without the same receipt verdict', () => {
+    const quote = 'We could run 4 Saturday sessions each month.';
+    const input = setting(quote, 'Run Saturday sessions', 'Saturday sessions', 4, 'sessions/month');
+    Object.assign(input.model.factors[0]!, { baseline_known: true });
+    const source = (model: CandidateModel) => {
+      const graph = admitCandidateModel(model, {}, quote);
+      const option = graph.nodes.find(n => n.label === input.option && n.kind === 'option')!;
+      const factor = graph.nodes.find(n => n.label === input.factor && n.kind === 'factor')!;
+      return option.interventions![factor.id]!.source;
+    };
+    assert.equal(source(input.model), 'brief_extraction');
+    const absent = structuredClone(input.model);
+    absent.options[0]!.interventions![0]!.stated_evidence = null;
+    assert.equal(source(absent), 'cee_hypothesis');
   });
 });

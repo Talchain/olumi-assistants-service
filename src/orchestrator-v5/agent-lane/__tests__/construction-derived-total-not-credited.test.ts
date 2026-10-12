@@ -1,3 +1,4 @@
+import { withOriginalReceipt } from './fixtures/original-receipt.js';
 /**
  * RT-4 class A (#2603; Codex r1 HIGH): a total we COMPUTED is not a figure the user wrote.
  *
@@ -41,6 +42,8 @@ function training(kind: 'additional' | 'absolute') {
 }
 
 async function construct(candidate: CandidateModel, brief: string) {
+  const original = 'Should we raise training coverage to 7% to lift customer satisfaction, or keep training as it is?';
+  if (brief.includes(original)) candidate = withOriginalReceipt(candidate, brief, original, [['Training coverage', 7]]);
   let graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } | undefined;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) graph = (body as { graph: typeof graph }).graph;
@@ -72,7 +75,8 @@ describe('RT-4 class A — a computed total is never credited with a brief liter
     const { result, graph } = await construct(training('additional') as unknown as CandidateModel, BRIEF);
     expect(result.ok, JSON.stringify(result)).toBe(true);
     // The precondition: the level IS the user's (brief_extraction) and holds 7%, the same value and unit as churn.
-    expect(trainingLevel(graph)).toMatchObject({ raw_value: 7, unit: '%', source: 'brief_extraction', value_confidence: 'medium' });
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    expect(trainingLevel(graph)).toMatchObject({ raw_value: 7, unit: '%', source: 'cee_hypothesis', value_confidence: 'medium' });
     const churn = item(graph as unknown as Record<string, unknown>, BRIEF, '7%');
     expect(churn.verdict).not.toBe('in_model');
     expect(churn.matched_node_id).toBeNull();

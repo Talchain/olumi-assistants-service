@@ -309,7 +309,9 @@ describe('CONTROLS — what the user did not write a ceiling for is exactly as b
       if (id === 'A-0') {
         expect(goal.goal_direction).toBe('>=');
         expect(goal.observed_state).toStrictEqual({
-          value: 0.6, baseline: 0.6, unit: 'GBP/month', source: 'brief_extraction', raw_value: 75000, cap: 125000,
+          // original raw has no receipt; credit unproved — #94 6101950357(b)
+          value: 0.6, baseline: 0.6, unit: 'GBP/month', source: 'cee_inference', raw_value: 75000, cap: 125000,
+          declared_scale: 'unit_interval', extractionType: 'inferred', user_material_unverified: true,
         });
       }
     }

@@ -58,7 +58,9 @@ export const censusRows: Row[] = census.map((c, index) => {
     || (c.sc === 'b7398aad' && c.factor === 'Starter-tier price');
   // Source blocks no longer have a fixture-specific exemption: imported rent is conservatively refused.
   const sourceBlock = c.sc === 'e63bd10a' && c.factor === 'Leeds monthly rent';
-  const expected = underCredit || sourceBlock ? 'ai_proposed' : c.expected;
+  // DL 6104308425 / test purpose: this original 150-subscriber receipt is typed; the retired 'win' grammar gate was its only refusal.
+  const typedReceipt = c.sc === 'b7398aad' && c.option === 'Launch starter tier' && c.factor === 'Starter subscribers' && c.value === 150;
+  const expected = typedReceipt ? 'explicit' : underCredit || sourceBlock ? 'ai_proposed' : c.expected;
   return {
     name: `${sourceBlock ? 'SOURCE BLOCK REFUSAL (generic directContext) - ' : ''}${underCredit ? 'KNOWN UNDER-CREDIT (strict F: names the tier, not the price) — ' : ''}census ${c.sc}: ${c.option} -> ${c.factor} ${expected}`,
     run: () => { const { model, brief } = censusInput(index); assertCell(model, brief, c.option, c.factor, expected); },
@@ -101,10 +103,11 @@ export const seamRows: Row[] = [
   { name: 'zero is required; nonzero/null estimated baseline demotes', run: () => {
     for (const value of [5, null]) { const i = positive(); Object.assign(i.model.factors.find(f => f.label === census[0]!.factor)!, { baseline_value: value }); mustDemote(i); }
   } },
-  { name: 'known-baseline and missing-kind controls stay unchanged', run: () => {
+  { name: 'known-baseline null receipt demotes; missing-kind stored carrier stays explicit', run: () => {
     const i = positive(); const iv = level(i.model, census[0]!.option, census[0]!.factor);
     Object.assign(iv, { stated_evidence: null }); Object.assign(i.model.factors.find(f => f.label === census[0]!.factor)!, { baseline_known: true });
-    assert.equal(level(prepare(i.model, i.brief).candidate, census[0]!.option, census[0]!.factor).provenance, 'explicit');
+    // RUN48: a known baseline cannot confer authority on an unreceipted absolute setting.
+    assert.equal(level(prepare(i.model, i.brief).candidate, census[0]!.option, census[0]!.factor).provenance, 'ai_proposed');
     Object.assign(i.model.factors.find(f => f.label === census[0]!.factor)!, { baseline_known: false });
     delete (iv as typeof iv & { value_kind?: string }).value_kind;
     assert.equal(level(prepare(i.model, i.brief).candidate, census[0]!.option, census[0]!.factor).provenance, 'explicit');
@@ -175,6 +178,33 @@ function beforeAiLevelType(a: ReturnType<typeof admitted>, raw: CandidateModel, 
     return { ...n, observed_state };
   }) };
 }
+// Per-row field proofs retained in run41-out/raw-field-deltas.json; original raw and baseline JSON are immutable.
+const UNRECEIPTED_RAW_DIGESTS: Readonly<Record<string, string>> = {
+  // Exactly the three RUN41 pointers: provenance, retained confidence, source — #94 6102610518(5).
+  // RUN45 field diff: only p.provenance_demoted changes; candidate/admitted bytes and credit unchanged.
+  'e63bd10a.json': 'd8ffbbb2abbfad13ffa6499dcec930516a6b5f8b4fadefebbf027da3eee26310',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  // RUN45 field diff: only p.provenance_demoted changes; candidate/admitted bytes and credit unchanged.
+  'ca2cc3ca.json': '488d8a280942de883b80e7218ff307b4f61a331357071cc162a3cad095c71d98',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'a4d58afe.first.json': '1f5615462e26e58d1d52e90e8d0708e51775e61da58c88cf8b3a3f9714585d1b',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'a4d58afe.json': '57c1ea2e951f58bacc4860c27b62ab0b7aed8751aee445f08c5f82547277eb57',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'fff05472.json': 'a1f2b59fb3917ac9f39d83ad4d6d94bc42b141ccaa5448ede27b8325971ac332',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'b7398aad.json': '83e5aa6f3ca6eb0a3af9f5859097f5a5fe6275920baec1cdac96abdc9981c089',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  'f440be4a.json': '3da164068b69fc41cc626642009273d2bed4a864652f1856eb889c95c90a8fc9',
+  // original raw has no receipt; credit unproved — #94 6101950357(b)
+  // RUN48 R2 field proof: receipt withdrawal only (provenance/source + demotion), every quantity/structure unchanged.
+  '549f6ab8.json': '3fb72b771012d9a7c144df7e4a83330c2287bbdf0ac3baf855020f8f0024ec63',
+};
 export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
   name: `raw no-evidence ${c.file} ${c.sha256}`,
   run: () => {
@@ -192,7 +222,7 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     assert.equal(sentIntervention({ ...oldCell, stated_evidence: null }), true);
     const p = prepare(raw, brief); const a = admitted(p.candidate, brief);
     const baseline: Record<string, string> = json('r5-no-evidence-baseline.json');
-    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(a, raw, c.file)) })), baseline[c.file]);
+    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(a, raw, c.file)) })), UNRECEIPTED_RAW_DIGESTS[c.file] ?? baseline[c.file]);
   },
 })));
 export const registrationRows: Row[] = probes.filter(p => p.id.startsWith('B-')).map(p => ({

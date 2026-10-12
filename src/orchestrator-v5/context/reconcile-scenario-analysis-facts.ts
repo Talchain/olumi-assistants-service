@@ -1,3 +1,4 @@
+import { DurableHandlerFactSchema } from './durable-human-authority.js';
 import { bindRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 /**
  * Reconcile the ordinary bounded turn-window facts with one uncached,
@@ -28,7 +29,6 @@ import { bindRunAnalysisOccurrence, validatedScenarioRevision } from '../types/h
  */
 
 import {
-  HandlerFactSchema,
   type HandlerFact,
 } from '@talchain/schemas/orchestrator';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
@@ -387,7 +387,7 @@ function classifyHotFacts(
     ) {
       continue;
     }
-    const parsed = HandlerFactSchema.safeParse(candidate);
+    const parsed = DurableHandlerFactSchema.safeParse(candidate);
     if (!parsed.success) {
       invalid = true;
       continue;
@@ -570,7 +570,7 @@ function parseEligibleRunAnalysisFact(
   candidate: unknown,
   expectedScenarioId: string,
 ): HandlerFact | null {
-  const parsed = HandlerFactSchema.safeParse(candidate);
+  const parsed = DurableHandlerFactSchema.safeParse(candidate);
   if (!parsed.success) return null;
   const fact = parsed.data;
   if (fact.fact_type !== 'run_analysis' || fact.noop) return null;
@@ -711,7 +711,7 @@ function validateLegacyEditFacts(read: LegacyAnalysisEditFacts | undefined): Leg
     || read.facts.length > SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT) return failed;
   const ids = new Set<string>();
   for (const entry of read.facts) {
-    const parsed = HandlerFactSchema.safeParse(entry?.fact);
+    const parsed = DurableHandlerFactSchema.safeParse(entry?.fact);
     if (!parsed.success || parsed.data.fact_type !== 'edit_graph' || parsed.data.noop !== false
       || parsed.data.result.status !== 'applied' || parsed.data.result.rerun_recommended !== true
       || typeof entry.fact_row_id !== 'string' || entry.fact_row_id === '' || ids.has(entry.fact_row_id)

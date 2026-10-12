@@ -101,7 +101,8 @@ describe('a figure the user wrote only as the TARGET never becomes the goal\'s c
       pricing({ baseline_known: true, baseline_value: 16000 }),
       'Should we raise the Pro plan price? MRR is about £16,000 today and we are aiming for £20,000.',
     );
-    expect(goal.observed_state).toMatchObject({ raw_value: 16000, source: 'brief_extraction' });
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    expect(goal.observed_state).toMatchObject({ raw_value: 16000, source: 'cee_inference', user_material_unverified: true });
   });
 
   // AIQ 5885651301: Paul's own briefs are the controls (the strict chain's served witness, #72 5882267370).
@@ -124,6 +125,7 @@ describe('a figure the user wrote only as the TARGET never becomes the goal\'s c
       TARGET_ONLY,
       'Should we raise the Pro plan price? MRR is £20,000 today and we want it to stay at least £20,000.',
     );
-    expect(goal.observed_state).toMatchObject({ raw_value: 20000, source: 'brief_extraction' });
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    expect(goal.observed_state).toMatchObject({ raw_value: 20000, source: 'cee_inference', user_material_unverified: true });
   });
 });

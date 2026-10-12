@@ -39,7 +39,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { claimScopeNegative, verifiedFactorLevel, verifiedOptionSetting, verifiedOptionTotal } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -97,8 +97,8 @@ export function withCountInterventionRanges(model: CandidateModel, brief: string
       const unit = factor?.unit;
       if (typeof unit !== 'string'
         || (point.unit !== undefined && !sameUnit(point.unit, unit))
-        || (point as typeof point & { value_kind?: string }).value_kind === 'additional'
-        || (point as typeof point & { derived_total?: boolean }).derived_total === true) return point;
+        || point.value_kind === 'additional') return point;
+      // A withheld/computed point does not withdraw a separately verified written range around that same value.
       const range = statedCountInterventionRange(point.value, unit, point.factor_label, option.label, brief, quantities);
       if (range === undefined) return point;
       const verdict = admitInterventionRange({ ...point, range: {
@@ -195,6 +195,8 @@ export function buildCandidateSchema(): Record<string, unknown> {
       baseline_known: { type: 'boolean', description: 'True only when the brief states the goal metric\u2019s CURRENT level.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'The goal metric\u2019s current level in the goal unit, exactly as the brief states it; null when the brief does not. Never an estimate, never the target.' },
       baseline_provenance: provenance,
+      baseline_evidence: { anyOf: [{ type: 'null' }, obj({ quote: { type: 'string' } }, ['quote'])],
+        description: 'Complete verbatim brief sentence stating the goal’s current level; null otherwise.' },
       // ⛔ C46: "£20k MRR" — the Pro plan's or all plans'? REQUIRED so strict output must say
       // "no such question" (null) rather than omit it. `admit-model.ts` records an unstated scope on
       // the goal as Olumi's assumption and the build asks which was meant (#70 5841314428: never
@@ -335,6 +337,7 @@ export const BUILD_INSTRUCTIONS = [
   'For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. Ask for the date first, then how long today’s team takes, then when new people start. Never ask today’s level of the event goal.',
   'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
   'For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership.',
+  'For the goal whose CURRENT level the brief states, give goal.baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership.',
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
   'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',
@@ -598,6 +601,8 @@ export function retrySchemaPinningGoal(
     : { type: 'null' };
   const goalSchema = properties['goal'];
   if (goalSchema === undefined) return schema;
+  const currentGoalProperties = goalSchema['properties'];
+  if (!currentGoalProperties || typeof currentGoalProperties !== 'object' || !('baseline_evidence' in currentGoalProperties)) return schema;
   goalSchema['properties'] = {
     metric: { type: 'string', enum: [goal.metric] },
     operator: { type: 'string', enum: [goal.operator] },
@@ -621,6 +626,7 @@ export function retrySchemaPinningGoal(
       ? { type: 'number', enum: [goal.baseline_value] }
       : { type: 'null' },
     baseline_provenance: { type: 'string', enum: [goal.baseline_provenance ?? goal.provenance] },
+    baseline_evidence: currentGoalProperties.baseline_evidence,
     // C46: the scope is part of the goal, so a compaction cannot switch readings or drop the
     // question. An absent scope (a candidate from before the field) pins to "none" (null).
     scope: goal.scope === null || goal.scope === undefined || typeof goal.scope !== 'object'
@@ -664,15 +670,19 @@ export function retrySchemaPinningGoal(
  *   directed link, and no machine shortcut.
  *   A LOOP is not found here: it is admission's verdict (`loopIssues`, below).
  *
- * ⛔ An EXPLICIT `value_kind:"absolute"` level on a factor whose baseline is NOT
- * known is demoted to `ai_proposed`: with no known starting point it may be an
- * addition mislabelled as a total, derived from Olumi's estimate, and stamping it
- * as the user's would exempt a modelling guess from the money invariant's audit.
+ * ⛔ An EXPLICIT `value_kind:"absolute"` level is demoted to `ai_proposed` unless
+ * the shared option receipt authority verifies it, regardless of baseline knowledge.
+ * A known starting point alone cannot make an option's new level the user's;
+ * verified settings (including the known-zero stock case) retain their credit.
  * ⚠ BUT A USER'S OWN NUMBER MUST NEVER SILENTLY READ AS OLUMI'S (review 5822711266,
  * B2): every demotion is returned in `provenance_demoted` and said to the user, who
  * can confirm it. A candidate with no `value_kind` (stored before the field) is left
  * exactly as it was on staging.
  */
+interface VerifiedNativeAddition {
+  readonly claim: NonNullable<CandidateModel['options'][number]['interventions']>[number];
+  readonly verified: true;
+}
 export interface AdditionWithoutTotal {
   readonly option: string;
   readonly factor: string;
@@ -680,8 +690,9 @@ export interface AdditionWithoutTotal {
   readonly unit?: string;
   readonly reason: 'baseline_unknown' | 'unit_mismatch' | 'factor_unknown' | 'factor_ambiguous' | 'value_kind_unknown';
   readonly factor_unit?: string;
+  readonly native_addition?: VerifiedNativeAddition;
 }
-export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number }
+export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number; readonly unit?: string; readonly native_addition?: VerifiedNativeAddition }
 /**
  * ⛔ A LIMIT THE USER STATED IS NEVER DROPPED UNSEEN.
  *
@@ -797,22 +808,41 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       const factors = factorsByLabel(intervention.factor_label);
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
-        const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
-        if (intervention.provenance === 'explicit' && unknownBaseline
-          && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
+        // ONE authority, scoped to the defect: a drafter-`explicit` absolute level on a factor whose baseline is KNOWN keeps
+        // its credit only if the shared option receipt verifies it (the known-baseline path used to skip the receipt, so
+        // admission stamped brief_extraction on figures the public verifier refuses). The UNKNOWN-baseline rule is exactly
+        // as before (credit only for a verified zero-stock setting), and an ambiguous/absent factor is untouched.
+        // The receipt is consulted only when the brief it verifies AGAINST was supplied (production always supplies it,
+        // build-model :1696/:1711/:1854); with no brief there is no authority to consult and the stored level is untouched.
+        const solo = factors.length === 1 ? factors[0]! : undefined;
+        const refused = solo === undefined ? false
+          : solo.baseline_known === true ? brief !== undefined && !verifiedOptionSetting(model, option, intervention, brief)
+            : !(solo.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief));
+        if (intervention.provenance === 'explicit' && refused) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
-          interventions.push({ ...intervention, provenance: 'ai_proposed' });
+          // Retain governing scope as reasoning; an ordinary no-receipt demotion does not invent a basis.
+          const scope = intervention.stated_evidence == null ? 'none' : claimScopeNegative(intervention.stated_evidence.quote);
+          const retainScope = scope === 'history' || scope === 'desire' || scope === 'condition'
+            || scope === 'attribution' || scope === 'denial';
+          interventions.push({ ...intervention, provenance: 'ai_proposed',
+            ...(intervention.basis === undefined && intervention.stated_evidence != null && retainScope
+              ? { basis: intervention.stated_evidence.quote } : {}) });
         } else {
           interventions.push(intervention);
         }
         continue;
       }
       const factor = factors.length === 1 ? factors[0] : undefined;
+      // Retain a verified native operand separately from any unsupported computed total.
+      const nativeAddition: VerifiedNativeAddition | undefined = kind === 'additional'
+        && verifiedOptionSetting(model, option, intervention, brief)
+        ? { claim: structuredClone(intervention), verified: true } : undefined;
       const unresolved = (reason: AdditionWithoutTotal['reason']): void => {
         additions_without_total.push({
           option: option.label, factor: intervention.factor_label, value: intervention.value, reason,
           ...(intervention.unit ? { unit: intervention.unit } : {}),
           ...(factor?.unit ? { factor_unit: factor.unit } : {}),
+          ...(nativeAddition === undefined ? {} : { native_addition: nativeAddition }),
         });
         // Kept as what the option ACTS ON, with no level — never a guessed total.
         if (factors.length > 0) becameChanges.push(intervention.factor_label);
@@ -827,16 +857,34 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (!factor.unit || !intervention.unit || factor.unit.trim().toLowerCase() !== intervention.unit.trim().toLowerCase()) {
         unresolved('unit_mismatch'); continue;
       }
-      // A stated addition to known zero IS the stated figure, regardless of who named the factor.
-      const statedFigure = intervention.provenance === 'explicit' && factor.baseline_known === true && factor.baseline_value === 0;
+      const total: Iv = { ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value };
+      const receipt = verifiedOptionTotal(model, option, intervention, brief);
+      const verifiedTotal = receipt.verified;
+      const statedFigure = verifiedTotal && !receipt.derived;
+      // An inferred zero cannot turn a verified addition into a literal/current total.
+      if (!verifiedTotal && nativeAddition !== undefined
+        && factor.baseline_value === 0 && !verifiedFactorLevel(model, factor, brief)) {
+        unresolved('baseline_unknown'); continue;
+      }
+      if (brief !== undefined && !verifiedTotal && intervention.provenance === 'explicit' && factor.baseline_known === true) {
+        provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value,
+          ...(nativeAddition === undefined ? {} : { native_addition: nativeAddition }) });
+      }
+      // Withholding credit does not remove the existing uncertainty of a claimed-user operand computation.
+      const uncertainty: Pick<Iv, 'value_confidence'> = !statedFigure && factor.baseline_known && factor.baseline_value !== 0
+        && factor.provenance === 'explicit' && intervention.provenance === 'explicit'
+        ? { value_confidence: 'medium' } : {};
       interventions.push({
-        ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value,
-        provenance: statedFigure || (factor.baseline_known && factor.provenance === 'explicit' && intervention.provenance === 'explicit')
-          ? 'explicit' : 'ai_proposed',
+        ...total,
+        provenance: verifiedTotal ? 'explicit' : 'ai_proposed',
         // ⛔ A TOTAL WE COMPUTED IS NOT A FIGURE THE USER WROTE (RT-4 class A, #2603; Codex r1): a stated 5% today plus a
         // stated 2% is the user's 7%, but "7%" appears nowhere as theirs, and an unrelated "Churn is 7%" was credited to it.
         // Admission marks the level (`constructedLevel`) so the not-modelled manifest never credits a brief literal to it.
         ...(statedFigure ? {} : { derived_total: true }),
+        ...uncertainty,
+        ...(receipt.basis === undefined
+          ? verifiedTotal || intervention.basis !== undefined || nativeAddition?.claim.stated_evidence == null ? {} : { basis: nativeAddition.claim.stated_evidence.quote }
+          : { basis: receipt.basis }),
       } as Iv);
     }
     const changes = [...(option.changes ?? [])];
@@ -2429,6 +2477,30 @@ export async function buildModelFromBrief(
   const replayed = (reg.json as { replayed?: unknown }).replayed === true;
   // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated.
   const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link');
+  // RUN58: a refused claimed-user self-setting is not an AI figure. The invalid self-target cannot
+  // reach analysis, but its original amount/unit remain in the existing demotion/disclosure carrier.
+  for (const withheld of admitted.withheld) {
+    if (withheld.reason !== 'loop_closing_link' || withheld.from !== withheld.to) continue;
+    const node = admitted.nodes.find(n => n.id === withheld.from);
+    if (node === undefined || node.interventions?.[withheld.to] !== undefined) continue;
+    const originals = candidate.options.filter(o => canonicalLabel(o.label) === canonicalLabel(node.description ?? node.label));
+    if (originals.length !== 1) continue;
+    const option = originals[0]!;
+    for (const iv of option.interventions ?? []) {
+      if (canonicalLabel(iv.factor_label) !== canonicalLabel(option.label)
+        || verifiedOptionSetting(candidate, option, iv, brief)) continue;
+      const retained = preparation.provenance_demoted.find(d => d.option === option.label && d.factor === iv.factor_label && d.value === iv.value);
+      // Preparation already demoted a modern claimed-user level; enrich that exact retained claim, never an AI guess.
+      if (retained === undefined && iv.provenance !== 'explicit') continue;
+      if (retained === undefined) {
+        preparation.provenance_demoted.push({ option: option.label, factor: iv.factor_label, value: iv.value,
+          ...(iv.unit === undefined ? {} : { unit: iv.unit }) });
+      } else if (retained.unit === undefined && iv.unit !== undefined) {
+        preparation.provenance_demoted[preparation.provenance_demoted.indexOf(retained)] = { ...retained, unit: iv.unit };
+      }
+    }
+  }
+
 
   return {
     ok: true,
@@ -2514,9 +2586,16 @@ export async function buildModelFromBrief(
       ...admitted.loss.filter((l) => /\.extra_parent\./.test(l.field_path)).map((l) => l.reason),
       ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
-      ...preparation.provenance_demoted.map((d) =>
-        `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
-        `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`),
+      ...new Set(preparation.provenance_demoted.map((d) => {
+        const factors = preparation.candidate.factors.filter((f) => f.label === d.factor);
+        if (factors.length === 1 && factors[0]!.baseline_known === true) {
+          // Existing conditional-input-basis level label; no claim that a known baseline is unknown.
+          const name = `"${d.factor}"`;
+          return `${name}: Not confirmed from your brief`;
+        }
+        return `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
+          `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`;
+      })),
       ...preparation.levels_over_own_levers.map(sayOptionLevelOverOwnLevers),
       directionless.length > 0
         ? `${directionless.length} relationship(s) were left out because nobody has stated which way they run.`

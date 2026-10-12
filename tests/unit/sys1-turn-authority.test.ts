@@ -394,6 +394,7 @@ describe('S1T2 residual Responses sites', () => {
       return { response, sid, rows: (response.json()._provider_calls ?? []) as policyModule.GenerativeCall[] };
     } finally { policySpy?.mockRestore(); }
   };
+  // RUN61: callStructured alone adds the AIE-approved goal receipt (4b22d293) and instruction (d85fecb7); run61-out/golden-proof.json.
   it.each(residualSites)('%s happy-path bytes equal the BEFORE golden', async site => {
     const { response } = await drive(site);
     // ONE structured call per build: E6 (Batch R; also in the B combine) parks the draft-time widening call, so only the drafter's is sent.

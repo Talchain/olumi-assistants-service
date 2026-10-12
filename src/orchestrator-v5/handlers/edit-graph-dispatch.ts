@@ -1,3 +1,6 @@
+import { attachCheckedCellApproval } from '../context/durable-human-authority.js';
+import { readCheckedWriteUser } from '../ownership/door-ownership.js';
+import { interventionPreimageScope, type InterventionHumanAuthority } from '../../orchestrator/tools/encode-option-interventions.js';
 import { prepareHorizonBasisForWrite } from '../goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { hasReliesOnRiskWrite } from '../graph-management/field-safety.js';
@@ -1341,13 +1344,16 @@ async function runStructuralEditTool(input: {
   // receipts); the referee gate below in this dispatch then returns its ONE
   // governing verdict over the whole batch, exactly as it does for the
   // deterministic path. No second applier exists.
+  const encoderPreimage = GraphV3.safeParse(persisted);
   const editResultForPart = await handleEditGraph(
     context,
     payload.message,
     adapter,
     requestId,
     payload.turn_id,
-    { preComposedOperations: firstPart.operations as readonly PatchOperation[] },
+    { preComposedOperations: firstPart.operations as readonly PatchOperation[],
+      persistedGraph: encoderPreimage.success ? encoderPreimage.data : null,
+      preimageScope: interventionPreimageScope(encoderPreimage.success ? encoderPreimage.data : null, context.graph, payload.scenario_id) },
   );
 
   return {
@@ -1824,7 +1830,7 @@ function canonicaliseOptionEffectOperation(
   },
   requestId: string,
 ): readonly PatchOperation[] | null {
-  const raw = buildOptionEffectRawOperation(resolved);
+  const raw = buildOptionEffectRawOperation({ ...resolved, source: 'user_specified' });
   let parsedOperations: unknown[];
   try {
     parsedOperations = parseEditGraphResponse(
@@ -2327,6 +2333,26 @@ export async function dispatchEditGraph(
 
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
     graphStateToGraphV3WithParseResult(graphState, requestId, editBase?.graph != null);
+  let encoderBaseRead: Promise<unknown> | undefined;
+  const readEncoderBase = (): Promise<unknown> => encoderBaseRead ??= useAppendV6()
+    ? Promise.resolve(editBase?.graph)
+    : loadPersistedGraphStrict(payload.scenario_id);
+  const encoderContinuity = {
+    loadInterventionPreimage: async () => {
+      try {
+        const base = await readEncoderBase();
+        const parsed = GraphV3.safeParse(base);
+        const current = structuredClone(parsedGraph);
+        prepareHorizonBasisForWrite(current, parsed.success ? parsed.data : undefined, payload.scenario_id);
+        return { persistedGraph: parsed.success ? parsed.data : null,
+          preimageScope: parsed.success ? interventionPreimageScope(parsed.data, current, payload.scenario_id) : null };
+      } catch {
+        // The existing post-provider merge/read path owns the failure class and copy.
+        return { persistedGraph: null, preimageScope: null };
+      }
+    },
+  };
+  let operationHumanAuthority: InterventionHumanAuthority = [];
   let recordedAnswer: RecordedEffectAnswer | null = null;
   if (params.recordedEffectAnswer !== undefined) {
     const resolved = resolveRecordedOptionEffectAnswer({
@@ -2904,6 +2930,7 @@ export async function dispatchEditGraph(
         const nativeWrite = nativeQuantityOperation === null || nativeAnswer.kind !== 'bind'
           ? null
           : nativeAnswer;
+        if (nativeWrite !== null) operationHumanAuthority = [{ optionId: nativeWrite.optionId, factorId: nativeWrite.factorId }];
 
         const optionEffect = recordedAnswer !== null
           ? { matched: true as const, kind: 'write' as const,
@@ -2930,6 +2957,7 @@ export async function dispatchEditGraph(
         const optionEffectWrite =
           optionEffectOperations === null ? null : optionEffectResolved;
         if (optionEffectWrite !== null) {
+          if (nativeWrite === null) operationHumanAuthority = [{ optionId: optionEffectWrite.optionId, factorId: optionEffectWrite.factorId }];
           emit(TelemetryEvents.V5OptionEffectWriteResolved, {
             request_id: requestId,
             scenario_id: payload.scenario_id,
@@ -2965,11 +2993,15 @@ export async function dispatchEditGraph(
           // The native restatement wins when both resolve: it is an answer to a
           // question the product ASKED, and the option-effect resolution is a
           // read of the sentence. A recorded answer outranks a fresh guess.
-          nativeQuantityOperation !== null
-            ? { preComposedOperations: nativeQuantityOperation }
-            : optionEffectOperations === null
-            ? undefined
-            : { preComposedOperations: optionEffectOperations },
+          { ...encoderContinuity,
+            ...(nativeQuantityOperation !== null
+              ? { preComposedOperations: nativeQuantityOperation,
+                  humanAuthority: nativeWrite === null ? []
+                    : [{ optionId: nativeWrite.optionId, factorId: nativeWrite.factorId }] }
+              : optionEffectOperations === null ? {}
+              : { preComposedOperations: optionEffectOperations,
+                  humanAuthority: optionEffectWrite === null ? []
+                    : [{ optionId: optionEffectWrite.optionId, factorId: optionEffectWrite.factorId }] }) },
         );
         // ⭐ THE NATIVE PATH'S OWN LANDING CHECK AND ACK.
         //
@@ -3291,7 +3323,7 @@ export async function dispatchEditGraph(
       if (useAppendV6()) {
         strictBase = editBase!.graph;
       } else {
-        strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+        strictBase = await readEncoderBase();
       }
     } catch (err) {
       log.warn(
@@ -5268,7 +5300,7 @@ export async function dispatchEditGraph(
   // construction — the graph this reads is the one that stays in
   // `scenarios.graph`.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
-    ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!)
+    ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!, operationHumanAuthority)
     : (!successfulAppliedMutation ||
         optionInterventionWriteWithheld ||
         // Same reviewer finding: a turn that refused the write must still hand
@@ -5785,6 +5817,12 @@ export async function dispatchEditGraph(
       site: 'edit_graph_dispatch',
     });
     const expectedRevision = useAppendV6() ? editBase?.revision : undefined;
+    const approvingUser = readCheckedWriteUser();
+    if (editGraphFact && approvingUser && expectedRevision !== undefined) {
+      const approvedFact = attachCheckedCellApproval(editGraphFact, graphForCommit, operationHumanAuthority,
+        { scenarioId: payload.scenario_id, turnId: payload.turn_id, userId: approvingUser, revision: expectedRevision });
+      if (approvedFact.fact_type === 'edit_graph') editGraphFact = approvedFact;
+    }
     const commitResult = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,

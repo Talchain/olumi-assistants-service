@@ -154,7 +154,8 @@ describe('(a) the build persists an option level in the one form, from the facto
       value: 59 / os.cap!,
       raw_value: 59,
       unit: os.unit,
-      source: 'brief_extraction',
+      // #94 6105226165 safe withholding: unreceipted Raise Pro to £59 / Pro plan price; all numeric fields exact.
+      source: 'cee_hypothesis',
       target_match: exactMatch(factor.id),
     });
     // The encoded value is unchanged from the one served at A01: only what was dropped is now kept.
@@ -200,8 +201,10 @@ describe('(b) each writer of a framed level writes the same key-set', () => {
     if (!built.matched) return;
     const addNode = built.operations[0]!.value as { interventions: Record<string, Record<string, unknown>> };
     const addKeys = Object.keys(addNode.interventions[factor.id]!).sort();
-    expect(addKeys).toEqual(['raw_value', 'source', 'target_match', 'unit', 'value']);
-    expect(buildKeys).toEqual(addKeys);
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    // The builder input supplies no human authority; the receipted build alone carries a source.
+    expect(addKeys).toEqual(['raw_value', 'target_match', 'unit', 'value']);
+    expect(buildKeys).toEqual([...addKeys, 'source'].sort());
   });
 
   it('every framed level the build writes carries all five members (magnitude-checked)', () => {
@@ -251,7 +254,8 @@ describe('(c) CONTRAST — a level the contract makes different keeps its own sh
     const { nodes } = buildAndPersist(withToggle);
     const f = byLabel(nodes, 'factor', 'AI features in release');
     expect(f.observed_state, 'control: the factor has no frame at all').toBeUndefined();
-    expect(levelOf(nodes, RAISE_59, 'AI features in release')).toEqual({ value: 1, source: 'brief_extraction', target_match: exactMatch(f.id) });
+    // #94 6105226165 safe withholding: missing receipt changes only this cell's source.
+    expect(levelOf(nodes, RAISE_59, 'AI features in release')).toEqual({ value: 1, source: 'cee_hypothesis', target_match: exactMatch(f.id) });
   });
 });
 
@@ -345,8 +349,9 @@ describe('(g) AIQ Q1 — Olumi’s estimate in the limit’s unit does not answe
     // Precondition: the estimate carries a native figure in the limit's own unit, so only its author can tell it apart.
     expect(olumi.interventions?.[factor.id]).toMatchObject({ raw_value: 54, unit: 'GBP/month', source: 'cee_hypothesis' });
     expect(askOn(nodes)).toEqual({
-      option_id: olumi.id,
-      option_label: RAISE_54,
+      // #94 6105226165 safe withholding: unreceipted £59 is also unconfirmed; the first ask binds that unchanged cell.
+      option_id: byLabel(nodes, 'option', RAISE_59).id,
+      option_label: RAISE_59,
       factor_id: factor.id,
       factor_label: PRICE,
       unit: 'GBP/month',
@@ -354,19 +359,23 @@ describe('(g) AIQ Q1 — Olumi’s estimate in the limit’s unit does not answe
     });
   });
 
-  it('control: the SAME cell with the user’s own figure (user_specified) → no ask', () => {
+  it('control: the SAME checked cell (user_specified) needs no ask; the unreceipted £59 still does', () => {
     const { nodes } = buildAndPersist(aCandidate());
     const factor = byLabel(nodes, 'factor', PRICE);
     const olumi = byLabel(nodes, 'option', RAISE_54);
     const users = nodes.map((n) => (n.id !== olumi.id ? n : {
       ...n, interventions: { ...n.interventions, [factor.id]: { ...(n.interventions![factor.id] as object), source: 'user_specified' } },
     }));
-    expect(askOn(users)).toBeNull();
+    // #94 6105226165 safe withholding: approval is scoped to £54, not the unreceipted sibling £59.
+    expect(askOn(users)?.option_label).not.toBe(RAISE_54);
+    expect(askOn(users)?.option_label).toBe(RAISE_59);
   });
 
-  it('control: the brief’s £59 (brief_extraction) is the user’s and is never the one named', () => {
+  it('control: the reconstructed £59 has no receipt and is the unconfirmed cell named', () => {
     const { nodes } = buildAndPersist(aCandidate());
-    expect(askOn(nodes)?.option_label).not.toBe(RAISE_59);
+    // #94 6105226165 safe withholding: the fixture supplies neither a brief nor a checked-human authority for £59.
+    expect(levelOf(nodes, RAISE_59, PRICE).source).toBe('cee_hypothesis');
+    expect(askOn(nodes)?.option_label).toBe(RAISE_59);
   });
 });
 
@@ -427,7 +436,8 @@ describe('(h) AIQ Q2 — a scale_frame-only level carries the pair and reaches P
     const { nodes } = buildAndPersist(withScaleFrameOnlyLevels());
     const subs = byLabel(nodes, 'factor', SUBS);
     const cell = levelOf(nodes, CAMPAIGN, SUBS);
-    expect(cell).toEqual({ value: 0.09, raw_value: 90, unit: 'subscribers', source: 'brief_extraction', target_match: exactMatch(subs.id) });
+    // #94 6105226165 safe withholding: missing receipt changes only this cell's source.
+    expect(cell).toEqual({ value: 0.09, raw_value: 90, unit: 'subscribers', source: 'cee_hypothesis', target_match: exactMatch(subs.id) });
     expect((cell.value as number) * (subs.scale_frame as number)).toBeCloseTo(cell.raw_value as number, 9);
     // No stored unit on the node: the unit is the FACTOR's as constructed, never the option's spelling.
     const spend = byLabel(nodes, 'factor', SPEND);
@@ -466,7 +476,8 @@ describe('(i) AIC — the served-bytes read-back reads the frame and unit off th
   it('control: the one-form build reads back as the served A01 short form on the served frames', () => {
     const { nodes } = buildAndPersist(aCandidate());
     const back = asServedBeforeOneForm({ nodes }, served()).nodes as readonly Node[];
-    expect(levelOf(back, RAISE_59, PRICE)).toEqual({ value: 0.295, source: 'brief_extraction' });
+    // #94 6105226165 safe withholding: missing receipt changes only this cell's source.
+    expect(levelOf(back, RAISE_59, PRICE)).toEqual({ value: 0.295, source: 'cee_hypothesis' });
     expect(levelOf(back, RAISE_54, PRICE)).toEqual({ value: 0.27, source: 'cee_hypothesis' });
   });
 

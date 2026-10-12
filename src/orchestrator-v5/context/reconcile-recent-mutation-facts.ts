@@ -1,3 +1,4 @@
+import { DurableHandlerFactSchema } from './durable-human-authority.js';
 /**
  * Reconcile the bounded hot-window mutation facts with the scenario-scoped,
  * uncached durable mutation-receipt read.
@@ -10,7 +11,6 @@
  */
 
 import {
-  HandlerFactSchema,
   type HandlerFact,
 } from '@talchain/schemas/orchestrator';
 
@@ -285,7 +285,7 @@ function classifyFacts(candidates: readonly unknown[]): ClassifiedFacts {
   let ineligible = false;
 
   for (const candidate of candidates) {
-    const parsed = HandlerFactSchema.safeParse(candidate);
+    const parsed = DurableHandlerFactSchema.safeParse(candidate);
     if (!parsed.success) {
       malformed = true;
       continue;
@@ -321,7 +321,7 @@ function classifyIdentifiedFacts(
       malformed = true;
       continue;
     }
-    const parsed = HandlerFactSchema.safeParse(candidate.fact);
+    const parsed = DurableHandlerFactSchema.safeParse(candidate.fact);
     const factRowId = candidate.fact_row_id;
     const factCreatedAt = candidate.fact_created_at;
     if (

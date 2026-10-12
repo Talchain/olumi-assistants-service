@@ -1,3 +1,4 @@
+import type { InterventionHumanAuthority } from '../../orchestrator/tools/encode-option-interventions.js';
 /**
  * ⭐ GO(A) — WHICH OPTION'S NATIVE COST TO ASK FOR, WHEN A MONEY LIMIT COULD NOT BE CHECKED.
  *
@@ -161,6 +162,7 @@ export function decideOptionCostAsk(input: {
    * here — see the ⚠⚠ block above; deriving it is a reverted release blocker.
    */
   readonly notDecisionGrade: boolean;
+  readonly humanAuthority?: InterventionHumanAuthority;
   readonly ratified: readonly OptionCostAskConstraint[];
   /** Graph nodes — used ONLY to resolve the constraint's target factor. */
   readonly nodes: readonly OptionCostAskNode[];
@@ -220,7 +222,8 @@ export function decideOptionCostAsk(input: {
       // this ask, the limit could never become checkable. Whose figure it is comes from the ONE authority rule (d)
       // reads (`constraint-feasibility.ts` `collectLeaderEstimatedTargetIds`), never a second list here. The native is
       // NOT gated anywhere else: it is the factor's own figure, and PLoT needs it whoever wrote it.
-      && earnsAuthorshipCredit(classifyValueSource(cell.source));
+      && earnsAuthorshipCredit(classifyValueSource(cell.source))
+      && input.humanAuthority?.some(pair => pair.optionId === optionId && pair.factorId === factorId) === true;
     if (alreadyAnswered) continue;
 
     return {

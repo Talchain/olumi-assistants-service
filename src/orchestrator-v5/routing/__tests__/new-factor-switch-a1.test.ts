@@ -384,14 +384,23 @@ describe('CONTRAST — everything that is not a new switch is byte-identical to 
   };
   it.each(['existing', 'graded', 'grandfathering_graded'])('%s: builder ops, hold inline_patch, copy and committed graph are byte-identical', (name) => {
     const head = headOutputs(BASE.specs[name]!);
-    const base = BASE.outputs[name] as Json;
+    const base = structuredClone(BASE.outputs[name]) as Json;
+    // original raw has no receipt; credit unproved — #94 6101950357(b)
+    // These three fixed pre-approval cells are builder claims, not the later confirmed human transaction.
+    if (name === 'existing' || name === 'grandfathering_graded') {
+      delete base.built.operations[0].value.interventions.pro_plan_price.source;
+      delete base.built.proposals[0].operations[0].value.interventions.pro_plan_price.source;
+      delete base.inline_patch.operations[0].value.interventions.pro_plan_price.source;
+    }
     const levels = C2_LEVELS[name];
     const named = `add option '${BASE.specs[name]!.label}'`;
     if (levels !== undefined) expect(base.assistant_text, 'control: the base text names the option').toContain(named);
     const expected = levels === undefined ? base.assistant_text : String(base.assistant_text).replace(named, `${named}${levels}`);
     expect(head.assistant_text).toBe(expected);
     // Science 393023 LICENCE (a): subtract only the new door-default tag; keep the full old fidelity assertion.
-    expect(JSON.stringify(beforeDoorTagsDeep({ ...head, assistant_text: undefined }, base))).toBe(JSON.stringify({ ...base, assistant_text: undefined }));
+    expect(JSON.stringify(beforeDoorTagsDeep({ ...head, assistant_text: undefined }, base,
+      // Fixed original option id; only source key order on the confirmed human cell — #94 6102610518(8).
+      levels === undefined ? undefined : { optionId: base.built.proposals[0].optionId, factorId: 'pro_plan_price' }))).toBe(JSON.stringify({ ...base, assistant_text: undefined }));
   });
 
   it('CONTRAST: a GRADED new factor ("Marketing spend", £5,000/month asked) stays valueless and asked — never 0', () => {

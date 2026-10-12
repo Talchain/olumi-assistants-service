@@ -1,3 +1,4 @@
+import type { InterventionHumanAuthority } from '../../../orchestrator/tools/encode-option-interventions.js';
 import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
 import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
@@ -337,6 +338,8 @@ function withholdStatedOperator<C>(goalConstraints: C): C {
  * The reader produces them; PLoT consumes them; the handler is the conduit.
  */
 export interface RunAnalysisScenarioSnapshot {
+  /** Server-resolved applied approval receipts for this exact loaded revision. */
+  readonly humanAuthority?: InterventionHumanAuthority;
   readonly evaluatedScenarioRevision?: number;
   /** Production reader attests current scope; a failed pending read throws before PLoT. */
   readonly goalScopeClaimInput?: GoalScopeClaimInput;
@@ -2380,19 +2383,22 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // restated, not a check (AI Quality, #70 5844226031): read off the options PLoT received, and passed as the FIFTH
     // argument — the fourth stays deliberately omitted (see above).
     // WIRE, not graph (review 5844327116): a status quo the gate HELD sets the target on the wire only.
+    const leaderUnattributedTargetIds = new Set<string>();
     const leaderEstimatedTargetIds = collectLeaderEstimatedTargetIds(
       graphForAnalysis,
       ratifiedConstraints,
       leadingOptionId ?? null,
-      { options: submittedOptions, held: gate.held },
+      { options: submittedOptions, held: gate.held,
+        // Only the snapshot loader's exact applied approval receipts provide durable proof.
+        humanAuthority: snapshot.humanAuthority ?? [], unattributedTargetIds: leaderUnattributedTargetIds },
     );
-    if (leaderEstimatedTargetIds.size > 0) {
+    if ([...leaderEstimatedTargetIds].some(id => !leaderUnattributedTargetIds.has(id))) {
       log.info(
         {
           event: 'run_analysis.limit_rests_on_olumi_estimate',
           request_id: invocation.requestId,
           scenario_id: args.scenario_id,
-          constraint_ids: [...leaderEstimatedTargetIds],
+          constraint_ids: [...leaderEstimatedTargetIds].filter(id => !leaderUnattributedTargetIds.has(id)),
         },
         'run_analysis: a limit on a quantity the leading option sets at Olumi\'s estimate is not counted as checked',
       );
@@ -2431,7 +2437,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       leaderEstimatedTargetIds,
       // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
       // R-c: with the options PLoT scores, so a change limit moved only through unsized parts is withheld.
-      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations),
+      { ...collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations),
+        unattributedInterventionIds: leaderUnattributedTargetIds },
       strictThresholdPins,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
@@ -2811,6 +2818,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // blocker (see the ⚠⚠ block above `deriveConstraintVerdict`).
     const optionCostAsk = decideOptionCostAsk({
       notDecisionGrade: constraintVerdict.state === 'unevaluated',
+      humanAuthority: snapshot.humanAuthority,
       ratified: ratifiedConstraints,
       nodes: readGraphNodesForCostAsk(snapshot.rawPersistedGraph ?? snapshot.graph),
       options: readOptionEntriesForCostAsk(snapshot),

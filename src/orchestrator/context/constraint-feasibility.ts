@@ -1,3 +1,4 @@
+import type { InterventionHumanAuthority } from '../tools/encode-option-interventions.js';
 /**
  * Winner constraint-feasibility detection (trust-spine board item #1, CEE half).
  *
@@ -973,6 +974,10 @@ const nodeCarriesNoQuantity = constraintTargetCarriesNoQuantity;
  * Only the leader matters: the verdict is the leader's. Pure; empty on anything malformed or absent.
  */
 export interface LeaderWireOptions {
+  /** Exact current-operation authority; undefined keeps non-operation legacy readers separate. */
+  readonly humanAuthority?: InterventionHumanAuthority;
+  /** Transient decision output, never a graph or persisted authorship field. */
+  readonly unattributedTargetIds?: Set<string>;
   /** The options PLoT received, pre-projection objects (`run-analysis.ts` `gate.options`). */
   readonly options: ReadonlyArray<Record<string, unknown>>;
   /** The gate's hold record: which factor ids CEE supplied on which option (`gate.held`). */
@@ -1014,7 +1019,14 @@ export function collectLeaderEstimatedTargetIds(
     const stamp = heldFactors.has(c.node_id)
       ? sourceOf(asObject(nodeById(c.node_id))?.observed_state)
       : (sourceOf(setBy[c.node_id]) ?? sourceOf(graphInterventions?.[c.node_id]));
-    if (earnsAuthorshipCredit(classifyValueSource(stamp))) continue;
+    if (earnsAuthorshipCredit(classifyValueSource(stamp))) {
+      if (wire?.humanAuthority !== undefined && !heldFactors.has(c.node_id)
+        && !wire.humanAuthority.some(pair => pair.optionId === leadingOptionId && pair.factorId === c.node_id)) {
+        wire.unattributedTargetIds?.add(c.constraint_id);
+        out.add(c.constraint_id);
+      }
+      continue;
+    }
     out.add(c.constraint_id);
   }
   return out;
@@ -1727,6 +1739,7 @@ export function deriveConstraintVerdict(
   perLimitInput?: {
     readonly userBaselineIds: ReadonlySet<string>;
     readonly userAssumptionIds: ReadonlySet<string>;
+    readonly unattributedInterventionIds?: ReadonlySet<string>;
     /** R1 S4-core: limits stored `change_rel` ({@link collectLimitLevelOwners}). Omitted = none known (as before). */
     readonly relativeChangeIds?: ReadonlySet<string>;
     /** R-c: limits withheld for their target's unsized parts, with why ({@link collectLimitLevelOwners}). */
@@ -1906,6 +1919,7 @@ function derivePerLimitVerdicts(
   levels: {
     readonly userBaselineIds: ReadonlySet<string>;
     readonly userAssumptionIds: ReadonlySet<string>;
+    readonly unattributedInterventionIds?: ReadonlySet<string>;
     readonly relativeChangeIds?: ReadonlySet<string>;
     readonly placeholderPartsReasons?: ReadonlyMap<string, string>;
     readonly placeholderMovedOptionIds?: ReadonlyMap<string, ReadonlySet<string>>;
@@ -2040,6 +2054,7 @@ function derivePerLimitVerdicts(
     const usersOwnLevel =
       userBaselineIds.has(c.constraint_id) && leaderEstimatedTargetIds?.has(c.constraint_id) !== true;
     if (islEstimateOnly && usersOwnLevel) reasons.push(BASE_OWNER_UNESTABLISHED_REASON);
+    if (levels.unattributedInterventionIds?.has(c.constraint_id)) reasons.push(BASE_OWNER_UNESTABLISHED_REASON);
     if (reasons.length > 0) return { constraint_id: c.constraint_id, state: 'unscored', reason: firstFailed(reasons) };
     if (usersOwnLevel) return { constraint_id: c.constraint_id, state: 'scored' };
     // (a) WHOSE figure. A level that is not the user's names its own owner. When the level IS the user's, only rule (d)

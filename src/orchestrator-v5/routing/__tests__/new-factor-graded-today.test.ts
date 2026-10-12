@@ -60,7 +60,7 @@ const LABEL = 'New Pro customer price';
 const SWITCH_FAC = 'fac_existing_customers_grandfathered';
 
 /** Today's £49 exactly as admission writes a baseline the brief states — by the one framer, on its default range. */
-const STATED = framedObservedState({ baseline_value: 49, unit: 'GBP per month', provenance: 'explicit', plausible_max: defaultFrameFor(59) });
+const STATED = framedObservedState({ baseline_value: 49, unit: 'GBP per month', provenance: 'explicit', plausible_max: defaultFrameFor(59) }, 'human_authority');
 
 /** The Agent's graded add: the price at £57 (a distinct choice) and the NEW graded factor it acts on, with no level. */
 const GRADED_SPEC = (withSwitch = false): Json => ({

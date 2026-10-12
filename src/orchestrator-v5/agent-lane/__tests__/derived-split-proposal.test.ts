@@ -121,7 +121,8 @@ describe('any condition failing takes today\'s path (unset and said), never the 
   it('CONTROL: figures the user typed ("£15,000 each") are theirs by the ordinary path, with no derivation recorded', async () => {
     const { iv } = await propose('Put £15,000 into features and £15,000 into advertising.', { features: 15000, ads: 15000 });
     expect(iv('incremental_feature_investment_6_months')?.raw_value).toBe(15000);
-    expect(iv('incremental_feature_investment_6_months')?.source).toBeUndefined();
+    // DL RUN39 / #94 6099157525: checked user figures carry user_specified; absence is unattributed.
+    expect(iv('incremental_feature_investment_6_months')?.source).toBe('user_specified');
     expect(iv('incremental_feature_investment_6_months')?.derived_from).toBeUndefined();
   });
 });

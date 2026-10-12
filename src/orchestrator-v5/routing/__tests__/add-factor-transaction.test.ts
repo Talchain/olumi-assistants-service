@@ -51,7 +51,7 @@ const UNIT = 'GBP/year per engineer';
 
 /** The ONE framing rule (ruling point 3), then the user's source. */
 const userToday = (v: number): Json => ({
-  ...framedObservedState({ baseline_value: v, unit: UNIT, provenance: 'explicit', plausible_max: v > 1 ? defaultFrameFor(v) : null }),
+  ...framedObservedState({ baseline_value: v, unit: UNIT, provenance: 'explicit', plausible_max: v > 1 ? defaultFrameFor(v) : null }, 'human_authority'),
   source: USER_TODAY_SOURCE,
 });
 const SENIOR = userToday(120000);

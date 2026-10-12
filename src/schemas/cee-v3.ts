@@ -935,7 +935,7 @@ export const InterventionV3 = z.object({
   /** Unit (should match target factor's observed_state.unit) */
   unit: z.string().optional(),
   /** How this intervention was determined */
-  source: z.enum(["brief_extraction", "cee_hypothesis", "user_specified"]),
+  source: z.enum(["brief_extraction", "cee_hypothesis", "user_specified"]).optional(),
   /** How the target was matched */
   target_match: TargetMatch,
   /** Confidence in the value itself */

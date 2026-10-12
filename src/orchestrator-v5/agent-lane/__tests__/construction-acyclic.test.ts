@@ -1,3 +1,4 @@
+import { withOriginalReceipt } from './fixtures/original-receipt.js';
 /**
  * ⛔ A FIRST MODEL WITH A LOOP IN IT CAN NEVER BE ANALYSED — AND NOTHING SAID WHY.
  *
@@ -149,7 +150,7 @@ const quoted = (m: CandidateModel): CandidateModel => ({ ...m, factors: m.factor
   f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 49
     ? { ...f, baseline_evidence: { quote: PRICE_QUOTE } } : f) });
 async function build(...drafts: CandidateModel[]): Promise<Built> {
-  drafts = drafts.map(quoted);
+  drafts = drafts.map(d => withOriginalReceipt(quoted(d), SERVED.brief, SERVED.brief, [['Pro plan price', 59]]));
   const brief = `${PRICE_QUOTE}\n\n${SERVED.brief}`;
   let body: unknown = null;
   const inputs: string[] = [];
@@ -649,7 +650,8 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
     expect(issues(inputs[1]!)).toEqual([GAP_ISSUE]);
     expect(inputs[1]).not.toContain(SERVED_LOOP_ISSUE);
     // …as a compaction (#1891): the draft to edit, the copy rule, and the compaction's repair rule.
-    expect(inputs[1]).toContain(`Candidate to repair (your previous model, to shrink): ${JSON.stringify(first)}`);
+    // RUN52 already attaches the ORIGINAL receipt in build(); compare the actual callback draft, not its pre-helper bytes.
+    expect(inputs[1]).toContain(`Candidate to repair (your previous model, to shrink): ${JSON.stringify(withOriginalReceipt(first, SERVED.brief, SERVED.brief, [['Pro plan price', 59]]))}`);
     expect(instructions[1]).toMatch(/Copy every item you keep EXACTLY/);
     expect(instructions[1]).toContain('Keep every option the brief states, and every other option in your previous model unless you ADDED it beyond the brief');
     expect(instructions[1]).not.toContain('Preserve every option');
@@ -679,7 +681,8 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
     expect(out.size_retried).toBe(false);
     expect(calls).toBe(2);
     expect(issues(inputs[1]!)).toEqual([GAP_ISSUE, SERVED_LOOP_ISSUE]);
-    expect(inputs[1]).toContain(`Candidate to repair: ${JSON.stringify(first)}`);
+    // RUN52 already attaches the ORIGINAL receipt in build(); compare the actual callback draft, not its pre-helper bytes.
+    expect(inputs[1]).toContain(`Candidate to repair: ${JSON.stringify(withOriginalReceipt(first, SERVED.brief, SERVED.brief, [['Pro plan price', 59]]))}`);
     expect(instructions[1]).toContain('Preserve every option and risk hypothesis');
     // Adopted by identity: the risk now routes on to what it threatens, and nothing is withheld for a loop.
     expect(has(graph, DELAY, NEW_CONVERSIONS)).toBe(true);

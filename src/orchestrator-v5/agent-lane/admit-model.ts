@@ -77,7 +77,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { verifiedFactorLevel } from './verified-option-setting.js';
+import { verifiedFactorLevel, verifiedGoalLevel, verifiedOptionAction, verifiedOptionSetting, verifiedOptionTotal } from './verified-option-setting.js';
 
 const MAX_ID = 100;
 
@@ -128,6 +128,8 @@ export interface StatedOptionEvidence {
  * metric's decision framing, "Decision: <metric>", `ai_inferred`: nobody stated it.
  */
 
+export type InterventionValueKind = 'absolute' | 'additional';
+
 export interface CandidateModel {
   readonly goal: {
     metric: string; operator: string; unit: string; horizon_months: number | null; provenance: string;
@@ -157,6 +159,8 @@ export interface CandidateModel {
     baseline_known?: boolean;
     baseline_value?: number | null;
     baseline_provenance?: string;
+    /** Drafter receipt; verified by verifiedGoalLevel. */
+    baseline_evidence?: { readonly quote: string } | null;
     /**
      * Whether the goal metric is one part or the whole (C46: "£20k MRR" — Pro MRR or total
      * MRR?). Optional because the banked contract has no such field: absent or `null` means
@@ -179,10 +183,14 @@ export interface CandidateModel {
     interventions?: readonly {
       factor_label: string;
       value: number;
+      /** Existing absolute/additional discriminator; absent legacy and unknown kinds remain guarded by construction. */
+      value_kind?: InterventionValueKind;
       unit?: string;
       provenance: string;
       estimate?: true;
       basis?: string;
+      /** Existing intervention uncertainty, independent of the point's credit. */
+      value_confidence?: InterventionV3T['value_confidence'];
       stated_evidence?: StatedOptionEvidence | null;
       /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
       range?: InterventionV3T['range'];
@@ -374,7 +382,7 @@ export interface WidenerAdditions {
  * type on purpose: a machine-derived level never claims user authority, and
  * only the writer, on a user's approved change, mints that stamp.
  */
-export type ConstructedLevelSource = Exclude<InterventionV3T['source'], 'user_specified'>;
+export type ConstructedLevelSource = Exclude<NonNullable<InterventionV3T['source']>, 'user_specified'>;
 export interface ConstructedLevel {
   value: number;
   source: ConstructedLevelSource;
@@ -398,8 +406,8 @@ export interface ConstructedLevel {
   basis?: string;
 }
 
-const levelSourceFor = (provenance: string): ConstructedLevelSource =>
-  provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
+const levelSourceFor = (provenance: string, verifiedReceipt: boolean): ConstructedLevelSource =>
+  provenance === 'explicit' && verifiedReceipt ? 'brief_extraction' : 'cee_hypothesis';
 
 /**
  * ⭐ ONE FORM FOR AN OPTION'S LEVEL, WHICHEVER WRITER WROTE IT (P2 A5; DL #70 order 5858777018 item 3).
@@ -439,12 +447,14 @@ function constructedLevel(
   factor: Pick<AdmittedNode, 'observed_state' | 'scale_frame'> | undefined,
   declaredUnit: string | undefined,
   derivedTotal = false,
+  computedConfidence?: InterventionV3T['value_confidence'],
 ): ConstructedLevel {
   const level: ConstructedLevel = {
     value: cap !== undefined ? figure / cap : figure,
     source,
     target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
-    ...(derivedTotal && source === 'brief_extraction' ? { value_confidence: 'medium' as const } : {}),
+    ...(derivedTotal && (source === 'brief_extraction' || computedConfidence === 'medium')
+      ? { value_confidence: 'medium' as const } : {}),
   };
   const os = factor?.observed_state;
   const usable = (u: unknown): u is string => typeof u === 'string' && u.trim() !== '';
@@ -783,7 +793,7 @@ function framedByRange(x: { plausible_max?: number | null }): { node?: { scale_f
 
 export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
-}, verifiedCurrentLevel?: boolean, userMaterialUnverified = false): Record<string, unknown> {
+}, verifiedCurrentLevel: boolean | 'human_authority' | 'legacy', userMaterialUnverified = false): NonNullable<AdmittedNode['observed_state']> {
   const raw = f.baseline_value as number;
   // ⛔ A KNOWN BASELINE THE BUILDER INFERRED IS OLUMI'S, NOT NOBODY'S (AIQ #70 5852160429). Source-less, served
   // eng-hiring (`2d0df14`) left salary spend and both headcounts unauthored: "I supplied N values" skipped them and
@@ -792,9 +802,9 @@ export function framedObservedState(f: {
   // not evidence for a user's measured level; construction attribution requires the verified receipt.
   // Construction always passes a receipt verdict. The two typed human doors use this
   // formatter after verifying the figure themselves; preserve their trusted carrier shape.
-  const base = verifiedCurrentLevel === undefined ? {
+  const base: Omit<NonNullable<AdmittedNode['observed_state']>, 'value'> = verifiedCurrentLevel === 'human_authority' || verifiedCurrentLevel === 'legacy' ? {
     ...(f.unit ? { unit: f.unit } : {}),
-    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' }
+    ...(verifiedCurrentLevel === 'human_authority' ? { source: 'brief_extraction' }
       : f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {} : { source: 'cee_inference' }),
   } : {
     ...(f.unit ? { unit: f.unit } : {}),
@@ -3318,7 +3328,32 @@ function admitOnce(
   sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean,
   sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null,
 ): AdmittedModel {
+  // RUN52: establish receipt authority on native figures BEFORE the existing affine conversion.
+  const actionVerdicts = new Map<string, Map<string, string>>();
+  const receiptVerdicts = new WeakMap<NonNullable<CandidateModel['options'][number]['interventions']>[number], boolean>();
   const { model: restatedModel, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
+  for (const option of restatedModel.options) {
+    const originals = candidateModel.options.filter(o => o.label === option.label);
+    for (const iv of option.interventions ?? []) {
+      const nativeOption = originals.length === 1 ? originals[0]! : undefined;
+      const originalsForFactor = nativeOption?.interventions?.filter(i => i.factor_label === iv.factor_label) ?? [];
+      const native = originalsForFactor.length === 1 ? originalsForFactor[0]! : undefined;
+      if (nativeOption === undefined || native === undefined) { receiptVerdicts.set(iv, false); continue; }
+      if (verifiedOptionAction(candidateModel, nativeOption, native, brief)) {
+        const quantities = actionVerdicts.get(option.label) ?? new Map<string, string>();
+        quantities.set(iv.factor_label, native.stated_evidence!.quote);
+        actionVerdicts.set(option.label, quantities);
+      }
+      const factors = candidateModel.factors.filter(f => f.label === native.factor_label);
+      const baseline = factors.length === 1 ? factors[0]!.baseline_value : null;
+      const derived = 'derived_total' in native && native.derived_total === true;
+      const operand = derived && typeof baseline === 'number'
+        ? { ...native, value_kind: 'additional' as const, value: native.value - baseline, basis: undefined } : native;
+      receiptVerdicts.set(iv, derived
+        ? verifiedOptionTotal(candidateModel, nativeOption, operand, brief).verified
+        : verifiedOptionSetting(candidateModel, nativeOption, native, brief));
+    }
+  }
   // ⛔ A two-part product goal's rate is the user's own price when Olumi's rate only passes it on (shape 2,
   // `product-goal-rate-operand.ts`, DL 5902949807) — first, so the parts below are the user's.
   const { model: foldedModel, found: rateOperandFolds } = foldPassThroughRateOntoUsersPrice(restatedModel);
@@ -3618,8 +3653,11 @@ function admitOnce(
             targetUnit: model.goal.unit,
           });
           if (verdict.admitted) {
-            // Only the user's stated level reaches here (see `estimated` above).
-            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap);
+            observed_state = verifiedGoalLevel(model, brief)
+              ? { ...briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap), extractionType: 'explicit' }
+              : { ...framedObservedState({ baseline_value: baselineRaw, unit: model.goal.unit,
+                provenance: model.goal.baseline_provenance ?? model.goal.provenance, plausible_max: resolved.cap }, false, true),
+                baseline: verdict.normalised };
           } else {
             withheld(verdict.reason);
           }
@@ -3705,7 +3743,7 @@ function admitOnce(
           const c = capFor(f.label) ?? f.plausible_max;
           if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
           if ((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number') {
-            const os = framedObservedState({ ...f, plausible_max: c }) as { cap?: unknown };
+            const os = framedObservedState({ ...f, plausible_max: c }, false) as { cap?: unknown };
             // Already framed inside `observed_state` — a second carrier could
             // disagree with it, so do not write one.
             if (typeof os.cap === 'number') return {};
@@ -4082,8 +4120,8 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId),
-        (iv as { derived_total?: unknown }).derived_total === true);
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance, receiptVerdicts.get(iv) === true), nodes.find((n) => n.id === factorId), unitById.get(factorId),
+        (iv as { derived_total?: unknown }).derived_total === true, iv.value_confidence);
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
@@ -4449,7 +4487,7 @@ function admitOnce(
   // authored, so recording one as a projection would dilute the ledger and hide
   // the real projections.
   const decisionId = ids.get(DECISION_LABEL)!;
-  const topo = (from: string, to: string) => ({
+  const topo = (from: string, to: string): AdmittedEdge => ({
     from,
     to,
     strength: { ...STRUCTURAL_EDGE_DEFAULTS.strength },
@@ -4521,23 +4559,29 @@ function admitOnce(
    * canonical structural values, which is all the validator checks.
    */
   const USER_AUTHORED_EDGE_SOURCES = new Set(['brief_extraction', 'user_specified']);
-  /**
-   * ⛔ …AND ONLY THE OPTION'S OWN USER-STAMPED ACTION PUTS THE USER'S NAME ON ITS LINK (AIQ 5909030106 / 5909528911,
-   * DL 5909532986; MG SUCCESSOR root cause 5909516196). A link's `explicit` becomes `brief_extraction` for ANY link
-   * (`admit-candidate.ts`), so the drafter's word alone made "Raise price to £59 → Monthly churn" the user's on Paul's
-   * brief, whose only action is the price rise (P0's counterexample on the served control; the level-gap retry kept it
-   * whether it repeated the link, failed, or answered with the churn LIMIT as the option's action). An option → X link
-   * is the user's only when the brief's own words for that option name X (AIQ 5909754019 (1)), and admission has ONE
-   * reliable witness of that: the option's USER-STAMPED LEVEL on X ("Raise to £59" → the price). Everything else the
-   * drafter supplies (a `changes` entry, an Olumi level, a restated link) is its word, not the brief's, and no lexical
-   * test tells "£59 with AI release" → AI feature availability from "Raise price" → "Price-driven churn". So it fails
-   * CLOSED to Olumi's, which the user can confirm (P0 PARTNER CR 5909944908: H1 the level-gap retry's Olumi level,
-   * H2 a drafted `changes` entry, H3 an Olumi level in the first answer, each with a drafted `explicit` link, all became
-   * the user's under a "the user's option acts on X" rule). An under-claim is honest; a false "yours" is the defect.
+  /** A drafted link never witnesses its own authorship. An exact human/verified level or an independently
+   * verified original proposed-action receipt can witness only this option→quantity relationship.
+   * Changes lists, matching labels and useful wiring confer nothing. The structural constants are not
+   * authored effects, and the relationship verdict never grants a level, denominator or current observation.
    */
+  // A verified qualitative action witnesses only the relationship; quantitative credit remains receiptVerdicts-only.
+  const authoredActions = new Map([...actionVerdicts].flatMap(([option, factors]) => {
+    const optionId = ids.get(option);
+    return optionId === undefined ? [] : [[optionId, new Map([...factors].flatMap(([factor, quote]) => {
+      const factorId = ids.get(factor);
+      return factorId === undefined ? [] : [[factorId, quote] as const];
+    }))] as const];
+  }));
   const userActsOn = (optionId: string, factorId: string): boolean =>
-    USER_AUTHORED_EDGE_SOURCES.has(String(interventionsByOption.get(optionId)?.[factorId]?.source ?? ''));
+    USER_AUTHORED_EDGE_SOURCES.has(String(interventionsByOption.get(optionId)?.[factorId]?.source ?? ''))
+    || authoredActions.get(optionId)?.has(factorId) === true;
   for (const t of topologyEdges) {
+    if (authoredActions.get(t.from)?.has(t.to) === true) {
+      // Same structural writer and constants: authored relationship, never an authored coefficient.
+      t.provenance = { source: levelSourceFor('explicit', authoredActions.get(t.from)?.has(t.to) === true),
+        source_quote: authoredActions.get(t.from)!.get(t.to)! };
+      continue;
+    }
     if (!duplicatePairs.has(`${t.from}::${t.to}`) || !userActsOn(t.from, t.to)) continue;
     const userStated = linkResult.edges.find(
       (e) => e.from === t.from && e.to === t.to && USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')),
