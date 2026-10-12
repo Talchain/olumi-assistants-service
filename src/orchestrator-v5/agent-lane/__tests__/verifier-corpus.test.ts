@@ -1,23 +1,25 @@
 /**
- * Recovery Batch B: the figure-credit corpus harness (DL #94 6120805174; SYS2 owns the verifier).
+ * Recovery Batch B: the figure-credit corpus harness (DL #94 6120805174; SYS2 owns the verifier and the corpus).
  *
- * Corpus: `fixtures/verifier-corpus-v1.json` is a byte copy of `recovery/bB/verifier-corpus-codex/VERIFIER-CORPUS-v1.json`,
- * sha256-pinned below. It holds 18 verbatim sentences from Paul's journey briefs and turns, labelled by SYS2 and relabelled
- * blind by Codex, and 48 new sentences written and labelled by Codex.
- * Labels come from the corpus, never from this file:
- *   - a `level` figure (the user's own current point) must be stored as the user's (`human`);
- *   - every other figure must not be;
- *   - a figure the user wrote is never reattributed to Olumi (`ai`) (AIE 6120633627).
+ * Corpus: `fixtures/verifier-corpus-v2.json` is a byte copy of `recovery/bB/verifier-corpus-codex/VERIFIER-CORPUS-v2.json`,
+ * sha256-pinned below. v2 is v1 (674cfaf6) plus four changes, listed in its `provenance.v2.changes`:
+ *   - M01 is labelled by the bound quantity (DL 12 Oct; AIE 0825 §3);
+ *   - the H06 and M04 adjudications (AIE 6120633627) are recorded;
+ *   - the effect-rate definition is narrowed (0825 §5);
+ *   - the AIE's rate-parameter vs incremental-effect contrast is added (A01/A02).
+ * It holds 18 verbatim sentences from Paul's journeys (labelled by SYS2, relabelled blind by Codex), 48 Codex sentences and
+ * 2 AIE contrasts. Labels come from the corpus, never from this file:
+ *   - a `level` figure (the user's own current point) is stored as the user's, VERIFIED;
+ *   - every other figure keeps human origin with its role UNVERIFIED (AIE 0825 §2), and is never Olumi's.
  *
  * Each figure is drafted the way the constructor's drafter claims a level: one factor, the figure as `baseline_value`,
  * `provenance: 'explicit'`, and the sentence as its `baseline_evidence.quote`. It is then admitted through the real
- * `admitCandidateModel`, and the stored `observed_state` is read through one provenance reader. ⚠ The factor label and
- * unit per figure (DRAFTS) are SELF-AUTHORED by the builder; the independent check should read them.
+ * `admitCandidateModel`, and the stored `observed_state` is read through the provenanceOf stand-in (origin and role, as
+ * the DL adopted). ⚠ The factor label and unit per figure (DRAFTS) are SELF-AUTHORED by the builder; the independent check
+ * should read them.
  *
- * Rows the corpus cannot decide today:
- *   - H06 "25%" and M04 "3-month sales cycle" are adjudicated `other` by the AIE (6120633627), so they are not credited.
- *   - `effect-rate` points are PENDING V2. The AIE says a per-unit rate is a rate-parameter level or an incremental
- *     effect depending on the bound model quantity, so only "never Olumi's" is asserted for them.
+ * Rows the corpus cannot decide yet:
+ *   - `effect-rate` points are PENDING the bound quantity's role (0825 §3), so only "never Olumi's" is asserted.
  *   - Any endpoint of a stated range is not the user's point, so it is not credited as one (row 5).
  * Today's failures are RED by design.
  */
@@ -25,27 +27,19 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
-import { valueAuthorshipOf } from '../turn-context/guidance-signals.js';
+import { provenanceOf, type Provenance } from './fixtures/provenance-of-standin.js';
 
-const RAW = readFileSync(new URL('./fixtures/verifier-corpus-v1.json', import.meta.url));
-const CORPUS_SHA256 = '674cfaf63672ee3cab3b1647c6f4bd44ba9685f87017f94ebcdc405b35f96284';
-type Figure = { figure?: string; text?: string; label: string; range?: unknown };
+const RAW = readFileSync(new URL('./fixtures/verifier-corpus-v2.json', import.meta.url));
+const CORPUS_SHA256 = '45ca62a5795d6feb054dfbb96aafe1f76bf9ed35c6e7706bae4558eecaca904b';
+type Figure = { figure?: string; text?: string; label: string; range?: unknown; by_quantity?: { bound: string; label: string }[] };
 type Sentence = { id: string; sentence: string; figures: Figure[] };
-const corpus = JSON.parse(RAW.toString('utf8')) as { verbatim: { sentences: Sentence[] }; extension: Sentence[]; adjudicate: { id: string; figure: string }[] };
+const corpus = JSON.parse(RAW.toString('utf8')) as { version: string; verbatim: { sentences: Sentence[] }; extension: Sentence[]; contrasts: Sentence[];
+  adjudicate: { id: string; figure: string; resolved?: string }[] };
 
-/**
- * Interim stand-in for C's `provenanceOf` (DL 12 Oct: one read side for every reader). It reads the EXISTING stored
- * fields through the existing authorship reader; swap the import when C's export lands.
- */
-function provenanceOf(observed: unknown): 'human' | 'ai' | 'unknown' {
-  const a = valueAuthorshipOf(observed);
-  return a === 'yours' ? 'human' : a === 'olumi_estimate' || a === 'olumi_accepted' ? 'ai' : 'unknown';
-}
-
-/** AIE 6120633627 adjudications of the corpus's two open rows. */
+/** AIE 6120633627 adjudications of the corpus's two open rows (v2 records them as `adjudicate[].resolved`). */
 const AIE_LABEL = new Map([['H06:25%', 'other'], ['M04:3-month sales cycle', 'other']]);
 type Draft = { label: string; unit: string; value: number; rangeEnd?: true } | { none: string };
-/** Key `${id}:${figure text}`. SELF-AUTHORED: the factor a drafter would name for the figure, in the sentence's own words. */
+/** Key `${id}:${figure text}`, plus `#${bound}` where v2 labels by the bound quantity. SELF-AUTHORED: the factor a drafter would name for the figure, in the sentence's own words. */
 const DRAFTS: Record<string, Draft> = {
   'H01:at least 10%': { label: 'Productivity increase', unit: '%', value: 10 },
   'H01:two developers': { label: 'Developers', unit: 'developers', value: 2 },
@@ -54,7 +48,8 @@ const DRAFTS: Record<string, Draft> = {
   'H04:£200,000': { label: 'Budget', unit: '£', value: 200000 },
   'H05:between 20% and 30%': { label: 'Time spent on non-development tasks', unit: '%', value: 20, rangeEnd: true },
   'H06:25%': { label: 'Time spent on non-development tasks', unit: '%', value: 25 },
-  'M01:£100,000': { label: 'Budget', unit: '£', value: 100000 },
+  'M01:£100,000#budget': { label: 'Budget', unit: '£', value: 100000 },
+  'M01:£100,000#spend': { label: 'Marketing spend', unit: '£', value: 100000 },
   'M02:more than 25% of my time': { label: 'Share of my time', unit: '%', value: 25 },
   'M03:over 15%': { label: 'Conversion rate', unit: '%', value: 15 },
   'M03:20 new customers': { label: 'New customers', unit: 'customers', value: 20 },
@@ -135,6 +130,9 @@ const DRAFTS: Record<string, Draft> = {
   'X48:68%': { label: 'Room occupancy', unit: '%', value: 68 },
   'X48:61%': { label: 'Room occupancy', unit: '%', value: 61 },
   'X48:2': { label: 'Occupancy lift per tour-group booking', unit: 'percentage points per booking', value: 2 },
+  'A01:20': { label: 'Throughput per specialist', unit: 'tickets per week per specialist', value: 20 },
+  'A01:10': { label: 'Throughput per specialist', unit: 'tickets per week per specialist', value: 10, rangeEnd: true },
+  'A02:20': { label: 'Capacity added per specialist', unit: 'tickets per week per specialist', value: 20 },
 };
 
 type Expect = 'credit' | 'refuse' | 'pending';
@@ -147,7 +145,7 @@ function expectation(key: string, label: string, d: Draft): Expect {
 }
 
 type Rec = Record<string, unknown>;
-function stored(model: CandidateModel, brief: string, label: string): 'human' | 'ai' | 'unknown' {
+function stored(model: CandidateModel, brief: string, label: string): Provenance {
   const nodes = admitCandidateModel(model, {}, brief).nodes as unknown as Rec[];
   const node = nodes.find(n => n.kind === 'factor' && n.label === label);
   expect(node, `admitted factor "${label}"`).toBeDefined();
@@ -165,10 +163,10 @@ function alone(sentence: string, d: { label: string; unit: string; value: number
   } as unknown as CandidateModel;
 }
 
-const rows = [...corpus.verbatim.sentences, ...corpus.extension].flatMap(s => s.figures.map(f => {
+const rows = [...corpus.verbatim.sentences, ...corpus.extension, ...corpus.contrasts].flatMap(s => s.figures.flatMap(f => {
   const figure = f.text ?? f.figure!;
-  const key = `${s.id}:${figure}`;
-  return { s, key, label: f.label, draft: DRAFTS[key] };
+  const bound = f.by_quantity ?? [{ bound: null, label: f.label }];
+  return bound.map(b => { const key = `${s.id}:${figure}${b.bound === null ? '' : `#${b.bound}`}`; return { s, key, label: b.label, draft: DRAFTS[key] }; });
 }));
 
 describe('corpus integrity', () => {
@@ -181,8 +179,10 @@ describe('corpus integrity', () => {
     expect(Object.keys(DRAFTS).filter(k => !rows.some(r => r.key === k))).toEqual([]);
     expect(rows).toHaveLength(Object.keys(DRAFTS).length);
   });
-  it('the two adjudicated rows are the corpus\'s own open rows', () => {
-    expect(corpus.adjudicate.map(a => a.id).sort()).toEqual(['H06', 'M04']);
+  it('the two adjudicated rows are the corpus\'s own, resolved as the AIE ruled', () => {
+    expect(corpus.version).toBe('v2');
+    expect(corpus.adjudicate.map(a => [a.id, a.resolved]).sort()).toEqual([['H06', 'other'], ['M04', 'other']]);
+    expect([...AIE_LABEL.values()]).toEqual(['other', 'other']);
   });
 });
 
@@ -192,12 +192,12 @@ describe('each corpus figure, drafted as a claimed level and admitted alone: cre
     const want = expectation(r.key, r.label, d);
     const tag = AIE_LABEL.has(r.key) ? ` (AIE 6120633627: ${AIE_LABEL.get(r.key)})` : d && 'rangeEnd' in d ? ' (range end)' : '';
     if ('none' in d) { it(`${r.key} [${r.label}] has no number to credit: ${d.none}`, () => undefined); continue; }
-    const name = `${r.key} [${r.label}${tag}] → ${want === 'pending' ? 'PENDING V2: never Olumi\'s' : want === 'credit' ? 'the user\'s' : 'not the user\'s point, never Olumi\'s'}`;
+    const name = `${r.key} [${r.label}${tag}] → ${want === 'pending' ? 'PENDING (0825 §3): never Olumi\'s' : want === 'credit' ? 'the user\'s, verified' : 'the user\'s, role unverified'}`;
     it(name, () => {
       const got = stored(alone(r.s.sentence, d), r.s.sentence, d.label);
-      if (want === 'credit') expect(got).toBe('human');
-      else if (want === 'refuse') expect(got).toBe('unknown');
-      else expect(got).not.toBe('ai');
+      if (want === 'credit') expect(got).toEqual({ origin: 'human', role: 'verified' });
+      else if (want === 'refuse') expect(got).toEqual({ origin: 'human', role: 'unverified' });
+      else expect(got.origin).not.toBe('ai');
     });
   }
 });
@@ -226,11 +226,11 @@ describe('the capacity sentences inside their own served brief (quoted option la
   for (const key of ['C02:80 tickets per week', 'C06:the existing 80 tickets per week', 'C05:about 20 tickets per week']) {
     const r = rows.find(x => x.key === key)!; const d = r.draft as { label: string; unit: string; value: number };
     const want = expectation(key, r.label, d);
-    it(`${key} [${r.label}] in the capacity brief → ${want === 'pending' ? 'PENDING V2: never Olumi\'s' : want === 'credit' ? 'the user\'s' : 'not the user\'s point, never Olumi\'s'}`, () => {
+    it(`${key} [${r.label}] in the capacity brief → ${want === 'pending' ? 'PENDING (0825 §3): never Olumi\'s' : want === 'credit' ? 'the user\'s, verified' : 'the user\'s, role unverified'}`, () => {
       const got = stored(inBrief(key), CAPACITY, d.label);
-      if (want === 'credit') expect(got).toBe('human');
-      else if (want === 'refuse') expect(got).toBe('unknown');
-      else expect(got).not.toBe('ai');
+      if (want === 'credit') expect(got).toEqual({ origin: 'human', role: 'verified' });
+      else if (want === 'refuse') expect(got).toEqual({ origin: 'human', role: 'unverified' });
+      else expect(got.origin).not.toBe('ai');
     });
   }
 });
