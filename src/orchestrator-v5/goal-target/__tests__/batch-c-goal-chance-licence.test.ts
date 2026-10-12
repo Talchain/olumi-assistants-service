@@ -279,8 +279,8 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
       'Meeting both is no more likely than the lower of the two chances.',
       'On its own, the chance of ‘New customers’ being at least 20 customers over the first three months after launch, in this model: ‘Hire a marketing manager’ about 60%; ‘AI planning plus advertising’ about 70%.',
       'On its own, the chance of ‘Conversion rate’ being above 15% over the first three months after launch, in this model: ‘Hire a marketing manager’ about 42%; ‘AI planning plus advertising’ about 55%.',
-      // Amendment 1, for every target the headline names.
-      'This assumes carrying on as now leaves ‘New customers’ and ‘Conversion rate’ unchanged over that period; each option is measured against that.',
+      // Batch C: AIE status-quo disposition (12 Oct) — marketing is read from launch with no level today and no status quo:
+      // no condition's reference is the same-draw one, so no "carrying on leaves … unchanged" is said of it.
       'Each option’s effects are read as their size over the first three months after launch, including recruitment and ramp-up '
         + '(customers and percentage points over the first three months after launch), and are added together: twice the change counts twice, '
         + 'with no diminishing returns, interactions or extra onboarding drag modelled.',
@@ -343,7 +343,8 @@ describe('DL contract rulings (12 Oct): precision names follow PLoT\'s wire; nev
     expect(l.pct_by_option).toEqual({ hire_manager: 100, ai_plus_ads: 100 });
     // Nothing an interval could be drawn from is carried on the licence: no standard error, no bounds, no "±".
     expect(JSON.stringify(l)).not.toMatch(/standard_error|interval|±/);
-    expect(l.notes!.some((n) => n.startsWith('This assumes carrying on as now leaves'))).toBe(true);
+    // Batch C: AIE status-quo disposition (12 Oct) — read from launch, no status quo: no assumption is claimed of it.
+    expect(l.notes!.some((n) => n.startsWith('This assumes carrying on as now leaves'))).toBe(false);
     expect(l.notes!.some((n) => n.startsWith('Each option’s effects are read as their size'))).toBe(true);
     const env = withGoalChanceLicence(run, g, 'new_customers', () => false, undefined, g,
       { storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints) });
@@ -383,8 +384,10 @@ describe('DL contract rulings (12 Oct): precision names follow PLoT\'s wire; nev
     // exactly as above, and the compared options keep theirs.
     // Batch C: B2 beside amendment 1 (CI 6e3bce10) — no held month here: a held month the Run did not carry keeps B2's
     // "needs month-by-month changes" instead (its own row in item 3 below).
+    // Batch C: AIE status-quo disposition (12 Oct) — the same-draw reference needs the goal REACHED through a link (not a root).
     const level = hiringGraph({ quantity_frame: 'level', goal_threshold_frame: 'level', goal_target_basis: undefined, goal_horizon_months: undefined,
-      observed_state: { value: 0, baseline: 0, raw_value: 0, cap: 100, unit: '%', source: 'brief_extraction' } });
+      observed_state: { value: 0, baseline: 0, raw_value: 0, cap: 100, unit: '%', source: 'brief_extraction' } },
+      { edges: [{ from: 'cost', to: 'productivity', strength: { mean: 0.1, std: 0.05 } }] });
     const kept = withGoalChanceLicence(run, level, 'productivity', () => false, undefined, level, hiringConstraints(level)) as Rec;
     const keptRows = Object.fromEntries((kept.option_comparison as Rec[]).map((r) => [r.option_id, r]));
     expect(keptRows.carry_on).not.toHaveProperty('probability_of_goal_precision');
@@ -448,7 +451,9 @@ describe('AIE clause 3: a target the joint cannot support is kept, named and ref
     // The goal's own licensed chance is still said, as its own target, beside the level target's.
     expect(l.targets!.per_target.map((t) => [t.words, t.pct_by_option])).toEqual([
       ['‘Productivity’ being at least 10% higher than today at three months', { hire_a_tech_lead: 46, hire_two_developers: 31 }],
-      ['‘Code quality score’ being at least 80 score at three months', { hire_a_tech_lead: 70, hire_two_developers: 70 }],
+      // Batch C: AIE status-quo disposition item 4 (12 Oct) — the goal's unchanged reference never attests ‘Code quality
+      // score’ (no level today, no link reaching it): the status quo's own 70% for it is the Run's, shown like any option's.
+      ['‘Code quality score’ being at least 80 score at three months', { hire_a_tech_lead: 70, hire_two_developers: 70, carry_on: 70 }],
     ]);
   });
 
@@ -575,9 +580,12 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     const stripped = structuredClone(run);
     delete (stripped.option_comparison as Rec[])[2]!.probability_of_goal;
     expect(goalChanceLicenceOf(stripped, g, 'capacity', () => false, undefined, g, {})).toBeNull();
-    // CONTROL: a status quo whose draws spread is not by assumption — nothing to say, so no record (as before).
+    // Batch C: AIE status-quo disposition (12 Oct) — a status quo whose draws spread on this same-draw reference is a
+    // disagreement, withheld with that reason (the record carries it), never a finding and never "no change".
     (run.option_comparison as Rec[])[2]!.outcome = { mean: 76, std: 3, p10: 72, p50: 76, p90: 80 };
-    expect(goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})).toBeNull();
+    const spread = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
+    expect(spread.status_quo).toBeUndefined();
+    expect(spread.withheld_reason_by_option?.carry_on?.reason).toBe('reference_moved');
   });
 
   it('B2 beside amendment 1: at a held month the Run did not carry, the status quo keeps "needs month-by-month changes"', () => {
@@ -660,5 +668,157 @@ describe('independent check r1 — item 7: a withheld joint says truly why, with
   it('no joint figure at all: "not calculated yet", with the next step', () => {
     const l = licenceFor(marketingRun({ probability_of_joint_goal: undefined, probability_of_joint_goal_precision: undefined }))!;
     expect((l.targets!.joint as Rec).line).toBe('The chance of meeting both together isn’t calculated yet. Run the analysis again to get it.');
+  });
+});
+
+// ── AIE status-quo disposition (12 Oct, #94 6117119450; PL 6117155350): amendment 1 is PARTIAL by design ────────────────
+// The checked facts decide how carrying on is read — never the Run row's summary statistics. Contrasts, written by hand:
+// ordinary anchored capacity (75% today, reached from ‘Developers’) and hiring's change quantity are the same-draw reference;
+// a root goal, a goal an option sets directly and a goal read from a launch are not established; a rates forecast is
+// carrying on's own projection; an ordinary paired Run whose status quo drifts or spreads is withheld until checked.
+const MOVED = (label: string): string => `Not shown: this run’s result for carrying on as now doesn’t match ‘${label}’ as it stands today in the model, so it needs checking first.`;
+const capacityWith = (sq: Rec): Rec => {
+  const run = capacityRun();
+  (run.option_comparison as Rec[])[2] = { ...(run.option_comparison as Rec[])[2], ...sq };
+  return run;
+};
+const cellsOf = (run: Rec, g: Rec): Record<string, Rec> => {
+  const env = withGoalChanceLicence(run, g, 'capacity', () => false, undefined, g, {});
+  return Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
+};
+
+describe('AIE status-quo disposition — the same-draw reference is decided by the checked facts, and checked by the Run', () => {
+  it.each([
+    ['spreads (72%–80%)', { probability_of_goal: 0.1, outcome: { mean: 76, std: 3, p10: 72, p50: 76, p90: 80 } }],
+    ['drifts to 78% with no spread', { outcome: { mean: 78, std: 0, p10: 78, p50: 78, p90: 78 } }],
+    ['meets the target on some draws only', { probability_of_goal: 0.2 }],
+  ])('RED (drift): an ordinary paired Run whose status quo %s is withheld with that reason — never a finding, never "no change"', (_name, sq) => {
+    const g = capacityGraph();
+    const run = capacityWith(sq);
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
+    expect(l.pct_by_option).toEqual({ lead: 46, two: 31 });
+    expect(l.withheld_option_ids).toEqual(['carry_on']);
+    expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'reference_moved', line: MOVED('Development capacity') } });
+    expect(l.status_quo).toBeUndefined();
+    expect(JSON.stringify(l)).not.toMatch(/by assumption|carrying on as now leaves/);
+    expect(cellsOf(run, g).carry_on).toEqual({ kind: 'withheld', face: 'Chance not shown yet', why: MOVED('Development capacity'),
+      reasons: [{ code: 'reference_moved', message: MOVED('Development capacity') }] });
+    // Read back by the Agent exactly as stored; a malformed one (with a side, or no line) speaks for nothing.
+    const env = withGoalChanceLicence(run, g, 'capacity', () => false, undefined, g, {}) as Rec;
+    expect(goalChanceLicenceForAgent({ enrichment: env })?.withheld_reason_by_option).toEqual(l.withheld_reason_by_option);
+    for (const bad of [{ reason: 'reference_moved', side: 'falls_short', line: MOVED('x') }, { reason: 'reference_moved', line: '' }]) {
+      const record = { ...structuredClone(l), withheld_reason_by_option: { carry_on: bad } };
+      expect(goalChanceLicenceForAgent({ inference_warnings: [record] })).not.toHaveProperty('withheld_reason_by_option');
+    }
+  });
+
+  it.each([
+    ['a ROOT goal (no link reaches it)', (g: Rec) => { g.edges = (g.edges as Rec[]).filter((e) => e.to !== 'capacity'); }],
+    ['a goal an option SETS directly', (g: Rec) => { ((g.nodes as Rec[])[2]!.interventions as Rec).capacity = { value: 0.8, raw_value: 80, source: 'brief_extraction' }; }],
+    ['a goal read from a LAUNCH, not today', (g: Rec) => { (g.nodes as Rec[])[0]!.goal_target_basis = { quantity_frame: 'level', target_frame: 'level', target_raw: 85,
+      reference: 'launch', period_months: 3, period_kind: 'at_end', effect_unit: 'percentage points', effects_at_period_end: true, source: 'olumi_reading' }; }],
+    ['a held month the Run did not carry', (g: Rec) => { (g.nodes as Rec[])[0]!.goal_horizon_months = 9; }],
+  ])('RED (authority unknown): %s — a status quo at today\'s level with no spread claims NO assumption (summary statistics are never the proof)', (_name, mutate) => {
+    const g = capacityGraph();
+    mutate(g);
+    const l = goalChanceLicenceOf(capacityRun(), g, 'capacity', () => false, undefined, g, {})!;
+    expect(l.status_quo).toBeUndefined();
+    expect(JSON.stringify(l)).not.toMatch(/by assumption|carrying on as now leaves/);
+    // The status quo is the Run's own row, exactly as before amendment 1: an unearned exact 0 at zero spread keeps its typed reason.
+    expect(l.withheld_reason_by_option?.carry_on?.reason).toBe('zero_spread');
+    const env = withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {}) as Rec;
+    expect((env.option_comparison as Rec[])[2]).toEqual((capacityRun().option_comparison as Rec[])[2]);
+  });
+
+  it('RED (projection): a rates forecast keeps carrying on\'s own projection with its real uncertainty — labelled, never "no change"', () => {
+    const g = capacityGraph({ goal: { nonlinear_identity: { operation: 'accumulation', factor_ids: ['devs'] } } });
+    expect(goalHorizonVerdict(g, {})).toBe('no_horizon');
+    const run = capacityWith({ probability_of_goal: 0.12, probability_of_goal_precision: wilson(0.12, 1200), outcome: { mean: 79, std: 4, p10: 74, p50: 79, p90: 84 } });
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
+    expect(l.pct_by_option).toEqual({ lead: 46, two: 31, carry_on: 12 });
+    expect(l.status_quo).toBeUndefined();
+    expect(l.notes).toEqual(['‘Carry on as now’ is this model’s projection for carrying on as now, with its own uncertainty — not an assumption that nothing changes.']);
+    expect(JSON.stringify(l)).not.toMatch(/by assumption|carrying on as now leaves|reference_moved/);
+    const env = withGoalChanceLicence(run, g, 'capacity', () => false, undefined, g, {}) as Rec;
+    expect((env.option_comparison as Rec[])[2]).toEqual((run.option_comparison as Rec[])[2]); // its precision and spread stay
+    // The same forecast whose status quo happens to sit at today with no spread is STILL not "by assumption".
+    const flat = goalChanceLicenceOf(capacityRun(), g, 'capacity', () => false, undefined, g, {})!;
+    expect(flat.status_quo).toBeUndefined();
+    expect(JSON.stringify(flat)).not.toMatch(/by assumption/);
+  });
+
+  it('CONTROL (assumed): ordinary anchored capacity and hiring\'s change quantity keep the assumption line, with no interval', () => {
+    expect(capacityLicence()!.status_quo?.line).toBe('Doing nothing: no change to ‘Development capacity’ in this model, by assumption.');
+    const g = hiringGraph();
+    expect(goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!.status_quo?.option_id).toBe('carry_on');
+    // Hiring's status quo whose change is NOT 0 disagrees with its own reference: withheld with that reason.
+    const drift = hiringRun();
+    (drift.option_comparison as Rec[])[2]!.outcome = { mean: 2, std: 1, p10: 1, p50: 2, p90: 3 };
+    const l = goalChanceLicenceOf(drift, g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
+    expect(l.withheld_reason_by_option?.carry_on).toEqual({ reason: 'reference_moved', line: MOVED('Productivity') });
+    expect(l.status_quo).toBeUndefined();
+  });
+});
+
+// AND: each condition keeps its own frame, population and timing — the primary goal never attests a secondary target.
+const pairedPair = (conversion: Rec = { observed_state: { value: 0.1, raw_value: 10, cap: 100, unit: '%', source: 'brief_extraction' } }): Rec => {
+  const g = marketingGraph();
+  const nodes = g.nodes as Rec[];
+  Object.assign(nodes[0]!, { goal_target_basis: { ...MARKETING_BASIS, reference: 'today', period_kind: 'at_end' },
+    observed_state: { value: 0.2, raw_value: 5, cap: 25, unit: 'customers', source: 'brief_extraction' } });
+  Object.assign(nodes[1]!, conversion);
+  nodes.push({ id: 'carry_on', kind: 'option', label: 'Carry on as now', is_baseline: true });
+  g.edges = [{ from: 'annual_spend', to: 'new_customers' }, { from: 'annual_spend', to: 'conversion_rate' }];
+  return g;
+};
+const withSqRow = (run: Rec, sq: Rec): Rec => ({ option_comparison: [...(run.option_comparison as Rec[]), { option_id: 'carry_on',
+  probability_of_goal: 0, probability_of_joint_goal: 0, probability_of_joint_goal_precision: PRECISION, ...sq }] });
+
+describe('AIE status-quo disposition — AND: the joint and its marginals keep each condition\'s OWN reference', () => {
+  it('RED: marketing (read from launch, no level today) — no universal "no change", no assumption note; the status quo keeps its figures', () => {
+    const g = marketingGraph();
+    (g.nodes as Rec[]).push({ id: 'carry_on', kind: 'option', label: 'Carry on as now', is_baseline: true });
+    const run = withSqRow(marketingRun(), { probability_of_goal: 0.3, probability_of_joint_goal: 0.12,
+      constraint_probabilities: { 'target:new_customers': 0.3, 'target:conversion_rate': 0.25 },
+      constraint_probabilities_precision: { 'target:new_customers': PRECISION, 'target:conversion_rate': PRECISION } });
+    const l = licenceFor(run, g)!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect(l.status_quo).toBeUndefined();
+    expect(JSON.stringify(l)).not.toMatch(/by assumption|carrying on as now leaves/);
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48, carry_on: 12 });
+    expect(l.targets!.per_target.find((t) => t.constraint_id === 'target:new_customers')!.pct_by_option).toEqual({ hire_manager: 60, ai_plus_ads: 70, carry_on: 30 });
+  });
+
+  it('CONTROL: both targets on the same-draw reference (anchored, reached, from today) — the line names both; no figure for the status quo', () => {
+    const g = pairedPair();
+    const run = withSqRow(marketingRun(), { constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0 } });
+    const l = licenceFor(run, g)!;
+    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'Doing nothing: no change to ‘New customers’ or ‘Conversion rate’ in this model, by assumption.' });
+    expect(l.notes).toContain('This assumes carrying on as now leaves ‘New customers’ and ‘Conversion rate’ unchanged through month three; each option is measured against that.');
+    expect(Object.keys(l.pct_by_option)).toEqual(['hire_manager', 'ai_plus_ads']);
+    for (const t of l.targets!.per_target) expect(t.pct_by_option).not.toHaveProperty('carry_on');
+  });
+
+  it('RED: the goal on the same-draw reference but ‘Conversion rate’ not anchored — the assumption names the goal only; the status quo keeps its joint and conversion figures', () => {
+    const g = pairedPair({});
+    const run = withSqRow(marketingRun(), { probability_of_joint_goal: 0, constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0.25 } });
+    const l = licenceFor(run, g)!;
+    expect(l.status_quo).toBeUndefined();
+    expect(l.notes).toContain('This assumes carrying on as now leaves ‘New customers’ unchanged through month three; each option is measured against that.');
+    expect(JSON.stringify(l.notes)).not.toMatch(/‘Conversion rate’ unchanged/);
+    expect(l.pct_by_option).toHaveProperty('carry_on');
+    const per = Object.fromEntries(l.targets!.per_target.map((t) => [t.constraint_id, t.pct_by_option]));
+    expect(per['target:new_customers']).not.toHaveProperty('carry_on');
+    expect(per['target:conversion_rate']).toMatchObject({ carry_on: 25 });
+  });
+
+  it('RED (drift): both on the same-draw reference but the status quo\'s conversion share is 25% — withheld with that reason, never relabelled', () => {
+    const g = pairedPair();
+    const run = withSqRow(marketingRun(), { constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0.25 } });
+    const l = licenceFor(run, g)!;
+    expect(l.status_quo).toBeUndefined();
+    expect(l.withheld_option_ids).toContain('carry_on');
+    expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'reference_moved', line: MOVED('Conversion rate') } });
+    for (const t of l.targets!.per_target) expect(t.pct_by_option).not.toHaveProperty('carry_on');
   });
 });

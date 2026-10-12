@@ -233,6 +233,22 @@ export function statusQuoRowWords(label: string): string {
   return `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
 }
 
+/**
+ * AIE status-quo disposition (12 Oct): a Run read on the same-draw reference whose status-quo result does NOT sit at that
+ * reference disagrees with its own inputs (source, transport or currentness) until checked — withheld with this reason,
+ * never relabelled as a finding or as "no change".
+ */
+export function statusQuoMovedWords(labels: readonly string[]): string {
+  const named = labels.map((l) => `‘${l}’`);
+  const list = named.length <= 1 ? (named[0] ?? '') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return `Not shown: this run’s result for carrying on as now doesn’t match ${list} as it stands today in the model, so it needs checking first.`;
+}
+
+/** AIE status-quo disposition (12 Oct): a forecast whose status quo varies is carrying on's own projection, with its uncertainty. */
+export function statusQuoProjectionWords(statusQuoLabel: string): string {
+  return `‘${statusQuoLabel}’ is this model’s projection for carrying on as now, with its own uncertainty — not an assumption that nothing changes.`;
+}
+
 /** Amendment 2 + DL hiring decision: the timing basis and the additive reading, said beside the chance. */
 export function effectsBasisWords(basis: GoalTargetBasis): string | undefined {
   if (!basis.effects_at_period_end) return undefined;

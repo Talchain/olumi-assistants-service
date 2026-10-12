@@ -47,7 +47,8 @@ import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js'
 import { goalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import {
-  effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoRowWords,
+  effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoMovedWords,
+  statusQuoProjectionWords, statusQuoRowWords,
   targetChanceWords, type GoalTargetBasis,
 } from './goal-target-basis.js';
 import { goalTargetsBlockOf, readGoalTargetsBlock, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
@@ -115,6 +116,17 @@ export interface GoalChanceZeroSpread {
   readonly line: string;
 }
 
+/**
+ * AIE status-quo disposition (12 Oct): a Run read on the same-draw reference whose status-quo row does not sit at that
+ * reference — a source, transport or currentness disagreement until checked. Withheld with this reason; never a finding.
+ */
+export interface GoalChanceReferenceMoved {
+  readonly reason: 'reference_moved';
+  readonly line: string;
+}
+
+export type GoalChanceWithheldReason = GoalChanceZeroSpread | GoalChanceReferenceMoved;
+
 export interface GoalChanceLicence {
   readonly code: typeof GOAL_CHANCE_LICENSED;
   readonly severity: 'info';
@@ -181,7 +193,7 @@ export interface GoalChanceLicence {
    * producer's own predicate): which side of the target that fixed result falls on, and the face line saying it is
    * conditional. The UI places `line` instead of a %; absent for any other withhold.
    */
-  readonly withheld_reason_by_option?: Readonly<Record<string, GoalChanceZeroSpread>>;
+  readonly withheld_reason_by_option?: Readonly<Record<string, GoalChanceWithheldReason>>;
   /**
    * ⭐ RECOVERY BATCH C (rulings 18–22): the words after "chance of" for THIS Run's headline, when its target's reference and
    * period are stated (`goal-target-basis.ts`) — "‘productivity’ being at least 10% higher than today at three months" — or,
@@ -216,13 +228,78 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
  *  · no carrier and no horizon: "Meets £20,000 a month if today’s figures hold." / "Falls short of … if today’s figures hold.";
  *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
  */
+/**
+ * How a Run reads carrying on as now (AIE status-quo disposition, 12 Oct, #94 6117119450):
+ *  · `assumed` — the same-draw reference (ISL b504df27: `B + (option − SQ)`): no change, by assumption, no interval;
+ *  · `moved` — that reference, but the Run's own status-quo row does not sit at it: withheld until checked, never relabelled;
+ *  · `projection` — a forecast whose status quo legitimately varies: the Run's own projection, with its real uncertainty;
+ *  · `unknown` — the checked facts do not say: no assumption is claimed, and the row is the Run's, exactly as before.
+ */
+type StatusQuoReading = 'assumed' | 'moved' | 'projection' | 'unknown';
+
+/** A node's own label, sayable on one line; else undefined. */
+function labelOfNode(nodes: readonly Rec[], id: string): string | undefined {
+  const label = nodes.find((n) => n.id === id)?.label;
+  return typeof label === 'string' && label.trim() !== '' && !/[\r\n]/.test(label) ? label.trim() : undefined;
+}
+
+/**
+ * The one timing fact the reading uses (`goalHorizonVerdict`): ordinary = no held month (or the target's own at-period-end
+ * basis) and no accumulation carrier anywhere; forecast = a carrier computed the held month, or rates accumulate with no held
+ * month (ISL's `per_draw_baseline` path). A held month the Run did not carry, or an attestation, is neither.
+ */
+function ordinaryTimingOf(graph: unknown, envelope: unknown): { readonly ordinary: boolean; readonly forecast: boolean } {
+  const verdict = goalHorizonVerdict(graph, envelope);
+  const accumulates = isRec(graph) && Array.isArray(graph.nodes) && graph.nodes.some((n) => isRec(n)
+    && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation');
+  return {
+    ordinary: !accumulates && (verdict === 'no_horizon' || verdict === 'basis_at_h'),
+    forecast: verdict === 'computed_at_h' || (verdict === 'no_horizon' && accumulates),
+  };
+}
+
+/**
+ * The EXISTING checked facts that a LEVEL quantity is read on the same-draw reference (ISL b504df27, ordinary anchored
+ * non-root level plans — single-goal chance and constraint series alike): today's level held on the node (anchored), the
+ * node reached through links from a quantity (not a root), not set by any option (not directly set), and read from today
+ * (not from a launch). The Run's summary statistics are never the proof.
+ */
+function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis, 'reference'> | undefined): boolean {
+  if (!isRec(graph) || typeof node.id !== 'string') return false;
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const kindOf = (id: unknown): unknown => nodes.find((n) => n.id === id)?.kind;
+  const anchored = isRec(node.observed_state) && finite(node.observed_state.raw_value);
+  const reached = edges.some((e) => e.to === node.id && kindOf(e.from) !== undefined && kindOf(e.from) !== 'option' && kindOf(e.from) !== 'decision');
+  const setDirectly = nodes.some((n) => n.kind === 'option'
+    && [n.interventions, isRec(n.data) ? n.data.interventions : undefined].some((iv) => isRec(iv) && Object.hasOwn(iv, node.id as string)));
+  return anchored && reached && !setDirectly && (basis === undefined || basis.reference === 'today');
+}
+
+/**
+ * The checked facts decide; the Run's status-quo row only CHECKS them. On the same-draw reference a constant level meets a
+ * fixed target on every draw or on none, at the reference itself: a share strictly between, a spread, or a centre away from
+ * the reference is a disagreement. A row that shows none of these (no outcome, or its spread already withheld) agrees.
+ */
+function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | undefined }): StatusQuoReading {
+  if (!a.paired) return a.forecast ? 'projection' : 'unknown';
+  const row = a.row;
+  if (row === undefined) return 'assumed';
+  const p = row.probability_of_goal;
+  if (typeof p === 'number' && p !== 0 && p !== 1) return 'moved';
+  const o = isRec(row.outcome) ? row.outcome : undefined;
+  if (o === undefined) return 'assumed';
+  if (['p10', 'p90', 'std'].some((k) => finite(o[k])) && !zeroSpread(row)) return 'moved';
+  const centre = finite(o.p50) ? o.p50 : finite(o.mean) ? o.mean : undefined;
+  return centre !== undefined && a.reference !== undefined
+    && Math.abs(centre - a.reference) > 1e-6 * Math.max(1, Math.abs(a.reference)) ? 'moved' : 'assumed';
+}
+
 function zeroSpreadReasons(
   sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown, envelope: unknown,
 ): Record<string, GoalChanceZeroSpread> {
   const verdict = goalHorizonVerdict(graph, envelope);
-  const rates = verdict === 'computed_at_h' || (verdict === 'no_horizon'
-    && isRec(graph) && Array.isArray(graph.nodes) && graph.nodes.some(n => isRec(n)
-      && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation'));
+  const rates = ordinaryTimingOf(graph, envelope).forecast;
   const months = heldGoalHorizonMonths(goal);
   // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
   const figure = sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
@@ -278,29 +355,30 @@ export function goalChanceLicenceOf(
   const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
   // The Run's own option records, current-first: the first carrier that has any is the comparison.
   const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
-  // ⭐ Amendment 1 (independent check r1 item 3): EVERY frame reads carrying on as now as the reference BY ASSUMPTION, never
-  // a finding. A quantity measured AS a change (hiring) is 0 today by definition, so its status quo is no change by
-  // construction. Any other goal's is by assumption where the Run's own status-quo row is that assumption — every draw at
-  // the goal's stated current level (zero spread, at today's level), which is what the same-draw reading produces. A Run
-  // whose status quo MOVED (drift over the period, or spread) did not hold it unchanged, so "no change" would be false of
-  // it: that row stays the Run's finding, as before. (A deadline share/event goal is not paired this way.)
+  // ⭐ AIE status-quo disposition (12 Oct, #94 6117119450; PL 6117155350) — amendment 1 is PARTIAL by design. Whether
+  // carrying on is "no change, by assumption" is decided by the EXISTING checked facts about how this Run reads the goal,
+  // never by a summary statistic of the Run's row (`statusQuoReadingOf`): the same-draw reference (paired) → by assumption,
+  // and a row that disagrees with it is withheld as a source/currentness disagreement; a forecast → carrying on's own
+  // projection, kept with its uncertainty; anything else → no assumption is claimed and the row is the Run's, as before.
   const sqRow = statusQuoId === undefined ? undefined
     : records.find((r) => (typeof r.option_id === 'string' ? r.option_id : r.id) === statusQuoId);
   const today = finite(goalState?.raw_value) ? goalState!.raw_value as number : undefined;
-  const sqCentre = isRec(sqRow?.outcome) ? (finite(sqRow!.outcome.p50) ? sqRow!.outcome.p50 : sqRow!.outcome.mean) : undefined;
-  const sqUnchanged = sqRow !== undefined && zeroSpread(sqRow) && today !== undefined && finite(sqCentre)
-    && Math.abs(sqCentre - today) <= 1e-6 * Math.max(1, Math.abs(today));
   // The goal's quantity frame as Olumi's validated reading holds it (`goalTargetBasisOf` keeps a reading only while its frame
   // equals the node's: 'change', else 'level'); read once, here.
   const readingFrame = basis?.quantity_frame;
   const changeQuantity = changeFrame !== undefined && readingFrame === 'change';
-  // B2 (Science §(ab)(2)) beside amendment 1: where the Run did not carry the goal's held month (verdict 'withhold'), a status
-  // quo whose exact 0/1 is unearned at zero spread keeps its typed reason ("needs month-by-month changes"): "no change" cannot
-  // be said at a month the model does not carry, and that line is the user's next step. Every other status quo: amendment 1.
+  const timing = ordinaryTimingOf(horizonGraph, envelope);
+  const sqReading: StatusQuoReading = share !== null || statusQuoId === undefined || goal === undefined ? 'unknown'
+    : statusQuoReadingOf({
+      paired: timing.ordinary && (changeQuantity || pairedLevelFacts(graph, goal, basis)),
+      forecast: timing.forecast,
+      row: sqRow,
+      // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today.
+      reference: changeQuantity ? 0 : today,
+    });
+  const sqByAssumption = sqReading === 'assumed';
   const sqP = sqRow?.probability_of_goal;
-  const sqMonthUncarried = sqRow !== undefined && statusQuoId !== undefined && (sqP === 0 || sqP === 1) && !earned(statusQuoId, sqP)
-    && zeroSpread(sqRow) && goalHorizonVerdict(horizonGraph, envelope) === 'withhold';
-  const sqByAssumption = share === null && statusQuoId !== undefined && (changeQuantity || sqUnchanged) && !sqMonthUncarried;
+  const goalLabel = typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label) ? goal.label.trim() : undefined;
   const option_ids: string[] = [];
   const licensed: string[] = [];
   const withheld: string[] = [];
@@ -321,8 +399,9 @@ export function goalChanceLicenceOf(
     const shareGate = share !== null && share.goal.id === goalId
       ? shareGateForOption(graph, id, typeof p === 'number' ? p : undefined, step) : undefined;
     if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
-    // ⭐ Amendment 1: the status quo is measured against itself — no change, by assumption, never a finding (every frame).
-    if (sqByAssumption && id === statusQuoId) { withheld.push(id); continue; }
+    // ⭐ Amendment 1: on the same-draw reference the status quo is measured against itself — no change, by assumption, never
+    // a finding. One whose row disagrees with that reference is withheld with that reason, never relabelled.
+    if ((sqByAssumption || sqReading === 'moved') && id === statusQuoId) { withheld.push(id); continue; }
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
     if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) {
       withheld.push(id);
@@ -347,8 +426,8 @@ export function goalChanceLicenceOf(
   // zero-spread reason did before (never a figure; the licence's message stays empty) — but only where the Run's own status-quo
   // row still carries its figure. A row whose figure was already withheld upstream (an untested horizon strips every option's)
   // said nothing before, so no record is added for it (fewer claims, never more).
-  const sqSaid = sqByAssumption && statusQuoId !== undefined && withheld.includes(statusQuoId) && typeof sqP === 'number'
-    && typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label);
+  const sqSaid = (sqByAssumption || sqReading === 'moved') && statusQuoId !== undefined && withheld.includes(statusQuoId)
+    && typeof sqP === 'number' && goalLabel !== undefined;
   if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0 && !sqSaid)) return null;
 
   // Only the superlative and every-option forms need every option (d5 6007421281): any withheld option ⇒ `each`.
@@ -396,7 +475,13 @@ export function goalChanceLicenceOf(
     : goalChanceEstimateCounts(graph, option_ids, goalId);
   const settingsByOption = Object.fromEntries(Object.entries(estimates.settingsByOption).filter(([id, n]) => licensed.includes(id) && n > 0));
   const estimateLinks = estimates.links;
-  const goalLabel = typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label) ? goal.label.trim() : undefined;
+  // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
+  // reference: withheld with that reason, never relabelled.
+  const withheldReasons: Record<string, GoalChanceWithheldReason> = {
+    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope) : {}),
+    ...(sqReading === 'moved' && statusQuoId !== undefined && withheld.includes(statusQuoId) && goalLabel !== undefined
+      ? { [statusQuoId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords([goalLabel]) } } : {}),
+  };
   const single: GoalChanceLicence = {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
@@ -418,8 +503,7 @@ export function goalChanceLicenceOf(
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
     ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
-    ...(Object.keys(zeroSpreadSide).length > 0
-      ? { withheld_reason_by_option: zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope) } : {}),
+    ...(Object.keys(withheldReasons).length > 0 ? { withheld_reason_by_option: withheldReasons } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit,
@@ -432,7 +516,9 @@ export function goalChanceLicenceOf(
   };
   return withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
-    sqByAssumption, quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, constraints, option_ids,
+    sqByAssumption, sqReading, timingOrdinary: timing.ordinary,
+    statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
+    quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, constraints, option_ids,
   });
 }
 
@@ -447,6 +533,7 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   readonly comparatorHeld: string; readonly target: { readonly value: number; readonly unit?: string };
   readonly base: number | undefined; readonly estimateOnly: boolean; readonly statusQuoId: string | undefined;
   readonly sqByAssumption: boolean; readonly quantityFrame: 'level' | 'change' | undefined; readonly olumiInputs: boolean;
+  readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean; readonly statusQuoLabel: string | undefined;
   readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
 }): GoalChanceLicence {
   const { goalLabel, changeFrame } = c;
@@ -458,7 +545,10 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   // Amendment 1, every frame: the status quo's own line, by assumption — never a figure or an interval.
   const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
     ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel) } } : {};
-  const assumed = 'status_quo' in statusQuo && goalLabel !== undefined ? [statusQuoAssumptionWords(goalLabel)] : [];
+  // AIE disposition: a forecast's status quo is carrying on's own projection, said as such (never "no change").
+  const projection = c.sqReading === 'projection' && c.statusQuoLabel !== undefined && c.statusQuoId !== undefined
+    && single.option_ids.includes(c.statusQuoId) ? [statusQuoProjectionWords(c.statusQuoLabel)] : [];
+  const assumed = [...('status_quo' in statusQuo && goalLabel !== undefined ? [statusQuoAssumptionWords(goalLabel)] : []), ...projection];
   if (goalLabel === undefined || (basis === undefined && changeFrame === undefined)) {
     // No stated basis: today's single-target sentence ("chance of meeting your goal"), with amendment 1's assumption and the
     // status quo's line where it is shown, and amendment 7's label; plus the several-targets block if the Run sent target rows.
@@ -487,8 +577,10 @@ function withBatchCWords(single: GoalChanceLicence, c: {
     notes.push(c.estimateOnly ? estimateOnlyWords(c.base, c.target.unit ?? '')
       : `Using ${sayFigureAsWritten(c.base, c.target.unit ?? '')} as today’s ‘${goalLabel}’.`);
   }
-  // Amendment 1: every paired frame reads carrying on as unchanged.
-  notes.push(statusQuoAssumptionWords(goalLabel, basis));
+  // Amendment 1, where the Run reads the goal on the same-draw reference (AIE disposition: never assumed where the checked
+  // facts do not establish it); a forecast's status quo is said as carrying on's own projection.
+  if ('status_quo' in statusQuo) notes.push(statusQuoAssumptionWords(goalLabel, basis));
+  notes.push(...projection);
   // Amendment 2 / DL hiring decision: the effects' timing basis and the additive reading.
   const effects = basis === undefined ? undefined : effectsBasisWords(basis);
   if (effects !== undefined) notes.push(effects);
@@ -542,11 +634,38 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   readonly statusQuoId: string | undefined; readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
   /** The drafter's retained conditions (`goal_target_basis.also_required`), whatever the basis' timing (AIE C clause 3). */
   readonly alsoRequired: readonly string[];
+  /** The goal's own status-quo reading, and the Run's ordinary timing: each other target is read on its OWN facts. */
+  readonly goal: Rec | undefined; readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean;
 }): GoalChanceLicence {
+  // ⭐ AIE status-quo disposition (12 Oct) item 4: a joint and its marginals keep each condition's OWN reference — the
+  // primary goal's unchanged reference never attests a secondary target. Each target condition is read on its own checked
+  // facts (`pairedLevelFacts`, the Run's ordinary timing); the status quo's own share for that condition only checks them.
+  const nodes = isRec(c.graph) && Array.isArray(c.graph.nodes) ? c.graph.nodes.filter(isRec) : [];
+  const stored = Array.isArray(c.constraints.storedConstraints) ? c.constraints.storedConstraints.filter(isRec) : [];
+  const sent = Array.isArray(c.constraints.sentConstraints) ? c.constraints.sentConstraints.filter(isRec) : [];
+  const sqId = c.statusQuoId !== undefined && c.option_ids.includes(c.statusQuoId) ? c.statusQuoId : undefined;
+  const sqRecord = sqId === undefined ? undefined : ((isRec(c.envelope) ? readOptionResultSources(c.envelope) : []).find((x) => x.length > 0) ?? [])
+    .find((r) => (typeof r.option_id === 'string' ? r.option_id : r.id) === sqId);
+  const conditionReading = (row: Rec): StatusQuoReading => {
+    if (sqId === undefined || typeof row.constraint_id !== 'string') return 'unknown';
+    if (c.goal !== undefined && row.node_id === c.goal.id) return c.sqReading;
+    const n = nodes.find((x) => x.id === row.node_id);
+    const frame = stored.find((x) => x.constraint_id === row.constraint_id)?.value_frame ?? row.value_frame;
+    if (n === undefined || (frame !== undefined && frame !== 'level') || !c.timingOrdinary || !pairedLevelFacts(c.graph, n, c.basis)) return 'unknown';
+    const cp = sqRecord?.constraint_probabilities;
+    const p = isRec(cp) ? cp[row.constraint_id] : Array.isArray(cp)
+      ? cp.filter(isRec).find((x) => x.constraint_id === row.constraint_id)?.probability : undefined;
+    return typeof p === 'number' && p !== 0 && p !== 1 ? 'moved' : 'assumed';
+  };
+  const targetRows = sent.filter((r) => stored.some((x) => x.constraint_id === r.constraint_id && x.role === GOAL_TARGET_ROLE));
+  const readings = new Map(targetRows.map((r) => [r.constraint_id as string, conditionReading(r)]));
+  const assumedIds = new Set([...readings].filter(([, r]) => r === 'assumed').map(([id]) => id));
+  const movedIds = new Set([...readings].filter(([, r]) => r === 'moved').map(([id]) => id));
+  const allAssumed = targetRows.length > 0 && assumedIds.size === targetRows.length;
   let block = goalTargetsBlockOf({
     envelope: c.envelope, graph: c.graph, storedConstraints: c.constraints.storedConstraints,
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
-    ...(c.statusQuoId !== undefined ? { statusQuoId: c.statusQuoId } : {}),
+    ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint: allAssumed || movedIds.size > 0, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
     ...(c.basis !== undefined ? { basis: c.basis } : {}),
   });
   if (block === null) return l;
@@ -554,19 +673,11 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     leader_option_id: _leader, next_option_id: _next, similar_option_ids: _similar, spread_note_by_option: _spread,
     shortfall_note_by_option: _shortfall, driver_by_option: _drivers, no_driver_by_option: _noDrivers, sent_threshold: _sent,
     summary_withheld: _summary, display_rounding_by_option: _rounding, withheld_reason_by_option: _zero, user_link_existence: _exists,
+    status_quo: _singleStatusQuo, notes: _singleNotes,
     ...kept
   } = l;
-  // Amendment 1 for every target the joint names (the single target's line named one); amendment 4 does not apply: the
-  // joint itself names every condition the Run sent.
+  // Amendment 4 does not apply: the joint itself names every condition the Run sent.
   const targetNames = block.conditions.filter((x) => x.role === 'target').map((x) => x.label);
-  const notes = (l.notes ?? []).flatMap((n) => n.startsWith('This chance covers ') ? []
-    : n.startsWith('This assumes carrying on as now') && targetNames.length > 0 ? [statusQuoAssumptionWords(targetNames, c.basis)] : [n]);
-  // ⭐ AIE C clause 3 (12 Oct): a condition the drafter RETAINED because this contract cannot represent it (a distinct
-  // period or reference) is said beside the joint, never claimed by it. One the joint already names (its figure) is not repeated.
-  const named = block.conditions.map((x) => sayFigureAsWritten(x.value, x.unit));
-  const retained = c.alsoRequired.filter((t) => !named.some((f) => t.includes(f)));
-  const covers = partialGoalWords(targetNames, retained);
-  if (covers !== undefined && targetNames.length > 0) notes.push(covers);
   // ⭐ AIE C clause 3: when the goal's OWN target cannot join the joint (stated as a change), its own licensed chance is kept
   // as one of the targets, said on its own — the same figure and words the single-target licence already licensed.
   const goalAlone = block.joint.status === 'withheld' && block.joint.reason === 'target_not_supported'
@@ -576,12 +687,40 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
       ...(l.display_rounding_by_option !== undefined ? { display_rounding_by_option: l.display_rounding_by_option } : {}) }]
     : [];
   if (goalAlone.length > 0) block = { ...block, per_target: [...goalAlone, ...block.per_target] };
-  // Amendment 1: carrying on as now is the reference for every target, by assumption — never given a figure here.
+  // Amendment 1, per condition: the assumption is said of exactly the targets whose own reference is the same-draw one.
+  const goalLabel = typeof l.goal_label === 'string' && l.goal_label.trim() !== '' ? l.goal_label.trim() : undefined;
+  const namedWhere = (ids: ReadonlySet<string>, reading: StatusQuoReading): string[] => [
+    ...(goalAlone.length > 0 && c.sqReading === reading && goalLabel !== undefined ? [goalLabel] : []),
+    ...block!.conditions.filter((x) => x.role === 'target' && ids.has(x.constraint_id)).map((x) => x.label),
+  ];
+  const assumedNames = namedWhere(assumedIds, 'assumed');
+  const movedNames = namedWhere(movedIds, 'moved');
+  const notes: string[] = [];
+  let assumptionSaid = false;
+  for (const n of l.notes ?? []) {
+    if (n.startsWith('This chance covers ')) continue;
+    if (n.startsWith('This assumes carrying on as now')) {
+      if (assumedNames.length > 0 && !assumptionSaid) { notes.push(statusQuoAssumptionWords(assumedNames, c.basis)); assumptionSaid = true; }
+      continue;
+    }
+    notes.push(n);
+  }
+  if (assumedNames.length > 0 && !assumptionSaid) notes.unshift(statusQuoAssumptionWords(assumedNames, c.basis));
+  // ⭐ AIE C clause 3 (12 Oct): a condition the drafter RETAINED because this contract cannot represent it (a distinct
+  // period or reference) is said beside the joint, never claimed by it. One the joint already names (its figure) is not repeated.
+  const named = block.conditions.map((x) => sayFigureAsWritten(x.value, x.unit));
+  const retained = c.alsoRequired.filter((t) => !named.some((f) => t.includes(f)));
+  const covers = partialGoalWords(targetNames, retained);
+  if (covers !== undefined && targetNames.length > 0) notes.push(covers);
+  // The status quo's own line is said only where EVERY target's reference is the same-draw one (never universal by default);
+  // a status quo whose own share disagrees with that reference is withheld with that reason.
   const targetLabels = targetNames.map((x) => `‘${x}’`);
-  const statusQuo = c.statusQuoId !== undefined && c.option_ids.includes(c.statusQuoId) && targetLabels.length > 0
-    ? { status_quo: { option_id: c.statusQuoId,
+  const statusQuo = sqId !== undefined && allAssumed && targetLabels.length > 0
+    ? { status_quo: { option_id: sqId,
       line: `Doing nothing: no change to ${targetLabels.length === 1 ? targetLabels[0] : `${targetLabels.slice(0, -1).join(', ')} or ${targetLabels[targetLabels.length - 1]}`} in this model, by assumption.` } }
     : {};
+  const moved = sqId !== undefined && movedNames.length > 0
+    ? { withheld_reason_by_option: { [sqId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords(movedNames) } } } : {};
   if (block.joint.status === 'licensed') {
     const quoted = block.joint.pct_by_option;
     return {
@@ -594,12 +733,13 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
       chance_words: `chance of ${block.joint.words}`,
       ...(notes.length > 0 ? { notes } : {}),
       ...statusQuo,
+      ...moved,
       targets: block,
     };
   }
-  const { withheld_option_ids: _w, chance_words: _words, status_quo: _sq, ...rest } = kept;
+  const { withheld_option_ids: _w, chance_words: _words, ...rest } = kept;
   return { ...rest, form: 'each', pct_by_option: {}, withheld_option_ids: [...c.option_ids], ...(notes.length > 0 ? { notes } : {}),
-    ...statusQuo, targets: block };
+    ...statusQuo, ...moved, targets: block };
 }
 
 /** One Run-input candidate must agree with every licensed option; ambiguity records nothing. */
@@ -965,7 +1105,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
   form: GoalChanceForm; option_ids: string[]; leader_option_id?: string; similar_option_ids?: string[]; withheld_option_ids?: string[];
   sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
   shortfall_note_by_option?: Readonly<Record<string, string>>;
-  withheld_reason_by_option?: Readonly<Record<string, GoalChanceZeroSpread>>;
+  withheld_reason_by_option?: Readonly<Record<string, GoalChanceWithheldReason>>;
   olumi_estimate_link_count?: number;
   olumi_estimate_value_count?: number;
   olumi_estimate_settings_by_option?: Readonly<Record<string, number>>;
@@ -997,12 +1137,16 @@ export function goalChanceLicenceForAgent(result: unknown): {
   if (r.withheld_option_ids !== undefined
     && (form !== 'each' || withheld === undefined || withheld.length === 0 || !withheld.every((id) => optionIds.includes(id)))) return undefined;
   // This is the producer's stored finding, never reconstructed from a public row whose exact 0/1 was stripped.
-  const zeroSpreadReasons: Record<string, GoalChanceZeroSpread> = {};
+  const zeroSpreadReasons: Record<string, GoalChanceWithheldReason> = {};
   for (const [id, reason] of Object.entries(isRec(r.withheld_reason_by_option) ? r.withheld_reason_by_option : {})) {
     if (!withheld?.includes(id) || (isRec(r.pct_by_option) && Object.hasOwn(r.pct_by_option, id))
-      || !isRec(reason) || reason.reason !== 'zero_spread' || (reason.side !== 'meets' && reason.side !== 'falls_short')
-      || typeof reason.line !== 'string' || reason.line.trim() === '' || /[\r\n]/.test(reason.line)) continue;
-    zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line: reason.line };
+      || !isRec(reason) || typeof reason.line !== 'string' || reason.line.trim() === '' || /[\r\n]/.test(reason.line)) continue;
+    if (reason.reason === 'zero_spread' && (reason.side === 'meets' || reason.side === 'falls_short')) {
+      zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line: reason.line };
+    } else if (reason.reason === 'reference_moved' && reason.side === undefined) {
+      // AIE status-quo disposition: the status quo's row disagrees with the same-draw reference (a typed reason, no side).
+      zeroSpreadReasons[id] = { reason: 'reference_moved', line: reason.line };
+    }
   }
   const sent = isRec(r.sent_threshold) ? r.sent_threshold : undefined;
   const notes = isRec(r.spread_note_by_option) ? r.spread_note_by_option : undefined;

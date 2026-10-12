@@ -14,7 +14,7 @@
  *     comparison the user stated did not reach the engine strictly, or when a condition cannot be said in the user's units
  *     (rulings 16–17, amendment 6). Marginal chances are NEVER multiplied. While it is withheld the Fréchet bound may be said:
  *     meeting both is no more likely than the lower of the two chances, which holds whatever their dependence;
- *   · the status quo is never given a figure here: carrying on as now is the reference, by assumption (amendment 1).
+ *   · the status quo is given no figure only where its own reference is the same-draw one (amendment 1, partial: AIE 12 Oct).
  * Pure and total; reads only the Run's own records and the rows it sent.
  */
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
@@ -124,7 +124,10 @@ const optionIdOf = (r: Rec): string | undefined => typeof r.option_id === 'strin
 
 /**
  * The several-targets block for a Run that SENT at least one `goal_target` row, else `null` (one target: nothing changes).
- * `optionIds` are the scored options in the model's order; `statusQuoId` is excluded from every figure (amendment 1).
+ * `optionIds` are the scored options in the model's order. The status quo is given no figure only where its own reference
+ * says so (AIE status-quo disposition, 12 Oct): `fromTargets` names each target whose marginal it is left out of (that
+ * target's reference is the same-draw one, or its share disagrees with it), and `fromJoint` whether it is left out of the
+ * joint. Anywhere else its figures are the Run's, with their uncertainty, exactly as any option's.
  */
 export function goalTargetsBlockOf(args: {
   readonly envelope: unknown;
@@ -132,7 +135,7 @@ export function goalTargetsBlockOf(args: {
   readonly storedConstraints: unknown;
   readonly sentConstraints: unknown;
   readonly optionIds: readonly string[];
-  readonly statusQuoId?: string;
+  readonly statusQuo?: { readonly id: string; readonly fromJoint: boolean; readonly fromTargets: ReadonlySet<string> };
   readonly basis?: GoalTargetBasis;
 }): GoalTargetsBlock | null {
   const stored = Array.isArray(args.storedConstraints) ? args.storedConstraints.filter(isRec) : [];
@@ -203,14 +206,16 @@ export function goalTargetsBlockOf(args: {
     const id = optionIdOf(r);
     if (id !== undefined && !recordOf.has(id)) recordOf.set(id, r);
   }
-  const compared = args.optionIds.filter((id) => id !== args.statusQuoId);
+  const sq = args.statusQuo;
+  const compared = args.optionIds.filter((id) => !(sq?.fromJoint === true && id === sq.id));
+  const comparedFor = (constraintId: string): string[] => args.optionIds.filter((id) => !(sq?.fromTargets.has(constraintId) === true && id === sq.id));
 
   // Each target's own chance, per option, from the same Run (never re-derived).
   const perTarget: GoalTargetChance[] = targets.flatMap((t) => {
     if (olumiBase.has(t.constraint_id) || strictLostIds.has(t.constraint_id)) return [];
     const pct: Record<string, number> = {};
     const rounding: Record<string, GoalChanceDisplayRounding> = {};
-    for (const id of compared) {
+    for (const id of comparedFor(t.constraint_id)) {
       const r = recordOf.get(id);
       const cp = r === undefined ? undefined : r.constraint_probabilities;
       const p = isRec(cp) ? cp[t.constraint_id] : Array.isArray(cp)
