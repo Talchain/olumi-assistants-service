@@ -7,7 +7,9 @@ import type { GuidanceSignals, GuidanceState, GoalPathEdit, JsonValue, PolicyId,
 const IDS = POLICY.rows.map(r => r.policy_id);
 const compareId = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const sorted = (ids: readonly string[]) => [...ids].sort(compareId);
-const SETTLED = new Set(['pressed', 'dismissed', 'completed']);
+/** E6 (Paul's test 12 Oct, DL): SHOWN counts. Served: RC-WIDEN W6 was offered with one state key on 8 replies in a row,
+ * each with the same "Why?" and "Suggest risks". A row is said once per state; it returns only when its key changes. */
+const SETTLED = new Set(['offered', 'pressed', 'dismissed', 'completed']);
 const LIMIT_REASONS = ['no_option_meets_limit', 'every_option_likely_breaks_limit'];
 const EDIT_KINDS = new Set(['factor_value_edit', 'edge_strength_edit', 'link_effect_edit', 'option_intervention_edit',
   'goal_target_edit', 'limit_edit', 'prior_range_edit', 'structural_add', 'structural_add_edge', 'structural_remove', 'structural_delete']);
@@ -28,12 +30,18 @@ export function entryKey(policy_id: PolicyId, item?: string): string {
   return item === undefined ? policy_id : `${policy_id}:${stateKeyHash({ item_id: item })}`;
 }
 
-/** A pressed, dismissed or completed entry hides its row until the row's state key changes. */
+/** A shown, pressed, dismissed or completed entry hides its row until the row's state key changes. */
 function cooled(draft: Draft, guidance: GuidanceState): boolean {
   const record = guidance[entryKey(draft.policy_id, draft.policy_id === 'RC-STRENGTHEN-ITEM' ? draft.item : undefined)];
   if (!record || !SETTLED.has(record.status)) return false;
   const recorded = record.state_key_hash ?? (record.state_key_fields ? stateKeyHash(record.state_key_fields) : undefined);
   return recorded === stateKeyHash(draft.fields);
+}
+/** E6: an item row whose SHOWN item is unchanged stays quiet; only an item the user acted on falls through to the next.
+ * Replayed on Paul's served graph, per-item fall-through put the identical S3L "Why?" on consecutive replies. */
+function shownItemUnchanged(candidates: readonly Draft[], guidance: GuidanceState): boolean {
+  return candidates.some(draft => draft.policy_id === 'RC-STRENGTHEN-ITEM' && draft.item !== undefined
+    && guidance[entryKey(draft.policy_id, draft.item)]?.status === 'offered' && cooled(draft, guidance));
 }
 
 type Candidate = { variant: Variant; priority: Priority; items: string[]; kind: 'link' | 'factor' };
@@ -183,7 +191,9 @@ function selected(d: Draft, s: GuidanceSignals): SelectedRow | undefined {
 export function eligibleGuidanceRows(signals: GuidanceSignals, guidance: GuidanceState): SelectedRow[] {
   const rows: SelectedRow[] = [];
   for (const id of IDS) {
-    for (const draft of evaluate(id, signals).candidates) {
+    const candidates = evaluate(id, signals).candidates;
+    if (shownItemUnchanged(candidates, guidance)) continue;
+    for (const draft of candidates) {
       if (cooled(draft, guidance)) continue;
       const row = selected(draft, signals);
       if (row) { rows.push(row); break; }
@@ -220,7 +230,8 @@ export function selectGuidance(signals: GuidanceSignals, guidance: GuidanceState
     const evaluation = evaluate(id, signals);
     let reason: SuppressionReason = evaluation.reason ?? 'not_eligible';
     let pick: SelectedRow | undefined;
-    for (const draft of evaluation.candidates) {
+    if (shownItemUnchanged(evaluation.candidates, guidance)) reason = 'cooldown';
+    else for (const draft of evaluation.candidates) {
       if (cooled(draft, guidance)) { reason = 'cooldown'; continue; }
       const row = selected(draft, signals);
       if (!row) { reason = 'pending_signal'; continue; }
