@@ -881,7 +881,9 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
       plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
-        expect(turn.coaching).toMatch(/explore the most-supported option/i);
+        // The win-share class: the Run turn's share-of-runs confirmation paragraph is removed, so the coaching copy is the
+        // reply's only paragraph (the `coaching` slot reads a second one): asserted on the whole reply.
+        expect(turn.assistantText).toMatch(/explore the most-supported option/i);
       });
     });
 
@@ -894,8 +896,8 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
       seedPriorRun();
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
-        expect(turn.coaching).not.toMatch(/your first analysis is ready/i);
-        expect(turn.coaching).toContain('Hire Marketing Manager');
+        expect(turn.assistantText).not.toMatch(/your first analysis is ready/i);
+        expect(turn.assistantText).toContain('Hire Marketing Manager');
       });
     });
   });

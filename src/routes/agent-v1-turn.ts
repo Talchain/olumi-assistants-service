@@ -2540,8 +2540,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // The bound Explain control is re-derived from the canonical readback above, so it is valid by construction.
         suggested_actions: firstOfEachId(replayActions).map(guidedSizingWireAction),
       });
+      // ⭐ The win-share class: a replay is filtered by the STORED ROW's own evidence (`replayedRowRunEvidence`), never today's
+      // turn: Olumi's fixed Run line in the row proves a Run reply; the Explain press on a Run still current, an explanation.
+      // Before the finaliser and every replay gate below (none of which adds a share sentence).
       const replayBody = {
-        ...finaliseV5Response(composedReplay, { scenarioId, runDeltaBoundByCaller: true }),
+        ...finaliseV5Response(withRunShareFreeResult(composedReplay, {
+          evidence: replayedRowRunEvidence({ storedText: prior.assistant_message,
+            explainsCurrentRun: isRunExplanationChip(explanationId) && replayNarration?.status === 'ready' }),
+          exitPath: 'agent_lane_v1_replay', requestId: String(req.id),
+        }), { scenarioId, runDeltaBoundByCaller: true }),
         ...(guidedSizingOnWire(replayGuided, state.graphHash) !== undefined
           ? { guided_sizing: guidedSizingOnWire(replayGuided, state.graphHash) } : {}),
         ...(replayFields !== undefined ? { _proposal_fields: replayFields } : {}),
@@ -2582,13 +2589,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
       });
-      // ⭐ The win-share class: a replay is filtered by the STORED ROW's own evidence (`replayedRowRunEvidence`), never today's
-      // turn: Olumi's fixed Run line in the row proves a Run reply; the Explain press on a Run still current, an explanation.
-      const gatedReplay = withEstimateGoalPointsAtEgress(withRunShareFreeResult(optionGatedReplay, {
-        evidence: replayedRowRunEvidence({ storedText: prior.assistant_message,
-          explainsCurrentRun: isRunExplanationChip(explanationId) && replayNarration?.status === 'ready' }),
-        exitPath: 'agent_lane_v1_replay', requestId: String(req.id),
-      }), {
+      const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
         current: (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
         userAuthoredTexts: userTextsForEgress(

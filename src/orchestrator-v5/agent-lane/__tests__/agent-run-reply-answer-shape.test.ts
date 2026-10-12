@@ -22,6 +22,7 @@
  *
  * The model call is a stubbed `fetch`: no provider is contacted.
  */
+import { RUN_SHARE_CENSUS } from '../../compose/run-share-text.js';
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -339,11 +340,14 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(fetch, 'positive control: the interpreter was called').toHaveBeenCalled();
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.headline).toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
-    expect([...b._answer_shape!.bullets, b._answer_shape!.detail].join('\n')).toContain(share);
+    // Batch E ruling (ii): the Agent's prose about a Run is a RESULT surface — the narrator's share-of-runs sentence is
+    // removed (never the headline, never anywhere on the reply); every other narrated sentence ships once.
+    expect([...b._answer_shape!.bullets, b._answer_shape!.detail].join('\n')).not.toContain(share);
+    expect(b.assistant_text).not.toMatch(RUN_SHARE_CENSUS);
     for (const line of screen) expect(faceOf(b._answer_shape!)).toContain(line.chance);
     expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
     for (const sentence of sentenceMultiset(narrated)) {
-      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence)).toHaveLength(1);
+      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence), sentence).toHaveLength(sentence === share ? 0 : 1);
     }
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
@@ -361,9 +365,10 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(b._answer_shape, b.assistant_text).toBeDefined();
     expect(b._answer_shape!.headline).toBe(own[0]);
     expect(b._answer_shape!.headline).not.toContain(share);
+    expect(b.assistant_text).not.toMatch(RUN_SHARE_CENSUS);
     expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
     for (const sentence of sentenceMultiset(narrated)) {
-      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence)).toHaveLength(1);
+      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence), sentence).toHaveLength(sentence === share ? 0 : 1);
     }
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });

@@ -644,11 +644,14 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       // formatting, not the claim-safety behaviour under test, and would go red
       // the next time paragraphing changed.
       const collapse = (s: string): string => s.replace(/\s+/g, ' ').trim();
-      expect(collapse(turn.assistantText)).toContain(collapse(SONNET_LEADER_ANSWER));
-      // Over-suppression control: the leader summary is untouched.
-      expect(turn.assistantText).toContain('comes out ahead');
-      expect(turn.assistantText).toContain('leading in 72%');
-      // And no withheld copy leaked onto a permitted turn.
+      // The win-share class (DL ruling, 12 Oct; AIE 6131687656): an explanation of the current Run is a result surface,
+      // so the answer's share-of-runs sentence ("comes out ahead, leading in 72% …") is removed at the exit and every
+      // other sentence of the answer ships verbatim. Those sentences are in no template, so they still prove the branch.
+      expect(collapse(turn.assistantText)).toContain(collapse(
+        'Your latest run is current, so there is no need to rerun it yet. ' +
+        'Capacity is the strongest computed driver here, so firming up that number would sharpen the comparison.'));
+      expect(turn.assistantText).not.toContain('leading in 72%');
+      // Over-suppression control: no withheld copy leaked onto a permitted turn.
       expect(turn.assistantText).not.toContain('no option can be put forward yet');
       expect(turn.assistantText).not.toContain('No single option can be put forward');
     });
