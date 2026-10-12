@@ -83,25 +83,35 @@ async function approveServedSet(variant = false) {
   return { w, p, receipt: String(out.follow_up) };
 }
 
-const UNSIZED_REVIEWED = '"Tech lead hires" → "Code review leadership" and "Code review leadership" → "Code quality deterioration"';
 const NEXT_STEP = 'Give a figure, or ask Olumi to estimate it.';
-const DISCLOSURE = `Your reviews of ${UNSIZED_REVIEWED} are recorded. They are not sized yet, so their values are unchanged. ${NEXT_STEP}`;
+const REVIEW = 'Review recorded; this link is still unsized. Its values are unchanged.';
+/** The AIE's text contract (#94 6115788987), said in full for the served approval. */
+const EXPECTED_RECEIPT = 'Recorded 4 link strengths and 2 reviews. '
+  + '"Current mid-weight developers" → "productivity" as moderate; "Developer hires" → "productivity" as moderate; '
+  + '"Developer hires" → "Code quality deterioration" as moderate; "Code quality deterioration" → "productivity" as moderate. '
+  + 'You accepted Olumi\'s estimate for how much "Current mid-weight developers" changes "productivity". '
+  + 'You accepted Olumi\'s estimate for how much "Developer hires" changes "productivity". '
+  + 'You accepted Olumi\'s estimate for how much "Developer hires" changes "Code quality deterioration". '
+  + 'You accepted Olumi\'s estimate for how much "Code quality deterioration" changes "productivity". '
+  + 'Olumi’s estimates stay marked as Olumi’s, not yours: your approval applied them, it did not make them your judgement. '
+  + `"Tech lead hires" → "Code review leadership": ${REVIEW} "Code review leadership" → "Code quality deterioration": ${REVIEW} ${NEXT_STEP}`;
 /**
  * Expectation (b)'s own instrument: the four element matchers the live witness applies to a receipt that confirms a
- * placeholder (`recovery/live/live-journey.mjs` batchAReceipt, copied verbatim 12 Oct). A receipt the witness cannot read
- * as carrying all four fails (b) on staging, whatever this spec says.
+ * placeholder (`recovery/live/live-journey.mjs` batchAReceipt, copied 12 Oct), with "still unsized" accepted as
+ * not-sized-yet as the DL ruled for the AIE's wording (SendMessage to SYS1, 12 Oct; the witness owner updates the script).
  */
 const WITNESS_B = {
   review_recorded: /review(?:ed)?\b[^.]{0,60}\b(?:recorded|noted|kept)|recorded (?:your|the) review|\breviewed\b/i,
-  not_sized_yet: /(?:isn['’]t|is not|not) (?:yet )?sized(?: yet)?|nobody has (?:sized|set)|whose strength nobody has set/i,
+  not_sized_yet: /(?:isn['’]t|is not|not) (?:yet )?sized(?: yet)?|still unsized|nobody has (?:sized|set)|whose strength nobody has set/i,
   values_unchanged: /values? (?:are |is |stay |stays )?unchanged|unchanged|kept as it is/i,
   give_a_figure: /Give a figure, or ask Olumi to estimate it\.?/i,
 };
+const itemsOf = (label: string): string => label.slice(label.indexOf(': '));
 
-describe('served mixed link set: the receipt follows the stored outcome', () => {
-  it('the fixture is the served approval: same offer, same six writes, same stored outcome', async () => {
+describe('served mixed link set: preview and receipt follow the stored outcome', () => {
+  it('the fixture is the served approval: the same six offered items, the same six writes, the same stored outcome', async () => {
     const { w, p } = await approveServedSet();
-    expect(String(p.public_label)).toBe(FX.served_offer_label);
+    expect(itemsOf(String(p.public_label))).toBe(itemsOf(FX.served_offer_label));
     const links = (w.sent[0]!.link_strengths as { from: string; to: string; intent: string; magnitude: number }[]);
     expect(links.map((l) => [key(l), l.intent])).toEqual(SIX.map((l) => [key(l), l.kept ? 'confirm_current' : 'set']));
     // Bound by identity: four links now sized as Olumi's estimates, the two reviewed links still nobody's.
@@ -109,30 +119,34 @@ describe('served mixed link set: the receipt follows the stored outcome', () => 
       .toEqual(SIX.map((l) => [key(l), l.kept ? 'placeholder' : 'olumi_accepted']));
   });
 
-  it('RED: the heading counts strengths and reviews from the stored outcome, discloses the unsized links once, and offers the next step', async () => {
+  it('RED: the consent preview counts 4 strengths and 2 reviews, as the receipt will', async () => {
+    const { p } = await approveServedSet();
+    expect(String(p.public_label)).not.toBe(FX.served_offer_label);
+    expect(String(p.public_label).startsWith('Record 4 link strengths and 2 reviews: ')).toBe(true);
+    expect(String(p.public_label)).not.toMatch(/Record these 6 link strengths/);
+  });
+
+  it('RED: the receipt counts from the stored outcome, says each review-only link is still unsized with its own values unchanged, then the next action once', async () => {
     const { receipt } = await approveServedSet();
     expect(receipt).not.toBe(FX.served_receipt);
-    expect(receipt).not.toContain('Recorded these 6 link strengths');
-    expect(receipt.startsWith('Recorded 4 link strengths and your reviews of 2 links: ')).toBe(true);
-    expect(receipt.endsWith(DISCLOSURE)).toBe(true);
-    expect(receipt.split(NEXT_STEP)).toHaveLength(2);
+    expect(receipt).toBe(EXPECTED_RECEIPT);
     for (const [element, re] of Object.entries(WITNESS_B)) expect(re.test(receipt), element).toBe(true);
+    expect(receipt.split(NEXT_STEP)).toHaveLength(2);
     // Other links WERE sized: never the whole model unchanged.
     expect(receipt).not.toMatch(/model[’']s values are unchanged|model is (?:exactly )?(?:as it was|unchanged)|nothing (?:was )?changed/i);
-    // "You accepted Olumi's estimate" only for the four links stored as Olumi's accepted estimates.
-    const accepted = receipt.match(/You accepted Olumi[’']s estimate for how much ("[^"]+") changes ("[^"]+")/g) ?? [];
-    expect(accepted).toHaveLength(4);
-    for (const s of accepted) expect(s).not.toMatch(/"Tech lead hires" changes "Code review leadership"|"Code review leadership" changes "Code quality deterioration"/);
+    // "You accepted Olumi's estimate" never for a review-only link.
+    expect(receipt).not.toMatch(/estimate for how much "(?:Tech lead hires" changes "Code review leadership|Code review leadership" changes "Code quality deterioration)"/);
     expect(receipt).not.toContain('—');
     expect(receipt).not.toMatch(/your own/i);
   });
 
-  it('RED (intent ≠ stored outcome): a moved link that stays unsized is counted as a change, not a strength, and disclosed', async () => {
-    const { w, receipt } = await approveServedSet(true);
+  it('RED (intent ≠ stored outcome): a moved link that stays unsized is counted as a change, not a strength', async () => {
+    const { w, p, receipt } = await approveServedSet(true);
     expect(linkSizing(edgeOf(w.graph(), { from: 'developer_hires', to: 'productivity' }))).toBe('placeholder');
-    expect(receipt.startsWith('Recorded 3 link strengths, the change to 1 link and your reviews of 2 links: ')).toBe(true);
+    expect(String(p.public_label).startsWith('Record 3 link strengths, 1 change to an unsized link and 2 reviews: ')).toBe(true);
+    expect(receipt.startsWith('Recorded 3 link strengths, 1 change to an unsized link and 2 reviews. ')).toBe(true);
     expect(receipt).toContain('"Developer hires" → "productivity" changed; it isn’t sized in the model yet');
-    expect(receipt.endsWith(DISCLOSURE)).toBe(true);
+    expect(receipt.endsWith(`"Tech lead hires" → "Code review leadership": ${REVIEW} "Code review leadership" → "Code quality deterioration": ${REVIEW} ${NEXT_STEP}`)).toBe(true);
     expect(receipt.split(NEXT_STEP)).toHaveLength(2);
     expect(receipt).not.toMatch(/Olumi[’']s estimate for how much "Developer hires" changes "productivity"/);
   });

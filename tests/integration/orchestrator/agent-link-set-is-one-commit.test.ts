@@ -138,7 +138,9 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(p.ok, JSON.stringify(p)).toBe(true);
     // His own link already sits in "strong": an estimate never replaces it, and it is said, not written.
     expect(p.already, JSON.stringify(p)).toEqual([expect.stringContaining('"Human assistant capacity" → "Delegation quality" is already strong, as the user set it')]);
-    expect(String(p.public_label)).toMatch(/^Record these 7 link strengths/);
+    // A′ (b) / AIE text contract #94 6115788987: four new estimates and three reviews of unsized links are counted apart,
+    // never "Record these 7 link strengths" (the over-count Batch A's live check failed on).
+    expect(String(p.public_label)).toMatch(/^Record 4 link strengths and 3 reviews: /);
     expect(String(p.public_label)).not.toContain('your estimate');
     const before = JSON.stringify(edge('capacityQuality'));
     const agreed = ['workloadHours', 'qualityHours', 'hoursFocus', 'capacityOverhead', 'aiUseQuality', 'riskQuality', 'overheadQuality'] as const;
