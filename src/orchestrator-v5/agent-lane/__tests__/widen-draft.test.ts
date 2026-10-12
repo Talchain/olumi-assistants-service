@@ -62,8 +62,8 @@ function candidate({ risks = 2, sameLever = false, nonSq = 3, counterCase = fals
 }
 const fixture = (args: Parameters<typeof candidate>[0] = {}) => {
   const c = candidate(args);
-  // The options arm is PARKED in the served seam (DL 6065138437); these unit rows opt in to keep testing it.
-  return { candidate: c, admitted: ADMIT(c, {}, BRIEF), admit: unitAdmit(BRIEF), brief: BRIEF, deadlineAt: Date.now() + 60_000, optionsArm: true };
+  // Both arms are PARKED in the served seam (options: DL 6065138437; risks: E6, DL 12 Oct); these unit rows opt in to keep testing them.
+  return { candidate: c, admitted: ADMIT(c, {}, BRIEF), admit: unitAdmit(BRIEF), brief: BRIEF, deadlineAt: Date.now() + 60_000, optionsArm: true, risksArm: true };
 };
 const churnFixture = () => {
   const input = fixture({ risks: 1 });
@@ -639,7 +639,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     if (settled) await promise;
   });
 
-  it('aw-late-timeout: separate late risk and option responses leave admission, recording and persisted graph unchanged', async () => {
+  it('aw-late-timeout (E6): both arms PARKED in the served seam, so a never-resolving provider is never called and the draft ships unchanged', async () => {
     vi.useFakeTimers();
     const c = candidate({ risks: 1, nonSq: 2, sameLever: true });
     const bytes = JSON.stringify(c);
@@ -654,24 +654,14 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     const actual = await run.promise;
     expect(actual.out.ok, JSON.stringify(actual.out)).toBe(true);
     expect(actual.out).not.toHaveProperty('widened');
-    // The served seam runs the risks pass only (options arm PARKED, DL 6065138437).
-    expect(pass).toHaveBeenCalledTimes(1);
-    expect(releases.risks).toBeDefined();
+    // E6: the risks arm is PARKED in the served seam too (options: DL 6065138437), so no pass starts.
+    expect(pass).toHaveBeenCalledTimes(0);
+    expect(releases.risks).toBeUndefined();
     expect(releases.options).toBeUndefined();
-    const admittedBefore = spy.mock.calls.length;
-    const recordingBefore = JSON.stringify(actual.recording);
-    const recordingLength = actual.recording.length;
-    const graphBefore = JSON.stringify(actual.graph);
-    const resultBefore = JSON.stringify(actual.out);
-    expect(recordingLength).toBeGreaterThan(0);
-    releases.risks!();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(spy, 'late generation must stop before re-admission').toHaveBeenCalledTimes(admittedBefore);
-    expect(actual.recording).toHaveLength(recordingLength);
-    expect(JSON.stringify(actual.recording)).toBe(recordingBefore);
+    expect(actual.recording.length).toBeGreaterThan(0);
     expect(JSON.stringify(actual.recording)).not.toContain(RATIONALE);
-    expect(JSON.stringify(actual.graph)).toBe(graphBefore);
-    expect(JSON.stringify(actual.out)).toBe(resultBefore);
+    expect(actual.graph!.nodes.filter((n: Rec) => n.draft_widening !== undefined)).toHaveLength(0);
+    expect(spy.mock.calls.length).toBeGreaterThan(0);
     expect(JSON.stringify(c)).toBe(bytes);
   });
 
@@ -883,7 +873,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
 });
 
 describe('P05b build seam and words', () => {
-  it('dv-no-provider: a caller that passes no widening provider makes no widening call, even on a thin draft (CONTRAST: same draft with one widens)', async () => {
+  it('dv-no-provider: a caller that passes no widening provider makes no widening call, even on a thin draft (E6: with one, both arms are PARKED in the served seam, so still none; CONTRAST: opted in, it widens)', async () => {
     const c = candidate({ risks: 1, sameLever: true });
     const call = vi.fn<CallStructuredModel>(async (req) => isRisks(req) || isOptions(req) ? generator()(req) : { text: JSON.stringify(c) });
     const dispatch: InternalDispatch = async (path) => path.endsWith('/graph/register')
@@ -894,7 +884,10 @@ describe('P05b build seam and words', () => {
     call.mockClear();
     const withIt = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, call, undefined, Date.now() + 60_000, call) as Rec;
     expect(withIt.ok, JSON.stringify(withIt)).toBe(true);
-    expect(call.mock.calls.filter(([req]) => isRisks(req) || isOptions(req)).length).toBeGreaterThan(0);
+    expect(call.mock.calls.filter(([req]) => isRisks(req) || isOptions(req))).toHaveLength(0);
+    const optIn = generator();
+    expect(await widening.widenDraft({ ...fixture({ risks: 1, sameLever: true }), callStructured: optIn })).not.toBeNull();
+    expect(optIn.mock.calls.some(([req]) => isRisks(req))).toBe(true);
   });
 
   it('dv-build-rich: a sufficient draft persists byte-identically without any widening call', async () => {
@@ -952,19 +945,20 @@ describe('P05b build seam and words', () => {
     expect(JSON.stringify(actual.graph)).toBe(JSON.stringify(baseline.graph));
   });
 
-  it('aw-build-widened: the served seam runs the RISKS pass only; counted risks reach registered GraphV3 and ToolResult, 0 options (arm PARKED)', async () => {
+  it('aw-build-risks-parked (E6): a one-risk draft gets NO Olumi risk in the served seam: 0 calls, no `widened`, no widened node (CONTRAST: opted in, the risks pass adds risks that stay out of the Run)', async () => {
     const pass = generator();
     const actual = await builder(candidate({ risks: 1, nonSq: 2, sameLever: true }), pass).promise;
     expect(actual.out.ok, JSON.stringify(actual.out)).toBe(true);
-    expect(pass).toHaveBeenCalledTimes(1);
-    expect(isRisks(pass.mock.calls[0]![0])).toBe(true);
-    expect(pass.mock.calls.some(([req]) => isOptions(req))).toBe(false);
-    expect(actual.out.widened).toEqual({ options: 0, risks: 3 });
-    const added = actual.graph!.nodes.filter((n: Rec) => n.draft_widening?.provenance === 'ai_suggested_widen');
-    expect(added.filter((n: Rec) => n.kind === 'risk')).toHaveLength(actual.out.widened.risks);
-    expect(added.filter((n: Rec) => n.kind === 'option')).toHaveLength(actual.out.widened.options);
+    expect(widening.diagnoseDraft(actual.graph).risks, 'POSITIVE CONTROL: the risk deficiency is still diagnosed').not.toBeNull();
+    expect(pass).toHaveBeenCalledTimes(0);
+    expect(actual.out).not.toHaveProperty('widened');
+    expect(actual.graph!.nodes.filter((n: Rec) => n.draft_widening !== undefined)).toHaveLength(0);
     expect(GraphV3.safeParse(actual.graph).success).toBe(true);
-    expect(JSON.stringify(actual.graph)).not.toContain(RATIONALE);
+    const optIn = generator();
+    const widened = await widening.widenDraft({ ...fixture({ risks: 1, nonSq: 2, sameLever: true }), callStructured: optIn });
+    expect(widened?.counts.risks).toBeGreaterThan(0);
+    expect(widened!.admitted.nodes.filter((n: Rec) => n.kind === 'risk' && n.draft_widening !== undefined)
+      .every((n: Rec) => n.analysis_participation === 'retained_excluded')).toBe(true);
   });
 
   it('aw-options-parked: an options-only deficiency (counter-case present, same lever) makes NO call in the served seam; CONTRAST: opted in, it calls', async () => {
@@ -1005,8 +999,9 @@ describe('P05b build seam and words', () => {
     const out = await caps.buildModelFromBrief({ scenario_id: SCENARIO, authenticated_user_id: 'user-aw', request_id: 'req-aw' }, { brief: BRIEF });
     await drafterRaw.settleDrafterRawWritesForTests();
     expect(out.ok, JSON.stringify(out)).toBe(true);
-    expect(pass).toHaveBeenCalledTimes(1);
-    expect(out).toHaveProperty('widened');
+    // E6: the risks arm is PARKED in the served seam, so nothing widens; the recording still holds only the drafter.
+    expect(pass).toHaveBeenCalledTimes(0);
+    expect(out).not.toHaveProperty('widened');
     expect(rows).toHaveLength(1);
     expect(rows[0]!.calls.length).toBeGreaterThan(0);
     expect(rows[0]!.calls.every(call => call.raw_text === JSON.stringify(c))).toBe(true);

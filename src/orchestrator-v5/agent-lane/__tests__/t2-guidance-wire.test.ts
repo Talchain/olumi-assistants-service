@@ -231,7 +231,10 @@ describe('the real route: the row rides the typed turn, and only it', () => {
       status: 'offered', variant_id: 'S1', slot: 1, state_key_hash: (b.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash,
     } } });
     expect(JSON.stringify(saved.agent_guidance)).not.toContain(AI.from);
-    expect((await turn({ message: 'What next?' })).guidance).toEqual(b.guidance); // offered is not settled
+    // E6 (DL 12 Oct, Paul's test): SHOWN counts. On the unchanged state the same row is not said again.
+    const next = (await turn({ message: 'What next?' })).guidance as { slot1?: { policy_id: string; item?: string; state_key_hash: string } } | undefined;
+    const first = (b.guidance as { slot1: { policy_id: string; item?: string; state_key_hash: string } }).slot1;
+    expect(next?.slot1 === undefined || next.slot1.policy_id !== first.policy_id, JSON.stringify(next)).toBe(true);
   });
   it('records a pressed event ONLY for the S1 item the successful held card actually targets', async () => {
     await turn({ message: 'Where does this leave me?' });
