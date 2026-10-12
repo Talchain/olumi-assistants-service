@@ -434,6 +434,66 @@ describe('a pending approval survives a restart', () => {
     expect(canonical().systemEvents, 'the Run adds no canonical write').toBe(afterApproval.systemEvents);
     expect(edges).toEqual([{ from: 'f1', to: 'o1' }]);
   }, 60_000);
+
+  // ── R2 T1 (friction audit row T1): typed "Yes, that is my deadline." — the card's own button words — was refused
+  // ("Please use the approval button…" + a false "Not saved: … ask me to try again"). Words typed EXACTLY equal to the ONE
+  // waiting card's button words are that press; anything else stays as it was. This harness's model never authorises.
+  const typedIn = (a: FastifyInstance, message: string, turnId: string = randomUUID()): Promise<Body> => turn(a, { message, turn_id: turnId });
+  it('R2 T1: typed words EXACTLY equal to the one waiting card\'s button → applied once on the approval path; a resend writes nothing more', async () => {
+    const turnId = randomUUID();
+    let words = '';
+    const t = await inProcess(async (a) => {
+      const approve = await offerIn(a);
+      words = approve.message;
+      return typedIn(a, words, turnId);
+    });
+    expect(words).toBe('Yes, make that change.');
+    expectSaved(t);
+    const after = { writes, systemEvents };
+    // The same request again (a client retry): the stored answer is replayed, no second write.
+    const replay = await inProcess((b) => typedIn(b, words, turnId));
+    expect(replay._agent.replayed, 'the same turn replays').toBe(true);
+    // The user types it again as a new message: no card waits now, so nothing is applied.
+    const again = await inProcess((b) => typedIn(b, 'Yes, make that change.'));
+    expect(again._diagnostic_trace.fast_path).toBeUndefined();
+    expect({ writes, systemEvents }, 'no second write').toEqual(after);
+    expect(edges).toEqual([{ from: 'f1', to: 'o1' }]);
+  }, 60_000);
+
+  it.each([
+    ['a near match (lower case)', 'yes, make that change.'],
+    ['a near match (extra words)', 'Yes, make that change please.'],
+  ])('R2 T1 CONTRAST: %s with one card waiting → not the approval path, nothing written', async (_name, words) => {
+    const t = await inProcess(async (a) => { await offerIn(a); return typedIn(a, words); });
+    expect(t._diagnostic_trace.fast_path).toBeUndefined();
+    expect(edges).toEqual([]);
+  }, 60_000);
+
+  it('R2 T1 CONTRAST: two cards waiting → the exact words are not bound to either; nothing written', async () => {
+    const { computeProposalId } = await import('../proposal.js');
+    const approve = await propose();
+    const row = latestRow()!;
+    const first = row.pending_actions.find((p) => (p as { chip_id?: string }).chip_id === approve.id) as Carrier;
+    const second = structuredClone(first);
+    const { proposal_id: _id, ...content } = second.action.inline_patch.agent_proposal as unknown as Record<string, unknown> & { proposal_id: string };
+    const changed = { ...content, public_label: `${String(content.public_label)} (second)` };
+    const id = computeProposalId(changed as never);
+    second.action.inline_patch.agent_proposal = { ...changed, proposal_id: id } as never;
+    second.chip_id = `agent-approve-proposal:${id}`;
+    second.action.proposal_ref = second.chip_id;
+    row.pending_actions.push(second);
+    const { isHeldProposal } = await import('../proposal-object/record.js');
+    expect((await store.readMostRecentPendingActions(SCENARIO) as never[]).filter(isHeldProposal), 'the control: two valid held cards').toHaveLength(2);
+    const t = await inProcess((b) => typedIn(b, approve.message));
+    expect(t._diagnostic_trace.fast_path).toBeUndefined();
+    expect(edges).toEqual([]);
+  }, 60_000);
+
+  it('R2 T1 CONTRAST: no card waiting → the same words are an ordinary message; nothing written', async () => {
+    const t = await inProcess((a) => typedIn(a, 'Yes, make that change.'));
+    expect(t._diagnostic_trace.fast_path).toBeUndefined();
+    expect(edges).toEqual([]);
+  }, 60_000);
 });
 
 describe('the persisted carrier satisfies the production parser', () => {

@@ -471,7 +471,13 @@ describe('R2 committed carrier read failure and bounded newest-offer identity', 
   })
   it('fixed cap stops before an older offer', async () => {
     const carryOnly = proposalPendingAction(proposalOf(offered), chip, { scenario_id: SCENARIO, emitted_at_iso: offered.emitted_at_iso }, false)
+    // One shared answer time, fixed: each row's `created_at` was its own `new Date()`, so on a slow runner (CI, #2971) the
+    // rows spanned more than one millisecond, and the S-D issuing-turn search (`issuedTurnIdsForProposalRecords`, the
+    // graph read's proposal_fields) then found a unique earliest row and read it too: a 9th read of 'carry-0', on
+    // staging 22393d76 as well. Same-time rows leave that search ambiguous (no read), as on a fast machine.
+    const at = new Date().toISOString()
     table = [...Array.from({ length: HELD_OFFER_ROWS_READ_CAP }, (_, i) => answerRow(carryOnly, `carry-${i}`)), answerRow(offered)]
+      .map(row => ({ ...row, created_at: at }))
     expect(await heldRead()).not.toHaveProperty('held_proposal_offers')
     expect(readCommittedTurn).toHaveBeenCalledTimes(HELD_OFFER_ROWS_READ_CAP)
     expect(readCommittedTurn.mock.calls.map(c => c[1])).not.toContain('held-turn')

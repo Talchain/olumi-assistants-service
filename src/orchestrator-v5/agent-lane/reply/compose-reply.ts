@@ -174,6 +174,11 @@ export interface ReplyComposeInput {
   readonly whatChanges?: string;
   /** The route's RC4 census words; never counted or inferred from prose here. */
   readonly estimatesLine?: string;
+  /**
+   * R2 N1 (friction audit): this turn neither ran nor explained a Run; it only sits beside a withheld one. Its reply
+   * carries no chance-status marker (the Run reply and Results already say it), so the user's answer leads.
+   */
+  readonly notRunOrExplain?: true;
   /** Exact questions already carried by this reply's pending/suggested typed control. */
   readonly typedControlQuestions?: readonly string[];
   /** Node labels resolve narrator mentions to the typed directed link subjects. */
@@ -661,7 +666,7 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
       return [{ ...o, text: sentence ?? written }];
     }) : [];
   const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
-  const chanceMarker = chanceDisclosure === null ? undefined : markerForDisclosure(chanceDisclosure);
+  const chanceMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined : markerForDisclosure(chanceDisclosure);
   const markerObligations = disclosures.filter(o => o.disclosure?.kind !== 'withhold').filter(o => o.lead === true || (o.disclosure?.kind === 'robustness' && !(o.subjects?.length))
     || (input.obligations ?? []).some(finding => finding.lead === true && finding.role === 'evidence'
       && (o.subjects ?? []).some(subject => finding.subjects?.includes(subject)))).map((o): FaceObligation => ({ ...o, text: markerForDisclosure(o.disclosure!), disclosure: undefined }));

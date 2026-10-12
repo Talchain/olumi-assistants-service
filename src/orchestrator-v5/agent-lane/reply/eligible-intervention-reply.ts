@@ -11,11 +11,10 @@ const words = (text: string): number => text.trim().split(/\s+/).filter(Boolean)
  */
 export function composeEligibleIntervention(composed: ReplyComposition, intervention: EligibleIntervention,
   actionLabel: string | undefined, faceContract: boolean, wholeProposal = false, whySaid = false): ReplyComposition {
+  // R2 N2r (friction audit N2): a whole proposal ships unshaped, so a <details> suffix reached the user as raw markup
+  // ("<details> <summary>Why?</summary>…", hiring step 5, deadline step 3). It keeps every byte and carries no Why.
+  if (wholeProposal) return composed;
   const disclosure = whySaid ? '' : `<details>\n<summary>${INTERVENTION_WHY_LABEL}</summary>\n\n${intervention.why}\n\n</details>`;
-  // Proposal disclosures and approval questions retain every byte; only the carried suffix is new.
-  if (wholeProposal) {
-    return whySaid ? composed : { ...composed, text: `${composed.text}\n\n${disclosure}` };
-  }
   // Run/Draft H/W/E/N belongs to the existing composer, byte for byte.
   if (faceContract) {
     if (whySaid) return composed;

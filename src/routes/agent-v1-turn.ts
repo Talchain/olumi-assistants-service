@@ -543,7 +543,8 @@ export function stillValidOffers(
   // The next step after a blocked Run stays offered while the model is KNOWN not to run (process-local,
   // like the approve chip: after a restart the replay carries the words only). A replay whose state read
   // failed is unknown, and an unknown state is never re-advertised as a refusal (#1885 pre-review 5827131835).
-  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && knownNotRunnable(now.analysisReady);
+  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && knownNotRunnable(now.analysisReady)
+    && !onlyUserCanUnblock(now.analysisReady);
   // Offered only on a refused run (`offersStartingAssumptions`): it stays while the run is KNOWN refused, as the next step does.
   const startingAssumptions = offered.some((a) => a.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id) && knownNotRunnable(now.analysisReady);
   // A rebuild stays offered only while there is still no model to build over.
@@ -1002,6 +1003,17 @@ export const RUN_OFFER_CHIP = {
 export function admitsRunOffer(analysisReady: unknown): boolean {
   const ar = (analysisReady ?? {}) as { may_run?: unknown; status?: unknown };
   return typeof ar.may_run === 'boolean' ? ar.may_run : ar.status === 'ready';
+}
+
+/**
+ * R2 T2 (friction audit): every blocker needs the user's own judgement (`human_input_required`), so "Suggest what it
+ * still needs" has nothing Olumi could prepare for approval (it produced nothing approvable 4/4); the face already asks.
+ */
+export function onlyUserCanUnblock(analysisReady: unknown): boolean {
+  const issues = (analysisReady as { readiness_issues?: unknown } | null | undefined)?.readiness_issues;
+  const blocking = (Array.isArray(issues) ? issues : []).filter((i): i is Record<string, unknown> => i !== null && typeof i === 'object')
+    .filter(i => i.obligation !== 'offered' && i.waived_by_exclusion !== true);
+  return blocking.length > 0 && blocking.every(i => i.repairability === 'human_input_required');
 }
 
 /**
@@ -2201,7 +2213,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // An approval wins over Run and retains its verification reads.
     if (!typedRunOf(body) || typedApprovalOf(body) !== undefined) readCache.prefetch();
 
-    const approvedProposal = typedApprovalOf(body);
+    // `let`: R2 T1 binds a composer message that is exactly the ONE waiting card's own button words, below.
+    let approvedProposal = typedApprovalOf(body);
     /**
      * ⭐ S-D: the values the user set in the change's panel, sent with that card's press (`proposal_edits`). `undefined`
      * = none sent (a plain approve); `null` = sent but unusable (nothing is applied). Their digest is part of this
@@ -2948,7 +2961,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...heldAtStart.map(h => proposalRecord(h, undefined)?.approve_action)]
       .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
     // A product hold is its own durable card; confirmHeld checks these words against that exact live hold.
-    const pressedApproval = approvedProposal !== undefined
+    let pressedApproval: Partial<AgentToolContext> = approvedProposal !== undefined
       ? { typed_approval_of: approvedProposal,
         ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
@@ -2965,6 +2978,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && proposal.operations.length > 0 && proposal.operations.every(op => op.op === 'add_edge' || op.op === 'update_edge')) {
         composerApproval = id;
       }
+    }
+    /**
+     * ⭐ R2 T1 (friction audit): words typed into the composer that EXACTLY equal the ONE waiting card's own button words
+     * ("Yes, that is my deadline.") ARE that press: the UI's chip sends the same words (DGAI `sendChip` → `chip.message`).
+     * Bound by card identity, never by reading words: exactly one card held in this conversation (the durable carrier
+     * this turn found) and no other proposal outstanding. A near match, two cards or no card stays refused, and a resend of
+     * the same turn replays its stored answer, so it never writes twice.
+     */
+    // The ONE waiting card, from the holds this turn already read (no further read): the only case typed words bind.
+    const onlyCard = heldAtStart.length === 1 ? proposalRecord(heldAtStart[0]!, undefined)?.approve_action : undefined;
+    const onlyCardId = onlyCard === undefined ? undefined : typedApprovalOf({ chip: { id: onlyCard.id } });
+    const exactlyOneCardWaits = onlyCardId !== undefined && proposals.outstanding(scenarioId, userId).every(p => p.proposal_id === onlyCardId);
+    if (approvedProposal === undefined && typedNow !== null && exactlyOneCardWaits && onlyCard!.message === typedNow) {
+      approvedProposal = onlyCardId;
+      pressedApproval = { typed_approval_of: onlyCardId, typed_approval_words: typedNow };
     }
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.
@@ -3179,7 +3207,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
-        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
+        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }, exactlyOneCardWaits).status ?? '', followUp].filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
           // The reply the user reads is composed from this text plus Olumi's status line.
@@ -4416,7 +4444,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? (() => { const chip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }); return chip === null ? [] : [chip]; })() : []),
       // The run is refused and Olumi can fill the gap: the one specific next step replaces the general one.
       ...(startingAssumptions.length > 0 ? startingAssumptions
-        : (runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+        : ((runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked) && !onlyUserCanUnblock(analysisReady) ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
       // The research control for each query the Agent offered THIS turn: the only way a query is ever sent. Only a
       // control the final egress would ship is offered, and so remembered as pressable.
@@ -4664,11 +4692,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? { text, status: null as string | null, stripped: [] as string[] }
       : fastPath === 'approve'
         ? (editsRefusedThisTurn ? { text, status: null as string | null, stripped: [] as string[] }
-          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }),
+          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }, exactlyOneCardWaits),
               // A specific partial follow-up is already the narrator's authoritative status.
               text: result.tool_results.some(r => r.mutated === true && r.applied === false
                 && typeof r.outcome === 'string' && r.follow_up === text) ? '' : text })
-        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null, alreadySaid: saidBeforeStatus });
+        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null, alreadySaid: saidBeforeStatus }, exactlyOneCardWaits);
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.
@@ -5117,6 +5145,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const faceContract = result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true)
         ? 'draft' as const : fastPath === 'run' || fastPath === 'explain' || screenLines.length > 0 || goalChanceOwed !== null || coHold !== undefined
           ? 'run' as const : undefined;
+      // R2 N1 (friction audit): only a Run/Explain turn leads with the chance status; a draft, Run or Explain shows estimates.
+      const runOrExplainTurn = ranAnalysisThisTurn || fastPath === 'explain';
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
       const runWidenWords = faceContract === 'run' || firstAnalysisExists || screenLines.length > 0
@@ -5240,7 +5270,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(runWidenWords.widenedRiskMarker === undefined ? {} : { widenedRiskMarker: runWidenWords.widenedRiskMarker }),
         ...(horizonLine === null ? {} : { horizonLine }),
         ...(whatChanges === null ? {} : { whatChanges }),
-        ...(faceContract !== undefined && profile === 'coaching' && estimates !== null && estimates.count > 0
+        ...(faceContract !== undefined && !runOrExplainTurn ? { notRunOrExplain: true as const } : {}),
+        ...((faceContract === 'draft' || runOrExplainTurn) && profile === 'coaching' && estimates !== null && estimates.count > 0
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
