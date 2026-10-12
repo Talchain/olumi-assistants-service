@@ -62,9 +62,11 @@ describe('typed current-level sentence authority', () => {
         expect(transformNodeToV3(n).observed_state).toEqual(os);
       }
       expect(os.user_material_unverified).toBe(claimed ? true : undefined);
-      expect(NodeV3.parse({ ...n, provenance: nodeProvenanceDisplay('explicit', os) }).provenance).toBe(claimed ? 'unverified_brief' : 'from_brief');
+      // ONE PROVENANCE AUTHORITY: a HELD figure's label is its own provenance, whatever extraction type a caller passes, and
+      // the value pair is total (Olumi's figure says ai_inferred; it no longer defers to the caller's fallback).
+      expect(NodeV3.parse({ ...n, provenance: nodeProvenanceDisplay('explicit', os) }).provenance).toBe(claimed ? 'unverified_brief' : 'ai_inferred');
       expect(nodeProvenanceDisplay(os.extractionType, os)).toBe(claimed ? 'unverified_brief' : 'ai_inferred');
-      expect(observedValueAuthorship(os)?.provenance).toBe(claimed ? 'unverified_brief' : undefined);
+      expect(observedValueAuthorship(os)?.provenance).toBe(claimed ? 'unverified_brief' : 'ai_inferred');
       expect(valueAuthorshipOf(os)).toBe(claimed ? 'unknown' : 'olumi_estimate');
       expect(deriveInferredValues(graph).some(r => r.factor_id === n.id)).toBe(!claimed);
       const questions = (out as { open_questions?: string[] }).open_questions ?? [];

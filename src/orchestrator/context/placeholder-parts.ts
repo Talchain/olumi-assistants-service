@@ -28,7 +28,7 @@
 
 import { isSizedOnlyByOlumi, isAcceptedOlumiSize, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
-import { isPersonsOwnSetting, isPersonsOwnValue, isUserStatedStrength, linkProvenanceOf } from '../../cee/provenance/provenance-of.js';
+import { isPersonsOwnSetting, isPersonsOwnValue, isUserSizedWithoutOlumiMarks, isUserStatedStrength } from '../../cee/provenance/provenance-of.js';
 import { exactIdentityOperandLinks } from '../../orchestrator-v5/admission/identity-evaluations.js';
 import { sameUnit } from '../../orchestrator-v5/agent-lane/same-unit.js';
 
@@ -213,8 +213,9 @@ export function userStatedLinkUnitsOf(nodes: readonly Rec[], edges: readonly Rec
       const p = isRec(edge.provenance) ? edge.provenance : undefined;
       const effect = p !== undefined && isRec(p.natural_effect) ? p.natural_effect : undefined;
       // An estimate is not the user's figure; all touching user stamps still take part in the fail-closed check.
-      // ONE PROVENANCE AUTHORITY: only a link whose size is the person's (`linkProvenanceOf` human) speaks for a unit.
-      if (p === undefined || linkProvenanceOf(edge).origin !== 'human') return false;
+      // ONE PROVENANCE AUTHORITY: only the person's size with no Olumi mark on it speaks for a unit (a narrower question
+      // than `linkProvenanceOf` human, answered by the authority).
+      if (p === undefined || !isUserSizedWithoutOlumiMarks(edge)) return false;
       const mean = isRec(edge.strength) ? edge.strength.mean : undefined;
       if (effect === undefined || !finite(mean) || mean !== effect.strength_mean || !finite(effect.amount)
         || !finite(effect.per_source_change) || effect.per_source_change === 0) return false;

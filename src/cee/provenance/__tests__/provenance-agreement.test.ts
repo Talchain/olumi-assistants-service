@@ -224,9 +224,13 @@ const linkVariants: { name: string; edge: Rec; from?: string; expected: Klass }[
   { name: 'Olumi estimate', edge: { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } }, expected: 'ai' },
   { name: 'Olumi estimate, accepted', edge: { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } } }, expected: 'ai_accepted' },
   { name: 'placeholder', edge: { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' }, defaulted: true }, expected: 'placeholder' },
+  // An AI DRAWING stamp says who drew the link, not who sized it: with no size mark the size is unestablished — unknown,
+  // counted and disclosed, never Olumi's wholesale and never dropped (agrees with `link_sizing: 'unmarked'` on the panel).
   { name: 'UNMARKED cee_hypothesis', edge: { provenance: { source: 'cee_hypothesis' } }, expected: 'unknown' },
   { name: 'UNMARKED domain_knowledge', edge: { provenance: { source: 'domain_knowledge' } }, expected: 'unknown' },
   { name: 'UNMARKED no provenance', edge: {}, expected: 'unknown' },
+  { name: 'UNMARKED no stamp, size defaulted', edge: { defaulted: true }, expected: 'unknown' },
+  { name: 'UNMARKED unrecognised stamp', edge: { provenance: { source: 'imported_csv' } }, expected: 'unknown' },
   // R11's existing source meaning (AIE: "their existing validated/source meaning where it is proven"): drawn by the person or the brief.
   { name: 'UNMARKED legacy user stamp', edge: { provenance: { source: 'user' } }, expected: 'human' },
   { name: 'UNMARKED brief link without its evidence', edge: { provenance: { source: 'brief_extraction' } }, expected: 'human' },
@@ -265,6 +269,7 @@ function linkSurfaces(edge: Rec, from: string): Record<string, readonly Klass[]>
   const compact = compactGraph(graph as never).edges.find((x: Rec) => x.from === from && x.to === 'f') as Rec;
   out.compact = compact.sizing === 'user' ? ['human'] : compact.sizing === 'olumi_estimate' ? ['ai'] : compact.sizing === 'olumi_accepted' ? ['ai_accepted']
     : compact.sizing === 'placeholder' ? ['placeholder'] : ['human', 'unknown', 'structural'];
+
   const ladder = edgeStrengthProvenance(e);
   out.ladder = ladder === 'user_stated' ? ['human'] : ladder === 'ai_drafted' ? ['ai', 'ai_accepted', 'placeholder', 'human', 'structural']
     : ladder === 'unattributed' ? ['unknown', 'structural'] : ALL;
@@ -292,10 +297,31 @@ describe('ONE PROVENANCE AUTHORITY — every reader of a link size agrees, and a
     ];
     for (const e of edges) {
       const human = authority.linkProvenanceOf(e).origin === 'human';
-      for (const name of ['isUserStatedStrength', 'isUserSetBand', 'hasUserStatedSize']) {
+      for (const name of ['isUserStatedStrength', 'isUserSetBand', 'hasUserStatedSize', 'isUserSizedWithoutOlumiMarks']) {
         if (authority[name](e)) expect({ name, e, human }).toEqual({ name, e, human: true });
       }
     }
+  });
+
+  it('who DREW a link, as the model is told it, is never `ai_inferred` for a drawer nobody established (compact context)', () => {
+    // Asked of the compactor itself (it exists on 591cc1a0 too), so this row is RED there and GREEN after.
+    const drawn = (edge: Rec, from = 'h'): Rec => {
+      const g = linkGraph(edge, from);
+      return compactGraph(g as never).edges.find((x: Rec) => x.from === from && x.to === 'f') as Rec;
+    };
+    // The four recognised drawing stamps keep their words exactly.
+    expect(drawn({ provenance: { source: 'brief_extraction' } }).provenance).toBe('from_brief');
+    expect(drawn({ provenance: { source: 'user_specified' } }).provenance).toBe('user_set');
+    expect(drawn({ provenance: { source: 'cee_hypothesis' } }).provenance).toBe('ai_inferred');
+    expect(drawn({ provenance: { source: 'domain_knowledge' } }).provenance).toBe('ai_inferred');
+    // An option's link is the model's structure, as before.
+    expect(drawn({}, 'o2').provenance).toBe('ai_inferred');
+    // RED on 591cc1a0 (both said `ai_inferred`): no stamp, or an unrecognised one, establishes no drawer.
+    expect(drawn({}).provenance).toBe('unverified_brief');
+    expect(drawn({ provenance: { source: 'imported_csv' } })).toEqual(expect.objectContaining({ provenance: 'unverified_brief', _raw_provenance: 'imported_csv' }));
+    // A recognised class beyond the four keeps its meaning: a repair is Olumi's, a person's literal is theirs.
+    expect(drawn({ provenance: { source: 'cee_repair' } }).provenance).toBe('ai_inferred');
+    expect(drawn({ provenance: { source: 'user' } }).provenance).toBe('user_set');
   });
 
   it('names what it could not exercise on this tree', () => {

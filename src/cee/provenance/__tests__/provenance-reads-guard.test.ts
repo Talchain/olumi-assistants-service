@@ -34,6 +34,8 @@ interface Entry {
 const RATCHET: Readonly<Record<string, Entry>> = {
   'src/cee/context-integrity/not-modelled-manifest.ts': { categories: { 'writer-readback': 1, 'different-field': 1 }, feeds: 'neither',
     note: "835: the user-write receipt literal table (USER_WRITE_RECEIPT); 1557: a unit reading's source" },
+  'src/cee/draft/records/completion.ts': { categories: { pipeline: 1 }, feeds: 'neither',
+    note: "558: draft completion's overwrite exemption for a cee_hypothesis option magnitude (camelCase local, caught by the widened probe)" },
   'src/cee/extraction/intervention-extractor.ts': { categories: { pipeline: 1 }, feeds: 'neither', note: 'draft binding of a stated figure' },
   'src/cee/factor-extraction/enricher.ts': { categories: { pipeline: 2 }, feeds: 'neither', note: 'factor enricher before admission' },
   'src/cee/factor-extraction/index.ts': { categories: { pipeline: 3 }, feeds: 'neither', note: 'extraction-type telemetry counts' },
@@ -48,7 +50,8 @@ const RATCHET: Readonly<Record<string, Entry>> = {
   'src/cee/transforms/value-uncertainty-derivation.ts': { categories: { pipeline: 1 }, feeds: 'neither', note: "a range value's spread (value kind, not whose)" },
   'src/orchestrator-v5/admission/identity-evaluations.ts': { categories: { 'ladder-class': 1 }, feeds: 'neither', note: 'compares valueClassOf output' },
   'src/orchestrator-v5/agent-lane/accumulation-rate-spread.ts': { categories: { 'ladder-class': 1 }, feeds: 'neither', note: 'compares valueClassOf output' },
-  'src/orchestrator-v5/agent-lane/admit-candidate.ts': { categories: { writer: 1 }, feeds: 'neither', note: 'admission writer' },
+  'src/orchestrator-v5/agent-lane/admit-candidate.ts': { categories: { writer: 2 }, feeds: 'neither',
+    note: "admission writer (288: the estimate basis door on its own sizing's olumi_estimate — camelCase local)" },
   'src/orchestrator-v5/agent-lane/admit-model.ts': { categories: { writer: 5 }, feeds: 'neither', note: 'admission writer: candidate link stamps (provenance_source) and value confidence' },
   'src/orchestrator-v5/agent-lane/approval-chips.ts': { categories: { 'different-field': 1 }, feeds: 'neither', note: 'a unit reading' },
   'src/orchestrator-v5/agent-lane/ceiling-stock.ts': { categories: { 'different-field': 1, 'writer-readback': 1 }, feeds: 'neither',
@@ -90,6 +93,8 @@ const PATTERNS = [
   /\bsource\??\.startsWith\(\s*['"]user/g,
   new RegExp(`\\b${F}\\s*[!=]==?\\s*[A-Z][A-Z0-9_]*_(?:SOURCE|MAGNITUDE)\\b`, 'g'),
   /\bclassifyValueSource\(/g,
+  // A stamp held in a camelCase local (`rawSource`, `magnitudeSource`, `estimateMagnitude`): the compact edge display hid here.
+  new RegExp(`\\b[a-z]\\w*(?:Source|Magnitude)\\s*[!=]==?\\s*['"](?:${LIT})['"]`, 'g'),
 ];
 const strip = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
   .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');

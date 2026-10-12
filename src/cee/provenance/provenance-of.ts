@@ -988,6 +988,27 @@ export function linkProvenanceOf(edge: unknown, context: LinkContext = {}): Prov
 }
 
 /**
+ * WHO DREW A LINK, as the model's compact context says it (`CompactEdge.provenance`; moved from `graph-compact.ts`, which
+ * read the drawing stamp itself). The four recognised drawing stamps keep their existing words exactly. Any other stamp,
+ * or none, used to say `ai_inferred` wholesale; it now says what the stamp's class establishes — Olumi's for a structural
+ * link or an AI / repair stamp, the person's for a person's stamp, otherwise `unverified_brief` (AIE 6121121310: never
+ * `ai` wholesale). `raw` is the unrecognised stamp, kept for diagnostics as before.
+ */
+export function linkDrawingDisplayOf(edge: unknown, context: LinkContext = {}): { readonly provenance: ProvenanceDisplay; readonly raw?: string } {
+  const src = isRec(edge) && isRec(edge.provenance) ? edge.provenance.source : undefined;
+  if (src === 'brief_extraction') return { provenance: 'from_brief' };
+  if (src === 'user_specified') return { provenance: 'user_set' };
+  if (src === 'cee_hypothesis' || src === 'domain_knowledge') return { provenance: 'ai_inferred' };
+  // WHO DREW IT, not whose size it is (that is `linkSizing` / `linkProvenanceOf`, carried beside it): an option's or a
+  // decision's link is the model's structure (Olumi's); otherwise the stamp's own class, and nothing established says so.
+  const structural = context.validatedDefinition === true || context.fromKind === 'option' || context.fromKind === 'decision';
+  const drawnBy = classifyValueSource(src);
+  const provenance: ProvenanceDisplay = structural || drawnBy === 'ai_drafted' || drawnBy === 'system_repaired' ? 'ai_inferred'
+    : drawnBy === 'user_stated' ? 'user_set' : 'unverified_brief';
+  return typeof src === 'string' && src.length > 0 ? { provenance, raw: src } : { provenance };
+}
+
+/**
  * The licence's "the user's link" class: the user sized it, or their brief stated it WITH its evidence. Science d5 #87
  * 6008444863: a `brief_extraction` edge without its `source_quote` may be a drafter-invented mediator, never "your link".
  * (Moved verbatim from `held-user-links.ts`, which re-exports it.)
@@ -1101,3 +1122,14 @@ export function isExampleFigureLink(edge: unknown): boolean {
   return isRec(edge) && isRec(edge.provenance) && edge.provenance.magnitude === 'example_figure';
 }
 
+/**
+ * The person's link size with NO Olumi mark on it (moved from `placeholder-parts.ts`'s unit inference, Science L1 r2/R3):
+ * an Olumi estimate, a projected mean or an Olumi drawing stamp never establishes the person's authority, whatever user
+ * stamp sits beside it. A NARROWER question than {@link linkProvenanceOf}: only ever true where that is `human`.
+ */
+export function isUserSizedWithoutOlumiMarks(edge: unknown): boolean {
+  const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
+  if (p === undefined || linkProvenanceOf(edge).origin !== 'human') return false;
+  return p.source !== 'cee_hypothesis' && p.mean_projected !== true
+    && !(typeof p.magnitude === 'string' && p.magnitude.startsWith('olumi_'));
+}

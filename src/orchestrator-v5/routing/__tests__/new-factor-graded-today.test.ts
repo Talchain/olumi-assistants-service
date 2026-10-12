@@ -39,6 +39,7 @@ import { checkPersistedGraphInvariants } from '../../persisted-graph-invariants.
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { framedObservedState, defaultFrameFor } from '../../agent-lane/admit-model.js';
+import { heldFigureOwnerOf, provenanceOf, valueAuthorshipOf } from '../../../cee/provenance/provenance-of.js';
 import { _resetConfigCache } from '../../../config/index.js';
 
 type Json = Record<string, any>;
@@ -175,6 +176,22 @@ describe('PJ-A1 £49 — the confirm writes it in the SAME apply as the option',
     for (const e of [`decision_mrr->${OPT}`, `${OPT}->${FAC}`, `${FAC}->mrr`]) expect(edges).toContain(e);
     const projected = projectGraphForPersistence(structuredClone(executed.mutatedGraph)) as Json;
     expect(checkPersistedGraphInvariants(projected, { baseGraph: STORED }).status).not.toBe('violated');
+  });
+
+  it('ONE PROVENANCE AUTHORITY (DL 12 Oct): the confirmed £49 — a type-less brief_extraction from the typed door — is the person\'s: human origin, verified, counted as theirs', () => {
+    const executed = confirm(hold(GRADED_SPEC(true), [{ label: LABEL, observed_state: STATED }]).pendingActions[0]);
+    expect(executed.status).toBe('executed');
+    const factor = nodeOf(executed.mutatedGraph, FAC)!;
+    // Identity: THIS factor, holding exactly the door's stated shape (source brief_extraction, no extraction type).
+    expect(factor.observed_state).toEqual(STATED);
+    expect(factor.observed_state).not.toHaveProperty('extractionType');
+    const p = provenanceOf({ value: factor.observed_state });
+    expect({ origin: p.origin, role: p.role, accepted: p.accepted }).toEqual({ origin: 'human', role: 'verified', accepted: false });
+    expect(valueAuthorshipOf(factor.observed_state)).toBe('yours');
+    // What the Agent is told: the person's figure, from their brief — never "Not confirmed from your brief".
+    expect(heldFigureOwnerOf(factor.observed_state)).toBe('brief');
+    // CONTRAST, same commit: the switch's today-0 is Olumi's.
+    expect(provenanceOf({ value: nodeOf(executed.mutatedGraph, SWITCH_FAC)!.observed_state }).origin).toBe('ai');
   });
 
   it('CONTRAST: the same hold with no level → the factor lands valueless (never 0), as before', () => {

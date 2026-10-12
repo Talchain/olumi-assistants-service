@@ -285,7 +285,9 @@ it('R8-2 AST: only link-sizing reads mean_projected in production; writers and s
   // DL 7 Oct (L1, Science 393023 ruling (b)): the absent-mediator-unit reader reads the flag ONLY to EXCLUDE a projected
   // mean from unit authority (fail-closed: an estimate never establishes a unit). The licence stays the one 'unsized' reader.
   // Science 393023 LICENCE (b) ONE predicate: link-sizing owns the placeholder reading.
-  scan('src'); expect([...new Set(found)].sort()).toEqual(['src/cee/magnitude/link-sizing.ts', 'src/orchestrator/context/placeholder-parts.ts'].sort());
+  // ONE PROVENANCE AUTHORITY (Batch C): the sizing core and the unit reader's exclusion moved verbatim into the one
+  // provenance module; link-sizing keeps its writers. Still ONE reading of the flag.
+  scan('src'); expect([...new Set(found)].sort()).toEqual(['src/cee/magnitude/link-sizing.ts', 'src/cee/provenance/provenance-of.ts'].sort());
 });
 
 it('R8 wording budget keeps exact singular/plural grammar and truncates only endpoint labels', () => {

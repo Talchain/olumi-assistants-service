@@ -437,11 +437,14 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
         observed_state?: { source?: unknown; extractionType?: unknown; value?: unknown; reviewed_by_user?: unknown };
       } | undefined;
       const os = node?.observed_state;
-      // ONE PROVENANCE AUTHORITY: only a lever value whose origin is NOT established grounds stories here (an absent-type
-      // `cee_inference` is Olumi's estimate under the one rule, named as such everywhere; a human figure whose role is
-      // unverified is never "unknown authorship"); finite and unaccepted, as before.
-      return valueProvenanceOf(os).origin === 'unknown' && os?.reviewed_by_user === undefined
-        && typeof os?.value === 'number' && Number.isFinite(os.value);
+      // ONE PROVENANCE AUTHORITY: a STAMPED lever value whose stamp establishes no origin, with no extraction metadata
+      // on the node, finite and unaccepted — 591cc1a0's class read through the authority. Its old members, absent-type
+      // `cee_inference`, are Olumi's estimates under the one rule (DL ruling; AIE 6119326092): F1 now names them and the
+      // union above grounds them with their card. An unstamped value stays ineligible (as before), and a human figure
+      // whose role is unverified is never "unknown authorship".
+      return valueProvenanceOf(os).origin === 'unknown' && typeof os?.source === 'string' && os.source !== ''
+        && node?.extractionType === undefined && os.reviewed_by_user === undefined
+        && typeof os.value === 'number' && Number.isFinite(os.value);
     }).sort((a, b) => a.goal_distance - b.goal_distance || byCodepoint(a.factor_id, b.factor_id))
       .map(f => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: null,
         lever_option_labels: ownLevers.get(f.factor_id)! }));

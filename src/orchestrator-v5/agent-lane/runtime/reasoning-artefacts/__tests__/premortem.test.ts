@@ -20,7 +20,15 @@ describe('A2 producer and coverage', () => {
     expect(worksheet()?.coverage.find(c => c.option_id === 'launch_starter_tier')?.status).toBe('not_stress_tested');
   });
   it.each(['draw1', 'draw2'] as const)('generic %s retains W9 union without modifying scout bytes', key => {
-    const c = captures[key], before = JSON.stringify(c);
+    // ONE PROVENANCE AUTHORITY (DL ruling; AIE 6119326092): the captures' absent-type cee_inference figures are Olumi's estimates
+    // now (as-captured: premortem-empty-leader-path.test.ts). The W9 union is held on the same captures with those stamps
+    // unrecognised — origin unestablished, still stamped — the reading 591cc1a0's F1 gave them.
+    const c = structuredClone(captures[key]);
+    for (const n of c.graph.nodes as { observed_state?: Record<string, unknown> }[]) {
+      const os = n.observed_state;
+      if (os?.source === 'cee_inference' && os.extractionType === undefined && os.user_material_unverified !== true) os.source = 'unrecognised_stamp';
+    }
+    const before = JSON.stringify(c);
     const turn = methodTurnForReadback(PREMORTEM_PRESS_ID, c);
     expect(turn?.kind).toBe('run');
     if (turn?.kind !== 'run') throw new Error('must run');
