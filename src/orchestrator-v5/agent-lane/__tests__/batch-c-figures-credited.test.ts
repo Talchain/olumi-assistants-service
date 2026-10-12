@@ -26,7 +26,7 @@ const HIRING_BRIEF = 'Should I hire a Tech lead or two developers to increase pr
   + 'Our budget is £200,000, but we\'d like to spend less.';
 const DEVS_SENTENCE = 'We currently have six mid-weight developers, so we\'re lacking leadership.';
 const raw = (): CandidateModel => JSON.parse(readFileSync(new URL('./fixtures/hiring-drafter-raw-3ad9cc58.json', import.meta.url), 'utf8'));
-const devsOf = (m: CandidateModel): Rec => (m.factors as Rec[]).find((f) => f.label === 'Mid-weight developers')!;
+const devsOf = (m: CandidateModel): Rec => (m.factors as unknown as Rec[]).find((f) => f.label === 'Mid-weight developers')!;
 const admitted = (m: CandidateModel, brief = HIRING_BRIEF): Rec =>
   admitCandidateModel(prepareProvisionalCandidate(m, brief).candidate, {}, brief) as unknown as Rec;
 const nodeOf = (g: Rec, label: string): Rec => (g.nodes as Rec[]).find((n) => n.label === label)!;
@@ -70,7 +70,7 @@ describe('L1 — a developer headcount the user wrote is the user\'s (real draft
 
   it('ADVERSE: a different factor citing the same sentence ("Tech leads", headcount, 6) gets nothing', () => {
     const m = raw();
-    const leads = (m.factors as Rec[]).find((f) => f.label === 'Tech leads')!;
+    const leads = (m.factors as unknown as Rec[]).find((f) => f.label === 'Tech leads')!;
     Object.assign(leads, { baseline_known: true, baseline_value: 6, provenance: 'explicit', baseline_evidence: { quote: DEVS_SENTENCE } });
     expect(verifiedFactorLevel(m, leads as never, HIRING_BRIEF)).toBe(false);
   });
@@ -82,7 +82,7 @@ describe('L1 — a developer headcount the user wrote is the user\'s (real draft
 });
 
 describe('L2 — no last-wins: the checked baseline plus the stated addition is kept over an unverified duplicate', () => {
-  const twoOf = (m: CandidateModel): Rec => (m.options as Rec[]).find((o) => o.label === 'Hire two developers')!;
+  const twoOf = (m: CandidateModel): Rec => (m.options as unknown as Rec[]).find((o) => o.label === 'Hire two developers')!;
 
   it('RED: "Hire two developers" is 6 + 2 = 8, the user\'s derived total, as drafted (duplicate last)', () => {
     const cell = cellOf(admitted(raw()), 'Hire two developers', 'Mid-weight developers');
