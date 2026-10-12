@@ -14,8 +14,11 @@
  * the stored graph with the REAL analysis hash and the REAL canonical readiness (`buildCanonicalAnalysisReadyFromGraph`).
  * OpenAI is scripted at `fetch` (0 provider calls; the drafter output is the event candidate the served drafter wrote:
  * 3 options, Olumi's pace 12% / 20% a month and hiring lead 2–4 months). The Run is the REAL `run_analysis` handler over
- * the stored graph, PLoT faked at the transport: each option's goal probability is the normal approximation CEE's own
- * share gate models (`event-by-date-share.ts` `normalChance`), never a figure this file chooses.
+ * the stored graph. ⭐ DL (b1)(3), 12 Oct: PLoT answers with the REAL ENGINE's response to this exact request (staging PLoT
+ * 6ec01e8 + ISL, posted 2026-10-12T11:49:51Z, `recovery/score/EBD-REAL-ENGINE.md`; fixture sha256 2b9d1b3c…), served only
+ * when CEE's request is byte-for-byte the one that was posted (sha256 7ea1f711…). CEE's own approximation (`normalChance`)
+ * is never the evidence: the engine gives no `probability_of_goal` at threshold 1, and each chance is read off the goal's own
+ * constraint (`goal-own-constraint-chance.ts`).
  *
  * Paul's hiring lead times ("a tech lead would take at least 3 months…") are E5 (SYS1's start-time door) and are not
  * replayed here: Olumi's own labelled hiring estimates stand until that card is approved.
@@ -25,7 +28,8 @@
  * hiring timings left out. It is a transport check of CEE's doors and words, not the original transcript (see the full-transcript
  * `it`), not the real numerical engine, and not proof of usable chances.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type {} from '../../../plugins/scenario-ownership.js';
 import type {} from '@fastify/rate-limit';
@@ -55,7 +59,7 @@ import { decisionInputAsk } from '../../agent-lane/decision-input-ask.js';
 import { draftedTeamPartOf } from '../event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../goal-kind.js';
 import { shareChanceRunBlock, sharePartsForOption } from '../share-by-date-run.js';
-import { extraShareMoments, momentsOfTeam, normalChance } from '../event-by-date-share.js';
+import { normalChance } from '../event-by-date-share.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
@@ -219,27 +223,24 @@ function expectOneVoice(graph: Rec, label: string): string {
   return coach!;
 }
 
-/** The REAL Run producer over the stored graph; PLoT faked with CEE's own normal approximation of each option's share. */
-async function runOn(w: ReturnType<typeof world>): Promise<{ result: Rec; request: unknown }> {
+/** The request CEE posted to staging PLoT for Paul's Run (`recovery/bB/ebd/paul-plot-capture/paul-plot-request.json`). */
+const POSTED_REQUEST_SHA256 = '7ea1f711d495511e1249aa14d77ad034574e1a7d13f25adfb74e3136c034be5e';
+const ENGINE_RESPONSE_BYTES = readFileSync(new URL('./fixtures/ebd-paul-real-engine-response-6ec01e8.json', import.meta.url));
+const ENGINE_RESPONSE_SHA256 = '2b9d1b3c999dc669e34f003d9b8819890a9b9daca40138d64f57d2060a73b4b8';
+const sha256 = (b: string | Buffer): string => createHash('sha256').update(b).digest('hex');
+
+/**
+ * The REAL Run producer over the stored graph; PLoT answers with the real engine's response to this exact request.
+ * `mutate` (a discriminating mutant only) edits the engine's answer, never the request it is bound to.
+ */
+async function runOn(w: ReturnType<typeof world>, mutate: (response: Rec) => Rec = r => r): Promise<{ result: Rec; request: unknown }> {
   const snapshot = await loadScenarioSnapshotForRunAnalysis(w.sid, 'ebd-run-load', w.store as never);
-  const graph = w.read();
-  const options = graph.nodes.filter((n: Rec) => n.kind === 'option');
-  const run = vi.fn(async () => ({
-    option_comparison: options.map((o: Rec) => {
-      const parts = sharePartsForOption(graph, o.id);
-      if (parts === null) throw new Error(`no share parts for ${o.id}`);
-      // The option's share by the deadline, as the same moments the gate reads: team part plus its added capacity.
-      const team = momentsOfTeam(parts.team), extra = parts.extra === undefined ? { mean: 0, sd: 0 }
-        : extraShareMoments(parts.extra.monthlyShare, parts.extra.D, parts.extra.leadLow, parts.extra.leadHigh);
-      const mean = team.mean + extra.mean, std = Math.sqrt(team.sd ** 2 + extra.sd ** 2);
-      return { id: o.id, option_id: o.id, label: o.label, option_label: o.label, status: 'computed',
-        outcome: { mean, p10: mean - 1.2816 * std, p50: mean, p90: mean + 1.2816 * std, std, n_samples: 10000, n_valid_samples: 10000,
-          validity_ratio: 1, percentiles_source: 'samples' },
-        win_probability: 1 / options.length, probability_of_goal: normalChance(parts, 1) };
-    }),
-    option_comparison_status: 'computed', analysis_status: 'completed', inference_warnings: [], factor_sensitivity: [],
-    conditional_probabilities: [], edge_e_values: [],
-  }) as unknown as V2RunResponseEnvelope);
+  expect(sha256(ENGINE_RESPONSE_BYTES), 'the real-engine response, as captured').toBe(ENGINE_RESPONSE_SHA256);
+  const run = vi.fn(async (request: unknown) => {
+    // A recording answers only the request it was recorded for: any change to what CEE sends invalidates it (§7.4).
+    expect(sha256(JSON.stringify(request, null, 2)), 'CEE sends the request the engine answered').toBe(POSTED_REQUEST_SHA256);
+    return mutate(JSON.parse(ENGINE_RESPONSE_BYTES.toString('utf8'))) as unknown as V2RunResponseEnvelope;
+  });
   const handler = createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient,
     scenarioReader: vi.fn(async () => snapshot) });
   const outcome = await handler({
@@ -293,8 +294,9 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     const team = proposed(t3, 'propose_team_time');
     const card = cardOf(t3, team.proposal_id);
     // AIE 6122738619, verbatim: Olumi's provisional [0.5P, 1.5P] for his low confidence IN THIS forecast; his words kept.
-    expect(card).toBe('Use Olumi’s provisional 3.5–10.5-month range for the current team? It uses your 7-month forecast and assumes all times '
-      + 'in the range are equally likely. You described low confidence in that forecast.');
+    // DL (b1)(2): the law is not named (neutral placeholder pending the AIE); the range itself is on the card.
+    expect(card).toBe('Use Olumi’s provisional 3.5–10.5-month range for the current team? It uses your 7-month forecast and Olumi’s assumed spread. '
+      + 'You described low confidence in that forecast.');
     const t3yes = await turn(approve(t3, team.proposal_id));
     seen.push(t3yes);
     expect(t3yes._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
@@ -318,10 +320,9 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     for (const [k, body] of seen.entries()) for (const ask of asks) expect(timesSaid(body, ask), `turn ${k + 1}: ${ask}`).toBeLessThanOrEqual(1);
     expect(timesSaid(t1, ask1), String(t1.assistant_text)).toBe(1);
 
-    // ── Run (the Run click). ⛔ A TRANSPORT CHECK, NOT A CAPABILITY (PL 6122519782): PLoT is faked with CEE's own normal
-    // approximation (`normalChance`, `runOn` above), so no figure here is the engine's. The real-engine route takes the
-    // captured stored graph and analysis request (`EBD_CAPTURE_DIR`). Checked here: every option gets a line, attributed in the
-    // AIE's words; the 2-point gate (unchanged) decides point or range, and the capture keeps its decisions as the diagnostic.
+    // ── Run (the Run click). ⭐ DL (b1): PLoT answers with the REAL ENGINE's response to this exact request (`runOn`). The
+    // engine gives no `probability_of_goal` at threshold 1; each chance is the goal's own constraint (`auto_goal_threshold`,
+    // bound by identity), shown as a point with "about" (DL (b1)(ii): the 2-point test is not applied to an engine figure).
     const { result, request } = await runOn(w);
     const lines = goalChanceScreenLinesForAgent(result, held, true);
     // For the DL's real-engine route (PL 6122519782): the exact stored graph and the analysis request CEE sent to PLoT.
@@ -330,14 +331,25 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
       const { writeFileSync } = await import('node:fs');
       writeFileSync(`${out}/paul-stored-graph.json`, JSON.stringify(held, null, 2));
       writeFileSync(`${out}/paul-plot-request.json`, JSON.stringify(request, null, 2));
-      writeFileSync(`${out}/paul-run-result-fake-plot.json`, JSON.stringify({ result, lines }, null, 2));
+      writeFileSync(`${out}/paul-run-result-real-engine.json`, JSON.stringify({ result, lines }, null, 2));
     }
     expect(lines.map(l => l.option_id).sort()).toEqual(['event_option_1', 'event_option_2', 'event_option_3']);
+    // The engine's own figures (83.01 / 95.15 / 41.58 %, `recovery/score/EBD-REAL-ENGINE.md`), each a point, none a range.
+    expect(Object.fromEntries(lines.map(l => [l.option_id, l.figure]))).toEqual({ event_option_1: 'about 83%', event_option_2: 'about 95%', event_option_3: 'about 42%' });
     for (const l of lines) {
       expect(l.chance).toContain('chance of launching by 12 April 2027');
-      expect(l.chance, l.chance).toMatch(/using your 7-month forecast and Olumi’s assumed 3\.5–10\.5-month range|You gave 7 months; Olumi’s provisional model range is 3\.5–10\.5 months\./);
-      expect(l.chance, l.chance).not.toMatch(/your 3\.5|most likely|which Olumi widened/);
+      // DL (b1)(2): the attribution names no law (neutral placeholder pending the AIE).
+      expect(l.chance, l.chance).toContain('using your 7-month forecast and Olumi’s assumed spread');
+      expect(l.chance, l.chance).not.toMatch(/equally likely|your 3\.5|most likely|which Olumi widened|slow end|between about/);
     }
+    // ⭐ DISCRIMINATING MUTANT (DL (b1)(ii)): what the user sees is the ENGINE's figure, never CEE's `normalChance`. The same
+    // request, the engine's answer for two developers moved to 0.9015: the line follows it (90), while CEE's own approximation
+    // of that option stays at 95.
+    const parts2 = sharePartsForOption(held, 'event_option_2')!;
+    expect(Math.round(normalChance(parts2, 1) * 100)).toBe(95);
+    const moved = await runOn(w, r => ({ ...r, option_comparison: r.option_comparison.map((o: Rec) => o.option_id !== 'event_option_2' ? o
+      : { ...o, constraint_probabilities: { ...o.constraint_probabilities, auto_goal_threshold: 0.9015 } }) }));
+    expect(goalChanceScreenLinesForAgent(moved.result, held, true).find(l => l.option_id === 'event_option_2')!.figure).toBe('about 90%');
     for (const id of ['event_option_1', 'event_option_2']) {
       // E5 combine: the AIE 6122738619 words (the hires' additional progress), after the team's attribution.
       expect(lines.find(l => l.option_id === id)!.chance).toContain("Olumi’s estimates of hiring time (2–4 months) and of the additional progress from the hires");

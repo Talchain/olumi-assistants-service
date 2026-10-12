@@ -11,6 +11,7 @@ import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint
 import { isEventShareForecast, missingEventCapacityOptionIds, unresolvedEventOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
 import { olumiAssumedRangeAttribution, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption,
   sharePartsForOption } from './share-by-date-run.js';
+import { goalOwnConstraintChanceRecords } from './goal-own-constraint-chance.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -177,11 +178,15 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
       code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id], message: failure,
     }, { keepOutcome: true, keepOrdering: true });
   }
-  const records = readOptionResultSources(inputScopedEnvelope).find(s => s.length > 0) ?? [];
+  // DL (b1): the same records the licence reads, so an ENGINE-READ figure (the goal's own constraint at threshold 1) meets
+  // the same rule here as there: the 2-point test is not applied to it; unsupported parts still withhold.
+  const engine = goalOwnConstraintChanceRecords(inputScopedEnvelope, graph, goalId, readOptionResultSources(inputScopedEnvelope).find(s => s.length > 0) ?? []);
+  const records = engine.records;
   const warnings = Array.isArray(inputScopedEnvelope.inference_warnings) ? inputScopedEnvelope.inference_warnings.filter(isRec) : [];
   const ranges: Record<string, GoalChanceRange> = {};
   const withheld = new Set<string>();
   const addedCapacity = new Set<string>();
+  const tooManyStarts = new Set<string>();
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || withheld.has(id) || !chance(r.probability_of_goal)) continue;
@@ -191,12 +196,13 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     const precision = goalChancePrecisionOf(r);
     const decision = shareGateForOption(graph, id, r.probability_of_goal,
       precision === null ? 'whole' : displayRoundingFor(precisionHalfWidthPoints(precision)));
-    if (decision?.form === 'point') continue;
+    if (decision?.form === 'point' || (decision !== null && engine.engineRead.has(id))) continue;
     withheld.add(id);
     if (sharePartsForOption(graph, id)?.extra !== undefined) addedCapacity.add(id);
-    if (decision === null) continue; // unsupported parts: no manufactured range
+    // Unsupported parts: no manufactured range. The one reachable cause is more ranged hiring starts than the exact check
+    // holds (`MAX_RANGED_PARTS`); its next step is E5's existing one (which two starts to use).
+    if (decision === null) { if ((graph as Rec & { nodes: Rec[] }).nodes.some(n => n.id === id && n.kind === 'option')) tooManyStarts.add(id); continue; }
     const lowPct = Math.round(decision.low * 100), highPct = Math.round(decision.high * 100);
-    if (lowPct === highPct) continue; // a displayed point is not a readable range
     const g = graph as Rec;
     const nodes = g.nodes as Rec[];
     const team = nodes.find(n => n.id === share.team_part_id)!;
@@ -209,13 +215,22 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
       from: share.team_part_id, to: goalId as string, among: 'all' };
   }
   if (withheld.size === 0) return inputScopedEnvelope;
+  const labelOf = (id: string): string => {
+    const label = (graph as Rec & { nodes: Rec[] }).nodes.find(n => n.id === id && n.kind === 'option')?.label;
+    return typeof label === 'string' && label.trim() !== '' && !/[\r\n]/.test(label) ? label.trim() : 'this option';
+  };
   // EBD E2 (AIE 6122738619): a range Olumi assumed from the user's single forecast is attributed as that, never as their figures.
   // E5 combine: hiring times may now be the user's (E5 r2), so they are "the modelled hiring times", never all Olumi's; the hires'
   // figure is ADDITIONAL progress, never a "pace" (AIE 6122738619: the same meaning as the option label).
   const assumed = olumiAssumedTeamRange(graph);
   let out = inputScopedEnvelope;
-  for (const shownAsRange of [false, true]) for (const usesAddedCapacity of [false, true]) {
-    const ids = [...withheld].filter(id => Object.hasOwn(ranges, id) === shownAsRange && addedCapacity.has(id) === usesAddedCapacity);
+  // DL 12 Oct (b1): never a withhold without its next step. More ranged starts than the exact check holds → E5's ask.
+  for (const id of tooManyStarts) out = withholdOptionGoalFigures(out, new Set([id]), {
+    code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id],
+    message: `Not shown. Olumi can use at most two start times for ‘${labelOf(id)}’ yet: say which two starts to use.`,
+  }, { keepOutcome: true, keepOrdering: true });
+  for (const usesAddedCapacity of [false, true]) {
+    const ids = Object.keys(ranges).filter(id => addedCapacity.has(id) === usesAddedCapacity);
     if (ids.length === 0) continue;
     out = withholdOptionGoalFigures(out, new Set(ids), {
       code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ids,
@@ -224,8 +239,7 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
           ? `${olumiAssumedRangeAttribution(assumed)}${usesAddedCapacity ? " together with the modelled hiring times and Olumi’s estimate of the additional progress from the hires" : ''}`
           : usesAddedCapacity ? "your team's time together with the modelled hiring times and Olumi’s estimate of the additional progress from the hires"
           : "your team's stated time or pace range")
-        + ' does not support one figure here, '
-        + (shownAsRange ? 'so this chance is shown as a range.' : 'so this chance is not shown.'),
+        + ' does not support one figure here, so this chance is shown as a range.',
     }, { keepOutcome: true, keepOrdering: true });
   }
   if (Object.keys(ranges).length > 0) out = appendInferenceWarning(out, {

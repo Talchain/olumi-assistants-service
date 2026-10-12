@@ -23,7 +23,7 @@ import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { buildModelFromBrief, constructionOperationId, type CallStructuredModel } from '../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { applyTeamShareEdit, bindTeamTimeQuote, teamTimeCard, teamTimesInQuote, widenedTeamTime, type ApprovedTeamTime } from '../team-share-write.js';
-import { shareChanceRunBlock, shareOptionEstimateWords, sharePartsForOption } from '../share-by-date-run.js';
+import { shareChanceRunBlock, shareGateForOption, shareOptionEstimateWords, sharePartsForOption } from '../share-by-date-run.js';
 import { withShareByDateChanceGate } from '../goal-chance-range.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import type { SessionTurnWrite } from '../../session/store.js';
@@ -189,19 +189,20 @@ describe('E2 — the team\'s time, bound by quote, from any of the user\'s messa
     // No quote: THIS message, as before.
     expect(bindTeamTimeQuote({ now: '6–10 months' }, { low_months: 6, high_months: 10 })).toMatchObject({ kind: 'bound', time: { low_months: 6, high_months: 10 } });
   });
-  it('the card (AIE 6122738619, verbatim): Olumi\'s provisional range, the user\'s forecast, the human qualifier; no progress headline', () => {
+  // DL (b1)(2), 12 Oct: the explanation names no law ("equally likely" is false for the engine); a neutral placeholder pending the AIE.
+  it('the card: Olumi\'s provisional range, the user\'s forecast, Olumi\'s assumed spread, the human qualifier; no progress headline', () => {
     const g = dated(), part = draftedTeamPartOf(g)!;
     const words = "they're going to be a month late delivering the next feature (so, 7 months)";
     const a: ApprovedTeamTime = { goal_id: part.goal.id, team_id: part.team.id, deadline: '2027-04-12', reference_date: '2026-10-12',
       low_months: 3.5, high_months: 10.5, forecast_months: 7, forecast_words: words, range_origin: 'olumi_estimate', range_rule: 'low_confidence' };
     expect(teamTimeCard(a, part.goal.goal_threshold_unit, part.deliverable)).toBe('Use Olumi’s provisional 3.5–10.5-month range for the current team? '
-      + 'It uses your 7-month forecast and assumes all times in the range are equally likely. You described low confidence in that forecast.');
+      + 'It uses your 7-month forecast and Olumi’s assumed spread. You described low confidence in that forecast.');
     expect(teamTimeCard({ ...a, low_months: 5.3, high_months: 8.8, range_rule: 'default' }, part.goal.goal_threshold_unit, part.deliverable))
-      .toBe('Use Olumi’s provisional 5.3–8.8-month range for the current team? It uses your 7-month forecast and assumes all times in the range are equally likely.');
+      .toBe('Use Olumi’s provisional 5.3–8.8-month range for the current team? It uses your 7-month forecast and Olumi’s assumed spread.');
     const written = applyTeamShareEdit(g, a, computeAnalysisAffectingGraphHash(g as never)!);
     if (written.kind !== 'mutated') throw new Error(JSON.stringify(written));
     // The writer's confirmation is the card's explanation, whole (never a split of the joined card).
-    expect(written.confirmation).toBe('It uses your 7-month forecast and assumes all times in the range are equally likely. You described low confidence in that forecast.');
+    expect(written.confirmation).toBe('It uses your 7-month forecast and Olumi’s assumed spread. You described low confidence in that forecast.');
     expect(draftedTeamPartOf(written.mutatedGraph)!.team.observed_state.stated_time).toEqual({ quantity: 'months_to_finish', low: 3.5, high: 10.5,
       unit: 'months', deadline: '2027-04-12', reference_date: '2026-10-12', forecast: 7, forecast_origin: 'user', forecast_words: words,
       range_origin: 'olumi_estimate', range_rule: 'low_confidence' });
@@ -337,7 +338,7 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     const devs = sharePartsForOption(w.graph(), 'event_option_2')!;
     expect([devs.extra, ...(devs.furtherExtras ?? [])]).toHaveLength(2);
     // ONE label, both attributions: EBD's assumed team range, then the user's hiring statement and every Olumi assumption.
-    expect(shareOptionEstimateWords(w.graph(), 'event_option_1')).toBe('using your 7-month forecast and Olumi’s assumed 3.5–10.5-month range, '
+    expect(shareOptionEstimateWords(w.graph(), 'event_option_1')).toBe('using your 7-month forecast and Olumi’s assumed spread, '
       + 'and your hiring time (“at least 3 months”) as modelled: 3–4 months, with Olumi’s estimate of the latest start (4 months), '
       + 'and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month)');
   });
@@ -388,11 +389,19 @@ describe('E2 — a range line never calls Olumi\'s range "yours" (AIE 6122738619
   };
   it('the range warnings attribute the forecast to the user and the range to Olumi, never "your time estimate" (P = 6, low confidence: 3–9)', () => {
     expect(widenedTeamTime(6, 'low_confidence')).toEqual({ low_months: 3, high_months: 9 });
-    const ws = said(gated(teamAt({ low_months: 3, high_months: 9, forecast_months: 6, range_origin: 'olumi_estimate', range_rule: 'low_confidence' })));
-    expect(ws).toContain("Not shown as a single figure. The approximation of your 6-month forecast and Olumi’s assumed 3–9-month range does not support one figure here, so this chance is shown as a range.");
-    expect(ws).toContain("Not shown as a single figure. The approximation of your 6-month forecast and Olumi’s assumed 3–9-month range together with the modelled hiring times and Olumi’s estimate of the additional progress from the hires does not support one figure here, so this chance is not shown.");
-    expect(ws).toContain('Each chance runs from the slow end of the range to the fast end. You gave 6 months; Olumi’s provisional model range is 3–9 months.');
-    for (const m of ws) expect(m).not.toMatch(/your time estimate|stated time or pace range|your 3–9/);
+    const g = teamAt({ low_months: 3, high_months: 9, forecast_months: 6, range_origin: 'olumi_estimate', range_rule: 'low_confidence' });
+    const ws = said(gated(g));
+    // DL (b1)(2): the attribution names no law (neutral placeholder pending the AIE); the range is said in its own line.
+    expect(ws).toEqual([
+      "Not shown as a single figure. The approximation of your 6-month forecast and Olumi’s assumed spread does not support one figure here, so this chance is shown as a range.",
+      "Not shown as a single figure. The approximation of your 6-month forecast and Olumi’s assumed spread together with the modelled hiring times and Olumi’s estimate of the additional progress from the hires does not support one figure here, so this chance is shown as a range.",
+      'Each chance runs from the slow end of the range to the fast end. You gave 6 months; Olumi’s provisional model range is 3–9 months.',
+    ]);
+    // DL 12 Oct: two developers' exact-law range has equal ends (both 100%), so it is the exact law's own point, at its ruled
+    // extreme (before: "so this chance is not shown"); the Tech lead's ends differ (61–100%), so it stays a range.
+    expect(shareGateForOption(g, 'event_option_2', 0.5)).toMatchObject({ form: 'point', exact_extreme: 1 });
+    expect(shareGateForOption(g, 'event_option_1', 0.5)?.form).toBe('range');
+    for (const m of ws) expect(m).not.toMatch(/your time estimate|stated time or pace range|your 3–9|is not shown|equally likely/);
   });
   it('CONTROL: the same range stated by the user (3–9 months) keeps the existing words, byte for byte', () => {
     const ws = said(gated(teamAt({ low_months: 3, high_months: 9 })));

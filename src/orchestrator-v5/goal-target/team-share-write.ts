@@ -71,7 +71,8 @@ export function teamTimesInQuote(quote: unknown): { low_months: number; high_mon
  * ⭐ EBD E2 (a) — THE MODEL RANGE FROM A SINGLE FORECAST (AIE 6121986101 / 6122738619, PL 6122519782; settled 12 Oct). A single
  * time (Paul's "7 months") is the user's FORECAST P, a human point kept with their words; it is never called their "most
  * likely" time. The chance needs bounds, so Olumi assumes a provisional model range from P by ONE convention, labelled as
- * Olumi's on the card and on every result line, with every time in it equally likely:
+ * Olumi's on the card and on every result line (the words name no law: DL (b1)(2), 12 Oct; the engine samples the range's
+ * mean and spread, `recovery/bB/ebd-law/DIAGNOSIS.md`):
  *   · low confidence positively bound to that forecast in the same sentence (`TEAM_TIME_LOW_CONFIDENCE`): 0.5 × P to 1.5 × P;
  *   · otherwise: 0.75 × P to 1.25 × P.
  * These widths are an explicitly assumed convention, not calibrated uncertainty. Each end is rounded to 0.1 month (0.01
@@ -205,7 +206,8 @@ export function teamTimeCardParts(a: ApprovedTeamTime, _unit: string, deliverabl
   // the human qualifier said back; no derived progress headline on an input-approval card.
   if (a.forecast_months !== undefined && a.range_origin === 'olumi_estimate') {
     return { question: `Use Olumi’s provisional ${a.low_months}–${a.high_months}-month range for the current team?`,
-      explanation: `It uses your ${a.forecast_months}-month forecast and assumes all times in the range are equally likely.`
+      // ⛔ DL (b1)(2), 12 Oct: a neutral placeholder pending the AIE (the engine does not treat the range's times as equally likely).
+      explanation: `It uses your ${a.forecast_months}-month forecast and Olumi’s assumed spread.`
         + (a.range_rule === 'low_confidence' ? ' You described low confidence in that forecast.' : '') };
   }
   const pct = displayedPctAt(cappedTeamShareMean(timeBetween(a.reference_date, a.deadline, 'months'), a.low_months, a.high_months), 'whole');

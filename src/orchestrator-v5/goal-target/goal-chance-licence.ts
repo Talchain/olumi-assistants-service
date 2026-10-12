@@ -43,6 +43,7 @@ import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
+import { goalOwnConstraintChanceRecords } from './goal-own-constraint-chance.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { resolveGoalDirection } from './goal-direction.js';
@@ -276,8 +277,10 @@ export function goalChanceLicenceOf(
   if (changeFrame === 'change_rel' && base === undefined) return null;
   const estimateOnly = changeFrame === 'change_rel' && goalState?.source === 'cee_inference' && !isRec(goal?.goal_level_reading);
   const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
-  // The Run's own option records, current-first: the first carrier that has any is the comparison.
-  const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
+  // The Run's own option records, current-first: the first carrier that has any is the comparison. DL (b1): where PLoT gave
+  // no `probability_of_goal` at threshold 1, the goal's OWN constraint, bound by identity, is the figure (never over a withhold).
+  const engine = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find((s) => s.length > 0) ?? []);
+  const records = engine.records;
   // ⭐ Amendment 1 (independent check r1 item 3): EVERY frame reads carrying on as now as the reference BY ASSUMPTION, never
   // a finding. A quantity measured AS a change (hiring) is 0 today by definition, so its status quo is no change by
   // construction. Any other goal's is by assumption where the Run's own status-quo row is that assumption — every draw at
@@ -320,7 +323,11 @@ export function goalChanceLicenceOf(
     const step = precision === null ? 'whole' : displayRoundingFor(precisionHalfWidthPoints(precision));
     const shareGate = share !== null && share.goal.id === goalId
       ? shareGateForOption(graph, id, typeof p === 'number' ? p : undefined, step) : undefined;
-    if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
+    // ⭐ DL (b1)(ii), 12 Oct: an ENGINE-READ figure is the disclosed law's own answer (the user's forecast and Olumi's assumed
+    // spread), so the 2-point test (CEE's Normal against the uniform law, which is no longer claimed) is not applied to it.
+    // Unsupported parts (null) still withhold. Wherever CEE's own approximation is the figure source, the gate stays.
+    const engineFigure = engine.engineRead.has(id);
+    if (shareGate !== undefined && (engineFigure ? shareGate === null : shareGate?.form !== 'point')) { withheld.push(id); continue; }
     // ⭐ Amendment 1: the status quo is measured against itself — no change, by assumption, never a finding (every frame).
     if (sqByAssumption && id === statusQuoId) { withheld.push(id); continue; }
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
@@ -332,14 +339,20 @@ export function goalChanceLicenceOf(
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
     if (!Number.isFinite(p) || p < 0 || p > 1) return null;
     licensed.push(id);
+    // The exact law's own figure where both ends of its range show the same whole % (`gate`): it is not the Run's draws, so
+    // the Run's precision does not describe it (whole step, no interval, no driver).
+    const exactPoint = !engineFigure && shareGate?.form === 'point' ? shareGate.exact_point : undefined;
     // ⭐ Ruling 5: the displayed step follows the figure's own precision; no precision block → whole, as before.
-    if (precision !== null) {
+    if (precision !== null && exactPoint === undefined) {
       precisionOf.set(id, precision);
       rounding[id] = step;
     }
     // The licence is the sole producer of the exact-extreme display; the raw Run evidence stays intact.
-    if (shareGate?.form === 'point' && shareGate.exact_extreme !== undefined) {
+    if (shareGate?.form === 'point' && shareGate.exact_extreme !== undefined && !engineFigure) {
       pct[id] = shareGate.exact_extreme * 100;
+      exactExtremes.add(id);
+    } else if (exactPoint !== undefined) {
+      pct[id] = displayedPctAt(exactPoint, 'whole');
       exactExtremes.add(id);
     } else pct[id] = displayedPctAt(p, step);
   }
@@ -383,7 +396,7 @@ export function goalChanceLicenceOf(
   const noDrivers: Record<string, GoalChanceNoDriverReason> = {};
   if (licensed.some((id) => recordOf.get(id)!.probability_of_goal_drivers !== undefined)) {
     for (const id of licensed) {
-      if (exactExtremes.has(id)) { noDrivers[id] = 'none'; continue; } // drivers are moot at a ruled extreme
+      if (exactExtremes.has(id)) { noDrivers[id] = 'none'; continue; } // drivers are moot at a ruled extreme or the exact law's point
       const claim = goalChanceDriverOf(recordOf.get(id)!, id, graph, envelope);
       if ('driver' in claim) drivers[id] = claim.driver;
       else noDrivers[id] = claim.no_driver;
@@ -611,7 +624,7 @@ export function sentGoalThresholdOf(
   const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
   if (goal === undefined || !isRec(envelope)) return undefined;
-  const records = readOptionResultSources(envelope).find(s => s.length > 0) ?? [];
+  const records = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find(s => s.length > 0) ?? []).records;
   const candidates: SentGoalThreshold[] = [];
   for (const field of ['goal_threshold_raw', 'goal_threshold'] as const) {
     const value = goal[field];

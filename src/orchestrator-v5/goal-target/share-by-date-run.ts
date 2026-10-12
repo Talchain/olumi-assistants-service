@@ -144,9 +144,14 @@ export function olumiAssumedTeamRange(graph: unknown): { readonly forecast: numb
     ? { forecast: stated.forecast, low: stated.low, high: stated.high } : null;
 }
 const months = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-/** AIE 6122738619, verbatim: the provisional chance attribution, after "using ". */
+/**
+ * The provisional chance attribution, after "using ". ⛔ DL (b1)(2), 12 Oct: a NEUTRAL PLACEHOLDER pending the AIE's
+ * replacement (`recovery/bB/B-STRINGS-FOR-AIE.md`). It states only the forecast and that the spread is Olumi's assumption:
+ * the engine does not treat every time in the range as equally likely (it samples the range's mean and spread,
+ * `recovery/bB/ebd-law/DIAGNOSIS.md`), so the words name no law. The range itself is on the card the user approved.
+ */
 export function olumiAssumedRangeAttribution(t: { readonly forecast: number; readonly low: number; readonly high: number }): string {
-  return `your ${months(t.forecast)}-month forecast and Olumi’s assumed ${months(t.low)}–${months(t.high)}-month range`;
+  return `your ${months(t.forecast)}-month forecast and Olumi’s assumed spread`;
 }
 /** AIE 6122738619, verbatim: the range line's sentence. */
 export function olumiAssumedRangeLine(t: { readonly forecast: number; readonly low: number; readonly high: number }): string {

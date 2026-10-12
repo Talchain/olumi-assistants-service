@@ -135,7 +135,7 @@ export function normalChance(parts: ShareParts, threshold: number): number {
   return sd === 0 ? (mean >= threshold ? 1 : 0) : normalTail((threshold - mean) / sd);
 }
 
-export type ShareGate = { readonly form: 'point'; readonly error_points: number; readonly exact_extreme?: 0 | 1 }
+export type ShareGate = { readonly form: 'point'; readonly error_points: number; readonly exact_extreme?: 0 | 1; readonly exact_point?: number }
   | { readonly form: 'range'; readonly low: number; readonly high: number; readonly error_points: number };
 export const SHARE_GATE_MAX_ERROR_POINTS = 2;
 export function gate(parts: ShareParts, threshold: number, displayedPoint = normalChance(parts, threshold),
@@ -150,6 +150,12 @@ export function gate(parts: ShareParts, threshold: number, displayedPoint = norm
   }
   const t = parts.team;
   const at = (v: number): number => exactChance({ ...parts, team: { ...t, low: v, high: v } }, threshold);
-  return { form: 'range', low: at(t.quantity === 'months_to_finish' ? t.high : t.low),
-    high: at(t.quantity === 'months_to_finish' ? t.low : t.high), error_points: error };
+  const low = at(t.quantity === 'months_to_finish' ? t.high : t.low), high = at(t.quantity === 'months_to_finish' ? t.low : t.high);
+  // DL 12 Oct (b1 follow-up): both ends of the exact-law range show the same whole %. The law is monotone in the team's time,
+  // so every time in the range, and the law's own mixture over it, gives that figure: it is shown as that point, never as a
+  // range with equal ends and never as nothing.
+  if (Math.round(low * 100) === Math.round(high * 100)) return exactClass === 'interior'
+    ? { form: 'point', error_points: error, exact_point: exact }
+    : { form: 'point', error_points: error, exact_extreme: exactClass === 'less_than_1' ? 0 : 1 };
+  return { form: 'range', low, high, error_points: error };
 }
