@@ -3732,9 +3732,19 @@ function admitOnce(
         const raw = model.goal.value;
         const stated = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw);
         if (!stated) {
+          // ⭐ Batch F (DL 12 Oct; T5 D6 A r2, `recovery/t5-meaning/DIAGNOSIS.md` §7): a goal with no target still keeps the
+          // current level the USER stated ("Our team currently completes about 80 features per week."), attributed as
+          // theirs; it was dropped with no line. No target means no threshold, so none is written, and the level sits on
+          // the cap rule's own scale for that figure. A level the brief never states (Olumi's) stays out, as before.
+          const written = model.goal.baseline_value;
+          const level = typeof written === 'number' && Number.isFinite(written) && written >= 0
+            && (!goalLevelIsEstimated(model.goal) || goalLevelStated(written, model.goal.unit) || briefWritesGoalLevel(model, brief)) ? written : null;
+          const scale = level === null ? null : resolveGoalThresholdCapWithProvenance(undefined, level, model.goal.unit, undefined);
           return {
             ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
             goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+            ...(level !== null && scale !== null && scale.cap > 0
+              ? { observed_state: briefGoalObservedState(level / scale.cap, model.goal.unit, level, scale.cap, verifiedGoalLevel(model, brief)) } : {}),
           };
         }
         // ⭐ R1 S4-core: a target stated as a CHANGE from today is written as one (`admitStatedGoalChange`); a level
