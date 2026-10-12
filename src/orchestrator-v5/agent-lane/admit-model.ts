@@ -661,6 +661,21 @@ export function decisionEntityFor(
 }
 
 /**
+ * ⭐ Batch F, D1 (DL 12 Oct, PL 6131102031; T6 RESULT.md): the event-by-date model's decision node goes through the SAME
+ * grounded decision-statement admission as every other model (`decisionEntityFor`). It wrote `decision_question ||
+ * goal.metric` and stamped it `ai_inferred` whatever it was: T6's D1 drafts copied the brief's own sentence and it was
+ * called Olumi's, and a paraphrase would have become the decision's title. A verbatim span is kept, and is the user's when
+ * its binding earns the brief's claim; anything else is the main path's fallback, Olumi's.
+ */
+function withGroundedEventDecision(event: AdmittedModel, candidate: CandidateModel, brief: string | undefined): AdmittedModel {
+  const decisions = event.nodes.filter((n) => n.kind === 'decision');
+  if (decisions.length !== 1) return event;
+  const decision = decisionEntityFor(candidate, brief, event.nodes.filter((n) => n !== decisions[0]).map((n) => n.label));
+  return { ...event, nodes: event.nodes.map((n) => (n === decisions[0]
+    ? { ...n, label: decision.label, provenance: displayProvenanceFor(decision.provenance) } : n)) };
+}
+
+/**
  * Deterministic, collision-safe id assignment in a fixed traversal order.
  *
  * ⛔ A SUFFIXED DUPLICATE ORPHANS THE GOAL. This keyed the map by the EXACT
@@ -3319,7 +3334,7 @@ export function admitCandidateModel(
   }
   if (prompted || (candidateModel.goal.kind === 'event_by_date' && briefAttestsEventByDate(brief, candidateModel.goal))) {
     try {
-      const event = admitEventByDate(candidateModel);
+      const event = withGroundedEventDecision(admitEventByDate(candidateModel), candidateModel, brief);
       const hasContext = candidateModel.constraints.length + candidateModel.factors.length + candidateModel.risks.length
         + candidateModel.outcomes.length + candidateModel.links.length + (candidateModel.identities?.length ?? 0) > 0
         || candidateModel.options.some(o => (o.interventions?.length ?? 0) + (o.changes?.length ?? 0) > 0);
