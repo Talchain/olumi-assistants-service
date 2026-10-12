@@ -87,7 +87,14 @@ export function attestHorizon(
   const claimed = candidate?.horizon_months;
   const durations = forwardDurations(brief);
   const countWords: Readonly<Record<string, number>> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, eighteen: 18 };
-  const proposed = /\bmonth\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\s+months?\b/i.exec(brief);
+  const proposals = [...brief.matchAll(/\bmonth\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\s+months?\b/gi)];
+  // ⛔ S3 T5 D2 (L1): the CANDIDATE's count picks the brief's span that says it. "…the first three months after launch. We
+  // plan to launch six months from today." with a 6 typed was saved as "three months": the first span won, whatever the
+  // claim. A forward span equal to the claim is taken; otherwise the first, exactly as before.
+  const countOf = (p: RegExpExecArray): number => countWords[(p[1] ?? p[2]!).toLowerCase()] ?? Number(p[1] ?? p[2]);
+  const proposed = proposals.find((p) => countOf(p) === claimed
+    && !PAST_OR_RANGE_BEFORE.test(brief.slice(Math.max(0, p.index - 16), p.index))
+    && !PAST_AFTER.test(brief.slice(p.index + p[0].length))) ?? proposals[0] ?? null;
   if (proposed !== null) {
     const count = proposed[1] ?? proposed[2]!;
     const months = countWords[count.toLowerCase()] ?? Number(count);
