@@ -26,6 +26,9 @@ import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { goalChanceTargetCause } from '../../../goal-target/goal-chance-gate.js';
 import { groupedGoalPathLinks } from '../../../compose/grouped-link-sizing.js';
 import { naturalAmountUnitsOf } from '../../../../cee/magnitude/frame-defaulted-links.js';
+import { goalChanceLicenceForAgent, withGoalChanceLicence } from '../../../goal-target/goal-chance-licence.js';
+import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
+import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
 type Rec = Record<string, any>;
 
@@ -285,5 +288,201 @@ describe('readback — gap 1: a change goal\'s effects are stored and said in th
     Object.assign(level.goal as Rec, { baseline_known: true, baseline_value: 75, value: 85, basis: null });
     const g = JSON.parse(store(level)) as Rec;
     expect(edge(g, 'additional_developers_hired', 'productivity').provenance.natural_effect.amount_unit).toBe('percentage points');
+  });
+});
+
+// ── RESPONSE → LICENCE → SCREEN (PL 6116591012 / 6116771927; independent check C-cee r1, test-evidence gap) ─────────────
+// The same stored bytes → production loader → the REAL Run handler, now with PLoT ANSWERING (the response rows below are
+// written by hand, in each goal's own units) → the licence the handler stores with the Run → the screen sentences read back
+// against the reopened graph. Expected words are written by hand from the decision text, never read off the code.
+
+/** The Run handler end to end, PLoT faked with `rowsOf(request)`: the request, the stored Run result, its screen view. */
+async function runAndRead(bytes: string, rowsOf: (request: Rec) => Rec[]): Promise<{ payload: Rec; result: Rec; view: Rec; reloaded: Rec }> {
+  const port = {
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 3 })),
+    readMostRecentPendingActions: vi.fn(async () => []),
+  };
+  const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-batch-c-response', port as never);
+  const run = vi.fn(async (request: Rec) => ({ ...structuredClone(minimalFixture), option_comparison: rowsOf(request) }));
+  const handler = createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn() } as never, scenarioReader: async () => snapshot });
+  const outcome = await handler({ payload: { scenario_id: SCENARIO, turn_id: 't-batch-c-response' }, requestId: 'req-batch-c-response',
+    signal: new AbortController().signal, context: {}, orientationText: '' } as never) as Rec;
+  expect(run).toHaveBeenCalledTimes(1);
+  const fact = outcome.handler_facts[0] as Rec;
+  expect(fact.fact_type).toBe('run_analysis');
+  const result = fact.result as Rec;
+  return { payload: run.mock.calls[0]![0] as Rec, result, view: { type: 'analysis_result', enrichment: result.enrichment }, reloaded: JSON.parse(bytes) as Rec };
+}
+
+const idOf = (request: Rec, label: string): string => (request.options as Rec[]).find((o) => o.label === label)!.id as string;
+/** A PLoT option row with its Wilson precision (10,000 informative draws). */
+const answered = (id: string, p: number, outcome: Rec): Rec => ({ option_id: id, probability_of_goal: p, outcome,
+  probability_of_goal_precision: { basis: 'simulation_precision', method: 'wilson_score', confidence_level: 0.95, n_informative: 10000,
+    n_met: Math.round(p * 10000), interval_lower: Math.max(0, p - 0.01), interval_upper: Math.min(1, p + 0.01) } });
+const precision = (p: number): Rec => ({ n_informative: 10000, standard_error: Math.sqrt((p * (1 - p)) / 10000) });
+
+/** Hiring with every link into the goal sized (the hiring cost moves no capacity, so it has no link to size). */
+const hiringSized = (): CandidateModel => {
+  const h = hiring() as unknown as Rec;
+  h.links = (h.links as Rec[]).filter((l) => l.from !== 'First-year hiring cost');
+  return h as unknown as CandidateModel;
+};
+// The status quo's change from today is 0 on every draw (the same-draw reading); the options' changes vary.
+const hiringAnswer = (request: Rec): Rec[] => [
+  answered(idOf(request, 'Hire a tech lead'), 0.46, { mean: 9, std: 3, p10: 5, p50: 9, p90: 13 }),
+  answered(idOf(request, 'Hire two developers'), 0.31, { mean: 8, std: 4, p10: 3, p50: 8, p90: 13 }),
+  answered(idOf(request, 'Carry on with the current team'), 0, { mean: 0, std: 0, p10: 0, p50: 0, p90: 0 }),
+];
+const DOING_NOTHING = (label: string): string => `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
+
+describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "% higher than today", the status quo by assumption, Olumi\'s sizes named', () => {
+  it('RED: the stored Run licenses each option on the ruled sentence; the status quo is "no change, by assumption" with no figure or interval', async () => {
+    const { result, view, reloaded } = await runAndRead(store(hiringSized()), hiringAnswer);
+    const licence = goalChanceLicenceForAgent(view)!;
+    expect(licence.chance_words).toBe('chance of ‘Productivity’ being at least 10% higher than today at three months');
+    expect(licence.status_quo).toEqual({ option_id: 'carry_on_with_the_current_team', line: DOING_NOTHING('Productivity') });
+    expect(licence.withheld_option_ids).toEqual(['carry_on_with_the_current_team']);
+    const sq = (result.enrichment.option_comparison as Rec[]).find((r) => r.option_id === 'carry_on_with_the_current_team')!;
+    expect(sq).not.toHaveProperty('probability_of_goal_precision');
+    expect(sq.outcome).toEqual({ mean: 0, p50: 0 });
+    // Provisional (amendment 7): both effect sizes into the goal are Olumi's (9% per tech lead, 4% per developer, drafted
+    // ai_proposed); every starting value is the user's 0 and each option's own setting (1 lead, 2 developers) is the user's.
+    expect(licence.provisional).toBe(true);
+    const faces = goalChanceCellFacesForAgent(view, reloaded, true);
+    expect([...faces]).toEqual([
+      ['hire_a_tech_lead', '‘Hire a tech lead’: about 46% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi\'s estimates for 2 relationships (see Check estimates).'],
+      ['hire_two_developers', '‘Hire two developers’: about 31% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi\'s estimates for 2 relationships (see Check estimates).'],
+    ]);
+    expect(goalChanceNotesForAgent(view, reloaded, true)).toEqual(expect.arrayContaining([DOING_NOTHING('Productivity'),
+      'This assumes carrying on as now leaves ‘Productivity’ unchanged through month three; each option is measured against that.']));
+    expect(JSON.stringify(licence)).not.toMatch(/percentage point/);
+  });
+
+  it('RED (amendment 7, per option): an option whose OWN setting is Olumi\'s says so on its result only — never on another option\'s', async () => {
+    const h = hiringSized() as unknown as Rec;
+    // ‘Hire two developers’ drafted with Olumi's own level for developers (not the user's 2).
+    (h.options as Rec[])[1].interventions[0].provenance = 'ai_proposed';
+    const { view, reloaded } = await runAndRead(store(h as unknown as CandidateModel), hiringAnswer);
+    const faces = goalChanceCellFacesForAgent(view, reloaded, true);
+    expect(faces.get('hire_two_developers')).toBe('‘Hire two developers’: about 31% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi\'s estimates for 1 option setting and 2 relationships (see Check estimates).');
+    expect(faces.get('hire_a_tech_lead')).toBe('‘Hire a tech lead’: about 46% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi\'s estimates for 2 relationships (see Check estimates).');
+  });
+});
+
+/**
+ * Capacity, a percentage LEVEL (75% today) raised by 10: the stored goal written by hand in the shape a level goal is
+ * stored in (today's level on the goal, the change target, Olumi's reading "level"). ⚠ The admission seam for a level %
+ * change is another builder's lease (DL, 12 Oct: capacity frames, `refit-frames.ts`); when it lands, this row's stored
+ * goal comes from admission instead. Store → loader → Run → licence → screen below are all real.
+ */
+function capacityBytes(): string {
+  const g = JSON.parse(store(hiringSized())) as Rec;
+  const goal = node(g, 'productivity');
+  delete goal.quantity_frame;
+  Object.assign(goal, {
+    label: 'Development capacity',
+    observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction' },
+    goal_target_basis: { ...goal.goal_target_basis, quantity_frame: 'level', denominator: 'today’s development capacity (75%)',
+      effect_unit: 'percentage points of capacity per added person, at month three' },
+  });
+  for (const e of g.edges as Rec[]) if (e.to === 'productivity' && e.provenance?.natural_effect) e.provenance.natural_effect.amount_unit = 'percentage points';
+  return JSON.stringify(GraphV3.parse(g));
+}
+// The status quo stays at today's 75% on every draw; the options' levels vary.
+const capacityAnswer = (request: Rec): Rec[] => [
+  answered(idOf(request, 'Hire a tech lead'), 0.46, { mean: 84, std: 3, p10: 80, p50: 84, p90: 88 }),
+  answered(idOf(request, 'Hire two developers'), 0.31, { mean: 83, std: 3, p10: 79, p50: 83, p90: 87 }),
+  answered(idOf(request, 'Carry on with the current team'), 0, { mean: 75, std: 0, p10: 75, p50: 75, p90: 75 }),
+];
+
+describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised by 10 is said in POINTS (75% → 85%, never 82.5%)', () => {
+  it('RED: "10 percentage points higher than today", never "10% higher"; the status quo held at 75% is by assumption', async () => {
+    const { result, view, reloaded } = await runAndRead(capacityBytes(), capacityAnswer);
+    const licence = goalChanceLicenceForAgent(view)!;
+    expect(licence.chance_words).toBe('chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months');
+    expect(licence.status_quo).toEqual({ option_id: 'carry_on_with_the_current_team', line: DOING_NOTHING('Development capacity') });
+    expect((result.enrichment.option_comparison as Rec[]).find((r) => r.option_id === 'carry_on_with_the_current_team')!.outcome).toEqual({ mean: 75, p50: 75 });
+    const faces = goalChanceCellFacesForAgent(view, reloaded, true);
+    expect(faces.get('hire_a_tech_lead')).toBe('‘Hire a tech lead’: about 46% chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months, in this model, using Olumi\'s estimates for 2 relationships (see Check estimates).');
+    expect(JSON.stringify([...faces, licence])).not.toMatch(/10% higher/);
+  });
+
+  it('CONTROL: a status quo the Run MOVED (its draws end at 78%, not today\'s 75%) is the Run\'s finding — no "no change" is said of it', async () => {
+    const moved = (request: Rec): Rec[] => capacityAnswer(request).map((r) => (r.option_id === 'carry_on_with_the_current_team'
+      ? { ...r, outcome: { mean: 78, std: 0, p10: 78, p50: 78, p90: 78 } } : r));
+    const { view } = await runAndRead(capacityBytes(), moved);
+    const licence = goalChanceLicenceForAgent(view)!;
+    expect(licence.status_quo).toBeUndefined();
+    expect(JSON.stringify(licence)).not.toMatch(/by assumption/);
+  });
+});
+
+/** Marketing with every link into a target sized (one customer per point of conversion, on a 0–20% conversion frame). */
+const marketingSized = (): CandidateModel => {
+  const m = marketing() as unknown as Rec;
+  m.links = (m.links as Rec[]).filter((l) => l.from !== 'Annual marketing spend')
+    .map((l) => (l.from === 'Conversion rate' ? { ...l, effect_amount: 1 } : l));
+  Object.assign((m.factors as Rec[]).find((f) => f.label === 'Conversion rate')!, { plausible_max: 20 });
+  return m as unknown as CandidateModel;
+};
+const marketingAnswer = (request: Rec): Rec[] => {
+  const target = (nodeId: string): string => (request.goal_constraints as Rec[]).find((r) => r.node_id === nodeId)!.constraint_id as string;
+  const [customers, conversion] = [target('new_customers'), target('conversion_rate')];
+  return ([['Hire a marketing manager', 0.6, 0.42, 0.3], ['AI planning plus advertising', 0.7, 0.55, 0.45]] as const).map(([label, nc, cv, both]) => ({
+    ...answered(idOf(request, label), nc, { mean: 22, std: 4, p10: 17, p50: 22, p90: 27 }),
+    constraint_probabilities: { [customers]: nc, [conversion]: cv },
+    constraint_probabilities_precision: { [customers]: precision(nc), [conversion]: precision(cv) },
+    probability_of_joint_goal: both, probability_of_joint_goal_precision: precision(both),
+  }));
+};
+
+describe('readback RESPONSE → LICENCE — marketing: "above 15%" is said only where the engine scored ">"', () => {
+  it('ADVERSE (amendment 7, real Run): conversion\'s level today is Olumi\'s estimate, so its own chance and the joint are never said', async () => {
+    const { view } = await runAndRead(store(marketingSized()), marketingAnswer);
+    const targets = goalChanceLicenceForAgent(view)!.targets!;
+    expect(targets.per_target.map((t) => t.constraint_id)).toEqual(['agent-lane:new_customers:>=']);
+    expect(targets.per_target[0]!.words).toBe('‘New customers’ being at least 20 customers over the first three months after launch');
+    expect(targets.joint).toMatchObject({ status: 'withheld', reason: 'olumi_base' });
+    expect(JSON.stringify([targets.per_target, targets.joint])).not.toMatch(/above 15%/);
+  });
+
+  /**
+   * Once the user has confirmed conversion today (the approval card stores source `user_confirmed`), the licence the
+   * handler writes (`withGoalChanceLicence`, run-analysis.ts) reads the request the handler BUILT from these stored bytes.
+   */
+  async function confirmed(): Promise<{ bytes: string; payload: Rec; reloaded: Rec }> {
+    const g = JSON.parse(store(marketingSized())) as Rec;
+    const conversion = node(g, 'conversion_rate');
+    conversion.observed_state = { value: 0.5, unit: '%', source: 'user_confirmed', raw_value: 10, cap: 20, declared_scale: 'unit_interval' };
+    conversion.provenance = 'user_set';
+    const bytes = JSON.stringify(GraphV3.parse(g));
+    const { payload, reloaded } = await runFromStore(bytes);
+    return { bytes, payload, reloaded };
+  }
+  const licenceOver = (payload: Rec, reloaded: Rec, sent: unknown) => {
+    const run = withGoalChanceLicence({ option_comparison: marketingAnswer(payload) }, reloaded, 'new_customers', undefined, undefined, reloaded,
+      { storedConstraints: reloaded.goal_constraints, sentConstraints: sent });
+    return goalChanceLicenceForAgent({ type: 'analysis_result', enrichment: run })!;
+  };
+
+  it('RED: the request the handler built sends ">" — so conversion\'s own chance is said "above 15%", and the joint names every condition', async () => {
+    const { payload, reloaded } = await confirmed();
+    expect((payload.goal_constraints as Rec[]).find((r) => r.node_id === 'conversion_rate')).toMatchObject({ operator: '>', value: 15 });
+    const targets = licenceOver(payload, reloaded, payload.goal_constraints).targets!;
+    expect(targets.per_target.map((t) => [t.words, t.pct_by_option])).toEqual([
+      ['‘New customers’ being at least 20 customers over the first three months after launch', { hire_a_marketing_manager: 60, ai_planning_plus_advertising: 70 }],
+      ['‘Conversion rate’ being above 15% over the first three months after launch', { hire_a_marketing_manager: 42, ai_planning_plus_advertising: 55 }],
+    ]);
+    expect(targets.joint).toMatchObject({ status: 'licensed', pct_by_option: { hire_a_marketing_manager: 30, ai_planning_plus_advertising: 45 } });
+  });
+
+  it('ADVERSE (r1 item 4): a Run whose request sent ">=" for the stated ">" withholds conversion\'s OWN chance too, and says so', async () => {
+    const { payload, reloaded } = await confirmed();
+    const oldWire = (payload.goal_constraints as Rec[]).map((r) => (r.node_id === 'conversion_rate' ? { ...r, operator: '>=' } : r));
+    const targets = licenceOver(payload, reloaded, oldWire).targets!;
+    expect(targets.per_target.map((t) => t.constraint_id)).toEqual(['agent-lane:new_customers:>=']);
+    expect(targets.joint).toMatchObject({ status: 'withheld', reason: 'strict_not_preserved',
+      line: 'The chance of meeting all of them together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: the comparison the analysis used is not the one you stated.' });
+    expect(JSON.stringify(targets.per_target)).not.toMatch(/above 15%/);
   });
 });

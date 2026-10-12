@@ -279,18 +279,22 @@ export function goalChanceLicenceOf(
   // The Run's own option records, current-first: the first carrier that has any is the comparison.
   const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
   // ⭐ Amendment 1 (independent check r1 item 3): EVERY frame reads carrying on as now as the reference BY ASSUMPTION, never
-  // a finding. A change target's status quo is no change by construction. A LEVEL target's is by assumption where the Run's
-  // own status-quo row is that assumption — every draw at the goal's stated current level (zero spread, at today's level),
-  // which is what the same-draw reading produces. A Run whose status quo MOVED (drift over the period, or spread) did not
-  // hold it unchanged, so "no change" would be false of it: that row stays the Run's finding, as before. (A deadline
-  // share/event goal is not paired this way: its status quo stays a finding.)
+  // a finding. A quantity measured AS a change (hiring) is 0 today by definition, so its status quo is no change by
+  // construction. Any other goal's is by assumption where the Run's own status-quo row is that assumption — every draw at
+  // the goal's stated current level (zero spread, at today's level), which is what the same-draw reading produces. A Run
+  // whose status quo MOVED (drift over the period, or spread) did not hold it unchanged, so "no change" would be false of
+  // it: that row stays the Run's finding, as before. (A deadline share/event goal is not paired this way.)
   const sqRow = statusQuoId === undefined ? undefined
     : records.find((r) => (typeof r.option_id === 'string' ? r.option_id : r.id) === statusQuoId);
   const today = finite(goalState?.raw_value) ? goalState!.raw_value as number : undefined;
   const sqCentre = isRec(sqRow?.outcome) ? (finite(sqRow!.outcome.p50) ? sqRow!.outcome.p50 : sqRow!.outcome.mean) : undefined;
   const sqUnchanged = sqRow !== undefined && zeroSpread(sqRow) && today !== undefined && finite(sqCentre)
     && Math.abs(sqCentre - today) <= 1e-6 * Math.max(1, Math.abs(today));
-  const sqByAssumption = share === null && statusQuoId !== undefined && (changeFrame !== undefined || sqUnchanged);
+  // The goal's quantity frame as Olumi's validated reading holds it (`goalTargetBasisOf` keeps a reading only while its frame
+  // equals the node's: 'change', else 'level'); read once, here.
+  const readingFrame = basis?.quantity_frame;
+  const changeQuantity = changeFrame !== undefined && readingFrame === 'change';
+  const sqByAssumption = share === null && statusQuoId !== undefined && (changeQuantity || sqUnchanged);
   const option_ids: string[] = [];
   const licensed: string[] = [];
   const withheld: string[] = [];
@@ -416,7 +420,7 @@ export function goalChanceLicenceOf(
   };
   return withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
-    sqByAssumption, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, constraints, option_ids,
+    sqByAssumption, quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, constraints, option_ids,
   });
 }
 
@@ -430,7 +434,7 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   readonly basis: GoalTargetBasis | undefined; readonly changeFrame: 'change_abs' | 'change_rel' | undefined;
   readonly comparatorHeld: string; readonly target: { readonly value: number; readonly unit?: string };
   readonly base: number | undefined; readonly estimateOnly: boolean; readonly statusQuoId: string | undefined;
-  readonly sqByAssumption: boolean; readonly olumiInputs: boolean;
+  readonly sqByAssumption: boolean; readonly quantityFrame: 'level' | 'change' | undefined; readonly olumiInputs: boolean;
   readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
 }): GoalChanceLicence {
   const { goalLabel, changeFrame } = c;
@@ -453,10 +457,9 @@ function withBatchCWords(single: GoalChanceLicence, c: {
       ...(provisional ? { provisional: true as const } : {}),
     }, { ...c, basis, alsoRequired });
   }
-  // Independent check r1 item 1: the goal's quantity frame as the validated reading holds it — `goalTargetBasisOf` keeps a
-  // reading only while its frame equals the node's ('change', else 'level'; admission stores a level with no frame on the
-  // node). No reading → no frame → a % change is never given a default wording.
-  const quantityFrame = c.basis?.quantity_frame;
+  // Independent check r1 item 1: the goal's quantity frame as the validated reading holds it (admission stores a level with
+  // no frame on the node; its reading says "level"). No reading → no frame → a % change is never given a default wording.
+  const quantityFrame = c.quantityFrame;
   const words = targetChanceWords({
     label: goalLabel, frame: changeFrame ?? 'level', comparator: c.comparatorHeld, value: c.target.value, unit: c.target.unit ?? '',
     quantityFrame,
