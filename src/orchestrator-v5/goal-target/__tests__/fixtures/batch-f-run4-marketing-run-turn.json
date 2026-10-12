@@ -1,0 +1,681 @@
+{
+ "_provenance": {
+  "source": "olumi-work/recovery/live/runs/2026-10-12T172858Z/marketing/turns/07.json (run 4, the Run turn; served CEE a770ce49, PLoT 6ec01e80, ISL 0b3321d1)",
+  "source_sha256": "841e150e29e9c05b5e3a1d11f39fd73d445285d5887b34e718da5995b6b45b8f",
+  "scenario_id": "35ecad67-eb48-4291-ba5e-c72411396a57",
+  "extracted": "response_body.draft_graph (nodes: identity, labels, levels, interventions, identities; edges: ends, strength, provenance) and response_body.limit_verdicts, verbatim; nothing else"
+ },
+ "graph": {
+  "nodes": [
+   {
+    "id": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+    "kind": "decision",
+    "label": "Should I hire a marketing manager, or use an AI tool to plan the campaign for…"
+   },
+   {
+    "id": "campaign_effectiveness",
+    "kind": "goal",
+    "label": "Campaign effectiveness",
+    "goal_threshold_unit": "campaign effectiveness score (0–100)",
+    "goal_threshold_frame": "level"
+   },
+   {
+    "id": "hire_marketing_manager",
+    "kind": "option",
+    "label": "Hire marketing manager",
+    "interventions": {
+     "advertising_spend": {
+      "unit": "£/year",
+      "value": 0.15,
+      "source": "cee_hypothesis",
+      "raw_value": 30000,
+      "target_match": {
+       "node_id": "advertising_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "ai_campaign_tool_cost": {
+      "unit": "£/year",
+      "value": 0,
+      "source": "cee_hypothesis",
+      "raw_value": 0,
+      "target_match": {
+       "node_id": "ai_campaign_tool_cost",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "marketing_manager_cost": {
+      "unit": "£/year",
+      "value": 0.4,
+      "source": "cee_hypothesis",
+      "raw_value": 60000,
+      "target_match": {
+       "node_id": "marketing_manager_cost",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "founder_time_on_campaign": {
+      "unit": "%",
+      "value": 0.1,
+      "source": "cee_hypothesis",
+      "raw_value": 10,
+      "target_match": {
+       "node_id": "founder_time_on_campaign",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "ai_tool_plus_advertising",
+    "kind": "option",
+    "label": "AI tool plus advertising",
+    "interventions": {
+     "advertising_spend": {
+      "unit": "£/year",
+      "value": 0.425,
+      "source": "cee_hypothesis",
+      "raw_value": 85000,
+      "target_match": {
+       "node_id": "advertising_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "ai_campaign_tool_cost": {
+      "unit": "£/year",
+      "value": 0.1,
+      "source": "cee_hypothesis",
+      "raw_value": 5000,
+      "target_match": {
+       "node_id": "ai_campaign_tool_cost",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "marketing_manager_cost": {
+      "unit": "£/year",
+      "value": 0,
+      "source": "cee_hypothesis",
+      "raw_value": 0,
+      "target_match": {
+       "node_id": "marketing_manager_cost",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "founder_time_on_campaign": {
+      "unit": "%",
+      "value": 0.2,
+      "source": "cee_hypothesis",
+      "raw_value": 20,
+      "target_match": {
+       "node_id": "founder_time_on_campaign",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "continue_as_now",
+    "kind": "option",
+    "label": "Continue as now",
+    "is_baseline": true
+   },
+   {
+    "id": "marketing_manager_cost",
+    "kind": "factor",
+    "label": "Marketing manager cost",
+    "observed_state": {
+     "unit": "£/year",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    },
+    "scale_frame": 150000
+   },
+   {
+    "id": "ai_campaign_tool_cost",
+    "kind": "factor",
+    "label": "AI campaign tool cost",
+    "observed_state": {
+     "unit": "£/year",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    },
+    "scale_frame": 50000
+   },
+   {
+    "id": "advertising_spend",
+    "kind": "factor",
+    "label": "Advertising spend",
+    "observed_state": {
+     "unit": "£/year",
+     "value": 0.1,
+     "source": "cee_inference",
+     "raw_value": 20000,
+     "extractionType": "inferred"
+    },
+    "scale_frame": 200000
+   },
+   {
+    "id": "founder_time_on_campaign",
+    "kind": "factor",
+    "label": "Founder time on campaign",
+    "observed_state": {
+     "unit": "%",
+     "value": 0.15,
+     "source": "cee_inference",
+     "raw_value": 15,
+     "extractionType": "inferred"
+    },
+    "scale_frame": 100
+   },
+   {
+    "id": "founder_marketing_experience",
+    "kind": "factor",
+    "label": "Founder marketing experience",
+    "observed_state": {
+     "unit": "marketing experience score (0–100)",
+     "value": 0.25,
+     "source": "cee_inference",
+     "raw_value": 25,
+     "extractionType": "inferred"
+    },
+    "scale_frame": 100
+   },
+   {
+    "id": "campaign_planning_quality",
+    "kind": "factor",
+    "label": "Campaign planning quality",
+    "observed_state": {
+     "unit": "campaign planning quality score (0–100)",
+     "value": 0.35,
+     "source": "cee_inference",
+     "raw_value": 35,
+     "extractionType": "inferred"
+    },
+    "scale_frame": 100
+   },
+   {
+    "id": "poor_campaign_targeting",
+    "kind": "risk",
+    "label": "Poor campaign targeting"
+   },
+   {
+    "id": "annual_campaign_spend",
+    "kind": "outcome",
+    "label": "Annual campaign spend",
+    "nonlinear_identity": {
+     "operation": "sum",
+     "factor_ids": [
+      "marketing_manager_cost",
+      "ai_campaign_tool_cost",
+      "advertising_spend"
+     ],
+     "stated_in_brief": false
+    },
+    "scale_frame": 200000
+   }
+  ],
+  "edges": [
+   {
+    "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+    "to": "hire_marketing_manager",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+    "to": "ai_tool_plus_advertising",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+    "to": "continue_as_now",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "hire_marketing_manager",
+    "to": "marketing_manager_cost",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "hire_marketing_manager",
+    "to": "ai_campaign_tool_cost",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "hire_marketing_manager",
+    "to": "advertising_spend",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "hire_marketing_manager",
+    "to": "founder_time_on_campaign",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "ai_tool_plus_advertising",
+    "to": "marketing_manager_cost",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "ai_tool_plus_advertising",
+    "to": "ai_campaign_tool_cost",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "ai_tool_plus_advertising",
+    "to": "advertising_spend",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "ai_tool_plus_advertising",
+    "to": "founder_time_on_campaign",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "continue_as_now",
+    "to": "marketing_manager_cost",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "continue_as_now",
+    "to": "ai_campaign_tool_cost",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "continue_as_now",
+    "to": "advertising_spend",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "continue_as_now",
+    "to": "founder_time_on_campaign",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "marketing_manager_cost",
+    "to": "annual_campaign_spend",
+    "strength": {
+     "std": 0.001,
+     "mean": 0.75
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/year",
+      "strength_mean": 0.75,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£/year"
+     }
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "ai_campaign_tool_cost",
+    "to": "annual_campaign_spend",
+    "strength": {
+     "std": 0.001,
+     "mean": 0.25
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/year",
+      "strength_mean": 0.25,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£/year"
+     }
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "advertising_spend",
+    "to": "annual_campaign_spend",
+    "strength": {
+     "std": 0.001,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/year",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£/year"
+     }
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "marketing_manager_cost",
+    "to": "campaign_planning_quality",
+    "strength": {
+     "std": 0.375,
+     "mean": 0.75
+    },
+    "provenance": {
+     "basis": "Dedicated specialist marketing capacity should improve campaign planning quality.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 10,
+      "amount_unit": "campaign planning quality score (0–100)",
+      "strength_mean": 0.75,
+      "per_source_change": 20000,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£/year"
+     }
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "ai_campaign_tool_cost",
+    "to": "campaign_planning_quality",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "provenance": {
+     "basis": "A campaign-planning tool can improve planning structure and execution.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 5,
+      "amount_unit": "campaign planning quality score (0–100)",
+      "strength_mean": 0.5,
+      "per_source_change": 5000,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£/year"
+     }
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "founder_time_on_campaign",
+    "to": "campaign_planning_quality",
+    "strength": {
+     "std": 0.19999999999999998,
+     "mean": 0.39999999999999997
+    },
+    "provenance": {
+     "basis": "More focused founder time can improve campaign decisions and coordination.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 4,
+      "amount_unit": "campaign planning quality score (0–100)",
+      "strength_mean": 0.39999999999999997,
+      "per_source_change": 10,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "founder_marketing_experience",
+    "to": "campaign_planning_quality",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.2
+    },
+    "provenance": {
+     "basis": "The stated lack of marketing experience is likely to reduce campaign-planning quality.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 5,
+      "amount_unit": "campaign planning quality score (0–100)",
+      "strength_mean": 0.2,
+      "per_source_change": 25,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "marketing experience score (0–100)"
+     }
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "campaign_planning_quality",
+    "to": "campaign_effectiveness",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "advertising_spend",
+    "to": "campaign_effectiveness",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive"
+   },
+   {
+    "from": "poor_campaign_targeting",
+    "to": "campaign_effectiveness",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative"
+   }
+  ],
+  "goal_constraints": [
+   {
+    "unit": "£/year",
+    "label": "Annual campaign spend",
+    "value": 100000,
+    "node_id": "annual_campaign_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:annual_campaign_spend:<="
+   },
+   {
+    "unit": "%",
+    "label": "Founder time on campaign",
+    "value": 25,
+    "node_id": "founder_time_on_campaign",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:founder_time_on_campaign:<="
+   }
+  ]
+ },
+ "limit_verdicts": {
+  "per_limit": [
+   {
+    "constraint_id": "agent-lane:annual_campaign_spend:<=",
+    "state": "unscored",
+    "reason": "parts_identity_unmodelled"
+   },
+   {
+    "constraint_id": "agent-lane:founder_time_on_campaign:<=",
+    "state": "unscored",
+    "reason": "limit_rests_on_olumi_guess"
+   }
+  ],
+  "joint": {
+   "state": "withheld",
+   "withheld_reason": "limit_unscored",
+   "constraint_ids": [
+    "agent-lane:annual_campaign_spend:<=",
+    "agent-lane:founder_time_on_campaign:<="
+   ]
+  }
+ }
+}

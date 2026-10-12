@@ -55,7 +55,7 @@ import {
   statusQuoProjectionWords, statusQuoRowWords,
   targetChanceWords, type GoalTargetBasis,
 } from './goal-target-basis.js';
-import { goalTargetsBlockOf, readGoalTargetsBlock, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
+import { goalTargetsBlockOf, readGoalTargetsBlock, retainedConditionsLine, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
 import {
   displayedPctAt, displayRoundingFor, goalChanceDisplayClass, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
   type GoalChanceDisplayRounding, type GoalChanceDriver, type GoalChanceNoDriverReason, type GoalChancePrecision,
@@ -223,6 +223,11 @@ export interface GoalChanceConstraintInputs {
   readonly sentConstraints?: unknown;
   /** What CEE sent PLoT for this Run: binds a deadline goal's engine-read chance (`goal-own-constraint-chance.ts`). */
   readonly sentRun?: SentRunInputs;
+  /**
+   * Batch F: this Run's per-row verdicts (`constraint_verdict.perLimit`, every ratified row, targets included), so a withheld
+   * joint or target names the cause CEE established. Absent: only PLoT's own `joint_withheld` reason is read.
+   */
+  readonly limitVerdicts?: unknown;
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -859,6 +864,9 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
     ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint: allAssumed || jointMovedIds.size > 0, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
     ...(c.basis !== undefined ? { basis: c.basis } : {}),
+    // Batch F: the causes CEE established per row, and the graph the Run SENT (where a target's level today is read).
+    ...(c.constraints.limitVerdicts !== undefined ? { limitVerdicts: c.constraints.limitVerdicts } : {}),
+    ...(c.constraints.sentRun?.graph !== undefined ? { sentGraph: c.constraints.sentRun.graph } : {}),
   });
   if (block === null) return l;
   const {
@@ -900,11 +908,18 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     notes.push(n);
   }
   if (assumedNames.length > 0 && !assumptionSaid) notes.unshift(statusQuoAssumptionWords(assumedNames, c.basis));
+  // ⭐ BATCH F (b): each stated target whose own chance is not shown is said, with its reason and next step — first among the
+  // notes, so it sits beside the targets that are shown (every reader already says the licence's notes, in order).
+  notes.unshift(...(block.withheld_targets ?? []).map((t) => t.line));
   // ⭐ AIE C clause 3 (12 Oct): a condition the drafter RETAINED because this contract cannot represent it (a distinct
   // period or reference) is said beside the joint, never claimed by it. ⛔ Re-scope (r2 BLOCKING 2): EVERY one is said — a
   // retained condition sharing a figure with a target the joint names (the same 15% over a distinct period) is not that target.
-  const covers = partialGoalWords(targetNames, c.alsoRequired);
-  if (covers !== undefined && targetNames.length > 0) notes.push(covers);
+  // ⛔ BATCH F (c, W4): nor is it said to be EXCLUDED. Beside several targets nothing binds a retained condition to a target by
+  // identity (the drafter typed "secure 20 new customers within the first 3 months" AND the ‘New customers in first 3 months’
+  // target row, row a5ada94b), so "It does not include: …" could exclude a target the chance does include. Each is still said,
+  // byte for byte, claimed neither in nor out (words pending AIE).
+  const retained = targetNames.length > 0 ? retainedConditionsLine(c.alsoRequired) : undefined;
+  if (retained !== undefined) notes.push(retained);
   // The status quo's own line is said only where EVERY target's reference is the same-draw one (never universal by default);
   // a status quo whose own share disagrees with that reference is withheld with that reason.
   // R5-3: "no change" only where EVERY condition of the joint is on the same-draw reference — and then it names every one.

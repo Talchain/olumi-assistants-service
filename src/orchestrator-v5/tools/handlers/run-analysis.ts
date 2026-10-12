@@ -2892,7 +2892,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     response = withholdForUnsentGoalTarget(response, graphForAnalysis, snapshot.goal_node_id, goalChanceConstraints);
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, sentRun),
-      snapshot.rawPersistedGraph ?? graphForAnalysis, goalChanceConstraints);
+      snapshot.rawPersistedGraph ?? graphForAnalysis,
+      // Batch F: and this Run's per-row verdicts, so a withheld joint or target names the cause CEE established.
+      { ...goalChanceConstraints, ...(constraintVerdict.perLimit !== undefined ? { limitVerdicts: constraintVerdict.perLimit } : {}) });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);
