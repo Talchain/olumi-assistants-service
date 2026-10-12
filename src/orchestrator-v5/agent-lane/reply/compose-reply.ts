@@ -1001,14 +1001,22 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
     // ⭐ Score run 2 hidden answers (DL 12 Oct; PL 6127523574 b4): with no chance on the face (it is withheld) — or a write
     // this turn did not apply — the reply's own answer is the face's content, never folded behind the status lines ("Not
     // shown yet; why is under More detail" with the answer under it: capacity 1 and 3b; hiring 7b's "Nothing you entered
-    // changed."). Added after the optional E/W demotion, so every existing face line stays exactly as it was. Typed detail
-    // lines, other questions (D-12) and a restated withheld cause still fold. Label, never withhold.
-    const answerOnFace = (!horizonBesideChance && (input.chanceCells ?? []).some((cell) => cell.kind === 'withheld'))
-      || input.notRecorded === true;
+    // changed."). Added after the optional E/W demotion, so every existing face line stays exactly as it was. Typed lines,
+    // other questions (D-12) and a restated withheld cause still fold. Label, never withhold.
+    // A typed finding that owns the next step (the guided invitation, R3 GP) IS the answer: its face stays as designed.
+    const answerOnFace = nextStepFinding === undefined && ((!horizonBesideChance && (input.chanceCells ?? []).some((cell) => cell.kind === 'withheld'))
+      || input.notRecorded === true);
     if (answerOnFace) {
+      // The narrator's own words only: every typed line keeps the place its producer gave it (a withheld reason stays where
+      // the marker says "why is under More detail"; a progress receipt and a status line stay as the route typed them).
+      const fill = (u: Unit): boolean => u.obligation === undefined && !faceSet.has(u) && u !== chanceLeadIn
+        && eligible(u) && !controlAsk(u) && !isQuestionUnit(u);
+      // A source line joins the face whole or not at all, and never as glued fragments (a typed reason typed without its
+      // full stop): what stays below keeps its own sentence intact, so every input sentence is still derived as written.
+      const whole = new Set(units.filter((u) => units.every((v) => v.line !== u.line || faceSet.has(v)
+        || (fill(v) && v.joinBefore !== ''))).map((u) => u.line));
       for (const u of units) {
-        if (faceSet.has(u) || u === chanceLeadIn || u.obligation === 'detail' || u.obligation === 'evidence' || u.obligation === 'withheld_reason'
-          || !eligible(u) || controlAsk(u) || isQuestionUnit(u)) continue;
+        if (!fill(u) || !whole.has(u.line)) continue;
         faceSet.add(u);
         faceBullets.push(u);
       }

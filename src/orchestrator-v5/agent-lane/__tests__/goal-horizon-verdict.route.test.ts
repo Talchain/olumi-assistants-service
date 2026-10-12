@@ -339,7 +339,8 @@ describe('Science §(ad) through the producer and reply route', () => {
     const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
     const body = await turn(); // turn asserts deep equality on the real same-id replay, without a model call.
     expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(body._answer_shape).toMatchObject({ headline: ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, bullets: [] });
+    // Score run 2 hidden answers (DL 12 Oct): with the chance withheld, the narrator's own words join the face.
+    expect(body._answer_shape).toMatchObject({ headline: ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, bullets: ['Your results are ready.'] });
     expect(body._answer_shape!.detail).toContain("Your goal is for month 9, and this model only has today's numbers.");
   }, 60_000);
 
