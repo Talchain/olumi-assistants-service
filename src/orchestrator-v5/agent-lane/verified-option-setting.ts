@@ -355,8 +355,12 @@ function currentLevelWords(text: string): string[] {
     (all, period: string) => periodNoun(period.toLowerCase()) === null ? all : '');
   return words(local.replace(/([\p{L}]+)-up\b/giu, '$1'));
 }
+/** A past anchor dates the claim ("6 months … from last Friday", "two years ago"): it does not attest today's level
+ * (AIE 0825 §2, "current versus past"). The figure stays the user's unverified claim. "Over the last year we …" is a
+ * historical period scoping a current rate and is stripped first (`currentLevelWords`). */
+const PAST_ANCHOR = new Set(['last', 'previous', 'ago', 'yesterday']);
 function currentLevelRole(text: string): boolean {
-  return !FOREIGN_LEVEL.test(text) && !currentLevelWords(text).some(w => BOUNDS.has(w)
+  return !FOREIGN_LEVEL.test(text) && !currentLevelWords(text).some(w => BOUNDS.has(w) || PAST_ANCHOR.has(w)
     || ['goal', 'target', 'limit', 'plan', 'forecast', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w));
 }
 
