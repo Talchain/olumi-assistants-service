@@ -1,4 +1,4 @@
-import { asAnalysed } from '../../orchestrator/context/placeholder-parts.js';
+import { asAnalysed, holdsTodaysLevel } from '../../orchestrator/context/placeholder-parts.js';
 import { validatedDefinitionForGraph } from '../goal-target/held-user-links.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
 import { factorValueHash, linkValueHash, type GoalPathFactor, type GoalPathLink } from './turn-context/guidance-signals.js';
@@ -140,7 +140,8 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
   const RC4_AUTHORSHIP = { human: 'yours', ai: 'olumi_estimate', ai_accepted: 'olumi_accepted', unverified: 'unknown' } as const;
   const factors: GoalPathFactor[] = valued.map(id => ({ factor_id: id, label: labelOf(id),
     value_authorship: RC4_AUTHORSHIP[originOf.get(id)!], goal_distance: distance.get(id)!, value_hash: factorValueHash(byId.get(id)!) }));
-  // (b) Every setting of every option in this Run on the set (the scored goal and the status quo included).
+  // (b) Every setting of every option in this Run on the set (the scored goal and the status quo included; a baseline cell
+  // that holds today's level is today's figure, not a setting).
   const setsOf = (o: Rec): Rec => rec(o.interventions) ?? rec(rec(o.data)?.interventions) ?? {};
   const optionOf = new Map<string, string>();
   const ownSetting = new Set<string>();
@@ -150,6 +151,10 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
     return Object.entries(setsOf(o)).flatMap(([nodeId, cell]) => {
       if (!distance.has(nodeId) || cellFigure(cell) === undefined) return [];
       ownSetting.add(`${o.id as string}->${nodeId}`);
+      // RC4 (the old panel walk's rule, now in the ONE census so the face and the panel count alike): a BASELINE option's cell
+      // that holds today's level mirrors today's figure, which the node's own starting value already counts — never a
+      // setting Olumi filled, whatever its stamp.
+      if (o.is_baseline === true && holdsTodaysLevel(cell, byId.get(nodeId))) return [];
       const whose = settingOriginOf(cell, byId.get(nodeId));
       if (whose === 'unverified') unverifiedSettingsByOption[o.id as string] = (unverifiedSettingsByOption[o.id as string] ?? 0) + 1;
       if (whose !== 'human' && whose !== 'ai') return [];

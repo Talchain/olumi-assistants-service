@@ -456,7 +456,7 @@ export function placeholderPartsFinding(
 }
 
 /** The option sets the target at exactly today's level (the status quo's zero change). */
-function holdsTodaysLevel(v: unknown, target: Rec | undefined): boolean {
+export function holdsTodaysLevel(v: unknown, target: Rec | undefined): boolean {
   const today = isRec(target?.observed_state) ? target.observed_state : undefined;
   if (today === undefined) return false;
   const raw = isRec(v) ? v.raw_value : undefined;
