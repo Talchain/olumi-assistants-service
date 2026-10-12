@@ -22,7 +22,6 @@ import marketing from './fixtures/marketing-17c98e69.json';
 import { eligibleInterventionFor, selectTurnGuidanceShown } from '../turn-context/guidance-wire.js';
 import { guidanceHistoryOf, guidanceOnAnswer, thinDraftShownWire, type AnswerGuidance } from '../turn-context/guidance-history.js';
 import { composeReplyShape } from '../reply/compose-reply.js';
-import { INTERVENTION_WHY_LABEL } from '../reply/eligible-intervention-reply.js';
 import { entryKey } from '../guidance/select.js';
 import { thinDraftOffer } from '../method-turn/widen-turn.js';
 import policy from '../guidance/reasoning-interventions.json';
@@ -31,6 +30,8 @@ type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[
 type Kind = 'construction' | 'turn' | 'run' | 'edit' | 'press_strengthen' | string;
 type Reply = { turn: number; graph: Graph; policy?: string; variant?: string; item?: string; key?: string; why: number; action: boolean; science?: string };
 const STRENGTHEN = 'RC-STRENGTHEN-ITEM';
+/** R3-1 (trial merge of B and R3): the Why? is R3's plain final paragraph, "Why? <science>", never <details> markup. */
+const WHY = '\n\nWhy? ';
 const REPLY = 'Here is what the model shows so far.';
 
 /** One reply per turn, as the route builds it: select on the readback, compose the Why? and action, record the answer. */
@@ -52,8 +53,7 @@ function replay(turns: readonly { kind: Kind; graph: Graph }[], history: AnswerG
         interventionActionLabel: row?.primary_action.label }).text;
       if (row?.policy_id === STRENGTHEN) held = row.item;
       reply = { ...reply, policy: row?.policy_id, variant: row?.variant, item: row?.item, key: row?.state_key_hash,
-        // Technique (c): the Why? rides the guidance row, never the reply; any "Why? " in the reply text counts.
-        why: text.split(`${INTERVENTION_WHY_LABEL} `).length - 1, action: row !== undefined && text.includes(row.primary_action.label),
+        why: text.split(WHY).length - 1, action: row !== undefined && text.includes(row.primary_action.label),
         ...(row?.science === undefined ? {} : { science: row.science }) };
       answer = guidanceOnAnswer(shown.wire, state);
     }
