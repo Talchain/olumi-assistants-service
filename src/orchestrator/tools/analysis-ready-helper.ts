@@ -39,6 +39,8 @@ import {
 // alternative was to re-derive `willProceed` here, which would mint the second
 // admission predicate this estate keeps paying for.
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
+// ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
+import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
@@ -1321,6 +1323,19 @@ function hasSampledPrior(prior: unknown): boolean {
 const statusQuoLevelAsk = (label: string): string =>
   `What is "${label}" today, before any option changes it? Without a current level the analysis would treat it as zero.`;
 
+/**
+ * ⭐ EBD E1 — ONE READINESS AUTHORITY FOR THE DEADLINE MODEL (Paul, 12 Oct, scenario 4184e877). Its team part
+ * (`event_team`) is a root with no level until the team's time is held, so the gap is real and still refuses the Run.
+ * But its question is the MODEL's own (`eventModelAsk`: the deadline, then the team's time), never "What is … today,
+ * before any option changes it?": a share of the work done by the deadline has no level today, and the coach called that
+ * sentence misleading three times. Every other root keeps the status-quo level ask, byte for byte.
+ */
+const levelGapAsk = (gap: { id: string; label: string }, rawGraph: unknown): string => {
+  const eventTeam = draftedTeamPartOf(rawGraph)?.team;
+  const eventAsk = eventTeam !== undefined && eventTeam.id === gap.id ? eventModelAsk(rawGraph) : null;
+  return eventAsk ?? statusQuoLevelAsk(gap.label);
+};
+
 function appendSemanticIssues(
   payload: AnalysisReadyPayload | undefined,
   out: CanonicalReadinessIssue[],
@@ -1574,7 +1589,7 @@ export function assessCanonicalAnalysisReadiness(
         issue_id: `level_${index + 1}`,
         code: 'MISSING_FACTOR_LEVEL',
         category: 'option_values',
-        message: statusQuoLevelAsk(gap.label),
+        message: levelGapAsk(gap, graph),
         repairability: 'human_input_required',
         factor_id: gap.id,
         factor_label: gap.label,
@@ -1662,7 +1677,7 @@ export function assessCanonicalAnalysisReadiness(
                     factor_id: gap.id,
                     factor_label: gap.label,
                     blocker_type: 'missing_value' as const,
-                    message: statusQuoLevelAsk(gap.label),
+                    message: levelGapAsk(gap, graph),
                     suggested_action: 'add_value' as const,
                   })),
                 ],

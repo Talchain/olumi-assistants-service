@@ -2,7 +2,7 @@
 import { REPAIR_CODES } from '@talchain/schemas';
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js';
-import { goalDeadlineFromRecord, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
+import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
 import { readStatedDeadline, sayDate, timeBetween } from './deadline-date.js';
 import { extraShareMoments, teamShareMoments } from './event-by-date-share.js';
 import { denormalisedMagnitude, findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
@@ -227,6 +227,19 @@ export function teamTimeAsk(graph: unknown): string | null {
   return Number.isFinite(eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time?.most_likely)
     ? 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?'
     : `How long would ${part.deliverable} take with the team you have now?`;
+}
+
+/**
+ * ⭐ EBD E1 — THE EVENT MODEL'S ONE QUESTION (Paul's hiring test, 12 Oct, scenario 4184e877). Its team part takes a value
+ * only from the team's time, and only once the deadline is held, so the question is the deadline first, then that time.
+ * Readiness asked "What is "Share today's team finishes by the deadline" today, before any option changes it? … treat it
+ * as zero" instead: a level this part can never be given. The readiness blocker (`analysis-ready-helper.ts`), the coach
+ * (`decision-input-ask.ts`) and so the UI all say THIS sentence. `null` when the model has no drafted event team part.
+ */
+export function eventModelAsk(graph: unknown): string | null {
+  const part = draftedTeamPartOf(graph);
+  if (part === null) return null;
+  return goalDeadlineFromRecord(graph, part.goal.id) === undefined ? chanceGoalDeadlineAsk(part.deliverable) : teamTimeAsk(graph);
 }
 
 export const EVENT_BY_DATE_REFUSALS = [
