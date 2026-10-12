@@ -215,7 +215,7 @@ import {
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
-import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../../goal-target/goal-chance-licence.js';
+import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
 import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -2215,7 +2215,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     response = withholdForOpenTargetQuestion(response, graphForAnalysis, snapshot.goal_node_id);
     // ⛔ AMEND item 2 (kept, DL 12 Oct): a level chance on Olumi's own estimate of the goal's level is refused by the licence;
     // the Run says why, with the next step (confirm the estimate, or give today's level) — never a silent gap.
-    response = withholdForOlumiGoalLevel(response, graphForAnalysis, snapshot.goal_node_id);
+    // ⭐ D3 (AIE #94 6128697025; recovery Batch D): a change target whose effects are not stated at the period's end (ruling
+    // 12) is refused by the licence; the Run says why — never an invisible null. No next step is promised.
+    response = [withholdForOlumiGoalLevel, withholdForPeriodEndEffects]
+      .reduce((run, withhold) => withhold(run, graphForAnalysis, snapshot.goal_node_id), response);
 
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
     // stated": PLoT's GOAL_DIRECTION_UNATTESTED is taken off the run it would mislabel, before the headline and the store.

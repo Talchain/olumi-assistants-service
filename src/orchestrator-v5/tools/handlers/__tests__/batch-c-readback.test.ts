@@ -368,6 +368,26 @@ describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "
     expect(JSON.stringify(licence)).not.toMatch(/percentage point/);
   });
 
+  it('D3 (AIE #94 6128697025): the same Run with effects NOT stated at month three says why on each option, through the real handler', async () => {
+    // The protected field as construction would store it (ruling 12); the CONTRAST is the test above (true → licensed, unchanged).
+    const g = JSON.parse(store(hiringSized())) as Rec;
+    const goal = (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    goal.goal_target_basis = { ...(goal.goal_target_basis as Rec), effects_at_period_end: false };
+    const { result, view } = await runAndRead(JSON.stringify(g), hiringAnswer);
+    expect(goalChanceLicenceForAgent(view), 'no chance is computed or licensed').toBeUndefined();
+    const warning = (result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE'
+      && (w.detail as Rec | undefined)?.reason === 'effects_at_period_end_unstated')!;
+    // This stored goal holds no comparator, so the readiness words say no bound ("up 10% from today", `sayGoalChange`).
+    expect(warning.message).toBe('The chance of reaching your target for ‘Productivity’ (up 10% from today) by month three isn’t shown: '
+      + 'the model has not established how much of these effects would be in place by then.');
+    // Each scored option but carrying on as now (`opt_only` is the harness fixture's own carrier row, as for every withhold).
+    expect(warning.option_ids).toEqual(expect.arrayContaining(['hire_a_tech_lead', 'hire_two_developers']));
+    expect(warning.option_ids).not.toContain('carry_on_with_the_current_team');
+    for (const r of (result.enrichment.option_comparison as Rec[]).filter((x) => x.option_id !== 'carry_on_with_the_current_team')) {
+      expect(r, String(r.option_id)).not.toHaveProperty('probability_of_goal');
+    }
+  });
+
   it('RED (amendment 7, per option): an option whose OWN setting is Olumi\'s says so on its result only — never on another option\'s', async () => {
     const h = hiringSized() as unknown as Rec;
     // ‘Hire two developers’ drafted with Olumi's own level for developers (not the user's 2).
