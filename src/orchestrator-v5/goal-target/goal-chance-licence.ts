@@ -159,8 +159,9 @@ export interface GoalChanceLicence {
   readonly shortfall_note_by_option?: Readonly<Record<string, string>>;
   /** The target as the user stated it: the UI says it in these words, never re-derives the comparator. */
   readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string; readonly by_date?: string;
-    /** Batch C: the target's frame when it is not a level (a change from today). */
-    readonly frame?: 'change_abs' | 'change_rel' };
+    /** The target's frame as Olumi's VALIDATED reading holds it (`goalTargetBasisOf`): a change from today, or 'level'. Absent
+     *  when there is no validated reading — never defaulted (R5 meaning at the producer, DL 12 Oct). */
+    readonly frame?: 'level' | 'change_abs' | 'change_rel' };
   /**
    * ⭐ D3 cut 5 (DL 0df0e1; Science d5 #87 6008242694 / 6008252938): present iff a USER-STATED link on a licensed option's
    * path to the goal carries an existence probability below 1 — the chances then also count Olumi's own assumption that
@@ -572,7 +573,7 @@ export function goalChanceLicenceOf(
  * the Agent already read by identity, and — with several targets — the joint headline that replaces the single target's.
  * Never a figure the Run did not compute; never a parallel licence.
  */
-function withBatchCWords(single: GoalChanceLicence, c: {
+function withBatchCWords(unframed: GoalChanceLicence, c: {
   readonly envelope: unknown; readonly graph: unknown; readonly goal: Rec | undefined; readonly goalLabel: string | undefined;
   readonly basis: GoalTargetBasis | undefined; readonly changeFrame: 'change_abs' | 'change_rel' | undefined;
   readonly comparatorHeld: string; readonly target: { readonly value: number; readonly unit?: string };
@@ -585,6 +586,12 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   readonly estimates: GoalChanceEstimates; readonly jointEstimates: GoalChanceEstimates | undefined;
 }): GoalChanceLicence {
   const { goalLabel, changeFrame } = c;
+  // ⭐ R5 MEANING AT THE PRODUCER (DL 12 Oct): the target says its frame whenever Olumi's VALIDATED reading holds one — a
+  // level as well as a change (a frameless level target fails closed on the UI). No validated reading → no frame: never
+  // defaulted to 'level'. `goalTargetBasisOf` keeps a reading only while it still describes this exact target.
+  const validatedFrame = c.basis?.target_frame;
+  const single: GoalChanceLicence = validatedFrame === undefined ? unframed
+    : { ...unframed, target: { ...unframed.target, frame: validatedFrame } };
   // A level target's period is said only on an at-period-end basis (ruling 12); otherwise today's words, unchanged.
   const basis = c.basis !== undefined && c.basis.effects_at_period_end ? c.basis : undefined;
   const alsoRequired = c.basis?.also_required ?? [];

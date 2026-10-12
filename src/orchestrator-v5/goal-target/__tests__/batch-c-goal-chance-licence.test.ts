@@ -1448,3 +1448,41 @@ describe('RE-SCOPE 2 R5-5 (b): no chance is licensed for a stated target the Run
     expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:conversion_rate']);
   });
 });
+
+// ── R5 meaning at the producer (DL 12 Oct): the licence target says its frame wherever Olumi's VALIDATED reading holds it ──
+describe('R5 at the producer — the licence target carries the validated reading\'s frame; an unvalidated one stays frameless', () => {
+  const CAPACITY_LEVEL_BASIS = { quantity_frame: 'level', target_frame: 'level', target_raw: 85, reference: 'today', period_months: 3,
+    period_kind: 'at_end', effect_unit: 'percentage points of capacity per added person, at month three', effects_at_period_end: true,
+    source: 'olumi_reading' };
+
+  it('RED: a level target with its validated LEVEL reading (Paul\'s capacity level brief shape) carries frame \'level\'', () => {
+    const l = capacityLicence(capacityGraph({ goal: { goal_target_basis: CAPACITY_LEVEL_BASIS } }));
+    expect(l).not.toBeNull();
+    expect(l!.goal_node_id).toBe('capacity');
+    expect(l!.target).toEqual(expect.objectContaining({ comparator: 'at_least', value: 85, unit: '%', frame: 'level' }));
+  });
+
+  it('RED: the same, on a validated level reading whose effects are not read at period end (today\'s sentence) — still \'level\'', () => {
+    const l = capacityLicence(capacityGraph({ goal: { goal_target_basis: { ...CAPACITY_LEVEL_BASIS, effects_at_period_end: false } } }));
+    expect(l).not.toBeNull();
+    expect(l!.target.frame).toBe('level');
+  });
+
+  it('CONTROL: a change target keeps its own frame (hiring, change_abs)', () => {
+    const g = hiringGraph();
+    const l = goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g));
+    expect(l!.target.frame).toBe('change_abs');
+  });
+
+  it('NEGATIVE: no validated reading (no stored basis) → frameless, never defaulted to \'level\'', () => {
+    const l = capacityLicence();
+    expect(l).not.toBeNull();
+    expect(l!.target).not.toHaveProperty('frame');
+  });
+
+  it('NEGATIVE: a stale reading (the target moved since it was read) is not validated → frameless', () => {
+    const l = capacityLicence(capacityGraph({ goal: { goal_target_basis: { ...CAPACITY_LEVEL_BASIS, target_raw: 80 } } }));
+    expect(l).not.toBeNull();
+    expect(l!.target).not.toHaveProperty('frame');
+  });
+});
