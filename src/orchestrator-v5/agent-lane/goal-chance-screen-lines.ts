@@ -27,7 +27,7 @@ import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
-import { goalChanceEstimateCounts, goalChanceEstimateLinkCount, olumiEstimateWords } from './goal-chance-estimate-attribution.js';
+import { goalChanceEstimateCounts, goalChanceEstimateLinkCount, olumiEstimateWords, type GoalChanceEstimateCounts } from './goal-chance-estimate-attribution.js';
 import { sentencesOf } from './reply/compose-reply.js';
 import { sayDisplayedPct } from '../goal-target/goal-targets-joint.js';
 
@@ -58,6 +58,12 @@ const estimatePointSentence = (l: GoalChanceScreenLine): string => l.chance.slic
 
 type ComposedChanceLine = Omit<GoalChanceScreenLine, 'label'> & { readonly label?: string };
 
+/** The ranges' census: this Run's options and the scored goal's own upstream set (`goalChanceEstimateCounts`). */
+function rangeCensusOf(facts: ReturnType<typeof goalChanceFactsForAgent>, graph: unknown): GoalChanceEstimateCounts | undefined {
+  return Object.keys(facts.goal_chance_range_display ?? {}).length === 0 ? undefined
+    : goalChanceEstimateCounts(graph, facts.goal_chance_licence?.option_ids, facts.goal_chance_licence?.goal_node_id);
+}
+
 /** Pure extraction of the existing sentence composer; consumers keep their own label/narration gates. */
 function composeGoalChanceLines(result: unknown, graph: unknown, current: boolean): {
   points: ComposedChanceLine[]; ranges: ComposedChanceLine[]; pointsOwed: boolean;
@@ -80,11 +86,9 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
   // ⭐ Condition 6 of a correct chance / r1 item 6 (DL, 12 Oct): a RANGE rests on the same Olumi inputs as a point and says
   // so in the point's own words — the same census (`goalChanceEstimateCounts`) over this Run's options and scored goal, with
   // THIS option's own settings only. A deadline range keeps its own estimate words (`shareOptionEstimateWords`).
-  // ⛔ Re-scope (r2 BLOCKING 4; re-scope r1 BLOCKING 2): over EVERY node of the Run's event (each of the joint's conditions,
-  // targets and included limits), as the licence counts its points.
-  const eventNodes = (facts.goal_targets?.conditions ?? []).map((x) => x.node_id);
-  const rangeCounts = Object.keys(facts.goal_chance_range_display ?? {}).length === 0 ? undefined
-    : goalChanceEstimateCounts(graph, facts.goal_chance_licence?.option_ids, facts.goal_chance_licence?.goal_node_id, eventNodes);
+  // ⛔ RE-SCOPE 2 (DL AMEND item 3; AIE 0518): a range measures the GOAL's own event, so it keeps the goal's own dependency
+  // set (its upstream inputs) — never the joint's union, which would claim the range rests on inputs it does not.
+  const rangeCounts = rangeCensusOf(facts, graph);
   const rangeInputsOf = (optionId: string): { readonly words: string; readonly links: number } | undefined => {
     const words = rangeCounts === undefined ? undefined
       : olumiEstimateWords({ links: rangeCounts.links, values: rangeCounts.values, settings: rangeCounts.settingsByOption[optionId] ?? 0 });

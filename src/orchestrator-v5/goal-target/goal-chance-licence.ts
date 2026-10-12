@@ -44,7 +44,7 @@ import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
-import { goalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
+import { goalChanceEstimateCounts, inputOriginOf, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import {
   BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoMovedWords,
@@ -355,7 +355,18 @@ export function goalChanceLicenceOf(
   const goalState = isRec(goal?.observed_state) ? goal!.observed_state : undefined;
   const base = changeFrame === 'change_rel' && finite(goalState?.raw_value) ? goalState!.raw_value as number : undefined;
   if (changeFrame === 'change_rel' && base === undefined) return null;
-  const estimateOnly = changeFrame === 'change_rel' && goalState?.source === 'cee_inference' && !isRec(goal?.goal_level_reading);
+  // Olumi's disclosed reading of the brief's figure keeps its own words (read once, for both rules below).
+  const levelReadingHeld = isRec(goal?.goal_level_reading);
+  const estimateOnly = changeFrame === 'change_rel' && goalState?.source === 'cee_inference' && !levelReadingHeld;
+  // ⛔ RE-SCOPE 2 (DL AMEND item 2; AIE R5 item 2): the existing stronger rule is kept, never relabelled. Admission never admits
+  // Olumi's own estimate of a goal's current level (`admit-model.ts` `goalLevelIsEstimated`: "Olumi's own estimate of the
+  // current level … was not used … that figure would rest on a guess"), so a chance of a LEVEL (or an absolute change of a
+  // level) is never shown against a starting value of the goal that is Olumi's (a recognised AI source) — a provisional label
+  // never licenses that refused result. Not a new human-only rule (AIE item 2): a goal level whose source is UNVERIFIED is
+  // disclosed by the unverified note like any other input; an accepted estimate and Olumi's disclosed reading of the brief's
+  // figure keep their own words; a relative change keeps `estimate_only`.
+  const goalOrigin = goalState !== undefined && (finite(goalState.value) || finite(goalState.raw_value)) ? inputOriginOf(goalState) : undefined;
+  if (changeFrame !== 'change_rel' && goalOrigin === 'ai' && !levelReadingHeld) return null;
   const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
   // The Run's own option records, current-first: the first carrier that has any is the comparison.
   const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
@@ -477,11 +488,15 @@ export function goalChanceLicenceOf(
   // Amendment 7 (independent check r1 item 6): every Olumi input on the goal paths — links, starting values, option settings.
   // ⛔ Re-scope (r2 BLOCKING 4; re-scope r1 BLOCKING 2): over everything upstream of EVERY node of the event this Run sent —
   // each target and each included limit (the joint rests on all of them), by any path — one census (`goalChanceEstimateCounts`).
+  // ⛔ RE-SCOPE 2 (DL AMEND item 3): each figure keeps the dependency set of the event it MEASURES — the goal's own figure (and
+  // range) the scored goal's upstream set alone; the joint the union over every condition the Run sent (`jointEstimates`,
+  // below); each marginal its own condition's (`withSeveralTargets`).
   const eventNodes = eventNodeIdsOf(constraints, goalId);
-  const estimates = licensed.length === 0 && eventNodes.length === 0
-    ? { links: 0, values: 0, settingsByOption: {} as Readonly<Record<string, number>> }
-    : goalChanceEstimateCounts(graph, option_ids, goalId, eventNodes);
+  const estimates = licensed.length === 0 ? NO_ESTIMATES : goalChanceEstimateCounts(graph, option_ids, goalId);
+  const jointEstimates = eventNodes.length === 0 ? undefined : goalChanceEstimateCounts(graph, option_ids, goalId, eventNodes);
   const settingsByOption = Object.fromEntries(Object.entries(estimates.settingsByOption).filter(([id, n]) => licensed.includes(id) && n > 0));
+  // ⛔ R5-2: an input whose origin is unverified is never "zero estimates" and never Olumi's: disclosed once, beside the result.
+  const unverifiedInputs = unverifiedOn(estimates, licensed);
   const estimateLinks = estimates.links;
   // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
   // reference: withheld with that reason, never relabelled.
@@ -526,8 +541,9 @@ export function goalChanceLicenceOf(
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
     sqByAssumption, sqReading, timingOrdinary: timing.ordinary,
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
-    quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, constraints, option_ids,
-    estimates,
+    quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, unverifiedInputs,
+    constraints, option_ids,
+    estimates, jointEstimates,
   });
 }
 
@@ -542,9 +558,11 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   readonly comparatorHeld: string; readonly target: { readonly value: number; readonly unit?: string };
   readonly base: number | undefined; readonly estimateOnly: boolean; readonly statusQuoId: string | undefined;
   readonly sqByAssumption: boolean; readonly quantityFrame: 'level' | 'change' | undefined; readonly olumiInputs: boolean;
+  /** R5-2: an input on this figure's paths whose origin is unverified (never "zero estimates", never Olumi's). */
+  readonly unverifiedInputs: boolean;
   readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean; readonly statusQuoLabel: string | undefined;
   readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
-  readonly estimates: GoalChanceEstimates;
+  readonly estimates: GoalChanceEstimates; readonly jointEstimates: GoalChanceEstimates | undefined;
 }): GoalChanceLicence {
   const { goalLabel, changeFrame } = c;
   // A level target's period is said only on an at-period-end basis (ruling 12); otherwise today's words, unchanged.
@@ -622,7 +640,21 @@ function withBatchCWords(single: GoalChanceLicence, c: {
 }
 
 /** The one census's counts (`goalChanceEstimateCounts`) over every target of this Run's event; settings unfiltered. */
-type GoalChanceEstimates = ReturnType<typeof goalChanceEstimateCounts>;
+type GoalChanceEstimates = GoalChanceEstimateCounts;
+/** Nothing licensed and no event beyond the goal: nothing is said, so nothing is counted (not a census reading). */
+const NO_ESTIMATES: GoalChanceEstimates = { links: 0, values: 0, settingsByOption: {}, unverifiedValues: 0, unverifiedSettingsByOption: {}, unread: false };
+
+/**
+ * ⛔ RE-SCOPE 2 (R5-2; DL AMEND item 1; AIE R5 handback item 1, its minimal existing-notes wording): an input whose origin is
+ * unverified — neither attested as the person's nor a recognised AI source — or a census that could not read the event whole.
+ * Said ONCE beside the result; never a count of Olumi's estimates, never a provisional label, never "zero estimates".
+ */
+export const UNVERIFIED_SOURCES_NOTE = 'This result uses inputs whose sources have not been verified.';
+
+/** Whether the figures said for `said` options rest on any unverified input (shared values, or those options' own settings). */
+function unverifiedOn(e: GoalChanceEstimates, said: readonly string[]): boolean {
+  return e.unread || e.unverifiedValues > 0 || said.some((id) => (e.unverifiedSettingsByOption[id] ?? 0) > 0);
+}
 
 /**
  * ⛔ Re-scope (r2 BLOCKING 4; re-scope r1 BLOCKING 2): every OTHER node of the event this Run sent. With several targets the
@@ -673,8 +705,10 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   readonly alsoRequired: readonly string[];
   /** The goal's own status-quo reading, and the Run's ordinary timing: each other target is read on its OWN facts. */
   readonly goal: Rec | undefined; readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean;
-  /** Re-scope (r2 BLOCKING 4): the one census over EVERY target's paths, and whether the goal's own base is Olumi's. */
+  /** The goal's own figure's census (its upstream set), and whether the goal's own base is Olumi's. */
   readonly estimates: GoalChanceEstimates; readonly estimateOnly: boolean;
+  /** Re-scope (r2 BLOCKING 4; DL AMEND item 3): the joint's census — the union over every condition the Run sent. */
+  readonly jointEstimates: GoalChanceEstimates | undefined;
 }): GoalChanceLicence {
   // ⭐ AIE status-quo disposition (12 Oct) item 4: a joint and its marginals keep each condition's OWN reference — the
   // primary goal's unchanged reference never attests a secondary target. Each target condition is read on its own checked
@@ -759,19 +793,45 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     : {};
   const moved = sqId !== undefined && movedNames.length > 0
     ? { withheld_reason_by_option: { [sqId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords(movedNames) } } } : {};
+  // ⛔ RE-SCOPE 2 (DL ruling on marginals, (B)): each target's OWN chance rests on its own condition's upstream inputs (its
+  // own census: three provenance states, each option's own settings) and says so — ONE note per marginal resting on any Olumi
+  // estimate, in the points' count words (`olumiEstimateWords`); the options are named only where their counts differ. The
+  // goal's own figure kept beside a withheld joint (AIE clause 3) is the goal's own census.
+  const je = c.jointEstimates ?? c.estimates;
+  const optionLabel = (id: string): string | undefined => {
+    const recorded = l.option_labels_by_option?.[id];
+    const label = typeof recorded === 'string' && recorded.trim() !== '' ? recorded : nodes.find((n) => n.id === id && n.kind === 'option')?.label;
+    return typeof label === 'string' && label.trim() !== '' && !/[\r\n]/.test(label) ? label.trim() : undefined;
+  };
+  let marginalUnverified = false;
+  for (const t of block.per_target) {
+    const said = Object.keys(t.pct_by_option);
+    const condition = block.conditions.find((x) => x.constraint_id === t.constraint_id);
+    const e = t.constraint_id === `goal:${String(c.goal?.id)}` ? c.estimates
+      : condition === undefined ? undefined : goalChanceEstimateCounts(c.graph, c.option_ids, c.goal?.id, [condition.node_id], { scoredInEvent: false });
+    if (said.length === 0 || e === undefined) continue;
+    if (unverifiedOn(e, said)) marginalUnverified = true;
+    const counts = said.map((id) => olumiEstimateWords({ links: e.links, values: e.values, settings: e.settingsByOption[id] ?? 0 }));
+    if (counts.every((x) => x === undefined)) continue;
+    if (new Set(counts).size === 1) notes.push(`On its own, the chance of ${t.words} rests on Olumi's estimates: ${counts[0]!}.`);
+    else {
+      const each = said.flatMap((id, i) => (counts[i] === undefined || optionLabel(id) === undefined ? [] : [`‘${optionLabel(id)!}’: ${counts[i]!}`]));
+      if (each.length > 0) notes.push(`On its own, the chance of ${t.words} rests on Olumi's estimates for ${each.join('; for ')}.`);
+    }
+  }
   if (block.joint.status === 'licensed') {
     const quoted = block.joint.pct_by_option;
     // ⛔ Re-scope (r2 BLOCKING 4): the joint rests on every input feeding ANY of its targets: it is provisional, and says on
     // what, from the one census over the union of their paths — each quoted option's own Olumi settings only.
     const { olumi_estimate_link_count: _k, olumi_estimate_value_count: _v, olumi_estimate_settings_by_option: _s, provisional: _p,
-      ...jointKept } = kept;
-    const settings = Object.fromEntries(Object.entries(c.estimates.settingsByOption).filter(([id, n]) => Object.hasOwn(quoted, id) && n > 0));
-    const provisional = c.estimateOnly || kept.provisional === true
-      || c.estimates.links + c.estimates.values + Object.keys(settings).length > 0;
+      // R5-3: the joint's own withheld set replaces the single target's (a status quo the joint now quotes is not withheld).
+      withheld_option_ids: _singleWithheld, ...jointKept } = kept;
+    const settings = Object.fromEntries(Object.entries(je.settingsByOption).filter(([id, n]) => Object.hasOwn(quoted, id) && n > 0));
+    const provisional = c.estimateOnly || kept.provisional === true || je.links + je.values + Object.keys(settings).length > 0;
     return {
       ...jointKept,
-      ...(c.estimates.links > 0 ? { olumi_estimate_link_count: c.estimates.links } : {}),
-      ...(c.estimates.values > 0 ? { olumi_estimate_value_count: c.estimates.values } : {}),
+      ...(je.links > 0 ? { olumi_estimate_link_count: je.links } : {}),
+      ...(je.values > 0 ? { olumi_estimate_value_count: je.values } : {}),
       ...(Object.keys(settings).length > 0 ? { olumi_estimate_settings_by_option: settings } : {}),
       ...(provisional ? { provisional: true as const } : {}),
       form: 'each',

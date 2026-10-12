@@ -650,3 +650,64 @@ describe('readback RESPONSE → LICENCE — marketing: "above 15%" is said only 
     expect(JSON.stringify(targets.per_target)).not.toMatch(/above 15%/);
   });
 });
+
+// ── RE-SCOPE 2 (DL 12 Oct, R5-1; re-scope check r2 BLOCKING 1): the checker's EXACT case, loader → Run → screen ─────────────
+// Every input made the person's (each starting value confirmed, each option cell from the brief, each link stated by the
+// user), then ONE Olumi `cee_hypothesis` setting DIRECTLY ON THE SCORED GOAL. The request carries it; the returned chance must
+// say it rests on it — on that option's chance only — for the single target AND the joint.
+const allTheirs = (g: Rec): Rec => {
+  for (const n of g.nodes as Rec[]) {
+    if (n.observed_state) { n.observed_state.source = 'user_confirmed'; n.observed_state.extractionType = 'explicit'; delete n.observed_state.user_material_unverified; }
+    if (n.kind === 'option' && n.interventions) for (const c of Object.values(n.interventions as Rec)) if (c && typeof c === 'object') (c as Rec).source = 'brief_extraction';
+  }
+  for (const e of g.edges as Rec[]) e.provenance = { ...e.provenance, source: 'user_specified', magnitude: 'user_stated' };
+  return g;
+};
+
+describe('RE-SCOPE 2 R5-1 — the checker\'s case: Olumi\'s setting on the SCORED GOAL reaches the Run and is said', () => {
+  it('RED on e58b8dbd (single): hiring — ‘Hire two developers’ sets ‘Productivity’ with Olumi\'s +8; its 31% says so, the other\'s does not', async () => {
+    const g = allTheirs(JSON.parse(store(hiringSized())) as Rec);
+    node(g, 'hire_two_developers').interventions.productivity = { value: 0.08, raw_value: 8, source: 'cee_hypothesis', target_match: { node_id: 'productivity' } };
+    const { payload, view, reloaded } = await runAndRead(JSON.stringify(GraphV3.parse(g)), hiringAnswer);
+    expect(optionWire(payload, 'Hire two developers').interventions).toMatchObject({ productivity: 8 });
+    const licence = goalChanceLicenceForAgent(view)!;
+    expect(licence.provisional).toBe(true);
+    expect(licence.olumi_estimate_settings_by_option).toEqual({ hire_two_developers: 1 });
+    const faces = goalChanceCellFacesForAgent(view, reloaded, true);
+    expect(faces.get('hire_two_developers')).toBe('‘Hire two developers’: about 31% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi\'s estimates for 1 option setting (see Check estimates).');
+    expect(faces.get('hire_a_tech_lead')).toBe('‘Hire a tech lead’: about 46% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model.');
+  });
+
+  it('CONTROL (single): the same graph with that setting the person\'s — the chance is not provisional and names no estimate', async () => {
+    const g = allTheirs(JSON.parse(store(hiringSized())) as Rec);
+    node(g, 'hire_two_developers').interventions.productivity = { value: 0.08, raw_value: 8, source: 'user_specified', target_match: { node_id: 'productivity' } };
+    const { view, reloaded } = await runAndRead(JSON.stringify(GraphV3.parse(g)), hiringAnswer);
+    expect(goalChanceLicenceForAgent(view)!.provisional).toBeUndefined();
+    expect(goalChanceCellFacesForAgent(view, reloaded, true).get('hire_two_developers'))
+      .toBe('‘Hire two developers’: about 31% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model.');
+  });
+
+  /**
+   * The joint through the handler's OWN request: the stored bytes → loader → the Run request the handler builds, and the
+   * licence the handler writes over that request (`withGoalChanceLicence`, run-analysis.ts) — the existing marketing
+   * readback pattern (`licenceOver`). (Through the handler's stored result this graph's conversion and limit P are withheld
+   * by the existing R-c rule before any licence — not_returned — so the joint is read over the request it actually sent.)
+   */
+  it('RED on e58b8dbd (joint): marketing — ‘AI planning plus advertising’ sets ‘New customers’ with Olumi\'s 35; the joint says so', async () => {
+    const g = allTheirs(JSON.parse(store(marketingSized())) as Rec);
+    node(g, 'conversion_rate').observed_state = { value: 0.5, unit: '%', source: 'user_confirmed', extractionType: 'explicit', raw_value: 10, cap: 20, declared_scale: 'unit_interval' };
+    node(g, 'ai_planning_plus_advertising').interventions.new_customers = { value: 0.7, raw_value: 35, source: 'cee_hypothesis', target_match: { node_id: 'new_customers' } };
+    const { payload, reloaded } = await runFromStore(JSON.stringify(GraphV3.parse(g)));
+    expect(optionWire(payload, 'AI planning plus advertising').interventions).toMatchObject({ new_customers: 35 });
+    const run = withGoalChanceLicence({ option_comparison: marketingAnswer(payload) }, reloaded, 'new_customers', undefined, undefined, reloaded,
+      { storedConstraints: reloaded.goal_constraints, sentConstraints: payload.goal_constraints });
+    const view = { type: 'analysis_result', enrichment: run };
+    const licence = goalChanceLicenceForAgent(view)!;
+    expect(licence.targets!.joint).toMatchObject({ status: 'licensed', pct_by_option: { hire_a_marketing_manager: 30, ai_planning_plus_advertising: 45 } });
+    expect(licence.provisional).toBe(true);
+    expect(licence.olumi_estimate_settings_by_option).toEqual({ ai_planning_plus_advertising: 1 });
+    const faces = goalChanceCellFacesForAgent(view, reloaded, true);
+    expect(faces.get('ai_planning_plus_advertising')).toMatch(/^‘AI planning plus advertising’: about 45% chance of ‘New customers’ being at least 20 customers and ‘Conversion rate’ being above 15% .*, in this model, using Olumi's estimates for 1 option setting \(see Check estimates\)\.$/);
+    expect(faces.get('hire_a_marketing_manager')).not.toMatch(/Olumi's estimates/);
+  });
+});

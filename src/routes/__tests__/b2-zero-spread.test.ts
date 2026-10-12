@@ -92,9 +92,13 @@ function produced(envelope = producerEnvelope(), graph = READ.graph): Rec {
     screen_lines: goalChanceScreenLinesForAgent(currentResult, graph, true) };
 }
 
+// ⛔ RE-SCOPE 2 (R5-1/R5-2, DL AMEND: three provenance states) — CHANGED EXPECTATION: two more starting values on the goal's
+// paths — ‘price_rise’ 0 and ‘new_starter_subscribers’ 0, stamped `cee_inference` with NO extraction type. F1 defers that stamp
+// to the extraction type and read them `unknown`, so e58b8dbd counted nothing for them and said nothing ("zero estimates");
+// `cee_inference` is a recognised AI source (AIE R5 item 1; the UI's `classifyValueProvenance` reads it 'ai'): Olumi's.
 const STARTER_RANGE = '‘Launch starter tier’: between about 95% and 99% chance of meeting your goal, in this model, '
-  + 'using Olumi\'s estimates for 1 starting value, 2 option settings and 2 relationships (see Check estimates).';
-const AMENDMENT_7 = { olumi_estimate_value_count: 1, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true };
+  + 'using Olumi\'s estimates for 3 starting values, 2 option settings and 2 relationships (see Check estimates).';
+const AMENDMENT_7 = { olumi_estimate_value_count: 3, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true };
 const withoutAmendment7 = (record: Rec): Rec => Object.fromEntries(Object.entries(record).filter(([key]) => !Object.hasOwn(AMENDMENT_7, key)));
 const withoutAmendment7InRecord = (enrichment: Rec): Rec => ({ ...enrichment, inference_warnings: enrichment.inference_warnings
   .map((warning: Rec) => (warning.code === GOAL_CHANCE_LICENSED ? withoutAmendment7(warning) : warning)) });
@@ -230,7 +234,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     graph.nodes.find((node: Rec) => node.id === 'raise_prices_10').interventions.price_rise.source = 'cee_hypothesis';
     const range = produced(producerEnvelope(true), graph).screen_lines.find((line: Rec) => line.option_id === STARTER);
     expect(range.chance).toBe('‘Launch starter tier’: between about 95% and 99% chance of meeting your goal, in this model, '
-      + 'using Olumi\'s estimates for 1 starting value and 2 relationships (see Check estimates).');
+      + 'using Olumi\'s estimates for 3 starting values and 2 relationships (see Check estimates).');
   });
 
   it('no zero-spread option and none licensed: keeps the null/no-new-record control unchanged', () => {

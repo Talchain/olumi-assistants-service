@@ -43,7 +43,12 @@ const withClause = (line: string, words: string): string => {
   if (at < 0) throw new Error(`no "in this model" in: ${line}`);
   return `${line.slice(0, at)}, in this model, using Olumi's estimates for ${words} (see Check estimates).${line.slice(at + ', in this model.'.length)}`;
 };
-const RANGE_INPUTS: Record<string, string> = { 'unseen-b4-1': '6 relationships', 'unseen-b4-2': '10 relationships', 'unseen-b3-2': '6 starting values, 2 option settings and 5 relationships' };
+// ⛔ RE-SCOPE 2 (R5-1/R5-2, DL AMEND: three provenance states) — CHANGED EXPECTATION for the two 01a2b27 captures: their six
+// factor levels upstream of the goal are stamped `cee_inference` with NO extraction type. F1 defers that stamp to the extraction
+// type and so read them `unknown`: e58b8dbd counted nothing and said nothing ("zero estimates"). `cee_inference` is a
+// recognised AI source (AIE R5 item 1; the UI's own `classifyValueProvenance` reads it 'ai'): six starting values, Olumi's.
+// b3-2 (`cee_inference` + `inferred`) is unchanged.
+const RANGE_INPUTS: Record<string, string> = { 'unseen-b4-1': '6 starting values and 6 relationships', 'unseen-b4-2': '6 starting values and 10 relationships', 'unseen-b3-2': '6 starting values, 2 option settings and 5 relationships' };
 const servedNow = (capture: string): string[] => screenFor(capture).map((l) => withClause(l, RANGE_INPUTS[capture]!));
 // …and, once the screen carries Olumi's count, RC4's existing rule applies to the range as to a point: narration never
 // supplies k, so the served B4-1 narrator's own count sentence ("16 underlying values …") is taken out (narratorCountGuard).
