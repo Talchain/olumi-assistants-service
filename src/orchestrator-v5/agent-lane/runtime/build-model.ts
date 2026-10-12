@@ -308,7 +308,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // \u2b50 THE MAGNITUDE CONTRACT (D1). A size in NATURAL units, read on each end's own frame by admission
       // (`cee/magnitude/link-effect.ts`). REQUIRED so strict output must say "not known" (null) rather than omit it.
       effect_amount: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
-        'The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage target, in points: 4% to 3% is -1. null when you cannot give a defensible size.' },
+        'The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage-level target, use percentage points: 4% to 3% is -1. For a goal measured as percentage change from today\'s level, use % of today\'s level as specified in CHANGE QUANTITIES, not percentage points. null when you cannot give a defensible size.' },
       effect_per_source_change: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
         'The change in the SOURCE\u2019s own unit that causes `effect_amount`: 1 for switching a yes/no on, 10 for a GBP 10 price rise. null when `effect_amount` is null.' },
       effect_provenance: { anyOf: [provenance, { type: 'null' }], description:
@@ -463,7 +463,7 @@ export const BUILD_INSTRUCTIONS = [
   + 'Only when you genuinely cannot say which way a link runs, set its direction to "unknown" AND add a question to `unknowns` asking the user which way it runs. An "unknown" link is withheld from the model and never counts as a path, so every option must still reach the goal through links whose direction you can state.',
   // ⭐ THE MAGNITUDE CONTRACT (D1): ONE sentence. Admission reads the size on each end's own frame and never
   // lets it run a bounded quantity out of its range (served T3: a frame-blind 0.5 moved churn by about 50 points).
-  'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), negative whenever the link’s direction is negative, and `basis` one short line on why that size and direction hold, with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
+  'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in percentage points when the target is a percentage level, so 4% to 3% is -1; for a goal measured as percentage change from today\'s level, use % of today\'s level as specified in CHANGE QUANTITIES, not percentage points) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), negative whenever the link’s direction is negative, and `basis` one short line on why that size and direction hold, with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
   // ⛔ A4 (R3 #75 5918453000; AIQ 5918516441 / 5918523203; R3 5918513716; DL 5918542181): Paul's brief states investment
   // firms "do deals between £1-2m", and no node or link carried it, so every £ figure into his goal was Olumi's
   // default. The size is per DEAL, never per conversation (that would claim every conversation brings £1m). One general

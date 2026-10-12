@@ -82,6 +82,24 @@ describe('the Batch C drafter contract', () => {
     expect(BUILD_INSTRUCTIONS).not.toContain('frame "level", the comparator exactly as written');
   });
 
+  it('RED (AIE C handback 0149, lines 17–19): both percentage instructions distinguish a percentage LEVEL (points) from a % CHANGE goal, verbatim, in the first AND the retry request', () => {
+    const LEVEL_VS_CHANGE = '(in percentage points when the target is a percentage level, so 4% to 3% is -1; for a goal measured as '
+      + 'percentage change from today\'s level, use % of today\'s level as specified in CHANGE QUANTITIES, not percentage points)';
+    const SCHEMA_WORDS = 'For a percentage-level target, use percentage points: 4% to 3% is -1. For a goal measured as percentage change '
+      + 'from today\'s level, use % of today\'s level as specified in CHANGE QUANTITIES, not percentage points.';
+    expect(BUILD_INSTRUCTIONS).toContain(`\`effect_amount\` is the signed change in the target’s own unit ${LEVEL_VS_CHANGE} caused by`);
+    expect(BUILD_INSTRUCTIONS).not.toContain('(in points for a percentage, so 4% to 3% is -1)');
+    // The controls stay: the percentage-level example, and the hiring percent-change clause it points to.
+    expect(BUILD_INSTRUCTIONS).toContain('CHANGE QUANTITIES. When the goal is a percentage change of a quantity');
+    const effectAmount = (schema: Rec): string => schema.properties.links.items.properties.effect_amount.description;
+    const hiring = { metric: 'Productivity', operator: '>=', target_stated: true, value: 10, unit: '%', horizon_months: 3, provenance: 'explicit',
+      frame: 'change_abs', quantity_frame: 'change', baseline_known: false, baseline_value: null, scope: null, basis: null } as unknown as CandidateModel['goal'];
+    for (const [request, schema] of [['first', strictForTheDrafter(buildCandidateSchema())], ['retry', strictForTheDrafter(retrySchemaPinningGoal(hiring))]] as const) {
+      expect(effectAmount(schema as Rec), request).toBe(`The signed change in the TARGET’s own unit that \`effect_per_source_change\` of the source causes. ${SCHEMA_WORDS} null when you cannot give a defensible size.`);
+      expect(effectAmount(schema as Rec), request).not.toContain('For a percentage target, in points');
+    }
+  });
+
   it('RED (AIE request check): a pinned retry keeps an EVENT goal\'s kind and deliverable, and never adds them to a quantity goal', () => {
     const event = { metric: 'Platform completion', operator: '>=', target_stated: false, value: null, unit: '%', horizon_months: null,
       provenance: 'explicit', frame: 'level', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
