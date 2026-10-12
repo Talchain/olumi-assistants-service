@@ -744,12 +744,6 @@ export interface TurnExecutorRunResult {
    */
   turn_outcome?: TurnOutcome;
   /**
-   * ⭐ Recovery Batch E (DL ruling (ii), 12 Oct): this turn RAN the analysis (a run_analysis fact among its own handler facts),
-   * so its reply is a RESULT surface the route's exit keeps free of any share-of-runs sentence (`run-share-text.ts`).
-   * Absent ⇒ a reasoning or other turn, whose supporting detail is kept.
-   */
-  ranAnalysisThisTurn?: true;
-  /**
    * V5 state-trust freshness derivation, threaded through so
    * response-finaliser / analysis-ready-emit can use the selected fact's
    * computed_at instead of restamping with Date.now() on every emit.
@@ -16898,7 +16892,6 @@ export async function runTurnExecutor(
       ...(handlerRefusalForRun !== null ? { handlerRefusal: handlerRefusalForRun } : {}),
       analysisReady: analysisReadyForTurn,
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
-      ...(handlerFactsForCommit.some((f) => f.fact_type === 'run_analysis') ? { ranAnalysisThisTurn: true as const } : {}),
       ...(freshness ? { freshness } : {}),
       // G3 — the scenario-bound verdict, beside the wire-bound one and never
       // instead of it. Absent when no durable reasoning authority licensed it

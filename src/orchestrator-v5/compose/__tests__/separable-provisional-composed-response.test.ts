@@ -29,7 +29,6 @@
  * Synthetic prose. No provider, browser or DB call. NOT RUN LOCALLY: root's
  * resource direction is hosted-only, so hosted CI is this file's first execution.
  */
-import { RUN_SHARE_CENSUS } from '../run-share-text.js';
 import { describe, expect, it } from 'vitest';
 import { OlumiResponseSchema, type OlumiResponse } from '@talchain/schemas/boundary';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
@@ -145,10 +144,7 @@ describe('separable provisional — one qualified interpretation across both sur
 
   it('(2) the BUILT analysis_result summary carries the same qualification, figures intact', () => {
     const built = envelope(UNQUALIFIED_ANSWER);
-    // Batch E ruling (ii): the analysis_result summary is a RESULT surface — the builder removes the share of runs the
-    // producer wrote (precondition: it did write one), so the summary never states it, before or after the seam.
-    expect(PRODUCER_SUMMARY).toMatch(RUN_SHARE_CENSUS);
-    expect(readSummary(built)).not.toMatch(RUN_SHARE_CENSUS);
+    expect(readSummary(built)).toContain('55%');
     const result = enforceLeadingOptionClaimsAtWire(built, {
       ...BASE,
       mayNameLeadingOption: true,
@@ -157,8 +153,8 @@ describe('separable provisional — one qualified interpretation across both sur
     });
     const summary = readSummary(result.response);
     expect(summary).toContain(PROVISIONAL_FIGURES_CAVEAT);
-    // The share of runs stays off the summary (ruling (ii)); the reply's own words are row (1)'s.
-    expect(summary).not.toMatch(RUN_SHARE_CENSUS);
+    // The producer's honest statistic is retained, not replaced.
+    expect(summary).toContain('55%');
     expect(summary).not.toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
     // ⚠ The ID the producer set is UNTOUCHED. This seam never restores an ID
     //   over a legitimate null projection and never removes a legitimate one.

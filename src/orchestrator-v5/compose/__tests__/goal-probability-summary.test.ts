@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { RUN_SHARE_CENSUS } from '../run-share-text.js';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
@@ -49,13 +48,7 @@ describe('same recorded Run certainty governs row, summary and whole public bloc
   it('keeps earned arithmetic, interior chance, input labels and legitimate win shares', () => {
     const fact = stored([{ option_id: 'hold', probability_of_goal: 0, earned: true }]);
     const block = buildAnalysisResultBlock(fact);
-    // Batch E ruling (ii): the summary is a RESULT surface. The contradiction sentence states a share of runs, so it leaves
-    // the summary whole, its earned arithmetic with it (a goal-chance-only wording needs the AIE's words: F's named
-    // residual); the composer's own words are unchanged (below) and the earned goal claims stay on the block.
-    expect(rawDisclosure).toContain('(48% against 0%)');
-    expect(rawDisclosure).toMatch(RUN_SHARE_CENSUS);
-    expect(block.summary.startsWith('The model was analysed.')).toBe(true);
-    expect(block.summary).not.toMatch(RUN_SHARE_CENSUS);
+    expect(block.summary).toContain('(48% against 0%)');
     expect(goalClaimsIn(block).length).toBeGreaterThan(0);
     expect(composeObjectiveContradictionDisclosure(null, rows, true, 'goal_framed',
       { goalCertainty: fact.result.goal_certainty })).toBe(rawDisclosure);

@@ -182,7 +182,6 @@ import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-cl
 // T1 claim safety, LAYER 3 — armed ONCE at the send point (1.272 E1). It used
 // to be called from inside `sanitiseOlumiResponseForEgress`, which this file
 // re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
-import { withoutRunShareTextAtEgress } from '../orchestrator-v5/compose/run-share-text.js';
 import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
 import { classifyUserVisibleRefusal } from '../orchestrator-v5/compose/user-visible-refusal.js';
@@ -828,8 +827,6 @@ async function sendFinalised200(
      * nothing.
      */
     readonly scenarioFreshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
-    /** Recovery Batch E (DL ruling (ii)): this turn RAN the analysis, so its reply is a result surface (`run-share-text.ts`). */
-    readonly runTurn?: boolean;
     /**
      * The COMPLETED RERUN's fact window, threaded into `finaliseV5Response` so
      * it can stamp the run-over-run consequence block (`run_delta`). Supplied
@@ -2162,12 +2159,6 @@ async function sendFinalised200(
       wireBody = finaliseV5Response(augmented, finaliserContext);
     }
   }
-  // ⭐ Recovery Batch E (DL ruling (ii), 12 Oct; Paul's #87): the Run's RESULT surfaces never state a share of runs — every
-  // analysis_result summary, and the reply of a turn that ran — after every writer and before the one alarm scan. An edited
-  // body is a NEW object, so it is finalised again (idempotent): the pre-serialisation hook ships only finalised bodies, and
-  // an unbranded one would be replaced by the egress-violation fallback.
-  const shareFree = withoutRunShareTextAtEgress(wireBody, { requestId, exitPath, runTurn: ctx.runTurn === true });
-  if (shareFree !== wireBody) wireBody = finaliseV5Response(shareFree, finaliserContext);
   guardLeadingOptionClaimsAtEgress(wireBody, {
     requestId,
     exitPath,
@@ -8928,7 +8919,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           : null;
     return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
       analysisReady: run.analysisReady,
-      ...(run.ranAnalysisThisTurn === true ? { runTurn: true } : {}),
       graph: turnGraph,
       // T1 claim safety — READ off the executor's run result, which took it
       // from the stamp the run_analysis handler persisted on the fact.
