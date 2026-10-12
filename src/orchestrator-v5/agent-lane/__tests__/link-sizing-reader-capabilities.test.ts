@@ -108,6 +108,20 @@ describe('R7 plural link ownership words', () => {
     expect(String(out.follow_up)).toContain('as strong, your estimate');
   });
 
+  it('RED (D1, single-link door): the user naming the band of the projected Price→Revenue sizes it as theirs at the midpoint', async () => {
+    const w = world();
+    const p = await w.caps.proposeLinkStrength!(ctx(STRONG_WORDS), { ...labels, strength: 'strong', rationale: 'D1 single door' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(w.store.get(String(p.proposal_id))!.operations).toEqual([expect.objectContaining({ op: 'update_edge', path: 'price::revenue',
+      value: expect.objectContaining({ magnitude: 0.55, intent: 'set', band: 'strong' }) })]);
+    expect(p).toMatchObject({ link: { keeps_current_strength: false } });
+    expect(String(p.public_label)).toContain('as your own estimate');
+    const out = await w.caps.authoriseChange(ctx(STRONG_WORDS), { proposal_id: String(p.proposal_id) });
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true });
+    expect(w.edge().strength.mean).toBe(0.55);
+    expect(linkSizing(w.edge())).toBe('user');
+  });
+
   // Science 393023 LICENCE ruling 3, re-derived: the same unsized identity proposed weak is not a user-owned
   // strong band: users_own_strength / "the user's own (strong)" → an unsized-prior change without a prior band.
   it('R7 RED: projected Price→Revenue weak is not refused as the user\'s own strong link', async () => {
@@ -195,14 +209,12 @@ describe('R7 plural link ownership words', () => {
 describe('R7 approval readback follows the stored sizing class', () => {
   // Science 393023 LICENCE ruling 3, re-derived: B1 confirm keeps Price→Revenue at 0.5 and records review without
   // clearing mean_projected. A reviewed placeholder was rejected by the must-be-sized gate → successful review.
-  // D1 (DL 12 Oct, Batch D): 'plural-user' left this row: the user naming the band in the set door now sizes the link
-  // as theirs (the D1 test above). The singular door is outside D1 and still reviews.
-  it.each(['singular', 'plural-model'] as const)('R7 RED: %s confirms the stored projected mean as review', async (kind) => {
+  // D1 (DL 12 Oct, Batch D): 'plural-user' and 'singular' left this row: the user naming the band, in either door, now sizes
+  // the link as theirs (the D1 tests). Olumi's band in the set door still reviews it: the adoption writer cannot size it.
+  it('R7 RED: plural-model confirms the stored projected mean as review', async () => {
     const w = world();
-    const c = ctx(kind === 'plural-model' ? 'Please suggest a strength.' : STRONG_WORDS);
-    const p = kind === 'singular'
-      ? await w.caps.proposeLinkStrength!(c, { ...labels, strength: 'strong', rationale: 'B1 review' })
-      : await w.caps.proposeLinkStrengths!(c, proposalArgs('strong'));
+    const c = ctx('Please suggest a strength.');
+    const p = await w.caps.proposeLinkStrengths!(c, proposalArgs('strong'));
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const out = await w.caps.authoriseChange(c, { proposal_id: String(p.proposal_id) });
     expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true });

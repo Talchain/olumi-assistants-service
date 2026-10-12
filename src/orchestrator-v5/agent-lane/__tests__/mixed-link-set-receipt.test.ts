@@ -258,10 +258,10 @@ describe('single link whose endpoint label cannot be read after the write: the f
   const PR = { from_label: 'Price', to_label: 'Revenue' };
   const said = 'Price has a strong effect on Revenue.';
   const c = { ...ctx, user_text: said, user_turn_text: said };
-  function single(provenance: Record<string, unknown>) {
+  function single(provenance: Record<string, unknown>, mean = 0.5) {
     let revision = 0;
     let graph = { nodes: [{ id: 'price', kind: 'factor', label: 'Price' } as Record<string, unknown>, { id: 'revenue', kind: 'goal', label: 'Revenue' }],
-      edges: [{ from: 'price', to: 'revenue', strength: { mean: 0.5, std: 0.125 }, exists_probability: 1, effect_direction: 'positive', provenance }] };
+      edges: [{ from: 'price', to: 'revenue', strength: { mean, std: 0.125 }, exists_probability: 1, effect_direction: 'positive', provenance }] };
     const dispatch: InternalDispatch = async (path, body) => {
       if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: `h${revision}` } };
       const event = (body as { event: Record<string, unknown> }).event;
@@ -276,8 +276,8 @@ describe('single link whose endpoint label cannot be read after the write: the f
     const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full', undefined, {});
     return { caps, edge: () => graph.edges[0]! };
   }
-  const approve = async (provenance: Record<string, unknown>) => {
-    const w = single(provenance);
+  const approve = async (provenance: Record<string, unknown>, mean = 0.5) => {
+    const w = single(provenance, mean);
     const p = await w.caps.proposeLinkStrength!(c, { ...PR, strength: 'strong', rationale: 'A′ round 2 fallback' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const out = await w.caps.authoriseChange(c, { proposal_id: String(p.proposal_id) });
@@ -286,7 +286,9 @@ describe('single link whose endpoint label cannot be read after the write: the f
   };
 
   it('RED: a reviewed placeholder says it is still unsized, its values unchanged, then the next action (was "its strength stays as it was")', async () => {
-    const { w, followUp } = await approve({ source: 'user_specified', mean_projected: true });
+    // D1 (DL 12 Oct, Batch D): a placeholder in the named band is now SIZED by it; it stays a review only where its default
+    // already IS the band's midpoint (0.55 for "strong"), so that is the reviewed placeholder here.
+    const { w, followUp } = await approve({ source: 'user_specified', mean_projected: true }, 0.55);
     expect(linkSizing(w.edge())).toBe('placeholder');
     expect(followUp).toBe(`${REVIEW} ${NEXT_STEP}`);
     witnessed(followUp);
