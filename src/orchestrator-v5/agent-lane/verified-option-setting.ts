@@ -679,6 +679,32 @@ export function briefAttributedLevelRange(factor: Factor, brief: string | undefi
   return undefined;
 }
 
+/** The goal's level read as a factor of the same name: the brief's sentences writing it in the goal's typed frame. */
+function goalLevelWrites(model: CandidateModel, brief: string | undefined): { asFactor: Factor; unit: NonNullable<ReturnType<typeof readUnitParts>>; writes: { text: string; amount: StatedAmount }[] } | null {
+  const goal = model.goal; const value = goal.baseline_value;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const unit = readUnitParts(goal.unit);
+  if (unit === null) return null;
+  const asFactor = { label: goal.metric, baseline_value: value, unit: goal.unit, provenance: 'explicit', baseline_known: true } as Factor;
+  const writes = sentencesWritingFigure(asFactor, brief);
+  return writes.length === 0 ? null : { asFactor, unit, writes };
+}
+
+/**
+ * ⭐ Recovery Batch B (DL 12 Oct, GO (2); the origin rule for goals): the brief writes the goal's current level in the
+ * goal's typed frame, naming the goal, not as an aim or bound (`sentencesWritingFigure`, the origin rule's reader). Then
+ * the level is the user's whatever the drafter tagged it: a drafter's `inferred` never withholds a figure the user wrote
+ * (cd3d9c25: "Total weekly support capacity is defined as the existing 80 tickets per week …"). Its role is V2's
+ * (`verifiedGoalLevel`). A level the brief never writes keeps its treatment.
+ */
+export function briefWritesGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
+  try {
+    return goalLevelWrites(model, brief) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * ⭐ Recovery Batch B (DL 12 Oct 13:3xZ): the GOAL's stated current level, through V2's verification, positive
  * attestation only and no new parser. Admission wrote it as `brief_extraction` with no extractionType and no user-text
@@ -686,18 +712,24 @@ export function briefAttributedLevelRange(factor: Factor, brief: string | undefi
  *   - ORIGIN: a direct sentence of the brief names the goal and writes this figure in the goal's typed frame, not as an
  *     aim or bound (`sentencesWritingFigure`, the origin rule's reader): "Total weekly support capacity is defined as the
  *     existing 80 tickets per week …";
- *   - ROLE: the same figure, in the goal's typed unit, is V2's VERIFIED current level of a factor of this model
- *     (`verifiedFactorLevel`): "Our existing team resolves 80 tickets per week."
+ *   - ROLE: V2 (`verifiedFactorLevel`) verifies the goal's own level ("Our … clinic completes 920 appointments each
+ *     month …"), or the same figure in the goal's typed unit is V2's verified level of a factor of this model ("Our
+ *     existing team resolves 80 tickets per week.").
  * Anything else stays exactly as written before. The typed-unit equality is defence in depth: V2's neighbour rule
  * already withholds a factor whose figure the goal's sentence writes as another quantity.
  */
 export function verifiedGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
   try {
     const goal = model.goal; const value = goal.baseline_value;
-    if (typeof value !== 'number' || !Number.isFinite(value)) return false;
-    const unit = readUnitParts(goal.unit);
-    if (unit === null) return false;
-    if (sentencesWritingFigure({ label: goal.metric, baseline_value: value, unit: goal.unit } as Factor, brief).length === 0) return false;
+    const read = goalLevelWrites(model, brief);
+    if (read === null || typeof value !== 'number') return false;
+    const { asFactor, unit, writes } = read;
+    // DIRECT: V2 itself, on the goal's own level ("Our … clinic completes 920 appointments each month …").
+    if (writes.some(({ text }) => {
+      const own = { ...asFactor, baseline_evidence: { quote: text } } as Factor;
+      return verifiedFactorLevel({ ...model, factors: [...model.factors.filter(f => f.label !== goal.metric), own] }, own, brief);
+    })) return true;
+    // THROUGH A FACTOR: the same figure in the goal's typed unit is V2's verified level of a factor of this model.
     return model.factors.some(f => f.baseline_value === value && JSON.stringify(readUnitParts(f.unit)) === JSON.stringify(unit)
       && verifiedFactorLevel(model, f, brief));
   } catch {

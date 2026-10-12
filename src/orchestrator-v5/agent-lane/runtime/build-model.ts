@@ -39,7 +39,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -2163,7 +2163,8 @@ export async function buildModelFromBrief(
     // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
     // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
     const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
-      (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief));
+      (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief),
+      verifiedGoalLevel(candidate, brief));
     if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
     // ⛔ R3-B 5893233864 / AIQ 5893340150: a target typed as a DECREASE, the drafter's own comparator a ceiling and none of
     // the user's held → Olumi's reading of the sense, typed on the goal (`goal-sense-reading.ts`) and said below.

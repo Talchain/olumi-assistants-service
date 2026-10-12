@@ -139,8 +139,18 @@ describe("Paul's pricing brief: a goal to get ABOVE £85k, today £75k", () => {
     expect(said(result)).toMatch(/already above the target/);
   });
 
-  it('AUTHORED (the level is Olumi\'s estimate, baseline_provenance "inferred"): withheld, as any estimate is', async () => {
+  it('AUTHORED (Paul\'s written £75k tagged "inferred"): DL GO 12 Oct, a drafter\'s tag never withholds a level the brief writes; admitted exactly as row 1', async () => {
     const { result, goal } = await build(PRICING, withGoal({ baseline_provenance: 'inferred' }));
+    expect(goal.goal_direction).toBe('>');
+    expect(goal.observed_state).toStrictEqual({
+      value: 75000 / 106250, baseline: 75000 / 106250, unit: 'GBP per month', source: 'brief_extraction', raw_value: 75000, cap: 106250,
+    });
+    expect(said(result)).not.toMatch(/Olumi's own estimate|strictly above 85000|was not used/);
+  });
+
+  it('AUTHORED (the level is Olumi\'s estimate, "inferred" £70k the brief never writes): withheld, as any estimate is', async () => {
+    const { result, goal } = await build(PRICING, withGoal({ baseline_provenance: 'inferred', baseline_value: 70000 }));
+    expect(PRICING, 'its reason: the brief writes no £70k').not.toMatch(/70k|70,000|70000/);
     expect(goal.observed_state).toBeUndefined();
     expect(said(result)).toMatch(/Olumi's own estimate/);
   });
