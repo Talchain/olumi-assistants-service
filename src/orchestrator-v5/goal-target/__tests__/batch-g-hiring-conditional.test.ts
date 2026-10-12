@@ -204,6 +204,19 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
       expect(l.withheld_reason_by_option?.[SQ], why).toBeUndefined();
       expect(JSON.stringify(l), why).not.toMatch(/by assumption|carrying on as now leaves/);
     }
+    // The case the held-versus-sent identity cannot decide: the held goal IS what this Run sent, yet the producer does not score
+    // it as the paired change (ISL 0b3321d1 :7837-7846 refuses 'change_rel' on a change node by name, CHANGE_OF_A_CHANGE). So the
+    // pairing is the producer's own rule on the sent goal, not identity, a figure or an assumed flag.
+    const rel = withGoal(g, (x) => {
+      x.goal_threshold_frame = 'change_rel';
+      x.goal_target_basis = { ...x.goal_target_basis, target_frame: 'change_rel' };
+      x.observed_state = { ...(x.observed_state ?? {}), raw_value: 50 };
+    });
+    const relLicence = goalChanceLicenceOf(FX.envelope, rel, GOAL, earned, undefined, rel,
+      { storedConstraints: rel.goal_constraints, sentConstraints: rel.goal_constraints, sentRun: sentRunOf(rel) }) as Rec | null;
+    expect(relLicence, 'the identity holds, so the licence is read').not.toBeNull();
+    expect(relLicence!.status_quo).toBeUndefined();
+    expect(JSON.stringify(relLicence), 'no claim either way').not.toMatch(/by assumption|carrying on as now leaves/);
   });
 
   it('AGENT, raw explanation: the AIE line once where the licence is received, no whole-goal direction, and the actual target, notes and licence', () => {
