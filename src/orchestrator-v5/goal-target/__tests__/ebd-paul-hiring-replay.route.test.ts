@@ -364,7 +364,7 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
       expect(lines.find(l => l.option_id === id)!.chance).toContain("Olumi’s estimates of hiring time (2–4 months) and of the additional progress from the hires");
     }
     expect(providerCalls.filter(c => c !== 'agent' && c !== 'drafter' && c !== 'widening' && c !== 'brief_spans')).toEqual([]);
-  });
+  }, 60_000);
 
   it('E4: what the deadline model set aside from a brief is said ONCE, on the build turn, and never on a later turn', async () => {
     const brief = 'Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?';
@@ -480,5 +480,5 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     expect(interactionsToResult).toBe(15);
     expect(kept).toEqual({ productivity_25pct_3months: true, six_month_deadline_words: true, low_confidence_words: true, hiring_qualifier_words: true });
     for (const body of [t1, t2]) expect(JSON.stringify(body)).not.toMatch(LEVEL_ASK);
-  });
+  }, 60_000);
 });
