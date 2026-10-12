@@ -5007,7 +5007,15 @@ export function createAgentCapabilities(
        * exactly base × multiplier. No word list reads the user's wording (DL: a free-text door is banned).
        */
       const derivedArg = (args as { derived_from?: { base?: unknown; multiplier?: unknown } }).derived_from;
-      const derived = derivedArg === undefined || derivedArg === null ? null
+      /**
+       * ⛔ AN EMPTY OR IDENTITY DERIVATION IS NO DERIVATION (marketing L20, served 11 Oct 22:29Z and A′: 4 of 4 calls
+       * refused `unreadable_derivation`; DL, 12 Oct). `{}`, a null base and multiplier, or a multiple of 1 derives nothing,
+       * so the figure itself must be one the user wrote (the check below). Any other derivation keeps every check.
+       */
+      const noDerivation = derivedArg === undefined || derivedArg === null
+        || (typeof derivedArg === 'object' && !Array.isArray(derivedArg)
+          && (((derivedArg.base ?? null) === null && (derivedArg.multiplier ?? null) === null) || derivedArg.multiplier === 1));
+      const derived = noDerivation ? null
         : typeof derivedArg.base === 'number' && Number.isFinite(derivedArg.base) && typeof derivedArg.multiplier === 'number'
           && Number.isFinite(derivedArg.multiplier) && derivedArg.multiplier > 0 && derivedArg.multiplier !== 1
           ? { base: derivedArg.base, multiplier: derivedArg.multiplier } : undefined;

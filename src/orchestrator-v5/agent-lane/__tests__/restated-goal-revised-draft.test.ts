@@ -200,9 +200,9 @@ describe('L20 on the served early draft: ONE revised-draft card, prepared once, 
     const s = server();
     const { caps, proposals, drafts } = lane(s);
     const a = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    // One preparation is one construction: its drafter call and its own widening call.
+    // One preparation is one construction: its drafter call (E6, in the B combine, parks the draft-time widening call).
     const preparation = drafts();
-    expect(preparation).toBe(2);
+    expect(preparation).toBe(1);
     const b = await caps.proposeGoalTarget!(l20Turn, customers as never);
     const again = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(a.ok, JSON.stringify(a)).toBe(true);
