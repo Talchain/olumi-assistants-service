@@ -89,9 +89,9 @@ describe('hiring — a change QUANTITY with change_abs +10 needs no level today 
 
   it('RED: each per-person effect is sized on the goal\'s own 0–100 frame: 2 developers × 4 = +8, 1 tech lead × 9 = +9', () => {
     const m = admitCandidateModel(hiring());
-    const edge = (from: string): Rec => (m.edges as Rec[]).find((e) => e.from === from && e.to === 'productivity')!;
-    const devs = (m.nodes as Rec[]).find((n) => n.id === 'additional_developers_hired')!;
-    const leads = (m.nodes as Rec[]).find((n) => n.id === 'additional_tech_leads_hired')!;
+    const edge = (from: string): Rec => (m.edges as unknown as Rec[]).find((e) => e.from === from && e.to === 'productivity')!;
+    const devs = (m.nodes as unknown as Rec[]).find((n) => n.id === 'additional_developers_hired')!;
+    const leads = (m.nodes as unknown as Rec[]).find((n) => n.id === 'additional_tech_leads_hired')!;
     const devFrame = (devs.scale_frame ?? (devs.observed_state as Rec | undefined)?.cap) as number;
     const leadFrame = (leads.scale_frame ?? (leads.observed_state as Rec | undefined)?.cap) as number;
     // β = (amount / 100) / (per_change / F_source); the engine's paired change for an option setting x people is β·x/F·100.
@@ -141,7 +141,7 @@ describe('a relative change on Olumi\'s starting value is estimate_only (ruling 
       value: 10, horizon_months: 3, baseline_known: false, baseline_value: 20000, baseline_provenance: 'ai_proposed',
       basis: { ...BASIS, denominator: 'today’s MRR', effect_unit: 'GBP/month per added person, at month three', also_required: null },
       ...goal } as CandidateModel['goal'],
-      links: base.links.map((l) => ({ ...l, to: 'MRR', effect_amount: l.effect_amount === null ? null : l.effect_amount * 100 })) } as CandidateModel;
+      links: base.links.map((l) => ({ ...l, to: 'MRR', effect_amount: typeof l.effect_amount === 'number' ? l.effect_amount * 100 : null })) } as CandidateModel;
   };
   const mrrGoal = (m: { nodes: readonly unknown[] }): Rec => goalOf(m);
 
