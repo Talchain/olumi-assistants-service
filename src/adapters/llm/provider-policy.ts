@@ -314,7 +314,8 @@ export function assertProviderAllowed(
       purpose: detail?.purpose ?? site ?? 'unspecified',
       outcome: allowed ? 'allowed' : 'refused_before_network',
       // Migrated Responses sites opt into host receipts; nested legacy rows keep their shape.
-      ...(['agent-v1-turn.callModel', 'agent-v1-turn.callResearch', 'agent-v1-turn.callStructured', 'agent-v1-turn.callBriefReading'].includes(site ?? '') ? {
+      // SYS1 (B2): the factor review (`extraction.openai`) is reached inside Agent turns; its row is correlated to the turn too.
+      ...(['agent-v1-turn.callModel', 'agent-v1-turn.callResearch', 'agent-v1-turn.callStructured', 'agent-v1-turn.callBriefReading', 'extraction.openai'].includes(site ?? '') ? {
         ...(policy.request_id !== undefined ? { request_id: policy.request_id } : {}),
         ...(policy.scenario_id !== undefined ? { scenario_id: policy.scenario_id } : {}),
         ...(policy.turn_id !== undefined ? { turn_id: policy.turn_id } : {}),
