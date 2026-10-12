@@ -1,6 +1,6 @@
 {
  "_generated_by": "restated-goal-revised-draft.test.ts row 'the L20 candidate fixture is the one the capability prepares' (proposals.get(offer).operations[0].value); regenerate by that row, never by hand",
- "operation_id": "6a1fdbe9-bee4-423b-8f01-4e483070afcd",
+ "operation_id": "2ad74a34-60ee-4ec4-adf8-2d5ac21ce37e",
  "candidate": {
   "nodes": [
    {
@@ -17,16 +17,16 @@
     "goal_threshold_unit": "customers",
     "goal_threshold_frame": "level",
     "goal_threshold_raw": 20,
-    "goal_threshold_cap": 25,
-    "goal_threshold_cap_provenance": "target_derived_headroom",
-    "goal_threshold": 0.8,
+    "goal_threshold_cap": 200,
+    "goal_threshold_cap_provenance": "stated_effect_fit",
+    "goal_threshold": 0.1,
     "observed_state": {
      "value": 0,
      "baseline": 0,
      "unit": "customers",
      "source": "brief_extraction",
      "raw_value": 0,
-     "cap": 25
+     "cap": 200
     },
     "goal_target_basis": {
      "quantity_frame": "level",
@@ -316,17 +316,24 @@
     "from": "conversion_rate",
     "to": "new_customers",
     "strength": {
-     "mean": 0.5,
-     "std": 0.125
+     "mean": 1,
+     "std": 0.5
     },
     "exists_probability": 0.8,
     "effect_direction": "positive",
     "provenance": {
      "source": "cee_hypothesis",
-     "mean_projected": true,
-     "magnitude": "olumi_placeholder"
-    },
-    "defaulted": true
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 2,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "%",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     },
+     "basis": "Each point of conversion adds customers."
+    }
    },
    {
     "from": "founder_marketing_time",

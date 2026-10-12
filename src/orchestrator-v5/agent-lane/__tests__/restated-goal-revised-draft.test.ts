@@ -11,7 +11,7 @@
  * words (`candidate`, written by hand like C's readback spec, so this is TESTED, not WIRE-WITNESSED) and the store
  * (in memory, with the register route's compare-and-set and operation-id replay rules, and its committed turn ledger).
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -476,7 +476,13 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     const { caps } = lane(s, proposals);
     const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     const v = proposals.get(offer.proposal_id as string)!.operations[0]!.value as Rec;
-    const fixture = JSON.parse(readFileSync(new URL('./fixtures/marketing-l20-revised-draft-candidate.json', import.meta.url), 'utf8')) as Rec;
+    const url = new URL('./fixtures/marketing-l20-revised-draft-candidate.json', import.meta.url);
+    // A deliberate regeneration only (a reviewed rule change moved the candidate), never to turn this drift check green.
+    if (process.env.L20_CANDIDATE_REWRITE === '1') {
+      const was = JSON.parse(readFileSync(url, 'utf8')) as Rec;
+      writeFileSync(url, `${JSON.stringify({ ...was, operation_id: v.operation_id, candidate: v.candidate }, null, 1)}\n`);
+    }
+    const fixture = JSON.parse(readFileSync(url, 'utf8')) as Rec;
     expect({ operation_id: v.operation_id, candidate: v.candidate }).toEqual({ operation_id: fixture.operation_id, candidate: fixture.candidate });
   });
 
