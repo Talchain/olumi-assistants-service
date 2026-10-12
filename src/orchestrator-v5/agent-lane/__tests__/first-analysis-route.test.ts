@@ -412,7 +412,9 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(ids).not.toContain('agent-suggest-what-it-needs');
   });
 
-  it('CONTRAST (test 3): blocked, but only the USER can fill it (factor levels; nothing Olumi can offer) → the general next step', async () => {
+  // R2 T2 (friction audit row T2) re-pins this row: "Suggest what it still needs" produced nothing approvable when only the
+  // user can fill every blocker (deadline 2/2, Paul 2/2), so it is no longer offered; the reply's own ask is the next step.
+  it('CONTRAST (test 3): blocked, but only the USER can fill it (factor levels; nothing Olumi can offer) → no general "Suggest what it still needs" (R2 T2)', async () => {
     // The served cut-costs construction with every factor's level removed: `may_run: false`, `needs_from_user` only.
     const g = structuredClone(CC_SERVED.graph) as { nodes: Record<string, unknown>[] };
     for (const n of g.nodes) if (n.kind === 'factor') delete n.observed_state;
@@ -420,7 +422,7 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const b = await buildTurn(app);
     expect(b._diagnostic_trace.first_analysis, 'the contrast reaches a refused first analysis').toMatchObject({ ran: false });
     const ids = b.suggested_actions.map((c) => c.id);
-    expect(ids).toContain('agent-suggest-what-it-needs');
+    expect(ids).not.toContain('agent-suggest-what-it-needs');
     expect(ids).not.toContain('agent-suggest-starting-assumptions');
   });
 
