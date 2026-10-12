@@ -94,55 +94,92 @@ export interface GoalTargetWithheld {
 }
 
 /**
- * ⛔ WORDS PENDING AIE (recovery Batch F, S12; rulings pending #94 6129762547). Every NEW joint or per-target withhold
- * sentence, and every next step, is ONE marked placeholder here: `⟦AIE:<key>⟧` followed by its slots, filled by identity
- * (labels as ‘…’, reason codes verbatim). No final user-facing sentence is composed for these; the AIE's exact words replace
- * the placeholder BY KEY and keep the slots. `meaning` is what the words must say, in one line.
+ * ⭐ THE AIE'S WORDS (recovery Batch F, S12; AIE copy banked f-inputs/AIE-JOINT-WITHHOLD-COPY-20261012.json, sha256 685ee884…).
+ * Every joint or per-target withhold sentence, and every next step, is ONE row: the AIE's sentence, byte for byte, with
+ * `{slot}`s filled by identity (labels as ‘…’; a reason as its ordinary words, {@link reasonWords}, never its raw code,
+ * which stays in the data). `meaning` is what the words say, kept for the reader of this table.
  */
 export const JOINT_WITHHOLD_WORDS = {
-  'joint.limit_unscored': { slots: ['conditions'],
+  'joint.limit_unscored': { slots: ['conditions'], words: 'The chance of meeting these conditions together is not shown because this analysis could not check: {conditions}.',
     meaning: 'Meeting every condition together is not shown: the engine did not score the named conditions (PLoT joint_withheld); each is named with its reason code.' },
-  'joint.not_returned': { slots: [],
+  'joint.not_returned': { slots: [], words: 'The chance of meeting these conditions together is not shown because this analysis returned no joint estimate and no usable explanation.',
     meaning: 'Meeting every condition together is not shown: the engine returned no joint figure and gave no reason CEE can read; no next step is known (never "run again").' },
-  'joint.precision_missing': { slots: [],
+  'joint.precision_missing': { slots: [], words: 'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is.',
     meaning: 'Meeting every condition together is not shown: the joint figure came back without its precision, so it is not said; no next step is known (never "run again").' },
-  'joint.no_option': { slots: [],
+  'joint.no_option': { slots: [], words: 'The chance of meeting these conditions together is not shown because no option has a usable joint result.',
     meaning: 'Meeting every condition together is not shown: no option is left to quote it for; no next step is known.' },
-  'target.withheld': { slots: ['target', 'reason'],
+  'target.withheld': { slots: ['target', 'reason'], words: 'Chance not shown for {target}: {reason}.',
     meaning: 'This target’s own chance is not shown: names the target and why (its reason code; target_no_level_today = its quantity has no level today, so it cannot be tested), then its one next step.' },
-  'conditions.retained_unbound': { slots: ['conditions'],
+  'conditions.retained_unbound': { slots: ['conditions'], words: 'Other conditions remain recorded from your brief: {conditions}; their relation to this result has not been established.',
     meaning: 'Beside several targets: the other conditions the brief states, each kept as written; CEE cannot bind them to the targets, so it claims neither that this chance includes nor that it excludes them.' },
-  'next.give_goal_current_level': { slots: ['quantity'], meaning: 'Next step: give today’s level of the goal’s quantity (the goal’s current-level card).' },
-  'next.give_starting_value': { slots: ['quantity'], meaning: 'Next step: give today’s level of this factor yourself (the starting-value card).' },
-  'next.give_option_levels': { slots: ['quantity'], meaning: 'Next step: give each option’s own level (or range) for this quantity; each now rests on Olumi’s single figure.' },
-  'next.size_link': { slots: ['from', 'to'], meaning: 'Next step: say how much the first quantity changes the second (a link Olumi sized or left unsized).' },
-  'next.rerun_analysis': { slots: [],
+  'next.give_goal_current_level': { slots: ['quantity'], words: 'Give the current value of {quantity}.',
+    meaning: 'Next step: give today’s level of the goal’s quantity (the goal’s current-level card).' },
+  'next.give_starting_value': { slots: ['quantity'], words: 'Give a starting value for {quantity}.',
+    meaning: 'Next step: give today’s level of this factor yourself (the starting-value card).' },
+  'next.give_option_levels': { slots: ['quantity'], words: 'Set the value or range for {quantity} in each option.',
+    meaning: 'Next step: give each option’s own level (or range) for this quantity; each now rests on Olumi’s single figure.' },
+  'next.size_link': { slots: ['from', 'to'], words: 'Estimate how much {from} affects {to}.',
+    meaning: 'Next step: say how much the first quantity changes the second (a link Olumi sized or left unsized).' },
+  'next.rerun_analysis': { slots: [], words: 'Run the analysis again to use the saved targets.',
     meaning: 'Next step: run the analysis again — said ONLY where the Run itself did not use the targets as stored (a stale or mismatched Run).' },
-} as const satisfies Readonly<Record<string, { readonly slots: readonly string[]; readonly meaning: string }>>;
+} as const satisfies Readonly<Record<string, { readonly slots: readonly string[]; readonly words: string; readonly meaning: string }>>;
 
 export type JointWithholdWordsKey = keyof typeof JOINT_WITHHOLD_WORDS;
 
-/** The marked placeholder for one row of {@link JOINT_WITHHOLD_WORDS}, its slots filled in the row's order. One line. */
-export function withholdPlaceholder(key: JointWithholdWordsKey, slots: Readonly<Record<string, string>> = {}): string {
-  const filled = (JOINT_WITHHOLD_WORDS[key].slots as readonly string[])
-    .flatMap((s) => (typeof slots[s] === 'string' && slots[s]!.trim() !== '' ? [`${s}: ${slots[s]!.replace(/[\r\n]+/g, ' ')}`] : []));
-  return `⟦AIE:${key}⟧${filled.length > 0 ? ` ${filled.join('; ')}` : ''}`;
+/** One row of {@link JOINT_WITHHOLD_WORDS}: the AIE's sentence, each `{slot}` filled by identity. One line. */
+export function withholdWords(key: JointWithholdWordsKey, slots: Readonly<Record<string, string>> = {}): string {
+  return (JOINT_WITHHOLD_WORDS[key].words as string).replace(/\{([a-z]+)\}/g, (_, s: string) => (slots[s] ?? '').replace(/[\r\n]+/g, ' '));
+}
+
+/**
+ * A reason code in ordinary words (AIE copy, binding guards 1–2): the AIE's own words for the codes it named; the existing
+ * withheld sentence's own clause for the Run-mismatch and Olumi-base codes; else the AIE's neutral line. The code itself is
+ * never said; it stays in the record (`reason`).
+ */
+export const KNOWN_REASON_WORDS: Readonly<Record<string, string>> = {
+  target_no_level_today: 'this analysis has no starting value for the quantity',
+  parts_identity_unmodelled: 'the model does not yet represent how its component values add up',
+  limit_rests_on_olumi_guess: 'at least one required input is an unconfirmed estimate from Olumi',
+  limit_unscored: 'this analysis could not evaluate the condition',
+  not_returned: 'this analysis returned no usable estimate for this target',
+  target_not_supported: 'this analysis cannot represent the target as stated',
+  strict_not_preserved: 'the comparison the analysis used is not the one you stated',
+  figure_not_preserved: 'this analysis did not use every stated target as specified',
+  olumi_base: 'it rests on Olumi’s own assumed starting value for a target, which you haven’t given',
+};
+export const NEUTRAL_REASON_WORDS = 'the returned result could not be used for this target';
+export function reasonWords(code: string): string {
+  return Object.hasOwn(KNOWN_REASON_WORDS, code) ? KNOWN_REASON_WORDS[code]! : NEUTRAL_REASON_WORDS;
 }
 
 /** The words of ONE next step (a placeholder), or '' when none is established — nothing is promised. */
 export function nextStepWords(next: WithholdNextStepRef | undefined): string {
   if (next === undefined || next.code === 'none_established') return '';
-  if (next.code === 'rerun_analysis') return withholdPlaceholder('next.rerun_analysis');
+  if (next.code === 'rerun_analysis') return withholdWords('next.rerun_analysis');
   const quantity = next.label === undefined ? '' : `‘${next.label}’`;
-  if (next.code === 'size_link') return withholdPlaceholder('next.size_link', { from: next.from === undefined ? '' : `‘${next.from.label}’`, to: quantity });
-  return withholdPlaceholder(`next.${next.code}`, { quantity });
+  if (next.code === 'size_link') {
+    // A step whose quantity cannot be named promises nothing (binding guard 3: only a supported writer and a useful input).
+    if (next.from === undefined || quantity === '') return '';
+    return withholdWords('next.size_link', { from: `‘${next.from.label}’`, to: quantity });
+  }
+  return quantity === '' ? '' : withholdWords(`next.${next.code}`, { quantity });
 }
 
 const NONE: WithholdNextStepRef = { code: 'none_established' };
 const RERUN: WithholdNextStepRef = { code: 'rerun_analysis' };
 /** A stored line a reader still accepts (`isGoalTargetsBlock`: ≤ 600 characters, one line). */
 const LINE_MAX = 600;
-const capLine = (s: string): string => (s.length <= LINE_MAX ? s : `${s.slice(0, LINE_MAX - 1)}…`);
+/**
+ * ⛔ NEVER A SILENT SLICE (AIE copy, binding guard 8): the first variant that fits, whole. A next step that does not fit is
+ * left out of the line (it stays in `next_step`), never cut off; the full per-condition state stays in `causes`.
+ */
+function fitLine(variants: readonly string[]): string {
+  const fits = variants.find((s) => s.length <= LINE_MAX);
+  if (fits !== undefined) return fits;
+  // Only a label longer than the line itself reaches here (labels are ≤ 600): its words end at a word, marked, never mid-word.
+  const last = variants[variants.length - 1]!;
+  return `${last.slice(0, LINE_MAX - 1).replace(/\s+\S*$/u, '')}…`;
+}
 
 export interface GoalCondition {
   readonly constraint_id: string;
@@ -213,11 +250,21 @@ export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupp
   /** Batch F: the conditions the engine did not score (`limit_unscored`) and the ONE next step (default: none established). */
   f: { readonly causes?: readonly WithheldConditionCause[]; readonly next?: WithholdNextStepRef } = {}): string {
   const next = nextStepWords(f.next);
-  return capLine(next === '' ? jointReasonWords(n, reason, unsupported, strictLost, f.causes ?? []) : `${jointReasonWords(n, reason, unsupported, strictLost, f.causes ?? [])} ${next}`);
+  const variants = jointReasonVariants(n, reason, unsupported, strictLost, f.causes ?? []);
+  return fitLine([...(next === '' ? [] : [`${variants[0]} ${next}`]), ...variants]);
 }
 
-function jointReasonWords(n: number, reason: JointWithholdReason, unsupported: readonly string[], strictLost: readonly string[],
-  causes: readonly WithheldConditionCause[]): string {
+/** The joint's reason sentence, then (for a long list of unscored conditions) the same sentence naming them without reasons. */
+function jointReasonVariants(n: number, reason: JointWithholdReason, unsupported: readonly string[], strictLost: readonly string[],
+  causes: readonly WithheldConditionCause[]): string[] {
+  if (reason === 'limit_unscored') {
+    return [withholdWords('joint.limit_unscored', { conditions: listWords(causes.map((c) => `‘${c.label}’ (${reasonWords(c.reason)})`)) }),
+      withholdWords('joint.limit_unscored', { conditions: listWords(causes.map((c) => `‘${c.label}’`)) })];
+  }
+  return [jointReasonWords(n, reason, unsupported, strictLost)];
+}
+
+function jointReasonWords(n: number, reason: JointWithholdReason, unsupported: readonly string[], strictLost: readonly string[]): string {
   const all = n === 2 ? 'both' : 'all of them';
   if (reason === 'target_not_supported' && unsupported.length > 0) {
     const names = listWords(unsupported.map((x) => `‘${x}’`));
@@ -236,26 +283,22 @@ function jointReasonWords(n: number, reason: JointWithholdReason, unsupported: r
   }
   if (reason === 'condition_not_named') return `The chance of meeting ${all} together isn’t shown: one of its conditions can’t be said in your units.`;
   if (reason === 'olumi_base') return `The chance of meeting ${all} together isn’t shown yet: it rests on Olumi’s own assumed starting value for a target, which you haven’t given.`;
-  // ⛔ Batch F (W1): PLoT's own reason — the engine did not score these conditions; each is named with its established cause.
-  if (reason === 'limit_unscored') {
-    return withholdPlaceholder('joint.limit_unscored', { conditions: causes.map((c) => `‘${c.label}’ (${c.reason})`).join(', ') });
-  }
   // ⛔ Batch F: a figure without its precision, and no figure with no reason, are NOT cured by running again: no step is promised.
-  if (reason === 'precision_missing') return withholdPlaceholder('joint.precision_missing');
-  if (reason === 'no_option') return withholdPlaceholder('joint.no_option');
-  return withholdPlaceholder('joint.not_returned');
+  if (reason === 'precision_missing') return withholdWords('joint.precision_missing');
+  if (reason === 'no_option') return withholdWords('joint.no_option');
+  return withholdWords('joint.not_returned');
 }
 
-/** Batch F (b): one stated target's own withheld line — its label, its reason code and its ONE next step (words pending AIE). */
+/** Batch F (b): one stated target's own withheld line — its label, its reason in ordinary words and its ONE next step. */
 export function targetWithheldLine(label: string, reason: string, next: WithholdNextStepRef): string {
-  const why = withholdPlaceholder('target.withheld', { target: `‘${label}’`, reason });
+  const why = withholdWords('target.withheld', { target: `‘${label}’`, reason: reasonWords(reason) });
   const step = nextStepWords(next);
-  return capLine(step === '' ? why : `${why} ${step}`);
+  return fitLine(step === '' ? [why] : [`${why} ${step}`, why]);
 }
 
 /** Batch F (c): the brief's other conditions beside several targets, each kept as written, claimed neither in nor out. */
 export function retainedConditionsLine(conditions: readonly string[]): string | undefined {
-  return conditions.length === 0 ? undefined : withholdPlaceholder('conditions.retained_unbound', { conditions: conditions.join('; ') });
+  return conditions.length === 0 ? undefined : withholdWords('conditions.retained_unbound', { conditions: conditions.join('; ') });
 }
 
 /** Amendment 6: true whatever the targets' dependence; never a product of the marginals. */
@@ -495,6 +538,9 @@ export function goalTargetsBlockOf(args: {
   for (const t of targets) {
     if (shownIds.has(t.constraint_id)) continue;
     const who = { constraint_id: t.constraint_id, node_id: t.node_id, label: t.label };
+    // AIE copy, binding guard 5: "run again" only where a fresh request is established to test the saved targets. It is:
+    // the current sender (`wireGoalConstraints`) sends each stored target's stated comparator and figure as stored, so a Run
+    // whose request did not was built before them (stale), and a fresh one tests them (pinned in batch-f-joint-withhold).
     if (strictLostIds.has(t.constraint_id)) withholdTarget(who, 'strict_not_preserved', RERUN);
     else if (figureLostIds.has(t.constraint_id)) withholdTarget(who, 'figure_not_preserved', RERUN);
     else if (olumiBase.has(t.constraint_id)) withholdTarget(who, 'olumi_base', levelStep(t.node_id));
@@ -511,7 +557,8 @@ export function goalTargetsBlockOf(args: {
 
   const n = Math.max(ordered.length + unsupported.length + unsentTargets.length + (unnamed ? 1 : 0), 2);
   const withheld = (reason: JointWithholdReason, f: { readonly causes?: readonly WithheldConditionCause[]; readonly next?: WithholdNextStepRef } = {}): GoalJoint => {
-    // ⛔ Batch F: "run again" only for the Run's own mismatch; the first olumi-base target's level step; else what was given.
+    // ⛔ "Run again" only where a fresh request is established to test the saved targets (AIE copy, binding guard 5; see the
+    // per-target note above): the Run's own stale request. Then the first olumi-base target's level step; else what was given.
     const next = reason === 'strict_not_preserved' || reason === 'figure_not_preserved' ? RERUN
       : reason === 'olumi_base' ? (() => { const t = targets.find((x) => olumiBase.has(x.constraint_id)); return t === undefined ? NONE : levelStep(t.node_id); })()
         : f.next ?? NONE;

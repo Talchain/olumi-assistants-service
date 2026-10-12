@@ -689,9 +689,9 @@ describe('readback RESPONSE → LICENCE — marketing: "above 15%" is said only 
     const oldWire = (payload.goal_constraints as Rec[]).map((r) => (r.node_id === 'conversion_rate' ? { ...r, operator: '>=' } : r));
     const targets = licenceOver(payload, reloaded, oldWire).targets!;
     expect(targets.per_target.map((t) => t.constraint_id)).toEqual(['agent-lane:new_customers:>=']);
-    // Batch F: a mismatched Run (the stated ">" was not sent) — the one cause whose next step is to run it again (words pending AIE).
+    // Batch F: a mismatched Run (the stated ">" was not sent) — the one cause whose next step is to run it again (the AIE's words).
     expect(targets.joint).toMatchObject({ status: 'withheld', reason: 'strict_not_preserved', next_step: { code: 'rerun_analysis' },
-      line: 'The chance of meeting all of them together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: the comparison the analysis used is not the one you stated. ⟦AIE:next.rerun_analysis⟧' });
+      line: 'The chance of meeting all of them together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: the comparison the analysis used is not the one you stated. Run the analysis again to use the saved targets.' });
     expect(JSON.stringify(targets.per_target)).not.toMatch(/above 15%/);
   });
 });
