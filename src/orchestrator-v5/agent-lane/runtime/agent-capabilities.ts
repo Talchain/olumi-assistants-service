@@ -5295,7 +5295,8 @@ export function createAgentCapabilities(
       const texts = { now: ctx.user_turn_text, conversation: ctx.user_text };
       const refuse = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
       const unusable = (): ToolResult => refuse('hiring_timings_unusable', 'Olumi could not use these hiring timings as quoted, so nothing was prepared. '
-        + 'Re-read the user\'s own words and quote each start exactly, in the order they happen; if Olumi still cannot use them, say so plainly.');
+        + 'Re-read the user\'s own words and quote each start exactly, in the order they happen. If Olumi still cannot use them, say plainly that '
+        + 'Olumi’s own hiring estimates stay in the model, labelled as Olumi’s, and ask once for each start as a number of months.');
       const asked = Array.isArray(args?.options) ? args.options : [];
       if (asked.length === 0) return unusable();
       const g = await readGraph(ctx.scenario_id);
@@ -5324,13 +5325,13 @@ export function createAgentCapabilities(
         }
         const plan = planStarts(quotes, estimate, held.length);
         if (!('parts' in plan)) {
-          if (plan.refusal === 'too_many_starts') return refuse('too_many_starts', `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly.`);
+          if (plan.refusal === 'too_many_starts') return refuse('too_many_starts', `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly, and ask once which two starts to use; until then Olumi’s own hiring estimate for ‘${label}’ stays in the model, labelled as Olumi’s.`);
           if (plan.refusal === 'fewer_starts_than_held') {
             return refuse('fewer_starts_than_held', heldQuotes.length === held.length
               ? `This card replaces all ${held.length} hiring timings for ‘${label}’ together, so nothing was prepared. Retain the unchanged timings and their sources and prepare the complete card for the requested change. If a held timing cannot be verified, ask only about that missing input.`
-              : `This card replaces all ${held.length} hiring timings for ‘${label}’ together, and Olumi cannot yet keep a timing it estimated while another changes, so nothing was prepared. Say so plainly.`);
+              : `This card replaces all ${held.length} hiring timings for ‘${label}’ together, and Olumi cannot yet keep a timing it estimated while another changes, so nothing was prepared. Say so plainly, and ask once for every start of ‘${label}’ together.`);
           }
-          if (plan.refusal === 'relative_to_range') return refuse('relative_to_range', `"${plan.quote}" for ‘${label}’ ties this start to an earlier one given as a range, which Olumi cannot model yet, so nothing was prepared. Say so plainly; the user's timings stay in the conversation.`);
+          if (plan.refusal === 'relative_to_range') return refuse('relative_to_range', `"${plan.quote}" for ‘${label}’ ties this start to an earlier one given as a range, which Olumi cannot model yet, so nothing was prepared. Say so plainly, and ask once for that start's own time in months (for example “about 5 months”); until then Olumi’s own hiring estimate for ‘${label}’ stays in the model, labelled as Olumi’s.`);
           return unusable();
         }
         planned.push({ option_id: id, label, part_ids: held.map(n => String(n.id)), expected: held.map(n => n.observed_state.extra_share_by_date),

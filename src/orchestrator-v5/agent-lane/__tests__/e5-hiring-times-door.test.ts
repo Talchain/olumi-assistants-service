@@ -228,6 +228,21 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
       ctx(later) as never, w.caps)).toMatchObject({ ok: false, refusal: 'hiring_timings_unusable' });
   });
 
+  // Paul's test (DL, 12 Oct): a refusal that is not a §7.4 blocking class names ONE next step and what the model keeps.
+  it.each([
+    ['too many starts', 'With two developers, one in 2 months, then in 3 months, then in 4 months.', DEVS, ['in 2 months', 'in 3 months', 'in 4 months'], 'too_many_starts'],
+    ['a start tied to a ranged one', 'With two developers, one in 2-3 months and another a month later.', DEVS, ['in 2-3 months', 'another a month later'], 'relative_to_range'],
+    ['unusable timings (at least past Olumi\'s latest)', 'For the tech lead it would be at least 6 months.', TECH, ['at least 6 months'], 'hiring_timings_unusable'],
+  ])('a refusal never ends the turn without a next step: %s → ONE ask, and Olumi\'s estimate stays, labelled', async (_n, said, option, quotes, refusal) => {
+    const w = world();
+    const r = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: option, starts: quotes.map(quote => ({ quote })) }] }),
+      ctx(said) as never, w.caps) as Rec;
+    expect(r).toMatchObject({ ok: false, refusal });
+    expect(String(r.detail)).toMatch(/ask once (for|which)/);
+    expect(String(r.detail)).toMatch(/Olumi’s own hiring estimates? (for ‘[^’]+’ )?stays? in the model, labelled as Olumi’s/);
+    expect(w.registers).toHaveLength(0);
+  });
+
   it('field-scoped stale: a carrier changed after the offer (outside the analysis hash) refuses; nothing is written', async () => {
     const w = world();
     const r = await dispatchTool('propose_hiring_times', JSON.stringify(PAULS_ARGS), ctx(PAUL) as never, w.caps) as Rec;
