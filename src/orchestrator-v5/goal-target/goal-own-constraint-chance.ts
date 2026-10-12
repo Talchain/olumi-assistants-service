@@ -64,9 +64,9 @@ export function sentRunTestsHeldTarget(sent: SentRunInputs | undefined, graph: u
   const sentGoal = sent.graph.nodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
   const sentOperator = sent.goal_direction === 'minimise'
     ? (sent.goal_threshold_strict === true ? '<' : '<=') : (sent.goal_threshold_strict === true ? '>' : '>=');
-  const share = shareByDateGoalForChanceOf(graph);
-  return sentGoal !== undefined && share !== null && share.goal.id === goalId && finite(sentGoal.goal_threshold)
-    && sentGoal.goal_threshold === share.threshold_raw / 100 && sentGoal.goal_threshold_frame === 'delta'
+  const share = shareByDateGoalForChanceOf(graph), threshold = sentGoal?.goal_threshold;
+  return sentGoal !== undefined && share !== null && share.goal.id === goalId && finite(threshold)
+    && threshold === share.threshold_raw / 100 && sentGoal.goal_threshold_frame === 'delta'
     && readGoalRecord(graph, goalId)?.target?.comparator === sentOperator;
 }
 

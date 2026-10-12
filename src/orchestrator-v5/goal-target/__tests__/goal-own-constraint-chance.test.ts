@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { goalOwnConstraintChanceRecords, GOAL_OWN_CONSTRAINT_ID, SENT_TARGET_NOT_HELD_WORDS, withSentTargetWithheld, type SentRunInputs } from '../goal-own-constraint-chance.js';
-import { goalChanceLicenceOf } from '../goal-chance-licence.js';
+import { goalChanceLicenceOf, withGoalChanceLicence } from '../goal-chance-licence.js';
 import { goalChancePrecisionOf } from '../goal-chance-driver.js';
 import { exactChance, normalChance } from '../event-by-date-share.js';
 import { shareGateForOption, sharePartsForOption } from '../share-by-date-run.js';
@@ -106,6 +106,11 @@ describe('AIE 6125204695: the goal’s own constraint, bound per option to what 
     expect(SENT_TARGET_NOT_HELD_WORDS).toBe('Not shown. This run did not test your goal’s own target, so its results are not the chance of meeting it. Run the analysis again.');
     const licence = licenceOf(out, sent);
     expect(licence === null || Object.keys(licence.pct_by_option).length === 0).toBe(true);
+    // At Run time, through the licence writer the Run handler calls: the words are stored with the Run, and no chance is.
+    const stored = withGoalChanceLicence(ENGINE(), GRAPH(), GOAL, undefined, undefined, GRAPH(), { sentRun: sent }) as Rec;
+    const said = (stored.inference_warnings ?? []).filter((w: Rec) => w.message === SENT_TARGET_NOT_HELD_WORDS);
+    expect(said.map((w: Rec) => [...w.option_ids].sort())).toEqual([OPTIONS]);
+    expect((stored.inference_warnings ?? []).some((w: Rec) => Object.keys(w.pct_by_option ?? {}).length > 0)).toBe(false);
     // CONTRAST: the Run that tested the held target is returned as it came, and quotes 83 / 95 / 42.
     const held = ENGINE();
     expect(withSentTargetWithheld(held, GRAPH(), GOAL, SENT())).toBe(held);

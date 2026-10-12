@@ -217,7 +217,6 @@ import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThres
 import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../../goal-target/goal-chance-licence.js';
 import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
-import { withSentTargetWithheld } from '../../goal-target/goal-own-constraint-chance.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
 import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
@@ -2882,8 +2881,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Recovery Batch B (b1, AIE 6125204695): what CEE SENT binds a deadline goal's engine-read chance, per option. The payload
     // itself (its graph, direction and strictness), never a copy: nothing edits it after the PLoT call above.
     const sentRun = plotPayload;
-    // B2 (check BLOCKING 3): a deadline goal's Run that did not test the HELD target withholds every option's chance, with words.
-    response = withSentTargetWithheld(response, graphForAnalysis, snapshot.goal_node_id, sentRun);
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, sentRun),
       snapshot.rawPersistedGraph ?? graphForAnalysis,

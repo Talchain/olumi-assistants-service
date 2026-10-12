@@ -44,7 +44,7 @@ import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
-import { goalOwnConstraintChanceRecords, type SentRunInputs } from './goal-own-constraint-chance.js';
+import { goalOwnConstraintChanceRecords, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
@@ -1138,13 +1138,15 @@ export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): E {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
-  if (licence === null || !isRec(envelope)) return envelope;
+  // B2 (check BLOCKING 3): a deadline goal's Run that did not test the HELD target withholds every option's chance, with words.
+  const checked = withSentTargetWithheld(envelope, graph, goalId, constraints.sentRun);
+  const licence = goalChanceLicenceOf(checked, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
+  if (licence === null || !isRec(checked)) return checked;
   // Recovery Batch C, amendment 1 (DL contract ruling 3): a status quo the licence records as BY ASSUMPTION carries no
   // precision and no Monte Carlo interval on any surface (its standard error is 0 by construction: never "±0").
-  const shown = licence.status_quo === undefined ? envelope : withholdStatusQuoIntervals(envelope, licence.status_quo.option_id);
+  const shown = licence.status_quo === undefined ? checked : withholdStatusQuoIntervals(checked, licence.status_quo.option_id);
   const warnings = Array.isArray(shown.inference_warnings) ? shown.inference_warnings : [];
-  return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;
+  return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(checked) }] } as E;
 }
 
 /**
