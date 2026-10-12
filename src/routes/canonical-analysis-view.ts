@@ -47,7 +47,10 @@ function goalIdentityWithheldMessage(result: unknown, option_id: string): string
   if (matched.length === 0) return undefined;
   const hasTargetRequirement = matched.some(warning => warning.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
   const reasons = hasTargetRequirement ? matched.filter(warning => warning.code !== 'GOAL_FIGURES_PLACEHOLDER_PATH') : matched;
-  const words = reasons.map(warning => typeof warning.message === 'string' ? warning.message.trim() : '');
+  // R2 C3: a display-safe specific reason ("This comparison turns on the links from …") takes the "Not shown." prefix
+  // instead of being dropped for the generic line. Empty or unsafe words still fall back.
+  const words = reasons.map(warning => typeof warning.message === 'string' ? warning.message.trim() : '')
+    .map(raw => raw === '' || raw.startsWith('Not shown.') ? raw : `Not shown. ${raw}`);
   const notDisplaySafe = /\b[a-z0-9]+_[a-z0-9_]+\b|[{}[\]<>]/;
   const allSafe = words.every(raw => raw.startsWith('Not shown.') && raw.length <= 400 && !notDisplaySafe.test(raw));
   return allSafe ? [...new Set(words)].join(' ')

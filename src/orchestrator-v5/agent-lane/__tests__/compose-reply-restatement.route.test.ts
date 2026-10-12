@@ -99,7 +99,10 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     expect(face).not.toContain(closing);
   });
 
-  it.each(['gate appended', 'already present'] as const)('%s: the face carries the typed cause marker once; the full cause and restatement stay in detail and durable text', async (source) => {
+  // R2 N1 (friction audit row N1, hiring 11/19, marketing 7/12): "Not shown: some relationships aren't sized yet" was the
+  // HEADLINE of an ordinary reply beside a withheld Run, with the user's answer moved under "More detail". Only a Run or
+  // Explain turn leads with it now (contrast: agent-run-reply-answer-shape "2. WITHHELD", a typed Run, keeps it).
+  it.each(['gate appended', 'already present'] as const)('R2 N1 %s: an ordinary reply carries no chance-status marker or estimates line; the full cause and restatement stay in detail and durable text', async (source) => {
     recordsOptionRoster = true;
     const cells = withCanonicalAnalysisView({ graph, analysis_result: resultWithRoster, analysis_state: currentState,
       analysis_ready: ready }, SCENARIO).canonical_analysis_view.options.map(row => row.cell);
@@ -116,11 +119,11 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     expect(b.blocks).toContainEqual(expect.objectContaining({ type: 'analysis_result' }));
     expect(b._answer_shape, response.body).toBeDefined();
     const face = [b._answer_shape!.headline, ...b._answer_shape!.bullets].join('\n');
-    // The canonical cells' recorded placeholder reason owns this marker; it never comes from note prose.
+    // The canonical cells' recorded placeholder reason owns this marker, on a Run/Explain turn only.
     const marker = "Not shown: some relationships aren't sized yet";
-    expect(face).toContain(marker);
-    expect(b._answer_shape!.headline, 'withheld cells lead without a shown chance').toBe(marker);
-    expect(face.split(marker)).toHaveLength(2);
+    expect(b.assistant_text, 'no status marker on an ordinary reply').not.toContain(marker);
+    expect(b.assistant_text, 'no estimates line on an ordinary reply').not.toContain("Olumi's estimates:");
+    expect(b._answer_shape!.headline, 'the reply\'s own answer leads').toBe('The model records an unresolved assumption.');
     expect(face).not.toContain(closing);
     expect(b._answer_shape!.detail.split(closing)).toHaveLength(2);
     expect(b.assistant_text.split(closing)).toHaveLength(2);

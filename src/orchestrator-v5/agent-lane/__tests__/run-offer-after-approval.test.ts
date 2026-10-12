@@ -173,6 +173,26 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     expect(runs).toBe(0);
   });
 
+  // R2 T2 (friction audit row T2): "Suggest what it still needs" ("…so I can approve it") produced 0 tools and nothing
+  // approvable (deadline 2/2, Paul 2/2) when every blocker was the user's own input; the face already asks for it.
+  const humanLevelGap = { issue_id: 'level_1', code: 'MISSING_FACTOR_LEVEL', category: 'option_values', repairability: 'human_input_required',
+    message: 'What is "Share today\u2019s team finishes by the deadline" today, before any option changes it?', factor_id: 'f', factor_label: 'Capacity' };
+  const safeGap = { ...humanLevelGap, issue_id: 'x', code: 'OPTION_NEEDS_ENCODING', repairability: 'safe_canonicalisation' };
+  it.each([
+    { name: 'every blocker is human_input_required', issues: [humanLevelGap], offered: false },
+    { name: 'CONTRAST: one blocker Olumi can supply', issues: [humanLevelGap, safeGap], offered: true },
+    { name: 'an offered item is not a blocker', issues: [humanLevelGap, { ...safeGap, obligation: 'offered' }], offered: false },
+  ])('R2 T2: approval applied, model still blocked, $name → next-step chip offered: $offered', async ({ issues, offered }) => {
+    readiness = { status: 'needs_user_input', may_run: false, readiness_issues: issues };
+    const b = await proposeThenApprove();
+    expect(edges, 'the approval really applied').toHaveLength(1);
+    expect(b.suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+    expect(b.suggested_actions.some((c) => c.id === 'agent-suggest-what-it-needs'), JSON.stringify(b.suggested_actions)).toBe(offered);
+    const { stillValidOffers, NEXT_STEP_AFTER_BLOCKED_RUN_CHIP } = await import('../../../routes/agent-v1-turn.js');
+    expect(stillValidOffers([NEXT_STEP_AFTER_BLOCKED_RUN_CHIP], { outstandingProposalIds: new Set<string>(), analysisReady: readiness, analysisState: {}, modelExists: true })
+      .some((a) => a.id === 'agent-suggest-what-it-needs'), 'a carried chip follows the same rule').toBe(offered);
+  });
+
   it('CONTROL: approval applied and a run is admitted → Run, and NOT the next-step chip', async () => {
     readiness = { status: 'ready', may_run: true };
     const b = await proposeThenApprove();

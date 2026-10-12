@@ -345,3 +345,24 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
     expect(cell(view, 'raise').why).toBe("Not shown. Olumi can't give each option's figures for this goal from this run.");
   });
 });
+
+describe('R2 C3 (friction audit row C3): the specific reason on the wire is the why, not the generic line', () => {
+  const GENERIC = "Not shown. Olumi can't give each option's figures for this goal from this run.";
+  // Served (marketing results): the cell's why read GENERIC while the wire carried "This comparison turns on the links
+  // from ‘Campaign plan quality’…" (GOAL_FIGURES_PLACEHOLDER_PATH), because it did not start "Not shown.".
+  const served = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', severity: 'warning',
+    message: 'This comparison turns on the links from ‘Campaign plan quality’ to ‘Qualified leads’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.' };
+
+  it('C3: a display-safe reason not starting "Not shown." is shown with that prefix', () => {
+    expect(cell(project(args([licence, served]))).why).toBe(`Not shown. ${served.message}`);
+    expect(cell(project(args([licence, served]))).why).not.toBe(GENERIC);
+  });
+
+  it('C3 CONTRAST: unsafe or empty words still fall back; an already-prefixed reason is byte-unchanged', () => {
+    expect(cell(project(args([licence, { ...served, message: 'This comparison turns on raw_node_id.' }]))).why).toBe(GENERIC);
+    expect(cell(project(args([licence, { ...served, message: '' }]))).why).toBe(GENERIC);
+    expect(cell(project(args([licence, { ...served, message: '   ' }]))).why).toBe(GENERIC);
+    expect(cell(project(args([licence, { ...served, message: 'Not shown. A link is not sized.' }]))).why).toBe('Not shown. A link is not sized.');
+    expect(cell(project(args([licence, { ...served, message: `${'x '.repeat(200)}end.` }]))).why).toBe(GENERIC);
+  });
+});

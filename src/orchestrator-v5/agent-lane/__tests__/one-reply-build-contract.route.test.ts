@@ -678,4 +678,22 @@ describe('ONE reply contract through the build route', () => {
     const currentLevelControl = body.action_bar?.priority.filter(a => a.action_id === 'set_current_level' && a.enabled === true) ?? [];
     expect(count(face(body._answer_shape!), '?') + currentLevelControl.length, 'one resolving ask or current-level control').toBe(1);
   });
+
+  // R2 N1 (friction audit row N1): "Not shown: some relationships aren't sized yet" + "Olumi's estimates: N, see Check
+  // estimates." took the face of ordinary replies (hiring 17/19, marketing 11/12) and hid the answer. CONTRAST: the
+  // build/Run turn above ("r13 draft without widened", "R1 Paul") keeps both lines.
+  it('R2 N1: an ordinary reply beside the same withheld Run leads with its own answer, with no status or estimates line', async () => {
+    withUserRatifiedSubscribers();
+    const built = await buildTurn();
+    expect(built.assistant_text, 'contrast: the build/Run turn keeps the estimates line').toContain("Olumi's estimates: ");
+    narrator = 'Start with how many subscribers a price change would cost you.';
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'What should I look at first?' } });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    const body = response.json() as Body;
+    expect(body._agent.tool_calls.some(c => c.name === 'run_analysis' || c.name === 'build_model_from_brief')).toBe(false);
+    expect(body.assistant_text).not.toContain("Olumi's estimates: ");
+    expect(body.assistant_text).not.toMatch(/^Not shown/);
+    expect(body._answer_shape?.headline ?? body.assistant_text.split('\n')[0]).toContain(narrator);
+  });
 });
