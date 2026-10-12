@@ -2976,13 +2976,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * this turn found) and no other proposal outstanding. A near match, two cards or no card stays refused, and a resend of
      * the same turn replays its stored answer, so it never writes twice.
      */
-    if (approvedProposal === undefined && typedNow !== null && heldAtStart.length === 1) {
-      const card = proposalRecord(heldAtStart[0]!, undefined)?.approve_action;
-      const id = card !== undefined && card.message === typedNow ? typedApprovalOf({ chip: { id: card.id } }) : undefined;
-      if (id !== undefined && proposals.outstanding(scenarioId, userId).every(p => p.proposal_id === id)) {
-        approvedProposal = id;
-        pressedApproval = { typed_approval_of: id, typed_approval_words: typedNow };
-      }
+    // The ONE waiting card, from the holds this turn already read (no further read): the only case typed words bind.
+    const onlyCard = heldAtStart.length === 1 ? proposalRecord(heldAtStart[0]!, undefined)?.approve_action : undefined;
+    const onlyCardId = onlyCard === undefined ? undefined : typedApprovalOf({ chip: { id: onlyCard.id } });
+    const exactlyOneCardWaits = onlyCardId !== undefined && proposals.outstanding(scenarioId, userId).every(p => p.proposal_id === onlyCardId);
+    if (approvedProposal === undefined && typedNow !== null && exactlyOneCardWaits && onlyCard!.message === typedNow) {
+      approvedProposal = onlyCardId;
+      pressedApproval = { typed_approval_of: onlyCardId, typed_approval_words: typedNow };
     }
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.
@@ -3197,7 +3197,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
-        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
+        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }, exactlyOneCardWaits).status ?? '', followUp].filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
           // The reply the user reads is composed from this text plus Olumi's status line.
@@ -4678,11 +4678,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? { text, status: null as string | null, stripped: [] as string[] }
       : fastPath === 'approve'
         ? (editsRefusedThisTurn ? { text, status: null as string | null, stripped: [] as string[] }
-          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }),
+          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }, exactlyOneCardWaits),
               // A specific partial follow-up is already the narrator's authoritative status.
               text: result.tool_results.some(r => r.mutated === true && r.applied === false
                 && typeof r.outcome === 'string' && r.follow_up === text) ? '' : text })
-        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
+        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null }, exactlyOneCardWaits);
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.

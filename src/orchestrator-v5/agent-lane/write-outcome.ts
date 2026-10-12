@@ -151,8 +151,12 @@ const UNCONFIRMED_WORDS: Record<string, string> = {
  * Agent (it reads the result's `refusal` and `detail`); the user reads one plain sentence with a next step.
  */
 const GENERIC_NOT_SAVED = 'the change could not be made this time — ask me to try again';
-/** R2 T1 words, FOR AIE ACK: an unapproved change is waiting, not failed. */
+/**
+ * R2 T1 words, FOR AIE ACK: an unapproved change is waiting, not failed. "or type its words" is offered only when
+ * exactly ONE card waits, the only case in which typed words bind (`agent-v1-turn.ts`); otherwise the button alone.
+ */
 export const APPROVAL_REQUIRED_WORDS = 'Not saved yet: press the approval button on the card, or type its words.';
+export const APPROVAL_REQUIRED_BUTTON_WORDS = 'Not saved yet: press the approval button on the card.';
 const GENERIC_PARTLY_SAVED = 'not all of the change could be made — ask me what is still missing';
 const GENERIC_NOT_BUILT = 'something went wrong while building it — ask me to try again';
 
@@ -428,7 +432,7 @@ export function partialRangeLevelsWarning(ranges: readonly { factor: string; ran
 }
 
 /** One authoritative line per write the turn attempted. */
-function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
+function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, exactlyOneCardWaits = false): string {
   const partialMessage = r.mutated === true ? PARTIAL_WRITE_MESSAGES[String(r.outcome)] : undefined;
   if (isPartialWriteResult(r)) {
     if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
@@ -508,7 +512,7 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
   if (unconfirmed !== undefined) return unconfirmed;
   const mutated = r.mutated === true;
   // R2 T1 (friction audit): "could not be made this time — ask me to try again" was false here; the change waits for its card.
-  if (code === 'approval_required' && !mutated) return APPROVAL_REQUIRED_WORDS;
+  if (code === 'approval_required' && !mutated) return exactlyOneCardWaits ? APPROVAL_REQUIRED_WORDS : APPROVAL_REQUIRED_BUTTON_WORDS;
   return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? (mutated ? GENERIC_PARTLY_SAVED : GENERIC_NOT_SAVED)}.`;
 }
 
@@ -527,6 +531,8 @@ export function narrateWriteOutcome(
   toolResults: readonly ToolResult[],
   /** False for a guest, whose saves are never versioned: a save without a version is then not an anomaly. */
   opts: { readonly versioned?: boolean } = {},
+  /** R2 T1: exactly one card waits, so typed card words bind; otherwise "approval_required" names the button only. */
+  exactlyOneCardWaits = false,
 ): WriteOutcomeNarration {
   const writes = toolCalls
     .map((c, i) => ({ name: c.name, result: toolResults[i] }))
@@ -575,7 +581,7 @@ export function narrateWriteOutcome(
   }
 
   const pending = awaitingApproval(toolCalls, toolResults);
-  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true));
+  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true, exactlyOneCardWaits));
   const status = lines.length > 0
     ? lines.map((line) => line.trim()).filter((line) => line !== '').join(' ') || null
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
