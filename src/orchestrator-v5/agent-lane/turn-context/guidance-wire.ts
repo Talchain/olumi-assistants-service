@@ -132,8 +132,9 @@ export const ELIGIBLE_INTERVENTION_INSTRUCTION = 'Only name the scientific metho
 /**
  * ⛔ A ROW'S SCIENCE SENTENCE IS NOT ALWAYS TRUE OF EVERY VARIANT (SYS2 G1, served 11 Oct). RC-WIDEN's sentence ("Decisions
  * framed with a single alternative ('whether or not') fail more often…") describes W2Z/W2 only; Paul's two-option hiring
- * model got it under "Suggest drivers" (W7). Its other variants hold WITH real alternatives, so behind "Why?" they carry
- * their own approved `why_now` (the policy's progressive_detail: "Why: one line on the variant's why_now").
+ * model got it under "Suggest drivers" (W7). Its other variants name a different situation (a broken limit, which can
+ * hold with one option; one lever; no baseline; close options; one risk; few drivers), so behind "Why?" they carry their
+ * own approved `why_now` (the policy's progressive_detail: "Why: one line on the variant's why_now").
  */
 const ROW_SCIENCE_ONLY_FOR: Readonly<Partial<Record<SelectedRow['policy_id'], readonly string[]>>> = { 'RC-WIDEN': ['W2Z', 'W2'] };
 function whyOf(row: (typeof POLICY.rows)[number], variant: string | undefined): string | undefined {
