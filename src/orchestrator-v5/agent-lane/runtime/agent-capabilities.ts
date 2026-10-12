@@ -3687,9 +3687,9 @@ export function createAgentCapabilities(
       if (stated === null) {
         return { ok: false, mutated: false, refusal: 'deadline_not_placed',
           detail: named !== null
-            ? `Olumi cannot tell which date "last ${named}" in "${words}" is without guessing, so nothing was prepared. Ask the user which date it was `
-              + `(for example "Last ${named[0]!.toUpperCase()}${named.slice(1)} was the 9th of October"), never offering a date of your own; when they say, call `
-              + 'propose_goal_deadline again with these same deadline_words.'
+            ? `Olumi cannot tell which date "last ${named}" in "${words}" is without guessing, so nothing was prepared. `
+              + 'Ask which date the user means. Once they explicitly date that weekday, call propose_goal_deadline with the original deadline_words. '
+              + 'Never invent or offer a start date.'
             : `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
               + 'Ask the user which date they mean, and never offer a date of your own.' };
       }

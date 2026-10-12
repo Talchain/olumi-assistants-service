@@ -504,15 +504,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'propose_goal_deadline',
     description:
       'Record the DEADLINE the user has stated for their goal ("we have a deadline in 6 months", "by Q2", "by the end of March", '
-      + '"7 April 2027", "six months from 9 October"), as a date on the goal. Call it in the SAME turn the user states it, even beside another change they ask for; '
-      + 'when the user then dates a "last Friday" in that phrase ("Last Friday was the 9th of October"), call it again with the same deadline_words. '
-      + 'Give deadline_words EXACTLY as the user wrote the deadline phrase (for example "a deadline in 6 months"): Olumi works out the '
-      + 'calendar date itself, from the brief’s recorded creation date, and the card asks the user to confirm it ("Is your deadline 7 April 2027 (6 months from '
-      + '7 October 2026)?"). Never compute or state a date yourself, and never pass a duration that is not the deadline (for example how long '
+      + '"7 April 2027", "six months from 9 October"), as a date on the goal. Call in the turn the user states the deadline, including when they also ask for another change. '
+      + 'If this turn explicitly dates the ‘last Friday’ in their earlier deadline phrase, call with that original phrase; otherwise use only a deadline stated in this turn. '
+      + 'Give deadline_words exactly as the user wrote the deadline phrase. Olumi resolves it using a stated start date when present, otherwise the recorded reference date, '
+      + 'and asks the user to confirm the resulting date. Never compute or state a date yourself, and never pass a duration that is not the deadline (for example how long '
       + 'recruitment takes). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
       + 'authorise_change once the user agrees; never show the id.',
     parameters: obj({
-      reference_date: { type: 'string', description: 'Only an explicit YYYY-MM-DD the user typed as “as of”; the deadline card will ask them to confirm that reference. Otherwise omit it and use the recorded draft date.' },
+      reference_date: { type: 'string', description: 'Only an explicit YYYY-MM-DD the user typed as “as of”; the deadline card will ask them to confirm that reference. Otherwise omit it and use the recorded draft date. '
+        + 'This is an explicit ‘as of’ override, not the starting day of a duration. Do not derive it from ‘last Friday’ or a stated start date; keep that starting day in the user\'s deadline phrase, '
+        + 'or reuse the original last-weekday phrase when this turn explicitly dates it, and let Olumi resolve it.' },
       deadline_words: { type: 'string', maxLength: 80, description: 'The user\u2019s own words for the deadline, verbatim (for example "a deadline in 6 months" or "end of Q2").' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
     }, ['deadline_words', 'rationale']),
