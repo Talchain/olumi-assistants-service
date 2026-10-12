@@ -580,6 +580,36 @@ export function quoteBindsFactorFigure(model: CandidateModel, factor: Factor, br
   }
 }
 
+/**
+ * ⭐ Recovery Batch B, S4 V2 origin (DL ruling (b), 12 Oct; AIE 0825 §2: "do not reattribute a literal human number to an AI
+ * estimate simply because role verification failed"): a literal human figure keeps its HUMAN ORIGIN when the drafter cites
+ * nothing. Served capacity draft b33bf531 (11 Oct) drafted "Each additional specialist resolves about 20 tickets per week,
+ * between 10 and 30" as `Specialist capacity` = 20, `ai_proposed`, no quote, so Paul's 20 was stored as Olumi's estimate.
+ * CEE locates the receipt itself: a direct sentence of the brief names the factor (a word of its label) and writes THIS
+ * figure in the factor's own typed frame (`sameFrame`, the denominator allowed implicit, as W), and the occurrence reader
+ * does not read it as an aim or bound ("at least 100" is the target, never a supplied level). Quotation marks do not
+ * disown a supplied figure (AIE 0825 §1). ORIGIN ONLY: the role stays unverified; a current level is `verifiedFactorLevel`'s.
+ * #2942's receipt gate still holds wherever the brief writes no such figure: a drafter's claim alone never upgrades anything.
+ */
+export function briefWritesFactorFigure(factor: Factor, brief: string | undefined): boolean {
+  try {
+    const value = factor.baseline_value;
+    if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value)) return false;
+    const named = words(factor.label).filter(w => !grammar(w));
+    const writes = assertions(brief).filter(a => a.text.length <= MAX_ASSERTION && directContext(brief, a)
+      && words(a.text).some(w => named.some(n => sameName(n, w)))
+      && findLinkEffectAmounts(a.text).some(amount => {
+        const span = { start: amount.index, end: amount.index + amount.matchedText.length };
+        return amount.magnitude === Math.abs(value)
+          && occurrenceRoleOf(plainQuotes(a.text), amount.index) !== 'aim'
+          && sameFrame(a.text, span, factor.unit, amount, false, true);
+      }));
+    return writes.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
 export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   try {
