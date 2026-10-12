@@ -18,7 +18,7 @@
  * held it (`reads/02-04`: `brief_extraction`, raw 80). These rows prove ADMISSION → PAYLOAD; they prove nothing about what
  * the drafter will emit. Expectations are written by hand, never read back from the code. No chance is asserted.
  */
-import Ajv from 'ajv';
+import { Ajv } from 'ajv';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
