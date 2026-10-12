@@ -85,20 +85,25 @@ export function optionSettingsOf(read: ActionRead, goalPathFactors: readonly Goa
 }
 
 /**
- * ⭐ ONE CENSUS FOR THE FACE AND THE PANEL (DL 12 Oct; last check BLOCKING 4): Check estimates lists exactly the figures the
- * chance face counts — the SAME census function (`goalChanceEstimateCensus`) over the SAME inputs: this Run's scored options
- * and its scored goal (the licence's own, else the census's first goal). Equal by construction, never a second walk that
- * could drop a setting on the goal itself.
+ * ⭐ ONE CENSUS FOR THE FACE AND THE PANEL (DL 12 Oct; last check BLOCKING 4, narrow re-check r2): Check estimates lists exactly
+ * the figures the chance face counts — the SAME census function (`goalChanceEstimateCensus`) over the licence's OWN recorded
+ * inputs: its options, its scored goal and, when its joint is licensed, every node of the joint's event
+ * (`targets.conditions[].node_id`, the face's `jointEstimates` inputs). The panel enumerates nothing of its own.
+ * ⛔ Only on the model's CURRENT Run (graph hash = the Run's): on any other, no census is said — never "none are Olumi's" —
+ * and the existing needs-a-current-analysis words stand. (Residual, follow-on lease: the census result stored on the
+ * licence record itself, so the face and the panel read one object.)
  */
 export function checkEstimatesOf(read: ActionRead): OlumiEstimates | null {
-  const licence = goalChanceLicenceForAgent(read.analysisResult);
   const result = rec(read.analysisResult);
-  const enrichment = rec(result?.enrichment) ?? rec(rec(result?.data)?.enrichment) ?? {};
+  if (typeof result?.computed_against_hash !== 'string' || result.computed_against_hash !== read.graphHash) return null;
+  const licence = goalChanceLicenceForAgent(read.analysisResult);
+  const enrichment = rec(result.enrichment) ?? rec(rec(result.data)?.enrichment) ?? {};
   const runOptionIds = readOptionResultSources(enrichment).map(rows => rows
     .map(row => typeof row.option_id === 'string' ? row.option_id : row.id)
     .filter((id): id is string => typeof id === 'string' && id !== '')).find(ids => ids.length > 0);
-  // The face's own inputs where there is a face (the licence's options and scored goal); else this Run's option rows.
-  return goalChanceEstimateCensus(read.graph, licence?.option_ids ?? runOptionIds, licence?.goal_node_id).estimates;
+  const jointEventNodes = licence?.targets?.joint.status === 'licensed' ? licence.targets.conditions.map(c => c.node_id) : [];
+  // The face's own inputs where there is a face; else this Run's option rows and the census's first goal.
+  return goalChanceEstimateCensus(read.graph, licence?.option_ids ?? runOptionIds, licence?.goal_node_id, jointEventNodes).estimates;
 }
 
 /** The persisted state the bar is a function of. The same fields at the turn's end and on the reload GET. */

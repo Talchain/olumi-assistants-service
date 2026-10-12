@@ -28,6 +28,8 @@ import { extractInterventionsForOption } from '../../../cee/extraction/intervent
 import { transformNodeToV3 } from '../../../cee/transforms/schema-v3.js';
 import { transformNodeToV2 } from '../../../cee/transforms/schema-v2.js';
 import { actionFactsOf } from '../../agent-lane/actions/state.js';
+import { decidePress } from '../../agent-lane/actions/handlers.js';
+import { sayOlumiEstimates } from '../../agent-lane/olumi-estimates-feeding-result.js';
 
 type Rec = Record<string, any>;
 const clone = <T>(x: T): T => structuredClone(x);
@@ -255,5 +257,126 @@ describe('BLOCKING 4 — Check estimates lists exactly what the 31% chance face 
     expect(faceTotal).toBe(2);
     expect(panel.count).toBe(faceTotal);
     expect((panel.values as Rec[]).map((v) => v.id).sort()).toEqual(['improve_support:quality', 'support_effort']);
+  });
+});
+
+// ── NARROW RE-CHECK r2 (Codex, #2969 @ d7d78505: FAIL, prior #4 open for JOINT chances; DL 12 Oct option C) ───────────────
+// The checker's own graph and Run, verbatim in its inputs: a joint over ‘Quality’ ≥ 70% and ‘Reach’ > 50% while ‘Cost’ ≤ 80%.
+// An Olumi input feeding ONLY the secondary target (Audience → Reach) was named on the joint's 21% / 31% faces, while Check
+// estimates said "None of the figures behind this result are Olumi's estimates": the panel walked its own node set and
+// dropped the joint's other event nodes. The panel now calls the SAME census over the licence's OWN recorded inputs.
+describe('NARROW RE-CHECK r2 — Check estimates on a JOINT chance lists exactly what its face names', () => {
+  const jsid = 'acdca123-4567-4000-8000-123456789abc';
+  const precision = { n_informative: 10000, standard_error: 0.005 };
+  const jointGraph = (): Rec => {
+    const names: Record<string, string> = { g: 'Quality', other: 'Reach', limit: 'Cost', x: 'Effort', y: 'Audience' };
+    const nodes: Rec[] = Object.entries(names).map(([id, label]) => ({ id, label, kind: id === 'g' ? 'goal' : 'factor',
+      observed_state: { value: 0.2, baseline: 0.2, raw_value: 20, cap: 100, unit: '%', source: 'user_override' } }));
+    Object.assign(nodes[0]!, { goal_threshold_frame: 'level', goal_threshold_raw: 70, goal_threshold_cap: 100, goal_threshold: 0.7,
+      goal_threshold_unit: '%', goal_direction: '>=', goal_target_basis: { quantity_frame: 'level', target_frame: 'level', target_raw: 70,
+        reference: 'today', period_months: 3, period_kind: 'at_end', effect_unit: 'percentage points at month three', effects_at_period_end: true,
+        source: 'olumi_reading' } });
+    for (const id of ['a', 'b']) nodes.push({ id, kind: 'option', label: `Plan ${id}`, interventions: Object.fromEntries(Object.keys(names)
+      .map((n) => [n, { value: id === 'a' ? 0.6 : 0.7, raw_value: id === 'a' ? 60 : 70, unit: '%', source: 'user_specified' }])) });
+    nodes.push({ id: 'd', kind: 'decision', label: 'Which plan?' });
+    const pairs = [['d', 'a'], ['d', 'b'], ['x', 'g'], ['y', 'other'], ...['a', 'b'].flatMap((o) => Object.keys(names).map((n) => [o, n]))];
+    return { nodes, edges: pairs.map(([from, to]) => ({ from, to, strength: { mean: 0.3, std: 0.05 }, exists_probability: 1,
+      effect_direction: 'positive', provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 0.3, amount_unit: '%',
+        per_source_change: 1, per_source_change_unit: '%', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } })),
+    goal_constraints: [
+      { constraint_id: 'primary', node_id: 'g', operator: '>=', value: 70, unit: '%', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'secondary', node_id: 'other', operator: '>=', operator_as_stated: '>', value: 50, unit: '%', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'budget', node_id: 'limit', operator: '<=', value: 80, unit: '%', value_frame: 'level' },
+    ] };
+  };
+  const jointRows = (req: Rec): Rec[] => (req.options as Rec[]).map((o, i) => ({ option_id: o.id, probability_of_goal: 0.41 + i * 0.1,
+    probability_of_goal_precision: precision, probability_of_joint_goal: 0.21 + i * 0.1, probability_of_joint_goal_precision: precision,
+    constraint_probabilities: Object.fromEntries(((req.goal_constraints ?? []) as Rec[]).map((c) => [c.constraint_id,
+      c.node_id === 'g' ? 0.41 + i * 0.1 : c.node_id === 'other' ? 0.51 + i * 0.1 : 0.8])),
+    constraint_probabilities_precision: Object.fromEntries(((req.goal_constraints ?? []) as Rec[]).map((c) => [c.constraint_id, precision])),
+    outcome: { mean: 82, std: 4, p10: 77, p50: 82, p90: 90 } }));
+  async function runJoint(g: Rec): Promise<{ licence: Rec; faces: Map<string, string>; panel: Rec | null; read: Rec }> {
+    const bytes = JSON.stringify(g);
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(jsid, 'checker', {
+      loadGraphAndBriefText: async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 3 }),
+      readMostRecentPendingActions: async () => [],
+    } as never);
+    const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot, plotClient: {
+      run: async (req: Rec) => ({ ...clone(fixture), option_comparison: jointRows(req) }), validatePatch: async () => {},
+    } } as never);
+    const outcome = await handler({ payload: { scenario_id: jsid, turn_id: 'check' }, requestId: 'check', signal: new AbortController().signal,
+      context: {}, orientationText: '' } as never) as Rec;
+    const result = outcome.handler_facts?.[0]?.result as Rec;
+    const analysis = { type: 'analysis_result', enrichment: result.enrichment, computed_against_hash: result.graph_hash_at_run };
+    const read = { scenarioId: jsid, graph: g, graphHash: result.graph_hash_at_run, analysisResult: analysis,
+      analysisState: { run_state: { kind: 'complete_current', computed_at: result.computed_at } }, analysisReady: { status: 'ready' } };
+    return { licence: goalChanceLicenceForAgent(analysis) as Rec, faces: new Map(goalChanceCellFacesForAgent(analysis, g, true)),
+      panel: (actionFactsOf(read as never) as Rec).olumiEstimates as Rec | null, read };
+  }
+  const NONE = "None of the figures behind this result are Olumi's estimates.";
+
+  it('RED on d7d78505: an Olumi STARTING VALUE feeding only the secondary target (Audience) — the joint face names it, and the panel lists exactly it', async () => {
+    const g = jointGraph();
+    Object.assign(node(g, 'y').observed_state, { source: 'cee_inference', extractionType: 'inferred' });
+    const { licence, faces, panel } = await runJoint(g);
+    expect(licence.targets.joint.status).toBe('licensed');
+    expect(licence.olumi_estimate_value_count).toBe(1);
+    expect([...faces.values()].some((f) => f.includes('using Olumi\'s estimates for 1 starting value'))).toBe(true);
+    // Bound by identity: THE figure the face counts — Audience's starting value — and nothing else.
+    expect(panel).not.toBeNull();
+    expect((panel!.values as Rec[]).map((v) => v.id)).toEqual(['y']);
+    expect(panel!.links).toEqual([]);
+    expect(panel!.count).toBe(1);
+    expect(sayOlumiEstimates(panel as never)).not.toContain(NONE);
+  });
+
+  it('RED on d7d78505: an Olumi LINK SIZE feeding only the secondary target (Audience → Reach) — the joint face names it, and the panel lists exactly it', async () => {
+    const g = jointGraph();
+    Object.assign(g.edges.find((e: Rec) => e.from === 'y' && e.to === 'other').provenance, { source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    const { licence, faces, panel } = await runJoint(g);
+    expect(licence.targets.joint.status).toBe('licensed');
+    expect(licence.olumi_estimate_link_count).toBe(1);
+    expect([...faces.values()].some((f) => f.includes('using Olumi\'s estimates for 1 relationship'))).toBe(true);
+    expect(panel).not.toBeNull();
+    expect((panel!.links as Rec[]).map((l) => l.id)).toEqual(['y->other']);
+    expect(panel!.values).toEqual([]);
+    expect(panel!.count).toBe(1);
+    expect(sayOlumiEstimates(panel as never)).not.toContain(NONE);
+  });
+
+  it('CONTROL (single goal): with no joint, the panel is the scored goal\'s own census — exactly Effort\'s Olumi value', async () => {
+    // The same graph with the secondary target and the limit taken out (their nodes, links, settings and rows).
+    const keep = new Set(['g', 'x', 'a', 'b', 'd']);
+    const g = jointGraph();
+    g.nodes = (g.nodes as Rec[]).filter((n) => keep.has(n.id));
+    for (const o of g.nodes as Rec[]) if (o.interventions) o.interventions = Object.fromEntries(Object.entries(o.interventions).filter(([k]) => keep.has(k)));
+    g.edges = (g.edges as Rec[]).filter((e) => keep.has(e.from) && keep.has(e.to));
+    g.goal_constraints = [];
+    Object.assign(node(g, 'x').observed_state, { source: 'cee_inference', extractionType: 'inferred' });
+    const { licence, faces, panel } = await runJoint(g);
+    expect(licence.targets).toBeUndefined();
+    expect(licence.olumi_estimate_value_count).toBe(1);
+    expect([...faces.values()].some((f) => f.includes('using Olumi\'s estimates for 1 starting value'))).toBe(true);
+    expect((panel!.values as Rec[]).map((v) => v.id)).toEqual(['x']);
+    expect(panel!.count).toBe(1);
+  });
+
+  it('CONTROL: every input the person\'s — the joint face names no estimate, and the panel says none', async () => {
+    const { licence, panel } = await runJoint(jointGraph());
+    expect(licence.targets.joint.status).toBe('licensed');
+    expect(licence.olumi_estimate_value_count ?? 0).toBe(0);
+    expect(panel!.count).toBe(0);
+    expect(sayOlumiEstimates(panel as never)).toContain(NONE);
+  });
+
+  it('GUARD: on a Run that is not the model\'s current one (graph hash ≠ the Run\'s), no census is said — never "none are Olumi\'s"', async () => {
+    const { read } = await runJoint(jointGraph());
+    const stale = { ...read, graphHash: `${String(read.graphHash)}-moved` };
+    const facts = actionFactsOf(stale as never) as Rec;
+    expect(facts.olumiEstimates).toBeNull();
+    const pressed = decidePress({ id: 'act:check_estimates' }, facts as never) as Rec;
+    expect(pressed.kind).toBe('reply');
+    expect(pressed.reply.text).not.toContain(NONE);
+    expect(pressed.reply.text).toBe('I can’t show the estimates yet: it needs a current analysis first.');
   });
 });
