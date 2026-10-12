@@ -3531,15 +3531,40 @@ export function createAgentCapabilities(
     const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate'].includes(storedSizing(l))).length;
     const reviewsOnly = sent.every((l) => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder');
     const placeholderChangesOnly = sent.every((l) => l.intent === 'set' && storedSizing(l) === 'placeholder');
+    /**
+     * \u2b50 A MIXED SET IS COUNTED FROM THE STORED OUTCOME (Batch A live check (b) FAIL, PL 6115623359): "Recorded these 6 link
+     * strengths" when two of the six were only reviews of links nobody has sized. Strengths sized, changes to links still
+     * unsized, and reviews are counted apart, each from the link as STORED; reviewed links that are still unsized say so,
+     * with their own values unchanged (never the model's: other links were sized), then A's next step once.
+     */
+    const sizedCount = sent.filter((l) => storedSizing(l) !== 'placeholder').length;
+    const changedUnsized = sent.filter((l) => l.intent === 'set' && storedSizing(l) === 'placeholder');
+    const reviewedUnsized = sent.filter((l) => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder');
+    const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+    const mixedHeading = [
+      ...(sizedCount > 0 ? [`${sizedCount} ${plural(sizedCount, 'link strength', 'link strengths')}`] : []),
+      ...(changedUnsized.length > 0 ? [`${plural(changedUnsized.length, 'the change', 'the changes')} to ${changedUnsized.length} ${plural(changedUnsized.length, 'link', 'links')}`] : []),
+      ...(reviewedUnsized.length > 0 ? [`${plural(reviewedUnsized.length, 'your review', 'your reviews')} of ${reviewedUnsized.length} ${plural(reviewedUnsized.length, 'link', 'links')}`] : []),
+    ];
+    const listed = (ls: readonly { from: string; to: string }[]): string => {
+      const named = ls.map((l) => `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)}`);
+      return named.length === 1 ? named[0]! : `${named.slice(0, -1).join(', ')} and ${named.at(-1)!}`;
+    };
+    const mixed = !reviewsOnly && !placeholderChangesOnly && changedUnsized.length + reviewedUnsized.length > 0;
+    const unsizedDisclosure = !mixed ? ''
+      : (reviewedUnsized.length > 0 ? ` ${listed(reviewedUnsized)} ${plural(reviewedUnsized.length, 'has', 'have')} not been sized yet, so ${plural(reviewedUnsized.length, 'its value is', 'their values are')} unchanged.` : '')
+        + ' Give a figure, or ask Olumi to estimate it.';
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
       follow_up: `Recorded ${reviewsOnly ? (sent.length === 1 ? 'your review of this link' : `your reviews of these ${sent.length} links`)
         : placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
+        : mixed ? `${mixedHeading.slice(0, -1).join(', ')} and ${mixedHeading.at(-1)!}`
         : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
         + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
-        + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
+        + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : '')
+        + unsizedDisclosure,
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
   };
