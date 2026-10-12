@@ -182,6 +182,7 @@ import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-cl
 // T1 claim safety, LAYER 3 — armed ONCE at the send point (1.272 E1). It used
 // to be called from inside `sanitiseOlumiResponseForEgress`, which this file
 // re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
+import { REASONING_REPLY, withRunShareFreeResult, type ReplyRunEvidence } from '../orchestrator-v5/compose/run-share-text.js';
 import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
 import { classifyUserVisibleRefusal } from '../orchestrator-v5/compose/user-visible-refusal.js';
@@ -827,6 +828,11 @@ async function sendFinalised200(
      * nothing.
      */
     readonly scenarioFreshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
+    /**
+     * ⭐ The win-share class: what this reply IS, from the executor's own handler facts (`executorReplyRunEvidence`).
+     * Absent ⇒ a reasoning or other reply: only the `analysis_result` summaries are result surfaces.
+     */
+    readonly replyRunEvidence?: ReplyRunEvidence;
     /**
      * The COMPLETED RERUN's fact window, threaded into `finaliseV5Response` so
      * it can stamp the run-over-run consequence block (`run_delta`). Supplied
@@ -2159,6 +2165,12 @@ async function sendFinalised200(
       wireBody = finaliseV5Response(augmented, finaliserContext);
     }
   }
+  // ⭐ The win-share class (`run-share-text.ts`): after every writer and before the one alarm scan, the result surfaces carry
+  // no share-of-runs sentence — every analysis_result summary, and the reply only when THIS turn's own facts make it a Run
+  // result or an explanation of the current Run. An edited body is a NEW object, so it is finalised again (idempotent):
+  // the pre-serialisation hook ships only finalised bodies, and an unbranded one would ship the egress-violation fallback.
+  const shareFree = withRunShareFreeResult(wireBody, { evidence: ctx.replyRunEvidence ?? REASONING_REPLY, exitPath, requestId });
+  if (shareFree !== wireBody) wireBody = finaliseV5Response(shareFree, finaliserContext);
   guardLeadingOptionClaimsAtEgress(wireBody, {
     requestId,
     exitPath,
@@ -8919,6 +8931,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           : null;
     return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
       analysisReady: run.analysisReady,
+      replyRunEvidence: run.replyRunEvidence,
       graph: turnGraph,
       // T1 claim safety — READ off the executor's run result, which took it
       // from the stamp the run_analysis handler persisted on the fact.

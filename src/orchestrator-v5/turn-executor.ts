@@ -107,6 +107,7 @@ import {
   type FailureResponseRecoveryContext,
 } from './failure-response.js';
 import { composeValidationFailure } from './compose/validation-failure-responses.js';
+import { executorReplyRunEvidence, type ReplyRunEvidence } from './compose/run-share-text.js';
 import { composeUnsupportedActionResponse } from './compose/unsupported-action-response.js';
 import { composeRecoverableValidationResponse } from './compose/recoverable-validation-response.js';
 import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
@@ -743,6 +744,12 @@ export interface TurnExecutorRunResult {
    * consumers read freshness via the additive analysis_ready.* fields.
    */
   turn_outcome?: TurnOutcome;
+  /**
+   * ⭐ The win-share class (`compose/run-share-text.ts`): what this turn's reply IS, from its OWN handler facts — a
+   * completed run_analysis fact (never the refusal marker), else an answered explain_results fact. The route's exit
+   * removes share-of-runs sentences from a result reply and never from a reasoning one.
+   */
+  replyRunEvidence: ReplyRunEvidence;
   /**
    * V5 state-trust freshness derivation, threaded through so
    * response-finaliser / analysis-ready-emit can use the selected fact's
@@ -16892,6 +16899,7 @@ export async function runTurnExecutor(
       ...(handlerRefusalForRun !== null ? { handlerRefusal: handlerRefusalForRun } : {}),
       analysisReady: analysisReadyForTurn,
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
+      replyRunEvidence: executorReplyRunEvidence(handlerFactsForCommit),
       ...(freshness ? { freshness } : {}),
       // G3 — the scenario-bound verdict, beside the wire-bound one and never
       // instead of it. Absent when no durable reasoning authority licensed it

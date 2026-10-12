@@ -120,6 +120,8 @@ import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
+import { withRunShareFreeResult } from '../orchestrator-v5/compose/run-share-text.js';
+import { agentReplyRunEvidence, replayedRowRunEvidence } from '../orchestrator-v5/agent-lane/run-share-evidence.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -2580,7 +2582,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
       });
-      const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
+      // ⭐ The win-share class: a replay is filtered by the STORED ROW's own evidence (`replayedRowRunEvidence`), never today's
+      // turn: Olumi's fixed Run line in the row proves a Run reply; the Explain press on a Run still current, an explanation.
+      const gatedReplay = withEstimateGoalPointsAtEgress(withRunShareFreeResult(optionGatedReplay, {
+        evidence: replayedRowRunEvidence({ storedText: prior.assistant_message,
+          explainsCurrentRun: isRunExplanationChip(explanationId) && replayNarration?.status === 'ready' }),
+        exitPath: 'agent_lane_v1_replay', requestId: String(req.id),
+      }), {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
         current: (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
         userAuthoredTexts: userTextsForEgress(
@@ -5169,7 +5177,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (firstRunRiskMarker !== undefined && !reply.includes(firstRunRiskMarker)) reply = withDisclosures(reply, [firstRunRiskMarker]);
       // Every prose writer, including cell-owned horizons and the build's Run risk marker, crosses the ONE chokepoint
       // before shaping, history and storage. The unchanged-body branch below retains this same gated carrier.
-      wireBody = withEstimateGoalPointsAtEgress({ ...wireBody, assistant_text: reply }, {
+      // ⭐ The win-share class (`run-share-text.ts`): inside the chokepoint's input, so shaping, history, the stored row and
+      // any replay of it carry the same words. The reply is a result surface only by THIS turn's own results
+      // (`agentReplyRunEvidence`: a Run that ran, or the Explain press on the current Run); never by a model call.
+      wireBody = withEstimateGoalPointsAtEgress(withRunShareFreeResult({ ...wireBody, assistant_text: reply }, {
+        evidence: agentReplyRunEvidence({ fastPath, firstAnalysisRan: fa?.ran === true, toolCalls: result.tool_calls,
+          toolResults: result.tool_results, explainsCurrentRun }),
+        exitPath: 'agent_lane_v1_final', requestId: String(req.id),
+      }), {
         analysisResult, graph: readbackGraph ?? null,
         current: selectedRunCurrent,
         userAuthoredTexts: userTextsForEgress(
