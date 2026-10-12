@@ -7,14 +7,13 @@
  * the decision review's crowning sentence, and the Agent's own prose.
  *
  * One rule, applied LAST on each exit (the V5 route's wire body, the Agent's final and replay egress) and at the one
- * `analysis_result` builder: every sentence that states a share of runs is removed. No word is added; a reply left empty
- * gets the product's existing locked template. The per-option goal chance and its licence words never match, so they stay
+ * `analysis_result` builder: every sentence that states a share of runs is removed. No word is added. The per-option goal chance and its licence words never match, so they stay
  * untouched. The structured `win_probability` fields are data, not text, and are not edited here.
  *
  * The census pattern is the DL's, verbatim (`RUN_SHARE_CENSUS`); removal also covers the plural and ranking forms CEE
  * writes that it does not spell out ("the most runs", "scored highest", "came out lowest").
  */
-import { summaryWithoutLeadSentence, RUN_ANALYSIS_LOCKED_TEMPLATES } from '../coaching/analysis-result-headline.js';
+import { summaryWithoutLeadSentence } from '../coaching/analysis-result-headline.js';
 import { log } from '../../utils/telemetry.js';
 
 /** The DL's census, verbatim (12 Oct): no CEE text a Run emits may match it. */
@@ -29,7 +28,6 @@ const RUN_SHARE_SENTENCE = new RegExp([
 const SKIPPED_KEYS: ReadonlySet<string> = new Set(['draft_graph', 'graph', '_agent', '_diagnostic_trace', '_provider_calls', 'id', 'type',
   'option_id', 'leading_option_id', 'computed_against_hash', 'graph_hash', 'scenario_id', 'turn_id']);
 const MAX_DEPTH = 40;
-const FALLBACK = [...RUN_ANALYSIS_LOCKED_TEMPLATES][0]!;
 
 /** `text` without any sentence that states a share of runs; the lead ladder's sentence is read by its own grammar first. */
 export function withoutRunShareSentences(text: string): string {
@@ -79,20 +77,16 @@ function edit(value: unknown, path: string, depth: number, changed: string[]): u
 
 /**
  * The wire body without any share-of-runs sentence, by reference when there is none. A chip whose label is left empty is
- * dropped; an `assistant_text` left empty is the existing locked template. Logs the edited paths, never prose.
+ * dropped. Logs the edited paths, never prose.
  */
 export function withoutRunShareTextAtEgress<T extends object>(body: T, opts: { readonly requestId?: string; readonly exitPath: string }): T {
   const changed: string[] = [];
   const out = edit(body, '$', 0, changed);
   if (out === body) return body;
-  const before = body as Record<string, unknown>;
   const next: Record<string, unknown> = { ...(out as Record<string, unknown>) };
   if (Array.isArray(next.suggested_actions)) {
     next.suggested_actions = (next.suggested_actions as unknown[]).filter((c) =>
       !(c !== null && typeof c === 'object' && typeof (c as { label?: unknown }).label === 'string' && (c as { label: string }).label.trim() === ''));
-  }
-  if (typeof next.assistant_text === 'string' && next.assistant_text.trim() === '' && typeof before.assistant_text === 'string' && before.assistant_text.trim() !== '') {
-    next.assistant_text = FALLBACK;
   }
   log.info({ event: 'cee.run_share_text.removed', request_id: opts.requestId, exit_path: opts.exitPath, paths: changed.slice(0, 40), count: changed.length },
     'egress: a sentence stating a share of runs was removed');

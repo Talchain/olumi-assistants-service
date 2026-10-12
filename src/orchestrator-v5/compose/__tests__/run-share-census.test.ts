@@ -121,11 +121,13 @@ describe('census 3 — every other CEE emitter of the class, before and after th
     expect(withoutRunShareSentences(`${CHANCE_LINE}\n\n• In this model, 88% of runs supported ‘Add one specialist’.\n• Not shown yet; why is under More detail`))
       .toBe(`${CHANCE_LINE}\n\n• Not shown yet; why is under More detail`);
   });
-  it('an assistant_text left empty is the existing locked template; a chip left without a label is dropped', () => {
+  it('an assistant_text left empty ships as the filter leaves it, never a Run claim (named residual, F); a chip left without a label is dropped', () => {
     const out = withoutRunShareTextAtEgress({ assistant_text: 'Hold was supported by 70% of runs of this model.',
       suggested_actions: [{ id: 'a', label: 'Why did Hold come out on top?', message: 'x' }, { id: 'b', label: 'Check estimates', message: 'y' }] }, { exitPath: 'census' });
-    expect(out.assistant_text).toBe('Ran analysis on your current scenario.');
+    expect(out.assistant_text).toBe('');
     expect(out.suggested_actions.map((c: Rec) => c.id)).toEqual(['b']);
+    // The delta check's repro: a reply that ran nothing is never turned into "Ran analysis on your current scenario."
+    expect(withoutRunShareTextAtEgress({ assistant_text: 'I cannot tell which option comes out ahead.' }, { exitPath: 'census' }).assistant_text).toBe('');
   });
   it('CONTRAST: the licensed chance line and its licence words never match', () => {
     for (const text of [CHANCE_LINE,
