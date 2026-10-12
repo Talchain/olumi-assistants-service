@@ -289,8 +289,9 @@ describe('conversational recitation — defaulted values', () => {
       // the reason `DEFAULTED_DISCLOSURE_TAIL` is exported at all — and it duly
       // drifted the first time the wording moved.
       expect(after).toContain(DEFAULTED_DISCLOSURE_TAIL);
-      // The recitation itself SURVIVES — qualified, not withheld (run-share words, Science d5 #87 6008589328).
-      expect(after).toMatch(/was supported by \d{1,3}% of runs/);
+      // The recitation itself SURVIVES — qualified, not withheld; since the win-share class in the AIE's exact supporting
+      // label (#94 6131687656).
+      expect(after).toMatch(/: Share of model runs in which this option ranks first: 96%\./);
     });
 
     it('the explain fallback carries the same disclosure, from the same source', () => {

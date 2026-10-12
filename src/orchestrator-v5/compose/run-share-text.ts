@@ -35,6 +35,14 @@ const RUN_SHARE_SENTENCE = new RegExp([
 export const RUN_RESULT_TEMPLATE = [...RUN_ANALYSIS_LOCKED_TEMPLATES][0]!;
 /** The AIE's exact fixed qualifier (#94 6132054663, the 6131687656 bullet). */
 export const RUN_SHARE_QUALIFIER = 'This compares the analysed options; it is not the chance of meeting your goal.';
+/**
+ * The AIE's exact supporting label (same post) for a share of runs said on a REASONING surface, where comparative support is
+ * kept as supporting reasoning. `share` is the formatted percentage, with its sign ("62%"). The surface names the option
+ * before it and says {@link RUN_SHARE_QUALIFIER} once after its share lines.
+ */
+export function runShareSupportingLabel(share: string): string {
+  return `Share of model runs in which this option ranks first: ${share}.`;
+}
 
 /**
  * What a reply IS, from one typed fact of the turn that wrote it. `run_result`: that turn ran the analysis (removal and the

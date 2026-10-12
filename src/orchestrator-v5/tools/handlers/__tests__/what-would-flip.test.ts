@@ -329,8 +329,9 @@ describe('what_would_flip — answer-carrying contract', () => {
     // the prose would have satisfied (CLAUDE.md trap 19). It now binds to the
     // runner-up's own share by its full sentence.
     expect(outcome.assistant_text).toContain('Hire Two Mid-Level');
+    // The win-share class (AIE #94 6131687656): the runner-up's own share in the AIE's exact supporting label.
     expect(outcome.assistant_text).toContain(
-      "'Hire Two Mid-Level' was supported by the next most runs (27%)",
+      "'Hire Two Mid-Level': Share of model runs in which this option ranks first: 27%.",
     );
     expect(outcome.assistant_text).not.toMatch(/percentage points?/i);
   });

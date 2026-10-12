@@ -413,6 +413,14 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    */
   { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?|could\s+|still\s+)?support(?:s|ed|ing)?\b|\bsupported\s+by\s+[^.;!?]{0,48}?\b(?:runs?|simulations?|draws?)\b/i },
   { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
+  /**
+   * ⭐ The win-share class (AIE #94 6131687656): the tipping-point fallback now says each option's share in the AIE's exact
+   * supporting label ("‘X’: Share of model runs in which this option ranks first: 62%.", `runShareSupportingLabel`). It
+   * presupposes a ranking exactly as "was supported by N% of runs" did, so the withheld gate must SEE it. Added WITH the
+   * label and pinned by `leader-vocabulary-producer-control.test.ts` (the leader sentence alone). The exact label words only:
+   * "ranks first" alone is ordinary prose.
+   */
+  { code: 'runs_rank_first', re: /\bshare\s+of\s+model\s+runs\s+in\s+which\s+this\s+option\s+ranks\s+first\b/i },
 ];
 
 /**

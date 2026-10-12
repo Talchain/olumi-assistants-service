@@ -12,6 +12,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { RUN_SHARE_QUALIFIER } from '../../../compose/run-share-text.js';
 
 import type {
   AnalysisProjectionSummary,
@@ -345,7 +346,10 @@ describe('composeWhatWouldFlipFallback', () => {
     // ROADMAP 2.1067 — this pin required '35 percentage points' ("the lead of
     // 35 percentage points would need to close"). The contender is named with
     // its OWN share instead; the subtraction is gone.
-    expect(text).toContain("'Hire Two Mid-Level' was supported by the next most runs (27%)");
+    // The win-share class (AIE #94 6131687656): on this tipping-point surface each share is said in the AIE's exact label,
+    // after the option's name, with the fixed qualifier once.
+    expect(text).toContain("'Hire Two Mid-Level': Share of model runs in which this option ranks first: 27%.");
+    expect(text.split(RUN_SHARE_QUALIFIER)).toHaveLength(2);
     expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivities as bucketed lead-framing
     // prose. Thresholds align to bandFromMagnitude. No raw decimals.
@@ -624,7 +628,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     // When the margin is non-finite, never "lead of Not available would need to close" (the bug improvement 1
     // fixed).
     expect(text).not.toMatch(/lead of .* would need to close/i);
-    expect(text).toMatch(/was supported by the next most runs/i);
+    expect(text).toContain("'Hire Marketing Manager': Share of model runs in which this option ranks first: 43%.");
   });
 
   it('Infinity margin: same neutral runner-up fallback, no broken numeric copy', () => {
@@ -638,7 +642,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     );
     expect(text).not.toMatch(/lead of .* would need to close/i);
     expect(text).not.toMatch(/Not available/i);
-    expect(text).toMatch(/was supported by the next most runs/i);
+    expect(text).toContain("'Hire Marketing Manager': Share of model runs in which this option ranks first: 43%.");
   });
 
   it('unknown projected band with no raw signal: omits closing robustness sentence', () => {
@@ -1071,7 +1075,7 @@ describe('composeWhatWouldFlipFallback — label-quoting + hedge-consolidation p
     const text = composeWhatWouldFlipFallback(ANALYSIS);
     expect(text).not.toMatch(/performing best/i);
     expect(text).not.toMatch(/\bbest\b/i);
-    expect(text).toMatch(/In this model, .+ was supported by \d{1,3}% of runs/);
+    expect(text.startsWith("'Hire Senior Engineer': Share of model runs in which this option ranks first: 62%.")).toBe(true);
   });
 
   it('near-tie + fragile: the lead drops its trailing "could shift" hedge (one caveat only)', () => {

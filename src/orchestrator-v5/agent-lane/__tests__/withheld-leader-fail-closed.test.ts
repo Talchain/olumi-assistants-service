@@ -246,6 +246,8 @@ const RANKING: readonly string[] = [
   'It is the most likely of the three to reach £20k MRR.',
   'The analysis favours the release-timed increase.',
   'Holding the price outperforms both alternatives in the modelled runs.',
+  // The win-share class: the AIE's exact supporting label (#94 6131687656), as the tipping-point fallback says it.
+  "'Raise Pro to £59 at release': Share of model runs in which this option ranks first: 62%.",
 ];
 
 /** Must survive a withheld turn byte-identical. */

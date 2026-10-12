@@ -149,7 +149,8 @@ describe('explain and flip fallbacks: the leader and runner-up are said in this 
 
   it('flip fallback: exact leader sentence', () => {
     const text = composeWhatWouldFlipFallback(ANALYSIS, null, null, null);
-    expect(text).toContain("In this model, 'Hire Senior Engineer' was supported by 62% of runs.");
+    // The win-share class (AIE #94 6131687656): the tipping-point surface says the share in the AIE's exact label.
+    expect(text).toContain("'Hire Senior Engineer': Share of model runs in which this option ranks first: 62%.");
     expect(text).not.toMatch(/performs best|currently leads/);
   });
 });

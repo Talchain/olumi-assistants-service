@@ -39,6 +39,7 @@ import type {
 // rendered the runner-up gap as a magnitude; with those retired, the only
 // percentage this file may speak is an option's OWN win share.
 import { formatProbability } from '../../format/format-analysis-value.js';
+import { RUN_SHARE_QUALIFIER, runShareSupportingLabel } from '../../compose/run-share-text.js';
 import { edgeStrengthWords } from '../../format/edge-strength-words.js';
 import type { LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import {
@@ -247,6 +248,8 @@ export function composeRobustnessVerdict(
   rawRobustness: RawRobustnessSignals | null,
   mode: RobustnessVerdictMode,
   defaultedAssumptions: DefaultedAssumptionsSignal | null = null,
+  /** The win-share class: the what_would_flip fallback says the runner-up's share in the AIE's supporting label. */
+  opts: { readonly runShareLabel?: true } = {},
 ): RobustnessVerdict {
   const leading = projection.leading_option;
   const runner = projection.runner_up;
@@ -373,8 +376,12 @@ export function composeRobustnessVerdict(
     // voice: on a withheld turn the gate sees "supported by … runs" (`runs_supported`) and the withheld voice replaces
     // the reply wholesale, so "the next most runs" is said only where the leader is licensed.
     const hasRunnerP = typeof runnerP === 'number' && Number.isFinite(runnerP);
-    const runnerNextMost =
-      `In this model, ${quoteLabel(runner.label)} was supported by the next most runs${hasRunnerP ? ` (${formatProbability(runnerP)})` : ''}.`;
+    // ⭐ The win-share class (AIE #94 6131687656): on the what_would_flip (reasoning) surface the runner-up's share is
+    // supporting reasoning, said with the AIE's exact label; `composeWhatWouldFlipFallback` says the qualifier once after it.
+    // Every other caller (the advice gate) keeps its words.
+    const runnerNextMost = opts.runShareLabel === true && hasRunnerP
+      ? `${quoteLabel(runner.label)}: ${runShareSupportingLabel(formatProbability(runnerP))}`
+      : `In this model, ${quoteLabel(runner.label)} was supported by the next most runs${hasRunnerP ? ` (${formatProbability(runnerP)})` : ''}.`;
     const runnerStanding = hasRunnerP ? ` was supported by ${formatProbability(runnerP)} of runs` : ' came next';
     if (marginCat === 'near_tie') {
       margin_clause =
@@ -665,16 +672,17 @@ export function composeWhatWouldFlipFallback(
   // near-tie (including the raw `near_tie.is_tie` override) OR on how the
   // margin verdict and stability verdict resolve together. `flip` mode selects
   // the "what could change it" voice.
-  const verdict = composeRobustnessVerdict(projection, raw, 'flip', defaultedAssumptions ?? null);
+  const verdict = composeRobustnessVerdict(projection, raw, 'flip', defaultedAssumptions ?? null, { runShareLabel: true });
 
   // Staleness caveat is no longer composed here — see the parallel note in
   // composeExplainResultsFallback. The handler's applyStalenessPrefix
   // helper prepends it to the final assistant_text when staleness_reason
   // is set on the projection.
 
-  sentences.push(
-    `In this model, ${quoteLabel(leading.label)} was supported by ${formatProbability(leading.probability)} of runs.`,
-  );
+  // ⭐ The win-share class (AIE #94 6131687656): a tipping-point answer keeps the leading option's share as supporting
+  // reasoning, in the AIE's exact label after the option's name (the per-option "‘X’: …" form; never a dash in prose), with
+  // the fixed qualifier once after the share lines (never the goal chance).
+  sentences.push(`${quoteLabel(leading.label)}: ${runShareSupportingLabel(formatProbability(leading.probability))}`);
 
   // Margin sentence (near-tie "effectively tied" / clear "would need to close"
   // / neutral contender) — routed through the shared verdict so a near-zero gap
@@ -682,6 +690,7 @@ export function composeWhatWouldFlipFallback(
   if (verdict.margin_clause !== null) {
     sentences.push(verdict.margin_clause);
   }
+  sentences.push(RUN_SHARE_QUALIFIER);
 
   // DGAI #341: only materially-influential drivers may carry the "would
   // shift this result the most" claim. The live defect paired that claim
