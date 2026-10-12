@@ -152,6 +152,40 @@ describe('A6 persistence', () => {
   });
 });
 
+describe('E6 Why-once on the route: a second Strengthen item on the same state carries its action, not the same Why?', () => {
+  it('turn 1 says the Strengthen Why?; turn 2 offers the next unsized link with its action and no Why?', async () => {
+    const rows = new Map<string, Obj>();
+    const storage = {
+      readCommittedTurn: vi.fn(async (_sid: string, tid: string) => rows.get(tid) ?? null),
+      readGuidanceHistory: vi.fn(async () => guidanceHistoryOf([...rows.values()].reverse().flatMap(r => r.agent_guidance ? [r.agent_guidance] : []))),
+      append: vi.fn(async (w: Obj) => { rows.set(String(w.turn_id), { id: `row-${rows.size}`, request_hash: w.request_hash,
+        assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
+        pending_actions: w.pending_actions ?? [], ...(w.agent_guidance ? { agent_guidance: structuredClone(w.agent_guidance) } : {}) });
+        return { id: rows.get(String(w.turn_id))!.id }; }),
+    };
+    // Two unsized links to the goal (S1), on one unchanged state.
+    const twoUnsized = async (s: Snapshot) => {
+      const state = snapshot(s, 'S1');
+      const e = state.graph.edges.find(e => e.from === 'pro_subscribers_at_month_12' && e.to === 'mrr')!;
+      e.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' }; e.defaulted = true;
+      state.analysis_result.computed_against_hash = computeAnalysisAffectingGraphHash(state.graph as never);
+      state.graph_hash = String(state.analysis_result.computed_against_hash);
+      state.current_read = { ...state.current_read, computed_against_hash: state.graph_hash, current_analysis_hash: state.graph_hash };
+      return state;
+    };
+    const first = await run('S1', { storage, readSnapshot: twoUnsized, payload: { message, turn_id: '33333333-3333-4333-8333-333333333333' } });
+    const second = await run('S1', { storage, readSnapshot: twoUnsized,
+      payload: { message: 'What else should we examine?', turn_id: '44444444-4444-4444-8444-444444444444' } });
+    const [a, b] = [first, second].map(w => object(object(w.response.guidance).slot1));
+    expect([a.policy_id, a.variant, b.policy_id, b.variant]).toEqual(['RC-STRENGTHEN-ITEM', 'S1', 'RC-STRENGTHEN-ITEM', 'S1']);
+    expect(b.item, 'the next item is offered').not.toBe(a.item);
+    expect(String(first.response.assistant_text)).toContain(`<details>\n<summary>Why?</summary>\n\n${row('RC-STRENGTHEN-ITEM').science_basis.summary}\n\n</details>`);
+    expect(String(second.response.assistant_text)).not.toContain('<summary>Why?</summary>');
+    expect(array(object(second.response._answer_shape).bullets)).toContain(object(b.primary_action).label);
+    expect(object(carriers(second)[0]).why, 'the model is told the same method; only the display changes').toBe(row('RC-STRENGTHEN-ITEM').science_basis.summary);
+  });
+});
+
 function noRun(s: Snapshot): Snapshot {
   const state = snapshot(s, 'none');
   state.graph.nodes = state.graph.nodes.filter(n => n.id !== 'retain_subscribers' && (n.kind !== 'option' || n.id === 'raise_price_to_54'));
