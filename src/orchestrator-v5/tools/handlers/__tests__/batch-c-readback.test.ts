@@ -34,6 +34,7 @@ import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../../a
 import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+import { toTypedRunRows } from '../../../runs/typed-run-rows.js';
 
 type Rec = Record<string, any>;
 
@@ -406,6 +407,12 @@ describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "
     expect([...goalChanceCellFacesForAgent(view, reloaded, true)].map(([id]) => id)).toEqual(['hire_a_tech_lead', 'hire_two_developers']);
     expect((result.enrichment.inference_warnings as Rec[]).some((w) => (w.detail as Rec | undefined)?.reason === 'effects_at_period_end_unstated')).toBe(false);
     expect(goalTargetBasisOf(node(reloaded, 'productivity'))!.effects_at_period_end).toBe(false);
+    // The typed Run rows store each licensed chance as CONDITIONAL (permitted_with_caveat), never an unqualified permission.
+    const rows = toTypedRunRows({ fact_type: 'run_analysis', fact_version: 1, noop: false, result: JSON.parse(JSON.stringify(result)) },
+      { scenarioId: SCENARIO });
+    expect(rows, JSON.stringify(rows).slice(0, 300)).toHaveProperty('ok');
+    const typed = Object.fromEntries((rows as { ok: { options: Rec[] } }).ok.options.map((o) => [o.option_id, o.licence_status]));
+    expect(typed).toMatchObject({ hire_a_tech_lead: 'permitted_with_caveat', hire_two_developers: 'permitted_with_caveat' });
     // CONTRAST, the same handler: a brief stating only half the gain by month three withholds with E's sentence.
     const half = await runAndRead(JSON.stringify(g), hiringAnswer, `${brief} We expect only half the productivity gain by month 3.`);
     expect(goalChanceLicenceForAgent({ type: 'analysis_result', enrichment: half.result.enrichment })).toBeUndefined();
