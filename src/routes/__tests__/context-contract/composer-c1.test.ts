@@ -12,7 +12,7 @@ vi.setConfig({ testTimeout: 60_000 });
 const row = (id: string) => policy.rows.find(r => r.policy_id === id)!;
 // SYS2 G1: this fixture's W6 offer sits beside several real options, so its Why? is W6's own reason. RC-WIDEN's science
 // sentence ("a single alternative") holds for W2Z/W2 only; that negative is `sys2-why-matches-variant.test.ts`.
-const why = (row('RC-WIDEN').why_now as Readonly<Record<string, string>>).W6!;
+const why = (row('RC-WIDEN').why_now as unknown as Readonly<Record<string, string>>).W6!;
 const message = 'Our churn is 3%. What should we examine next?';
 const reply = 'Our churn is 3%.\n\n- Name another risk.\n- Test it with customer evidence.\n\nWhich risk could change your plan?';
 const response = (text = reply): Obj => ({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }] });
