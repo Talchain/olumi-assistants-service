@@ -193,7 +193,8 @@ function sameFrame(text: string, span: { start: number; end: number }, unit: unk
     || stated.scale !== expected.scale || stated.period !== expected.period) return false;
   const same = (x: readonly string[] | null, y: readonly string[] | null): boolean =>
     JSON.stringify(x?.length ? x : null) === JSON.stringify(y?.length ? y : null);
-  return (same(stated.per, expected.per) || (implicitPer && !stated.per?.length)) && same(stated.base, expected.base) && same(stated.qualifiers, expected.qualifiers)
+  return (same(stated.per, expected.per) || (implicitPer && !stated.per?.length)) && same(stated.base, expected.base)
+    && (same(stated.qualifiers, expected.qualifiers))
     && (expected.noun === null || nounFromLabel || (expected.noun.length > 0
       && expected.noun.every(w => stated.noun?.some(x => sameName(x, w)))));
 }
@@ -680,24 +681,73 @@ export function briefAttributedLevelRange(factor: Factor, brief: string | undefi
 }
 
 /**
+ * ⛔ B2 (DL 12 Oct; C's independent check r2, BLOCKING 1): a figure that is a TERM of a sum the user builds is a part, never
+ * the goal's level. Served capacity: "Total weekly support capacity is defined as the existing 80 tickets per week plus the
+ * additional specialist capacity." The 80 is the existing team's capacity, a term of the user's sum, even while the other
+ * term is 0 today; "90 tickets per week today: the existing 80 … plus 10 … outsourced" likewise. A total stated with its
+ * breakdown is still the total ("Our clinic completes 920 appointments each month: 800 booked plus 120 walk-ins."), and a
+ * sentence writing the quantity's own level ("Weekly support capacity is 80 tickets per week.") is the user's figure for
+ * THAT quantity, whatever the drafter tagged it. Read in the figure's own clause (to the nearest ":" ";" "—").
+ */
+const SUM_OPERATOR_BEFORE = /\b(?:plus|minus|defined\s+as|sum\s+of|made\s+up\s+of|consists?\s+of|compris(?:es|ing)|together\s+with|in\s+addition\s+to|on\s+top\s+of|added\s+to|combined\s+with)\b|[+=−]/iu;
+const SUM_OPERATOR_AFTER = /\b(?:plus|minus|together\s+with|in\s+addition\s+to|on\s+top\s+of|added\s+to|combined\s+with)\b|[+−]/iu;
+function figureIsAPart(text: string, amount: StatedAmount): boolean {
+  const before = text.slice(0, amount.index).split(/[:;—]/u).at(-1) ?? '';
+  const after = text.slice(amount.index + amount.matchedText.length).split(/[:;—]/u)[0] ?? '';
+  return SUM_OPERATOR_BEFORE.test(before) || SUM_OPERATOR_AFTER.test(after);
+}
+
+/** The goal's level read as a factor of the same name: the brief's sentences writing it in the goal's typed frame. */
+function goalLevelWrites(model: CandidateModel, brief: string | undefined): { asFactor: Factor; unit: NonNullable<ReturnType<typeof readUnitParts>>; writes: { text: string; amount: StatedAmount }[] } | null {
+  const goal = model.goal; const value = goal.baseline_value;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const unit = readUnitParts(goal.unit);
+  if (unit === null) return null;
+  const asFactor = { label: goal.metric, baseline_value: value, unit: goal.unit, provenance: 'explicit', baseline_known: true } as Factor;
+  const writes = sentencesWritingFigure(asFactor, brief).filter(({ text, amount }) => !figureIsAPart(text, amount));
+  return writes.length === 0 ? null : { asFactor, unit, writes };
+}
+
+/**
+ * ⭐ Recovery Batch B (DL 12 Oct, GO (2); the origin rule for goals): the brief writes the goal's current level in the
+ * goal's typed frame, naming the goal, not as an aim or bound (`sentencesWritingFigure`, the origin rule's reader). Then
+ * the level is the user's whatever the drafter tagged it: a drafter's `inferred` never withholds a figure the user wrote
+ * (cd3d9c25: "Total weekly support capacity is defined as the existing 80 tickets per week …"). Its role is V2's
+ * (`verifiedGoalLevel`). A level the brief never writes keeps its treatment.
+ */
+export function briefWritesGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
+  try {
+    return goalLevelWrites(model, brief) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * ⭐ Recovery Batch B (DL 12 Oct 13:3xZ): the GOAL's stated current level, through V2's verification, positive
  * attestation only and no new parser. Admission wrote it as `brief_extraction` with no extractionType and no user-text
  * check, so C reads Paul's typed figure as unverified. Verified when BOTH hold:
  *   - ORIGIN: a direct sentence of the brief names the goal and writes this figure in the goal's typed frame, not as an
  *     aim or bound (`sentencesWritingFigure`, the origin rule's reader): "Total weekly support capacity is defined as the
  *     existing 80 tickets per week …";
- *   - ROLE: the same figure, in the goal's typed unit, is V2's VERIFIED current level of a factor of this model
- *     (`verifiedFactorLevel`): "Our existing team resolves 80 tickets per week."
+ *   - ROLE: V2 (`verifiedFactorLevel`) verifies the goal's own level ("Our … clinic completes 920 appointments each
+ *     month …"), or the same figure in the goal's typed unit is V2's verified level of a factor of this model ("Our
+ *     existing team resolves 80 tickets per week.").
  * Anything else stays exactly as written before. The typed-unit equality is defence in depth: V2's neighbour rule
  * already withholds a factor whose figure the goal's sentence writes as another quantity.
  */
 export function verifiedGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
   try {
     const goal = model.goal; const value = goal.baseline_value;
-    if (typeof value !== 'number' || !Number.isFinite(value)) return false;
-    const unit = readUnitParts(goal.unit);
-    if (unit === null) return false;
-    if (sentencesWritingFigure({ label: goal.metric, baseline_value: value, unit: goal.unit } as Factor, brief).length === 0) return false;
+    const read = goalLevelWrites(model, brief);
+    if (read === null || typeof value !== 'number') return false;
+    const { asFactor, unit, writes } = read;
+    // DIRECT: V2 itself, on the goal's own level ("Our … clinic completes 920 appointments each month …").
+    if (writes.some(({ text }) => {
+      const own = { ...asFactor, baseline_evidence: { quote: text } } as Factor;
+      return verifiedFactorLevel({ ...model, factors: [...model.factors.filter(f => f.label !== goal.metric), own] }, own, brief);
+    })) return true;
+    // THROUGH A FACTOR: the same figure in the goal's typed unit is V2's verified level of a factor of this model.
     return model.factors.some(f => f.baseline_value === value && JSON.stringify(readUnitParts(f.unit)) === JSON.stringify(unit)
       && verifiedFactorLevel(model, f, brief));
   } catch {

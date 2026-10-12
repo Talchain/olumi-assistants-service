@@ -194,7 +194,7 @@ import {
   findScaleIncoherentBaselineFactorIds,
   decideAnalysisScaleBlock,
 } from '../plot-intervention-scale.js';
-import { wireInterventionRangePlan } from '../../intervention-range.js';
+import { wireInterventionRangePlan, withoutAttributedSettingRanges } from '../../intervention-range.js';
 import { nodeUnitOf, optionIdOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isRecommendableOption } from './recommendable-option.js';
 import { detectIdenticalArms } from './identical-arms.js';
@@ -215,7 +215,7 @@ import {
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
-import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
+import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects, withholdForUnsentGoalTarget } from '../../goal-target/goal-chance-licence.js';
 import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -1195,7 +1195,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
     const plotPayload: Record<string, unknown> = {
       // Recovery Batch B (L6): a stated level range changes no compute; the wire copy drops it (`withoutStatedLevelRanges`).
-      graph: toOutboundGraph(withoutStatedLevelRanges(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph))),
+      graph: toOutboundGraph(withoutAttributedSettingRanges(withoutStatedLevelRanges(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph)))),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -2884,12 +2884,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Recovery Batch B (b1, AIE 6125204695): what CEE SENT binds a deadline goal's engine-read chance, per option. The payload
     // itself (its graph, direction and strictness), never a copy: nothing edits it after the PLoT call above.
     const sentRun = plotPayload;
+    // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
+    // so a several-targets joint names exactly the conditions ISL counted on each draw.
+    const goalChanceConstraints = { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun };
+    // Post-B (DL 12 Oct; AIE #94 6123937762 item 3): a stated target the Run did not send as specified is refused by the
+    // licence; the Run says so in the AIE's words — never a silent gap. Every earlier withhold keeps its own reason.
+    response = withholdForUnsentGoalTarget(response, graphForAnalysis, snapshot.goal_node_id, goalChanceConstraints);
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, sentRun),
       snapshot.rawPersistedGraph ?? graphForAnalysis,
-      // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
-      // so a several-targets joint names exactly the conditions ISL counted on each draw.
-      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun });
+      // Batch F: and this Run's per-row verdicts, so a withheld joint or target names the cause CEE established.
+      { ...goalChanceConstraints, ...(constraintVerdict.perLimit !== undefined ? { limitVerdicts: constraintVerdict.perLimit } : {}) });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);

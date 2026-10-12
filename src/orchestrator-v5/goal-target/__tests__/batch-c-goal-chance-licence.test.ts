@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
+import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, goalTargetNotSent, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForUnsentGoalTarget } from '../goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { conditionsRefusedBasis, CONDITIONS_NOT_KEPT, targetChanceWords } from '../goal-target-basis.js';
@@ -289,8 +289,9 @@ describe('marketing — the same-draw joint is the headline, each target below (
     const l = licenceFor(marketingRun({ probability_of_joint_goal_precision: undefined }))!;
     expect(l.pct_by_option).toEqual({});
     expect(l.withheld_option_ids).toEqual(['hire_manager', 'ai_plus_ads']);
+    // Batch F: a figure without its precision is not cured by running again — no step is promised (the AIE's words).
     expect(l.targets!.joint).toEqual({ status: 'withheld', reason: 'precision_missing',
-      line: 'The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.', // Batch C: ruling 17 (independent check r1 item 7)
+      line: 'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is.', next_step: { code: 'none_established' },
       frechet_line: 'Meeting both is no more likely than the lower of the two chances.' });
     // 0.6 × 0.42 = 0.252 and 0.7 × 0.55 = 0.385 must never appear as a figure anywhere in the record.
     expect(JSON.stringify(l)).not.toMatch(/"(?:hire_manager|ai_plus_ads)":(?:25|39)\b/);
@@ -337,7 +338,7 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
     const forAgent = goalChanceLicenceForAgent(result)!;
     expect(forAgent.targets?.joint.status).toBe('withheld');
     expect(goalChanceNotesForAgent(result, g, true)).toEqual([
-      'The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.', // Batch C: ruling 17 (independent check r1 item 7)
+      'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is.', // Batch F: the AIE's words; no "run again" (precision missing is not a stale Run)
       'Meeting both is no more likely than the lower of the two chances.',
       'On its own, the chance of ‘New customers’ being at least 20 customers over the first three months after launch, in this model: ‘Hire a marketing manager’ about 60%; ‘AI planning plus advertising’ about 70%.',
       'On its own, the chance of ‘Conversion rate’ being above 15% over the first three months after launch, in this model: ‘Hire a marketing manager’ about 42%; ‘AI planning plus advertising’ about 55%.',
@@ -349,8 +350,8 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
     ]);
     const cells = projectCanonicalAnalysisCells(result as never, g);
     expect(cells.map((c) => [c.option_id, c.cell.kind, (c.cell as Rec).why])).toEqual([
-      ['hire_manager', 'withheld', 'The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision. Meeting both is no more likely than the lower of the two chances.'], // Batch C: ruling 17 (independent check r1 item 7)
-      ['ai_plus_ads', 'withheld', 'The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision. Meeting both is no more likely than the lower of the two chances.'],
+      ['hire_manager', 'withheld', 'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is. Meeting both is no more likely than the lower of the two chances.'], // Batch F: words pending AIE
+      ['ai_plus_ads', 'withheld', 'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is. Meeting both is no more likely than the lower of the two chances.'],
     ]);
   });
 
@@ -480,9 +481,13 @@ describe('AIE clause 3: a target the joint cannot support is kept, named and ref
     const l = licenceFor(marketingRun(), g)!;
     expect(l.pct_by_option).toEqual({});
     expect(l.targets!.joint).toEqual({ status: 'withheld', reason: 'target_not_supported',
-      line: 'The chance of meeting both together isn’t shown: ‘Conversion rate’ is stated as a change, which can’t yet be combined with the other targets in this analysis.' });
+      line: 'The chance of meeting both together isn’t shown: ‘Conversion rate’ is stated as a change, which can’t yet be combined with the other targets in this analysis.',
+      next_step: { code: 'none_established' } });
     // The level target is still said on its own; the change target is given no figure (its scoring is not supported here).
     expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
+    // Batch F (b): and the change target has its OWN withheld line, by identity — never dropped silently.
+    expect(l.targets!.withheld_targets?.map((t) => [t.constraint_id, t.label, t.reason, t.next_step.code]))
+      .toEqual([['target:conversion_rate', 'Conversion rate', 'target_not_supported', 'none_established']]);
     expect(JSON.stringify(l.targets)).not.toMatch(/Meeting both is no more likely/);
   });
 
@@ -524,7 +529,10 @@ describe('AIE clause 3: a target the joint cannot support is kept, named and ref
     (g.nodes as Rec[])[0] = { ...(g.nodes as Rec[])[0], goal_target_basis: { ...MARKETING_BASIS, also_required: ['repeat purchases from 30% of them within six months'] } };
     const l = licenceFor(marketingRun(), g)!;
     expect(l.targets!.joint.status).toBe('licensed');
-    expect(l.notes).toContain('This chance covers ‘New customers’ and ‘Conversion rate’ only. It does not include: repeat purchases from 30% of them within six months.');
+    // Batch F (c): said byte for byte beside several targets, claimed neither in nor out (nothing binds it to a target by identity).
+    expect(l.notes).toContain('Other conditions remain recorded from your brief: repeat purchases from 30% of them within six months; their relation to this result has not been established.');
+    expect((l.notes ?? []).some((n) => n.includes('It does not include'))).toBe(false);
+    expect(l.chance_words).not.toContain('repeat purchases');
   });
 
   it.each([
@@ -535,7 +543,9 @@ describe('AIE clause 3: a target the joint cannot support is kept, named and ref
     (g.nodes as Rec[])[0] = { ...(g.nodes as Rec[])[0], goal_target_basis: { ...MARKETING_BASIS, also_required: [condition] } };
     const l = licenceFor(marketingRun(), g)!;
     expect(l.targets!.joint.status).toBe('licensed');
-    expect(l.notes).toContain(`This chance covers ‘New customers’ and ‘Conversion rate’ only. It does not include: ${condition}.`);
+    // Batch F (c): still said, byte for byte — never matched away, never claimed excluded.
+    expect(l.notes).toContain(`Other conditions remain recorded from your brief: ${condition}; their relation to this result has not been established.`);
+    expect((l.notes ?? []).some((n) => n.includes('It does not include'))).toBe(false);
   });
 
   it('CONTROL: the supported marketing AND (both level, same period) is unchanged — licensed, no "covers only" note', () => {
@@ -584,7 +594,7 @@ const capacityWireRun = (): Rec => ({ option_comparison: [
   { option_id: 'carry_on', probability_of_goal: 0, probability_of_goal_precision: wilson(0, 0), outcome: { mean: 0.75, std: 0, p10: 0.75, p50: 0.75, p90: 0.75 } },
 ] });
 /** The status quo's typed zero-spread line (Science §(ab)(2)), its true reading when the frame is unknown. */
-const ZERO_SPREAD_LINE = 'Falls short of 85% if today’s figures hold.';
+const ZERO_SPREAD_LINE = 'Falls short of the target: ‘Development capacity’ at least 85%, if today’s figures hold.';
 /** The field this Run records for itself (run-analysis.ts: `sentGoalThresholdOf` beside `withGoalChanceLicence`). */
 const recordedField = (run: Rec, g: Rec) => sentGoalThresholdOf(run, g, 'capacity', () => false);
 const wireLicence = (g: Rec = capacityGraph(), run: Rec = capacityWireRun()) => goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {});
@@ -717,6 +727,8 @@ describe('independent check r1 — item 4: a stated ">" not sent strictly withho
     expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'strict_not_preserved',
       line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
         + 'the comparison the analysis used is not the one you stated.' });
+    expect(l.targets!.withheld_targets?.map((t) => [t.constraint_id, t.reason, t.next_step.code]))
+      .toEqual([['target:conversion_rate', 'strict_not_preserved', 'none_established']]);
   });
 });
 
@@ -859,14 +871,14 @@ describe('RE-SCOPE 2 (R5-2): an input whose source is unverified is disclosed on
   });
 });
 
-describe('independent check r1 — item 7: a withheld joint says truly why, with a next step', () => {
-  it('a joint figure without its precision is not "not calculated": it says what is missing and what to do', () => {
+describe('independent check r1 — item 7 (Batch F: no step is promised that would not change it): a withheld joint says truly why', () => {
+  it('a joint figure without its precision is not "not calculated": it says what is missing — and never "run again"', () => {
     const l = licenceFor(marketingRun({ probability_of_joint_goal_precision: undefined }))!;
-    expect((l.targets!.joint as Rec).line).toBe('The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.');
+    expect(l.targets!.joint).toMatchObject({ reason: 'precision_missing', next_step: { code: 'none_established' }, line: 'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is.' });
   });
-  it('no joint figure at all: "not calculated yet", with the next step', () => {
+  it('no joint figure and no reason from the engine: "not returned" — and never "run again"', () => {
     const l = licenceFor(marketingRun({ probability_of_joint_goal: undefined, probability_of_joint_goal_precision: undefined }))!;
-    expect((l.targets!.joint as Rec).line).toBe('The chance of meeting both together isn’t calculated yet. Run the analysis again to get it.');
+    expect(l.targets!.joint).toMatchObject({ reason: 'not_returned', next_step: { code: 'none_established' }, line: 'The chance of meeting these conditions together is not shown because this analysis returned no joint estimate and no usable explanation.' });
   });
 });
 
@@ -1326,6 +1338,8 @@ describe('RE-SCOPE r1 (DL item 3): a SENT figure that is not the stored one is n
     expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved',
       line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
         + 'this analysis did not use every stated target as specified.' });
+    expect(l.targets!.withheld_targets?.map((t) => [t.constraint_id, t.reason, t.next_step.code]))
+      .toEqual([['target:conversion_rate', 'figure_not_preserved', 'none_established']]);
     expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
     expect(l.pct_by_option).toEqual({});
   });
@@ -1493,6 +1507,81 @@ describe('RE-SCOPE 2 R5-5 (b): no chance is licensed for a stated target the Run
   });
 });
 
+// ── Post-B (DL 12 Oct; AIE #94 6123937762 item 3): the single-target refusal above is SAID in the AIE's words, through the
+// existing reason (`figure_not_preserved`) and the ONE goal-figure seam. Before this the licence returned null and nothing said
+// why. No new parser; no ask. A goal whose own figure was sent keeps the joint's own line.
+describe('post-B: a single stated target the Run did not send as specified is said, never a silent gap; the joint keeps its own line', () => {
+  const AIE = 'Your stated target for ‘Development capacity’ was not used as specified in this analysis, so its chance is not shown.';
+  const notTestable = (env: Rec): Rec[] => ((env.inference_warnings ?? []) as Rec[]).filter((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+  const ownRow = (): Rec => {
+    const g = capacityGraph({ goal: { goal_threshold_raw: undefined, goal_threshold: undefined } });
+    g.goal_constraints = [{ constraint_id: 'capacity:>=', node_id: 'capacity', operator: '>=', value: 85, unit: '%', value_frame: 'level' }];
+    return g;
+  };
+  const RED: readonly (readonly [string, () => Rec, unknown])[] = [
+    ['no threshold sent', () => capacityGraph({ goal: { goal_threshold: undefined } }), undefined],
+    ['a cap that could not be resolved', () => capacityGraph({ goal: { goal_threshold: undefined, goal_threshold_cap: undefined } }), undefined],
+    ['the goal\'s own target row not in the request', ownRow, []],
+  ];
+  for (const [name, graph, sent] of RED) {
+    it(`RED (single, ${name}): the licence refuses, and the Run says the AIE's sentence with the existing reason`, () => {
+      const g = graph();
+      const constraints = { storedConstraints: g.goal_constraints, sentConstraints: sent };
+      expect(goalChanceLicenceOf(capacityRun(), g, 'capacity', () => false, undefined, g, constraints), 'its reason: the licence refuses this target').toBeNull();
+      expect(goalTargetNotSent(g, 'capacity', constraints)).toBe(true);
+      const out = withholdForUnsentGoalTarget(capacityRun(), g, 'capacity', constraints) as Rec;
+      expect(notTestable(out)).toEqual([{ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', severity: 'warning', message: AIE, say: AIE,
+        node_ids: ['capacity'], option_ids: ['lead', 'two', 'carry_on'], detail: { reason: 'figure_not_preserved' },
+        // The seam's own record: the claims against the target only; no win share, so no leader is withheld (RT-10 B′ R2).
+        withheld_claims: ['goal_probability', 'joint_probability', 'downside'] }]);
+      // AIE item 3: the unsent target's own chance stays withheld; the outcome and the ordering stay.
+      for (const r of out.option_comparison as Rec[]) {
+        expect(r).not.toHaveProperty('probability_of_goal');
+        expect(r).toHaveProperty('outcome.p50');
+      }
+    });
+  }
+  it('CONTROL (single): the threshold sent → licensed, nothing said, the envelope untouched', () => {
+    const env = capacityRun();
+    expect(goalTargetNotSent(capacityGraph(), 'capacity', {}), 'its reason: the target was sent').toBe(false);
+    expect(withholdForUnsentGoalTarget(env, capacityGraph(), 'capacity', {})).toBe(env);
+    expect(capacityLicence()).not.toBeNull();
+  });
+  it('CONTROL (single, own row): the row sent, or no request known → read as before, nothing said', () => {
+    for (const sent of [wireGoalConstraints(ownRow().goal_constraints), undefined]) {
+      const g = ownRow(); const env = capacityRun();
+      const constraints = { storedConstraints: g.goal_constraints, sentConstraints: sent };
+      expect(goalTargetNotSent(g, 'capacity', constraints), 'its reason: the row was sent, or no request is known').toBe(false);
+      expect(withholdForUnsentGoalTarget(env, g, 'capacity', constraints)).toBe(env);
+    }
+  });
+  it('JOINT keeps its own line: a second target the Run did not send → the joint\'s figure line, and no single-target sentence', () => {
+    const g = marketingGraph();
+    const sent = (wireGoalConstraints(g.goal_constraints) as Rec[]).filter((r) => r.constraint_id !== 'target:conversion_rate');
+    const constraints = { storedConstraints: g.goal_constraints, sentConstraints: sent };
+    expect(goalTargetNotSent(g, 'new_customers', constraints), 'its reason: the goal\'s own figure was sent').toBe(false);
+    const env = marketingRun();
+    expect(withholdForUnsentGoalTarget(env, g, 'new_customers', constraints)).toBe(env);
+    const joint = licenceFor(marketingRun(), g, sent)!.targets!.joint as Rec;
+    expect([joint.reason, joint.line]).toEqual(['figure_not_preserved',
+      'The chance of meeting both together isn’t shown: this analysis did not use every stated target as specified.']);
+  });
+  it('CONTROL: another run-wide cause keeps its own words (no comparator held → the gate\'s cause, never this sentence)', () => {
+    const g = capacityGraph({ goal: { goal_threshold: undefined, goal_direction: undefined } });
+    const env = capacityRun();
+    expect(goalTargetNotSent(g, 'capacity', {}), 'its reason: the gate has its own cause').toBe(false);
+    expect(withholdForUnsentGoalTarget(env, g, 'capacity', {})).toBe(env);
+  });
+  it('CONTROL: an earlier withhold keeps its own reason (a reading refused for its conditions): one reason, never two', () => {
+    const g = capacityGraph({ goal: { goal_threshold: undefined } });
+    const held = withholdForOpenTargetQuestion(capacityRun(), g, 'capacity') as Rec;
+    const earlier: Rec = { ...held, inference_warnings: [{ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', severity: 'warning',
+      message: `Not shown. ${CONDITIONS_NOT_KEPT}`, node_ids: ['capacity'], option_ids: ['lead', 'two', 'carry_on'], detail: { reason: 'conditions_not_kept' } }] };
+    expect(goalTargetNotSent(g, 'capacity', {}), 'the same unsent target').toBe(true);
+    expect(withholdForUnsentGoalTarget(earlier, g, 'capacity', {})).toBe(earlier);
+  });
+});
+
 // ── R5 meaning at the producer (DL 12 Oct): the licence target says its frame wherever Olumi's VALIDATED reading holds it ──
 describe('R5 at the producer — the licence target carries the validated reading\'s frame; an unvalidated one stays frameless', () => {
   const CAPACITY_LEVEL_BASIS = { quantity_frame: 'level', target_frame: 'level', target_raw: 85, reference: 'today', period_months: 3,
@@ -1528,5 +1617,47 @@ describe('R5 at the producer — the licence target carries the validated readin
     const l = capacityLicence(capacityGraph({ goal: { goal_target_basis: { ...CAPACITY_LEVEL_BASIS, target_raw: 80 } } }));
     expect(l).not.toBeNull();
     expect(l!.target).not.toHaveProperty('frame');
+  });
+});
+
+// ── AIE 6129011591 (D2/S12, 12 Oct): a zero-spread option says the VALIDATED target ────────────────────────────────────────
+describe('AIE 6129011591: a zero-spread option\'s line says the validated target, never target.value + target.unit alone', () => {
+  const zeroSpreadRun = (p: 0 | 1): Rec => ({ option_comparison: [
+    { option_id: 'hire_a_tech_lead', probability_of_goal: 0.46 },
+    { option_id: 'hire_two_developers', probability_of_goal: p, outcome: { mean: 4, std: 0, p10: 4, p50: 4, p90: 4 } },
+    { option_id: 'carry_on', probability_of_goal: 0 },
+  ] });
+  const lineOf = (g: Rec, p: 0 | 1 = 0): unknown => goalChanceLicenceOf(zeroSpreadRun(p), g, 'productivity', () => false, undefined, g, hiringConstraints(g))
+    ?.withheld_reason_by_option?.hire_two_developers;
+  const level = (goal: Rec): Rec => hiringGraph({ label: 'Development capacity', quantity_frame: 'level',
+    observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction', extractionType: 'explicit' }, ...goal });
+  const LEVEL_BASIS = { ...HIRING_BASIS, quantity_frame: 'level', denominator: 'today’s development capacity (75%)',
+    effect_unit: 'percentage points of capacity per added person, at month three' };
+  const falls = (phrase: string): Rec => ({ reason: 'zero_spread', side: 'falls_short', line: `Falls short of the target: ${phrase}, if today’s figures hold.` });
+  it('productivity (a quantity measured AS a change, +10% of today): "at least 10% higher than today"; both sides', () => {
+    expect(lineOf(hiringGraph(), 0)).toEqual(falls('‘Productivity’ at least 10% higher than today at three months'));
+    expect(lineOf(hiringGraph(), 1)).toEqual({ reason: 'zero_spread', side: 'meets',
+      line: 'Meets the target: ‘Productivity’ at least 10% higher than today at three months, if today’s figures hold.' });
+  });
+  it('capacity (a percentage LEVEL, +10 points): "at least 10 percentage points higher than today", never "10%"', () => {
+    expect(lineOf(level({ goal_target_basis: LEVEL_BASIS }))).toEqual(falls('‘Development capacity’ at least 10 percentage points higher than today at three months'));
+  });
+  it('a RELATIVE +10% on a level quantity: "10% higher than today", never "10 percentage points"', () => {
+    const line = lineOf(level({ goal_threshold_frame: 'change_rel', goal_threshold_raw: 0.1, goal_threshold: 0.1,
+      goal_target_basis: { ...LEVEL_BASIS, target_frame: 'change_rel', target_raw: 0.1, effect_unit: '% of today’s capacity per added person, at month three' } }));
+    expect(line).toEqual(falls('‘Development capacity’ at least 10% higher than today at three months'));
+    expect(JSON.stringify(line)).not.toMatch(/percentage point/);
+  });
+  it('a decrease (at most, −5% of today): its own sign and bound, "at least 5% lower than today"', () => {
+    expect(lineOf(hiringGraph({ goal_threshold_raw: -5, goal_threshold: -0.05, goal_direction: '<=', goal_target_basis: { ...HIRING_BASIS, target_raw: -5 } })))
+      .toEqual(falls('‘Productivity’ at least 5% lower than today at three months'));
+  });
+  it('NEGATIVE — the target cannot be said (no goal label): the option stays withheld with NO zero-spread line, never a bare percentage', () => {
+    const g = hiringGraph({ label: '' });
+    const l = goalChanceLicenceOf(zeroSpreadRun(0), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
+    expect(l).not.toBeNull();
+    expect(l.withheld_option_ids).toContain('hire_two_developers');
+    expect(l.withheld_reason_by_option?.hire_two_developers).toBeUndefined();
+    expect(JSON.stringify(l)).not.toMatch(/(?:Meets|Falls short of) (?:the target: )?\d/);
   });
 });

@@ -150,9 +150,22 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     expect(goal.goal_threshold_raw).toBe(20000);
   });
 
-  it('CONTROL: no stated target → no frame to put a baseline on, so none is written', () => {
-    const m = admitCandidateModel(pricing({ target_stated: false, frame: 'level', value: null, baseline_known: true, baseline_value: 16000 }));
-    expect(m.nodes.find((n) => n.id === GOAL)).not.toHaveProperty('observed_state');
+  // Batch F T5 D6 (DL 12 Oct, `t5-d6-no-target-goal-level.test.ts`): a goal with no target keeps the level the user stated,
+  // as theirs; it was dropped with no line. What this control kept stays true: no target, so no threshold is written, and
+  // nothing the user did not state (Olumi's estimate) is.
+  it('CONTROL: no stated target → no threshold is written; the user\'s stated level is kept, as theirs (T5 D6)', () => {
+    const goal = admitCandidateModel(pricing({ target_stated: false, frame: 'level', value: null, baseline_known: true, baseline_value: 16000 }))
+      .nodes.find((n) => n.id === GOAL) as Record<string, any>;
+    expect(goal).not.toHaveProperty('goal_threshold');
+    expect(goal).not.toHaveProperty('goal_threshold_raw');
+    expect([goal.observed_state?.raw_value, goal.observed_state?.source]).toEqual([16000, 'brief_extraction']);
+  });
+
+  it('CONTROL: no stated target, and the level is Olumi\'s estimate → nothing is written', () => {
+    const goal = admitCandidateModel(pricing({ target_stated: false, frame: 'level', value: null, baseline_known: true, baseline_value: 16000,
+      baseline_provenance: 'inferred' })).nodes.find((n) => n.id === GOAL);
+    expect(goal).not.toHaveProperty('observed_state');
+    expect(goal).not.toHaveProperty('goal_threshold');
   });
 
   it('CONTROL: a current level ABOVE the target (a decrease the >= frame cannot carry) is withheld, and said', () => {

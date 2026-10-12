@@ -30,7 +30,7 @@
  */
 import { z } from 'zod';
 import type { EligibleIntervention } from '../turn-context/guidance-wire.js';
-import { composeEligibleIntervention } from './eligible-intervention-reply.js';
+import { withInterventionAction } from './eligible-intervention-reply.js';
 import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
@@ -149,8 +149,6 @@ export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope
 export interface ReplyComposeInput {
   readonly eligibleIntervention?: EligibleIntervention;
   readonly interventionActionLabel?: string;
-  /** E6 Why-once: the policy's Why? was already said on this state (`selectTurnGuidanceShown`); the action stays. */
-  readonly interventionWhySaid?: boolean;
   /** The final prose, after every gate: exactly what would ship without the composer. */
   readonly text: string;
   /** Only a typed Draft mutation or Run/Explain turn opts into the H/W/E/N face contract. */
@@ -179,6 +177,11 @@ export interface ReplyComposeInput {
    * carries no chance-status marker (the Run reply and Results already say it), so the user's answer leads.
    */
   readonly notRunOrExplain?: true;
+  /**
+   * Score run 2 hidden answers (DL 12 Oct; PL 6127523574 b4): a write this turn did not apply (the route's typed tool
+   * outcome: a refusal). The reply's own words say what was not recorded, so none of them folds under More detail.
+   */
+  readonly notRecorded?: true;
   /** Exact questions already carried by this reply's pending/suggested typed control. */
   readonly typedControlQuestions?: readonly string[];
   /** Node labels resolve narrator mentions to the typed directed link subjects. */
@@ -212,7 +215,7 @@ export interface ReplyComposition {
   readonly text: string;
   readonly shape: AnswerShape | null;
   readonly outcome: 'already_in_shape' | 'shaped' | 'kept_whole';
-  readonly reason?: KeepWholeReason | 'empty' | 'no_headline' | 'obligation_unlocated' | 'face_over_cap' | 'lead_in_split' | 'invariant_failed';
+  readonly reason?: KeepWholeReason | 'empty' | 'no_headline' | 'obligation_unlocated' | 'face_over_cap' | 'lead_in_split' | 'invariant_failed' | 'not_recorded';
   readonly measure?: ReplyMeasure;
 }
 
@@ -633,17 +636,31 @@ function expectedSentences(text: string, dropped: readonly string[]): string[] |
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const composed = composeNormalReplyShape(input);
-  if (input.eligibleIntervention !== undefined && composed.reason === 'proposal') {
-    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, false, true, input.interventionWhySaid === true);
-  }
-  if (input.eligibleIntervention !== undefined && (input.profile ?? 'coaching') === 'coaching') {
-    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, input.faceContract !== undefined,
-      false, input.interventionWhySaid === true);
-  }
+  // A coaching reply carries RC's selected action; a whole proposal and a Run/Draft face keep every byte. The policy's
+  // Why? is never the reply's (technique (c)): it stays with the guidance row.
+  if (input.eligibleIntervention !== undefined && composed.reason !== 'proposal' && (input.profile ?? 'coaching') === 'coaching'
+    && input.faceContract === undefined) return withInterventionAction(composed, input.interventionActionLabel);
   return composed;
 }
 
+/**
+ * Score run 4 U2-1 (DL 12 Oct, R4): a reply that ships whole has no "More detail", so "Not shown yet; why is under More
+ * detail" would point at nothing (capacity 1): it never ships there. The reasons it stood for are in the whole text
+ * already (one reason is said as the line itself; several are said below the pointer, in their own words).
+ */
 function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
+  const composed = composeMarkedReplyShape(input);
+  if (composed.shape !== null || input.faceContract === undefined || input.keepWhole !== undefined
+    || input.profile === 'method_step' || input.profile === 'proposal') return composed;
+  const pointer = (line: string): boolean => line.replace(/^\s*[-•*]\s+/, '').trim() === WITHHOLD_FALLBACK_MARKER;
+  const paras = composed.text.split('\n\n');
+  if (!paras.some(para => para.split('\n').some(pointer))) return composed;
+  const kept = paras.map(para => para.split('\n').filter(line => !pointer(line)).join('\n'))
+    .filter((para, i) => para !== '' || paras[i] === '');
+  return { ...composed, text: kept.join('\n\n') };
+}
+
+function composeMarkedReplyShape(input: ReplyComposeInput): ReplyComposition {
   const faceContract = input.faceContract !== undefined;
   const canMark = input.keepWhole === undefined && input.profile !== 'method_step' && input.profile !== 'proposal';
   const foldedInput = foldQuotes(input.text);
@@ -666,7 +683,32 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
       return [{ ...o, text: sentence ?? written }];
     }) : [];
   const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
-  const chanceMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined : markerForDisclosure(chanceDisclosure);
+  // ⭐ Score run 4 U2-1 (DL 12 Oct, R4): "Not shown yet; why is under More detail" pointed at nothing (capacity 1–3). The
+  // withheld cells' own licensed words (`cell.why`, the canonical view's display-safe line) replace it when the cells record
+  // exactly ONE reason (one cell can record several under one line, so reasons are counted, not lines): the face says that
+  // reason, once. With several, the pointer stays, and each reason the reply does not already carry is said below it.
+  const withheldCells = (input.chanceCells ?? []).filter((cell): cell is Extract<CanonicalAnalysisCell, { kind: 'withheld' }> => cell.kind === 'withheld');
+  // Paul's test (DL 13:0xZ): the change adds no ask. A line that ends on its own question ("… What is quarterly revenue
+  // today?") gives its reason only: its declarative sentences, whole.
+  const reasonOf = (why: unknown): string => (typeof why !== 'string' ? ''
+    : sentencesOf(why.trim()).filter(sentence => !QUESTION_END.test(sentence.trim())).join(' ').trim());
+  const whys = [...new Set(withheldCells.map(cell => reasonOf(cell.why)).filter(why => why !== ''))];
+  const recordedReasons = new Set(withheldCells.flatMap(cell => (Array.isArray(cell.reasons) ? cell.reasons : [])
+    .map(reason => `${reason.code}\u0000${reason.message ?? ''}`)));
+  const typedMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined : markerForDisclosure(chanceDisclosure);
+  // A reason is already said when the reply carries its line, or the words after the view's "Not shown." lead (as a
+  // sentence of its own, capitalised): then THAT span is the reason, said once, never a second copy beside it.
+  const said = (why: string): string | undefined => {
+    const rest = why.replace(/^Not shown[.:]\s+/u, '');
+    for (const words of [why, rest, rest.charAt(0).toUpperCase() + rest.slice(1)]) {
+      const at = foldedInput.indexOf(foldQuotes(words));
+      if (at !== -1) return input.text.slice(at, at + words.length);
+    }
+    return undefined;
+  };
+  const oneReason = typedMarker === WITHHOLD_FALLBACK_MARKER && recordedReasons.size === 1 && whys.length === 1 ? whys[0]! : undefined;
+  const chanceMarker = oneReason === undefined ? typedMarker : said(oneReason) ?? oneReason;
+  const pointedWhys = chanceMarker === WITHHOLD_FALLBACK_MARKER ? whys.filter(why => said(why) === undefined) : [];
   const markerObligations = disclosures.filter(o => o.disclosure?.kind !== 'withhold').filter(o => o.lead === true || (o.disclosure?.kind === 'robustness' && !(o.subjects?.length))
     || (input.obligations ?? []).some(finding => finding.lead === true && finding.role === 'evidence'
       && (o.subjects ?? []).some(subject => finding.subjects?.includes(subject)))).map((o): FaceObligation => ({ ...o, text: markerForDisclosure(o.disclosure!), disclosure: undefined }));
@@ -686,7 +728,7 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
   const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
     ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
-  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonWithholdDetails, ...widenDetail]
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...pointedWhys, ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonWithholdDetails, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
   const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
   const faceHostLines = !faceContract || !canMark ? [] : [
@@ -807,6 +849,9 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const whole = { ...initialMeasure, said_once_dropped: [] };
   if (input.keepWhole !== undefined) return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.keepWhole, measure: whole };
   if (input.profile === 'method_step' || input.profile === 'proposal') return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.profile, measure: whole };
+  // Score run 2 (deadline 13): "… so nothing was recorded." folded under More detail behind a full face. A write this turn
+  // did not apply (typed by the route, never read from the words): the reply ships whole, so what was not recorded is seen.
+  if (!faceContract && input.notRecorded === true) return { text, shape: null, outcome: 'kept_whole', reason: 'not_recorded', measure: initialMeasure };
   if (owed.some((o) => o.text.length === 0 || o.text.includes('\n'))) {
     return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated', measure: initialMeasure };
   }
@@ -987,7 +1032,35 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
       addExceptionsAfter(chance);
     }
     faceBullets.push(...robustnessPoints);
-    for (const line of [horizon, withhold, widenedRisk, whatChanges, estimates, ask]) {
+    for (const line of [horizon, withhold, widenedRisk, whatChanges]) {
+      if (line !== undefined && line !== headline && faceSet.has(line) && !faceBullets.includes(line)) faceBullets.push(line);
+    }
+    // ⭐ Score run 2 hidden answers (DL 12 Oct; PL 6127523574 b4): with no chance on the face (it is withheld) — or a write
+    // this turn did not apply — the reply's own answer is the face's content, never folded behind the status lines ("Not
+    // shown yet; why is under More detail" with the answer under it: capacity 1 and 3b; hiring 7b's "Nothing you entered
+    // changed."). Added after the optional E/W demotion, so every existing face line stays exactly as it was. Typed lines,
+    // other questions (D-12) and a restated withheld cause still fold. Label, never withhold.
+    // Score run 3 (DL 12 Oct, R4): so does a turn that neither ran nor explained a Run and only sits beside one (hiring
+    // 11/12, marketing 6 took the Run face for a conversational question, and only the first sentence was visible).
+    // A typed finding that owns the next step (the guided invitation, R3 GP) IS the answer: its face stays as designed.
+    const answerOnFace = nextStepFinding === undefined && ((!horizonBesideChance && (input.chanceCells ?? []).some((cell) => cell.kind === 'withheld'))
+      || input.notRecorded === true || input.notRunOrExplain === true);
+    if (answerOnFace) {
+      // The narrator's own words only: every typed line keeps the place its producer gave it (a withheld reason stays where
+      // the marker says "why is under More detail"; a progress receipt and a status line stay as the route typed them).
+      const fill = (u: Unit): boolean => u.obligation === undefined && !faceSet.has(u) && u !== chanceLeadIn
+        && eligible(u) && !controlAsk(u) && !isQuestionUnit(u);
+      // A source line joins the face whole or not at all, and never as glued fragments (a typed reason typed without its
+      // full stop): what stays below keeps its own sentence intact, so every input sentence is still derived as written.
+      const whole = new Set(units.filter((u) => units.every((v) => v.line !== u.line || faceSet.has(v)
+        || (fill(v) && v.joinBefore !== ''))).map((u) => u.line));
+      for (const u of units) {
+        if (!fill(u) || !whole.has(u.line)) continue;
+        faceSet.add(u);
+        faceBullets.push(u);
+      }
+    }
+    for (const line of [estimates, ask]) {
       if (line !== undefined && line !== headline && faceSet.has(line) && !faceBullets.includes(line)) faceBullets.push(line);
     }
     faceWords = faceWordCount();

@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { composeReplyShape } from '../compose-reply.js';
-import { eligibleInterventionFor, type GuidanceWire } from '../../turn-context/guidance-wire.js';
+import { eligibleInterventionFor, guidanceWireFor, type GuidanceWire } from '../../turn-context/guidance-wire.js';
 import policy from '../../guidance/reasoning-interventions.json';
 
 // The served guidance row, verbatim from hiring `turns/10.json` `.response_body.guidance.slot1`.
@@ -45,13 +45,17 @@ describe('R3-1: the Why? disclosure ships as text the chat renders, never as HTM
     ['coaching reply with the row\'s action', { interventionActionLabel: 'Give your estimate' }],
     ['Run face', { faceContract: 'run' as const }],
     ['Draft face', { faceContract: 'draft' as const }],
-  ])('%s: no "<details"/"<summary"; "Why? <science words>" once, as the last paragraph', (_name, extra) => {
+  ])('%s: no "<details"/"<summary"; the science words ride the guidance row, never the reply (technique (c))', (_name, extra) => {
     const carried = composeReplyShape({ text: SERVED_TEXT, profile: 'coaching', eligibleIntervention: eligibleInterventionFor(wire())!, ...extra });
     expect(carried.text).not.toContain('<details');
     expect(carried.text).not.toContain('<summary');
     expect(carried.text).not.toContain('</');
-    expect(occurrences(carried.text, WHY)).toBe(1);
-    expect(carried.text.endsWith(`\n\nWhy? ${WHY}`), carried.text).toBe(true);
+    // Technique (c) (AIE 6130197656 §3, DL 12 Oct; re-pinned from "Why? once, as the last paragraph"): the reply never
+    // carries the method's Why?; the served row carries it as its own detail, the same words byte for byte.
+    expect(occurrences(carried.text, WHY)).toBe(0);
+    expect(carried.text).not.toContain('Why?');
+    const { item_ref: _ref, ...row } = structuredClone(SERVED_SLOT1);
+    expect((guidanceWireFor({ slot1: row } as never, null)!.slot1 as { science?: string }).science).toBe(WHY);
     expect(carried.text).toContain('Should your 10% improvement target mean more time available for development');
   });
 

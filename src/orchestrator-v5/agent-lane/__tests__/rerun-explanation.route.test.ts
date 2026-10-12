@@ -47,6 +47,18 @@ const WHY = 'The model now shows a provisional comparison of the options.';
 const VIEW = { view: 'Before comparing, test how much sprint capacity moves the goal.', reasoning: 'It needs the least new capacity.', confirm_step: 'Size the sprint capacity link.' };
 const labels = new Map(GRAPH.nodes.map((n) => [n.id, n.label] as const));
 const FALLBACK = rerunExplanationPlan(RUN_DELTA, (id) => labels.get(id), ['AI Reporting Sprint'], false)!.fallback;
+/**
+ * R4 (DL 12 Oct; score runs 2/3: the answer is on the face, only the Why below): beside a withheld chance, Olumi's code
+ * line is the reply's answer, so its sentences are face bullets, each said once (no longer one paragraph under More detail).
+ */
+function expectFallbackOnFace(body: { assistant_text: string; _answer_shape?: unknown }): void {
+  const shape = body._answer_shape as AnswerShape | undefined;
+  const face = shape === undefined ? body.assistant_text : [shape.headline, ...shape.bullets].join('\n');
+  for (const sentence of sentencesOf(FALLBACK)) {
+    expect(body.assistant_text.split(sentence).length, sentence).toBe(2);
+    expect(face, sentence).toContain(sentence);
+  }
+}
 
 type Row = Record<string, unknown>;
 const rows: Row[] = [];
@@ -139,13 +151,13 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     const e1 = randomUUID();
     const explained = (await explainTurn(e1, first)).json() as Body;
     expect(modelCalls, 'the model really answered').toBe(1);
-    expect(explained.assistant_text).toContain(FALLBACK);
+    expectFallbackOnFace(explained);
     expect(explained.assistant_text).not.toMatch(/\brose\b/);
     expect(rows.length, 'the control: rows were written').toBeGreaterThan(0);
     expect(JSON.stringify(rows)).not.toMatch(/\brose\b/);
     const replay = (await explainTurn(e1, first)).json() as Body;
     expect(modelCalls, 'a replay calls no model').toBe(1);
-    expect(replay.assistant_text).toContain(FALLBACK);
+    expect(replay.assistant_text).toBe(explained.assistant_text);
     expect(replay.assistant_text).not.toMatch(/\brose\b/);
   });
 
@@ -153,7 +165,9 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     modelText = WHY;
     const first = (await runTurn(randomUUID())).json() as Body;
     const explained = (await explainTurn(randomUUID(), first)).json() as Body;
-    expect(explained.assistant_text).toContain(`${FALLBACK}\n\n${WHY}`);
+    expectFallbackOnFace(explained);
+    const last = sentencesOf(FALLBACK).at(-1)!;
+    expect(explained.assistant_text.indexOf(WHY), 'the clean sentence is sent after Olumi\'s code line').toBeGreaterThan(explained.assistant_text.indexOf(last));
   });
 
   /**
@@ -173,11 +187,21 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     expect(shape, explained.assistant_text).toBeDefined();
     const finding = goalChanceWithheldForAgent(SERVED.block, GRAPH)!.say;
     expect(finding).toBe('This run doesn’t yet show each option’s chance of meeting your goal.');
-    expect(WITHHOLD_FALLBACK_MARKER).toBe('Not shown yet; why is under More detail');
-    expect(shape!.headline).toBe(WITHHOLD_FALLBACK_MARKER);
+    // Score run 4 U2-1 (DL 12 Oct; re-pinned from the pointer headline): the withheld cells' ONE recorded reason (the Run's
+    // GOAL_FIGURES_TARGET_NOT_TESTABLE words, read by code) leads in its own words: its declarative sentences, since the
+    // change adds no ask. "Not shown yet; why is under More detail" is never shown.
+    const recorded = ((SERVED.block.enrichment as { inference_warnings: { code: string; message: string }[] }).inference_warnings)
+      .find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!.message;
+    const reason = sentencesOf(recorded).filter((s) => !s.trim().endsWith('?')).join(' ');
+    expect(recorded.endsWith('What is quarterly revenue today?'), 'the control: the recorded words end on their own question').toBe(true);
+    expect(shape!.headline).toBe(reason);
+    expect(explained.assistant_text).not.toContain(WITHHOLD_FALLBACK_MARKER);
+    expect(explained.assistant_text, 'no question is added').not.toContain('What is quarterly revenue today?');
     expect([shape!.headline, ...shape!.bullets].join('\n')).not.toContain(finding);
     expect(shape!.detail.split(finding)).toHaveLength(2);
-    expect(shape!.detail).toContain(FALLBACK);
+    // R4: Olumi's code line is the answer, so it is on the face (each sentence once), not under More detail.
+    expectFallbackOnFace(explained);
+    for (const sentence of sentencesOf(FALLBACK)) expect(shape!.detail).not.toContain(sentence);
     expect(explained.assistant_text).toBe(deriveAnswerTextFromShape(shape!));
     expect(explained.assistant_text.split(finding)).toHaveLength(2);
     for (const line of modelText.split('\n').filter((l) => l.trim() !== '')) {
@@ -192,7 +216,7 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     modelText = JSON.stringify({ answer: WHY, provisional_view: view });
     const first = (await runTurn(randomUUID())).json() as Body;
     const explained = (await explainTurn(randomUUID(), first)).json() as Body;
-    expect(explained.assistant_text).toContain(FALLBACK);
+    expectFallbackOnFace(explained);
     expect(explained._agent.provisional_view !== undefined, JSON.stringify(explained._agent.provisional_view ?? null)).toBe(shown);
     expect(JSON.stringify(explained)).not.toMatch(/\brose\b/);
   });

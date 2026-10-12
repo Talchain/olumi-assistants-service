@@ -25,7 +25,7 @@ import { describe, it, expect } from 'vitest';
 import { scalingRatio, timingIt } from '../../../../../tests/helpers/scaling-ratio.js';
 import {
   composeReplyShape, shapeFromDerivedAnswerText, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
-  HORIZON_MARKER, ROBUSTNESS_MARKER, WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE,
+  HORIZON_MARKER, ROBUSTNESS_MARKER, WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE, WITHHOLD_FALLBACK_MARKER,
   type ReplyComposition, type FaceObligation,
 } from '../compose-reply.js';
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
@@ -1422,20 +1422,32 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     ['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', "Not shown: how MRR is worked out isn't confirmed"],
     ['GOAL_FIGURES_PRODUCT_NOT_READ', "Not shown: how MRR is worked out isn't confirmed"],
     ['GOAL_FIGURES_PLACEHOLDER_PATH', "Not shown: some relationships aren't sized yet"],
-    ['reason_not_recorded', 'Not shown yet; why is under More detail'],
-    ['NEW_UNMAPPED_CODE', 'Not shown yet; why is under More detail'],
+    ['reason_not_recorded', null],
+    ['NEW_UNMAPPED_CODE', null],
   ] as const)('R3 withheld Run: canonical %s reason supplies the exact marker, independently of the note words', (code, marker) => {
     // The note deliberately does not provide the marker noun phrase: the typed source owns that choice.
     const note = 'This figure cannot be shown from the current model; the recorded inputs need your check.';
+    // The cell as the canonical view writes it (`canonical-analysis-view.ts`): the ≤8-word face, and its reason as `why`.
     const c = composeReplyShape({ faceContract: 'run', text: [chance, context, note, ask].join('\n\n'), graph: { nodes: [{ kind: 'goal', label: 'MRR' }] },
-      chanceCells: [{ kind: 'figure', display: '34%' }, { kind: 'withheld', why: 'Chance not shown yet', face: note, reasons: [{ code, message: note }] }], obligations: [
+      chanceCells: [{ kind: 'figure', display: '34%' }, { kind: 'withheld', face: 'Chance not shown yet', why: note, reasons: [{ code, message: note }] }], obligations: [
       { role: 'evidence', text: chance, lead: true, subjects: ['mrr'] },
       { role: 'withheld_reason', text: note, subjects: ['mrr'], disclosure: { kind: 'withhold', cause: 'other', goalLabel: 'MRR' } },
       { role: 'ask', text: ask },
     ] });
     expect(c.shape!.headline).toBe(chance);
-    expect(c.shape!.bullets).toEqual([marker, ask]);
-    assertDisclosure(c, marker, note);
+    if (marker !== null) {
+      expect(c.shape!.bullets).toEqual([marker, ask]);
+      assertDisclosure(c, marker, note);
+      return;
+    }
+    // Score run 4 U2-1 (DL 12 Oct): a cause the face has no fixed words for, with ONE reason, says that reason on the face
+    // in its own words, once: never "Not shown yet; why is under More detail".
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.bullets).toEqual([note, ask]);
+    expect(c.shape!.detail).not.toContain(note);
+    expect(count(c.text, note), 'said once').toBe(1);
+    expect(c.text).not.toContain(WITHHOLD_FALLBACK_MARKER);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
   });
 
   it.each(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'] as const)(
@@ -1447,7 +1459,8 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
         chanceCells: [{ kind: 'withheld', why: 'Chance not shown yet', face: note, reasons: [{ code, message: note }] }],
         obligations: [{ role: 'withheld_reason', text: note }, { role: 'ask', text: ask }] });
       expect(c.shape!.headline).toBe(marker);
-      expect(c.shape!.bullets).toEqual([ask]);
+      // Score run 2 hidden answers (DL 12 Oct): with no chance on the face, the reply's own words join it before the ask.
+      expect(c.shape!.bullets).toEqual([context, ask]);
       assertDisclosure(c, marker, note);
     });
 

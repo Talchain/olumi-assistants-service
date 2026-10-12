@@ -33,7 +33,7 @@ export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js
  */
 import {
   GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
-  readOptionResultSources,
+  goalFiguresWithheldWarnings, readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures, withholdStatusQuoIntervals } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
@@ -53,9 +53,9 @@ import { resolveGoalDirection } from './goal-direction.js';
 import {
   BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, periodEndWords, statusQuoAssumptionWords, statusQuoMovedWords,
   statusQuoProjectionWords, statusQuoRowWords,
-  targetChanceWords, type GoalTargetBasis,
+  targetChanceWords, targetPhraseWords, type GoalTargetBasis,
 } from './goal-target-basis.js';
-import { goalTargetsBlockOf, readGoalTargetsBlock, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
+import { goalTargetsBlockOf, readGoalTargetsBlock, retainedConditionsLine, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
 import {
   displayedPctAt, displayRoundingFor, goalChanceDisplayClass, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
   type GoalChanceDisplayRounding, type GoalChanceDriver, type GoalChanceNoDriverReason, type GoalChancePrecision,
@@ -223,6 +223,11 @@ export interface GoalChanceConstraintInputs {
   readonly sentConstraints?: unknown;
   /** What CEE sent PLoT for this Run: binds a deadline goal's engine-read chance (`goal-own-constraint-chance.ts`). */
   readonly sentRun?: SentRunInputs;
+  /**
+   * Batch F: this Run's per-row verdicts (`constraint_verdict.perLimit`, every ratified row, targets included), so a withheld
+   * joint or target names the cause CEE established. Absent: only PLoT's own `joint_withheld` reason is read.
+   */
+  readonly limitVerdicts?: unknown;
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -232,7 +237,10 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
  * Science §(ab)(2) face words for a zero-spread option (93 @0ecd69e4, ruled (a): never " / month" on the face):
  *  · the goal's level projected from monthly rates (an accumulation carrier): "Meets £20,000 a month by month 12 if today’s
  *    rates hold." / "Falls short of £20,000 a month by month 12 if today’s rates hold.";
- *  · no carrier and no horizon: "Meets £20,000 a month if today’s figures hold." / "Falls short of … if today’s figures hold.";
+ *  · no carrier and no horizon (AIE 6129011591, D2/S12): "Meets the target: ‘MRR’ at least £20,000 a month, if today’s figures
+ *    hold." / "Falls short of the target: {validated target phrase}, if today’s figures hold." — the phrase is the chance
+ *    words' own (`targetPhraseWords`: frame, comparator, sign, and only an already licensed period), never target.value +
+ *    target.unit alone; where it cannot be said, no line (never a bare percentage level);
  *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
  */
 /**
@@ -315,20 +323,65 @@ function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: bo
 
 function zeroSpreadReasons(
   sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown, envelope: unknown,
+  target: { readonly phrase: string | undefined; readonly change: boolean },
 ): Record<string, GoalChanceZeroSpread> {
   const verdict = goalHorizonVerdict(graph, envelope);
   const rates = ordinaryTimingOf(graph, envelope).forecast;
   const months = heldGoalHorizonMonths(goal);
   // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
   const figure = sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
+  const phrase = target.phrase?.replace(/ \/ (day|week|month|quarter|year)\b/g, ' a $1');
   const out: Record<string, GoalChanceZeroSpread> = {};
   for (const [id, side] of Object.entries(sides)) {
-    const tail = rates ? `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.` : ' if today’s figures hold.';
+    const tail = `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.`;
+    // A change target is never said as its bare figure (a +10-point change is not "10%"): on rates it has no line.
     const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine()
-      : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`;
-    out[id] = { reason: 'zero_spread', side, line };
+      : rates ? (target.change ? undefined : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`)
+        : phrase === undefined ? undefined
+          : `${side === 'meets' ? 'Meets the target' : 'Falls short of the target'}: ${phrase}, if today’s figures hold.`;
+    if (line !== undefined) out[id] = { reason: 'zero_spread', side, line };
   }
   return out;
+}
+
+/**
+ * ⭐ Post-B (DL 12 Oct; AIE #94 6123937762 item 3): the goal's stated target was not sent to the engine as specified
+ * (`targetSent`, R5-5 (b)). ONE predicate: the licence refuses on it, and the Run says why ({@link withholdForUnsentGoalTarget})
+ * instead of saying nothing. Only where the run-wide target is otherwise readable (`goalChanceTargetCause` null), so another
+ * cause keeps its own words. A goal with several targets whose own figure was sent keeps the joint's line (`jointWithheldLine`).
+ */
+export function goalTargetNotSent(graph: unknown, goalId: unknown, constraints: GoalChanceConstraintInputs = {}): boolean {
+  if (goalChanceTargetCause(graph, goalId) !== null) return false;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  return goal !== undefined && statedGoalTargetOf(graph as Rec, goal) !== null && !targetSent(graph as Rec, goal, constraints);
+}
+
+/** The AIE's words for one target (#94 6123937762 item 3): true for a target left out and for one sent with a changed figure. */
+export function unsentGoalTargetWords(label: string): string {
+  return `Your stated target for ‘${label}’ was not used as specified in this analysis, so its chance is not shown.`;
+}
+
+/**
+ * The Run says why the licence refused ({@link goalTargetNotSent}) through the ONE goal-figure seam, with the existing reason
+ * (`figure_not_preserved`): the outcome and the ordering stay. No ask is added. Every earlier withhold keeps its own reason.
+ */
+export function withholdForUnsentGoalTarget<E>(envelope: E, graph: unknown, goalId: unknown, constraints: GoalChanceConstraintInputs = {}): E {
+  if (!isRec(envelope) || !goalTargetNotSent(graph, goalId, constraints) || goalFiguresWithheldWarnings(envelope).length > 0) return envelope;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const label = typeof goal?.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'your goal';
+  const scored = [...new Set(readOptionResultSources(envelope).flat().flatMap((r) => {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    return id === undefined ? [] : [id];
+  }))];
+  if (scored.length === 0) return envelope;
+  const words = unsentGoalTargetWords(label);
+  // `detail.reason` is CEE-local (as `goal_level_olumi_estimate`); the UI renders `message` for this code.
+  return withholdOptionGoalFigures(envelope, new Set(scored), {
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: words, say: words,
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: 'figure_not_preserved' },
+  }, { keepOutcome: true, keepOrdering: true });
 }
 
 /** R5-5 (b): whether the Run sent the threshold of the target the goal states (see the guard in `goalChanceLicenceOf`). */
@@ -372,7 +425,7 @@ export function goalChanceLicenceOf(
   // (`targetSent`): a figure the goal node holds is sent as its finite normalised threshold on the graph this Run scored (none:
   // a reading refused for its conditions, or a cap that could not be resolved); a target that is the goal's own limit row is
   // sent as that row (checked where the Run's request is known).
-  if (goal === undefined || !targetSent(graph as Rec, goal, constraints)) return null;
+  if (goal === undefined || goalTargetNotSent(graph, goalId, constraints)) return null;
   const basis: GoalTargetBasis | undefined = goal === undefined ? undefined : goalTargetBasisOf(goal);
   // ⛔ Ruling 12 / amendment 2: a change's "at three months" needs its effects stated at that month; never steady state.
   // D3: where the basis holds they are NOT stated, the Run says why (`withholdForPeriodEndEffects`), never a silent gap.
@@ -550,7 +603,13 @@ export function goalChanceLicenceOf(
   // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
   // reference: withheld with that reason, never relabelled.
   const withheldReasons: Record<string, GoalChanceWithheldReason> = {
-    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope) : {}),
+    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope, {
+      change: changeFrame !== undefined,
+      // AIE 6129011591: the validated target, as the chance words say it; only a period they already license (ruling 12).
+      phrase: goalLabel === undefined ? undefined : targetPhraseWords({ label: goalLabel, frame: changeFrame ?? 'level', comparator: held,
+        value: target.value, unit: target.unit, quantityFrame: readingFrame,
+        ...(basis !== undefined && basis.effects_at_period_end ? { basis } : {}) }),
+    }) : {}),
     ...(sqReading === 'moved' && statusQuoId !== undefined && withheld.includes(statusQuoId) && goalLabel !== undefined
       ? { [statusQuoId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords([goalLabel]) } } : {}),
   };
@@ -819,6 +878,9 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
     ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint: allAssumed || jointMovedIds.size > 0, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
     ...(c.basis !== undefined ? { basis: c.basis } : {}),
+    // Batch F: the causes CEE established per row, and the graph the Run SENT (where a target's level today is read).
+    ...(c.constraints.limitVerdicts !== undefined ? { limitVerdicts: c.constraints.limitVerdicts } : {}),
+    ...(c.constraints.sentRun?.graph !== undefined ? { sentGraph: c.constraints.sentRun.graph } : {}),
   });
   if (block === null) return l;
   const {
@@ -860,11 +922,18 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     notes.push(n);
   }
   if (assumedNames.length > 0 && !assumptionSaid) notes.unshift(statusQuoAssumptionWords(assumedNames, c.basis));
+  // ⭐ BATCH F (b): each stated target whose own chance is not shown is said, with its reason and next step — first among the
+  // notes, so it sits beside the targets that are shown (every reader already says the licence's notes, in order).
+  notes.unshift(...(block.withheld_targets ?? []).map((t) => t.line));
   // ⭐ AIE C clause 3 (12 Oct): a condition the drafter RETAINED because this contract cannot represent it (a distinct
   // period or reference) is said beside the joint, never claimed by it. ⛔ Re-scope (r2 BLOCKING 2): EVERY one is said — a
   // retained condition sharing a figure with a target the joint names (the same 15% over a distinct period) is not that target.
-  const covers = partialGoalWords(targetNames, c.alsoRequired);
-  if (covers !== undefined && targetNames.length > 0) notes.push(covers);
+  // ⛔ BATCH F (c, W4): nor is it said to be EXCLUDED. Beside several targets nothing binds a retained condition to a target by
+  // identity (the drafter typed "secure 20 new customers within the first 3 months" AND the ‘New customers in first 3 months’
+  // target row, row a5ada94b), so "It does not include: …" could exclude a target the chance does include. Each is still said,
+  // byte for byte, claimed neither in nor out (words pending AIE).
+  const retained = targetNames.length > 0 ? retainedConditionsLine(c.alsoRequired) : undefined;
+  if (retained !== undefined) notes.push(retained);
   // The status quo's own line is said only where EVERY target's reference is the same-draw one (never universal by default);
   // a status quo whose own share disagrees with that reference is withheld with that reason.
   // R5-3: "no change" only where EVERY condition of the joint is on the same-draw reference — and then it names every one.

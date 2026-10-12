@@ -1,0 +1,201 @@
+{
+  "source": "recovery/live/runs/2026-10-12T153555Z (score run 3; served CEE 3fdf0f3866715aa0e84f4af56844e93efc6ee956 = C #2969, UI a9a5c26fc918abf687d5449b80b21daed183b35a); log fields from the served CEE staging logs (Render, read-only) by turn_id/request_id",
+  "cases": {
+    "hiring_11": {
+      "capture": "hiring/turns/12.json",
+      "capture_sha256": "543bba05e977ccd385c25b7ca8c9db529cfc15aa8647966eed5be34ca8a595b0",
+      "judge": "C6/U3 hiring step 11 (DL 12 Oct: the update list is wire-only)",
+      "user_message": "What updates do we need to make based on this, then?",
+      "turn_id": "de230f18-524b-4093-a5e9-81d59a645219",
+      "request_id": "d2ed5542-85fb-455e-8544-23143f2eb689",
+      "assistant_text": "We should add your time split as a capacity input, not treat it as productivity itself.\n\n- Add non-development time as a separate factor.\n- Clarify how each hire changes that time.\n- Define monthly output and acceptable quality.\n\nOlumi’s **100% “Delivery capacity” baseline** means today’s capacity—not 100% coding time—so we shouldn’t replace it with 70–80%. Your 20–30% range isn’t represented in the model.\n\nThis comparison turns on the link from ‘Tech leads hired’ to ‘Leadership capacity’, whose strength isn't sized in the model yet. Set it to see how much it matters.\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>",
+      "text_sha256": "66513854a7e0858b482d4e29892b79be819e9237b28e701954498d25ebf58d12",
+      "served_shape": {
+        "headline": "We should add your time split as a capacity input, not treat it as productivity itself.",
+        "bullets": [],
+        "detail": "- Add non-development time as a separate factor.\n- Clarify how each hire changes that time.\n- Define monthly output and acceptable quality.\n\nOlumi’s **100% “Delivery capacity” baseline** means today’s capacity—not 100% coding time—so we shouldn’t replace it with 70–80%. Your 20–30% range isn’t represented in the model.\n\nThis comparison turns on the link from ‘Tech leads hired’ to ‘Leadership capacity’, whose strength isn't sized in the model yet. Set it to see how much it matters.\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>"
+      },
+      "slot1": {
+        "policy_id": "RC-STRENGTHEN-ITEM",
+        "variant": "S3L",
+        "label": "Give your estimate"
+      },
+      "tool_calls": [],
+      "route_face_contract": "run",
+      "served_composer_log": {
+        "outcome": "shaped",
+        "profile": "coaching",
+        "obligations": 3,
+        "words_in": 93,
+        "units_in": 7,
+        "bullets_in": 3,
+        "questions_in": 0,
+        "face_bullets": 0,
+        "detail_units": 6,
+        "face_words": 16
+      },
+      "served_leader_gate_log": {
+        "dropped_sentences": 1,
+        "withheld_reason": "goal_path_unsized",
+        "original_length": 516,
+        "projected_length": 574
+      }
+    },
+    "hiring_12": {
+      "capture": "hiring/turns/13.json",
+      "capture_sha256": "1ed8e22019ee2c638d90ee86747e883056ac9b742c7b7418f3dd2cb0e97352b5",
+      "judge": "C6/U3 hiring step 12 (\"I need one clarification…\" never says what to answer)",
+      "user_message": "Okay, make these updates now.",
+      "turn_id": "7bd39459-c2b8-4fc9-862d-86d7d507255e",
+      "request_id": "efc4f985-0948-4ae3-a389-fddd621d7810",
+      "assistant_text": "I need one clarification before I can prepare a faithful update.\n\n- Keep “Delivery capacity” at today’s relative baseline.\n- Add non-development time as a separate factor.\n- Leave hiring effects and quality measures unresolved.\n\nThe available update stores one starting percentage, not your full **20–30% range**. I shouldn’t silently choose a midpoint or invent how either hire changes it. Nothing has been changed yet.\n\nThis comparison turns on the link from ‘Tech leads hired’ to ‘Leadership capacity’, whose strength isn't sized in the model yet. Set it to see how much it matters.\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>",
+      "text_sha256": "96506b1354fd8d7f192afc7672f61b9a2fd1c01c6e18a8eb466f652ae400049f",
+      "served_shape": {
+        "headline": "I need one clarification before I can prepare a faithful update.",
+        "bullets": [],
+        "detail": "- Keep “Delivery capacity” at today’s relative baseline.\n- Add non-development time as a separate factor.\n- Leave hiring effects and quality measures unresolved.\n\nThe available update stores one starting percentage, not your full **20–30% range**. I shouldn’t silently choose a midpoint or invent how either hire changes it. Nothing has been changed yet.\n\nThis comparison turns on the link from ‘Tech leads hired’ to ‘Leadership capacity’, whose strength isn't sized in the model yet. Set it to see how much it matters.\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>"
+      },
+      "slot1": {
+        "policy_id": "RC-STRENGTHEN-ITEM",
+        "variant": "S3V",
+        "label": "Give your estimate"
+      },
+      "tool_calls": [],
+      "route_face_contract": "run",
+      "served_composer_log": {
+        "outcome": "shaped",
+        "profile": "coaching",
+        "obligations": 3,
+        "words_in": 94,
+        "units_in": 8,
+        "bullets_in": 3,
+        "questions_in": 0,
+        "face_bullets": 0,
+        "detail_units": 7,
+        "face_words": 11
+      },
+      "served_leader_gate_log": {
+        "dropped_sentences": 1,
+        "withheld_reason": "goal_path_unsized",
+        "original_length": 494,
+        "projected_length": 585
+      }
+    },
+    "marketing_6": {
+      "capture": "marketing/turns/06.json",
+      "capture_sha256": "d9193bad0b7e82ed0fc6e19c9a4732bdde5fa37ead32bb2050fad50c6cdfa28f",
+      "judge": "C6 marketing step 6 (budget and time qualifications wire-only)",
+      "user_message": "What do you propose my goal be based on the information I've given you?",
+      "turn_id": "f8c19f83-8562-4132-aab4-ee24fac238d2",
+      "request_id": "4b330cd6-7745-4964-9fce-deefb5a1e8aa",
+      "assistant_text": "I’d define success as **at least 20 new customers and a conversion rate above 15%, within the first three months after launch**.\n\n- Keep annual marketing spend within £100,000.\n- Keep your time commitment within 25%.\n\nBoth success conditions must be met—not traded against each other. The current model’s broad campaign goal does not yet track them separately.\n\nNo single option can be put forward yet, because every estimate this comparison rests on is still Olumi’s, not yours; set one of them yourself, then run the analysis again.\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>",
+      "text_sha256": "8828c80e7ee5c006b141b76f2635161c08b9c8dbe0f5586138bebd4e7990ea5a",
+      "served_shape": {
+        "headline": "I’d define success as **at least 20 new customers and a conversion rate above 15%, within the first three months after launch**.",
+        "bullets": [],
+        "detail": "- Keep annual marketing spend within £100,000.\n- Keep your time commitment within 25%.\n\nBoth success conditions must be met—not traded against each other. The current model’s broad campaign goal does not yet track them separately.\n\nNo single option can be put forward yet, because every estimate this comparison rests on is still Olumi’s, not yours; set one of them yourself, then run the analysis again.\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>"
+      },
+      "slot1": {
+        "policy_id": "RC-STRENGTHEN-ITEM",
+        "variant": "S3L",
+        "label": "Give your estimate"
+      },
+      "tool_calls": [],
+      "route_face_contract": "run",
+      "served_composer_log": {
+        "outcome": "shaped",
+        "profile": "coaching",
+        "obligations": 4,
+        "words_in": 88,
+        "units_in": 6,
+        "bullets_in": 2,
+        "questions_in": 0,
+        "face_bullets": 0,
+        "detail_units": 5,
+        "face_words": 22
+      },
+      "served_leader_gate_log": {
+        "dropped_sentences": 1,
+        "withheld_reason": "unrequested_analysis_withheld",
+        "original_length": 452,
+        "projected_length": 534
+      }
+    },
+    "deadline_2": {
+      "capture": "deadline/turns/02.json",
+      "capture_sha256": "56ab2dc3faa1ce5feb75e753a3cd81d35338093beb5e99a927cd1c8e764fa473",
+      "judge": "§4 finding 27, deadline step 2 (the complete input question is hidden)",
+      "user_message": "Suggest what this model still needs before the analysis can run, so I can approve it.",
+      "turn_id": "6bcc29ac-60ad-464c-b4b4-4a36c36a5768",
+      "request_id": "5cd85df9-b585-4cbd-8ce1-7c2da712abcb",
+      "assistant_text": "The analysis cannot run yet: it needs a timing baseline, not a guessed completion percentage.\n\n• Give your estimate\n\n- Specify the feature-launch deadline.\n- Estimate today’s team’s likely completion-time range.\n\nMy earlier percentage question was the wrong framing. I can propose your timing information for approval, but shouldn’t invent a deadline or completion estimate.\n\nWhen is the deadline, and how long would today’s team likely take to finish the launch without either hire?\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>",
+      "text_sha256": "1cbac6221cfe7e108a031dda4aa99610d143a2680bde7a779a5e649f6c383f46",
+      "served_shape": {
+        "headline": "The analysis cannot run yet: it needs a timing baseline, not a guessed completion percentage.",
+        "bullets": [
+          "Give your estimate"
+        ],
+        "detail": "- Specify the feature-launch deadline.\n- Estimate today’s team’s likely completion-time range.\n\nMy earlier percentage question was the wrong framing. I can propose your timing information for approval, but shouldn’t invent a deadline or completion estimate.\n\nWhen is the deadline, and how long would today’s team likely take to finish the launch without either hire?\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>"
+      },
+      "slot1": {
+        "policy_id": "RC-STRENGTHEN-ITEM",
+        "variant": "S3L",
+        "label": "Give your estimate"
+      },
+      "tool_calls": [],
+      "route_face_contract": null,
+      "served_composer_log": {
+        "outcome": "shaped",
+        "profile": "coaching",
+        "obligations": 0,
+        "words_in": 70,
+        "units_in": 6,
+        "bullets_in": 2,
+        "questions_in": 1,
+        "face_bullets": 3,
+        "detail_units": 2,
+        "face_words": 44
+      },
+      "served_leader_gate_log": null
+    },
+    "deadline_8": {
+      "capture": "deadline/turns/08.json",
+      "capture_sha256": "acc9de70860bc2803da23f7c0907969de51a44448e1a05eca666efccd1ff5d52",
+      "judge": "§4 finding 27, deadline step 8 (the faster/slower-end question is hidden)",
+      "user_message": "Suggest what this model still needs before the analysis can run, so I can approve it.",
+      "turn_id": "454420e7-22d0-4ca2-be6d-aa484e497db2",
+      "request_id": "3261aadb-6f4d-4190-a800-3c361731cba6",
+      "assistant_text": "The remaining input is today’s team’s likely completion-time range without either hire.\n\n• Your deadline is set: 12 April 2027.\n• Both hiring effects already have Olumi estimates.\n• Give your estimate\n\nThe percentage-baseline error is misleading for this timing model. “Over a month late” gives only a lower bound, not a complete range. Once you supply both ends, I can propose that range for approval.\n\n- How many months from today would completion likely take, from the faster end to the slower end, without either hire?\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>",
+      "text_sha256": "f4d47ca022add346c713e4f0c8de4a576a6bfa61fc6e628f901a8fd7ae777768",
+      "served_shape": {
+        "headline": "The remaining input is today’s team’s likely completion-time range without either hire.",
+        "bullets": [
+          "Your deadline is set: 12 April 2027.",
+          "Both hiring effects already have Olumi estimates.",
+          "Give your estimate"
+        ],
+        "detail": "The percentage-baseline error is misleading for this timing model. “Over a month late” gives only a lower bound, not a complete range. Once you supply both ends, I can propose that range for approval.\n\n- How many months from today would completion likely take, from the faster end to the slower end, without either hire?\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>"
+      },
+      "slot1": {
+        "policy_id": "RC-STRENGTHEN-ITEM",
+        "variant": "S3L",
+        "label": "Give your estimate"
+      },
+      "tool_calls": [],
+      "route_face_contract": null,
+      "served_composer_log": {
+        "outcome": "shaped",
+        "profile": "coaching",
+        "obligations": 0,
+        "words_in": 82,
+        "units_in": 7,
+        "bullets_in": 2,
+        "questions_in": 1,
+        "face_bullets": 3,
+        "detail_units": 3,
+        "face_words": 46
+      },
+      "served_leader_gate_log": null
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "purpose": "Absolute four-episode prompt diagnosis through the existing T5 request hook; no new runner, source writer, model arm or serving change.",
+  "source_pin": "a770ce49fe29691b9e7f28982a100f01ab3b8eef",
+  "source_candidate_handback": 6129749753,
+  "source_candidate_artifact_sha256": "61c8064b1544b85658353a4a05d0350d1de22b89fc28dfbc05a9fa697369a61a",
+  "existing_harness": "/Users/paulslee/olumi-work/recovery/s3/T5/zz-s3-t5-generation.test.ts",
+  "existing_hook": "fetch wrapper for body.text.format.name === 'whole_candidate', before payload save and realFetch (lines59–83)",
+  "case_pack": "/Users/paulslee/.codex/.chatgpt-projects/g-p-678d5b7f8c508191a8e844f713596183/output/aie-complete-recovery-plan-20261012/AIE-DIVERSE-BRIEFS-20261012.json",
+  "case_pack_sha256": "d0b474f0c836a84093b5c1cfcc104e9ca5afbeb6776485aadbed0c8847095f33",
+  "T5_CASES": [
+    "D1-hiring-deadline",
+    "D4-reduce-cycle-time"
+  ],
+  "T5_REPS": [
+    1,
+    2
+  ],
+  "logical_episodes": 4,
+  "budget": "Existing DL budget/physical ledger and first429 stop; count widening/repair/retry/judge, post budget before >20. No AIE new provider call.",
+  "model_and_effort": "Unchanged actual assigned generation model/effort/budget from pinned source.",
+  "operations": [
+    {
+      "kind": "replace_exact",
+      "location": "actual provider body.instructions",
+      "old": "Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.",
+      "replacement": "Set decision_question to the brief's governing question or statement of intent, copied VERBATIM as one span of 8–240 characters, including a statement such as 'We need to decide whether ...'. Preserve its compound purposes and conditions. Use null only when no such span exists. Never reword it or turn exploration into a decision."
+    },
+    {
+      "kind": "replace_exact",
+      "location": "actual provider body.text.format.schema.properties.decision_question.description where retained by strict schema",
+      "old": "The question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none.",
+      "replacement": "The brief's own governing question or statement of intent, copied VERBATIM as one span of 8–240 characters. Include statements such as 'We need to decide whether ...'. Keep every purpose and condition within that span. Use null only when the brief contains no such span. Do not reword it or turn exploration into a decision."
+    },
+    {
+      "kind": "insert_after_exact",
+      "location": "actual provider body.instructions",
+      "anchor": "Preserve exact user facts, numbers, constraint semantics and time horizon.",
+      "insertion": " NO-CHANGE FORECAST. When the brief gives both a current level and a forecast without an intervention at a later horizon, preserve both with their distinct references and the forecast's exact wording and qualifiers. Represent the forecast once as a shared external drift by that horizon, in the goal's own units, using the existing factor and definitional-link shape. Derive the drift as forecast minus current level and identify it as derived from the stated forecast, never as a newly stated measurement. For 8 weeks today and a forecast of 10 weeks next quarter, retain 8 weeks as today's level and a forecast of 2 additional weeks by that horizon. That forecast affects carrying on and the alternatives unless an alternative changes its cause. Do not replace today's level or the target with the forecast, set the forecast drift to zero, count it twice, or retain it only as a question. Keep the original forecast sentence and its source alongside the derived change in the available evidence and question carriers."
+    }
+  ],
+  "preflight": [
+    "Use actual current assembled request, not a historic reconstruction. Assert pinned source and case bytes. First construction body must match each applicable old instruction exactly once; abort/report concrete drift if not.",
+    "Inspect actual strict schema: replace the existing description only; do not invent a missing description/property. If strict assembly prunes descriptions, record that and keep the remaining schema byte-identical.",
+    "Keep input, history, tools, other schema, model/effort/budget and store/admission route unchanged. Candidate differs only by these declared instructions/descriptions.",
+    "Apply consistent candidate instructions to subsequent whole_candidate calls where the original rules occur. Freeze every actual dynamic stage before its dispatch; never inject whole-builder rules into an unrelated ancillary prompt.",
+    "Serialize adjusted body back into the outgoing init.body. Ledger/hash/save the exact same bytes realFetch receives; saving adjusted bytes but dispatching the original init is invalid.",
+    "Freeze original and candidate request bytes/source/manifest/rubric before each call; preserve all raw responses and current-admission/readback/host results separately."
+  ],
+  "interpretation": "Candidate-only correctness/usefulness diagnosis, with existing independent judge. No improvement/reliability/full-source or served PASS. Matching baseline required for any later improvement claim. Original T5 failures, D5/source/cold residuals and six-case two-repeat completion remain banked/open.",
+  "acceptance_checks": [
+    "D1 full original governing sentence preserves productivity AND deadline and does not claim that deadline probability measures productivity.",
+    "D4 current8, future10, derived2 by that horizon, target6.8 from current8, defect condition and quoted forecast/source remain distinct in raw and admitted model.",
+    "Forecast is not a verified current measurement, new human claim or only a clarification question; verify actual current code carrier and report code/contract loss.",
+    "Absolute hard failures remain visible; stop the affected component at its first hard failure and route precise stage to its existing owner."
+  ]
+}

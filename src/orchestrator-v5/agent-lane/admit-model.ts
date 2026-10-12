@@ -40,7 +40,7 @@ import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-f
 import type { DraftOptionWideningT, DraftRiskWideningT, DraftWideningT, InterventionV3T } from '../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
 import { log } from '../../utils/telemetry.js';
-import { admitInterventionRange } from '../intervention-range.js';
+import { admitInterventionRange, interventionPoint } from '../intervention-range.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
@@ -81,7 +81,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, briefWritesGoalLevel, quoteBindsFactorFigure, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
 const MAX_ID = 100;
@@ -411,6 +411,12 @@ export interface ConstructedLevel {
    */
   value_confidence?: 'medium';
   range?: InterventionV3T['range'];
+  /**
+   * ⭐ Row5, option settings (DL 12 Oct): a third party's range for the factor's quantity, quoted (`source_quote`), in the
+   * setting's raw units, beside a setting it contains. Display only (an `InterventionV3` passthrough field): never the
+   * engine's `range`, and dropped from the analysis wire (`withoutAttributedSettingRanges`).
+   */
+  attributed_range?: { low: number; high: number; meaning: 'min_max'; source: 'brief_extraction'; source_quote: string };
   estimate?: true;
   basis?: string;
 }
@@ -658,6 +664,21 @@ export function decisionEntityFor(
   const words = label.trim().split(/\s+/).filter(Boolean).length;
   const users = words >= 2 && bindingEarnsBriefClaim(bindOptionLabelToBrief(label, brief));
   return { label, provenance: users ? 'explicit' : 'inferred' };
+}
+
+/**
+ * ⭐ Batch F, D1 (DL 12 Oct, PL 6131102031; T6 RESULT.md): the event-by-date model's decision node goes through the SAME
+ * grounded decision-statement admission as every other model (`decisionEntityFor`). It wrote `decision_question ||
+ * goal.metric` and stamped it `ai_inferred` whatever it was: T6's D1 drafts copied the brief's own sentence and it was
+ * called Olumi's, and a paraphrase would have become the decision's title. A verbatim span is kept, and is the user's when
+ * its binding earns the brief's claim; anything else is the main path's fallback, Olumi's.
+ */
+function withGroundedEventDecision(event: AdmittedModel, candidate: CandidateModel, brief: string | undefined): AdmittedModel {
+  const decisions = event.nodes.filter((n) => n.kind === 'decision');
+  if (decisions.length !== 1) return event;
+  const decision = decisionEntityFor(candidate, brief, event.nodes.filter((n) => n !== decisions[0]).map((n) => n.label));
+  return { ...event, nodes: event.nodes.map((n) => (n === decisions[0]
+    ? { ...n, label: decision.label, provenance: displayProvenanceFor(decision.provenance) } : n)) };
 }
 
 /**
@@ -2881,6 +2902,8 @@ export function admitStatedGoalChange(
    * "was not stated". Absent ⇒ exactly as before.
    */
   fromBrief: BriefGoalLevel | null = null,
+  /** Recovery Batch B (DL 12 Oct): the user's level is V2-verified (`verifiedGoalLevel`) → typed `explicit`. */
+  verified = false,
 ): {
   readonly node: Partial<AdmittedNode>;
   readonly withheld?: string;
@@ -2953,7 +2976,8 @@ export function admitStatedGoalChange(
       return `"${goal.metric}" is a goal to change by ${change} from today, and its current level was not stated, so no chance of ` +
         `reaching it can be shown: a change is measured from today's level of "${goal.metric}".`;
     }
-    if (goalLevelIsEstimated(goal)) {
+    // DL 12 Oct (origin rule for goals): a drafter's estimate tag never withholds a level the brief writes for this goal.
+    if (goalLevelIsEstimated(goal) && !userWroteLevel(today, goal.unit)) {
       return `Olumi's own estimate of the current level of "${goal.metric}" (${today}) was not used, so no chance of a change of ` +
         `${change} is shown: that figure would rest on a guess, not on anything you said.`;
     }
@@ -3013,7 +3037,7 @@ export function admitStatedGoalChange(
   };
   if (notTheUsers === null) {
     // Only a level the user stated for this goal reaches here (`goalLevelIsEstimated`, `userWroteLevel` above).
-    return { node: withBasis({ ...withBase, observed_state: briefGoalObservedState(level / resolved.cap, goal.unit, level, resolved.cap) }) };
+    return { node: withBasis({ ...withBase, observed_state: briefGoalObservedState(level / resolved.cap, goal.unit, level, resolved.cap, verified) }) };
   }
   if (estimateOnly) {
     // OLUMI'S starting value, said as such by the licence (`estimate_only`); never `brief_extraction` / `user_stated`.
@@ -3170,6 +3194,8 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
    * this, a level the brief never states was stored `brief_extraction` and `minimise` was sent beside it. REQUIRED.
    */
   userWroteLevel: (value: number, unit: unknown) => boolean,
+  /** Recovery Batch B (DL 12 Oct): the user's level is V2-verified (`verifiedGoalLevel`) → typed `explicit`. */
+  verified = false,
 ): { readonly nodes: readonly N[]; readonly loss: readonly RepairEntry[] } {
   const unchanged = { nodes, loss };
   const goals = nodes.filter((n) => n.kind === 'goal');
@@ -3187,7 +3213,8 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
   const baselineRaw = goal.baseline_value;
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw !== goal.value) return unchanged;
   if (typeof cap !== 'number' || !Number.isFinite(cap)) return unchanged;
-  if (typeof baselineRaw !== 'number' || !Number.isFinite(baselineRaw) || goalLevelIsEstimated(goal)) return unchanged;
+  // DL 12 Oct (origin rule for goals): a drafter's estimate tag never withholds a level the brief writes for this goal.
+  if (typeof baselineRaw !== 'number' || !Number.isFinite(baselineRaw) || (goalLevelIsEstimated(goal) && !userWroteLevel(baselineRaw, goal.unit))) return unchanged;
   // DL E12: a level the brief never states is not the user's, however the drafter marked it — it stays withheld, as today.
   if (!userWroteLevel(baselineRaw, goal.unit)) return unchanged;
   const path = `nodes[${slugId(goal.metric)}].observed_state.baseline`;
@@ -3199,7 +3226,7 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
   if (!verdict.admitted) {
     return { nodes, loss: loss.map((l) => (l.field_path === path ? { ...l, reason: verdict.reason } : l)) };
   }
-  const observed_state = briefGoalObservedState(verdict.normalised, goal.unit, baselineRaw, cap);
+  const observed_state = briefGoalObservedState(verdict.normalised, goal.unit, baselineRaw, cap, verified);
   return {
     nodes: nodes.map((n) => (n === node ? { ...node, observed_state } : n)),
     loss: loss.filter((l) => l.field_path !== path),
@@ -3313,7 +3340,7 @@ export function admitCandidateModel(
   }
   if (prompted || (candidateModel.goal.kind === 'event_by_date' && briefAttestsEventByDate(brief, candidateModel.goal))) {
     try {
-      const event = admitEventByDate(candidateModel);
+      const event = withGroundedEventDecision(admitEventByDate(candidateModel), candidateModel, brief);
       const hasContext = candidateModel.constraints.length + candidateModel.factors.length + candidateModel.risks.length
         + candidateModel.outcomes.length + candidateModel.links.length + (candidateModel.identities?.length ?? 0) > 0
         || candidateModel.options.some(o => (o.interventions?.length ?? 0) + (o.changes?.length ?? 0) > 0);
@@ -3726,15 +3753,26 @@ function admitOnce(
         const raw = model.goal.value;
         const stated = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw);
         if (!stated) {
+          // ⭐ Batch F (DL 12 Oct; T5 D6 A r2, `recovery/t5-meaning/DIAGNOSIS.md` §7): a goal with no target still keeps the
+          // current level the USER stated ("Our team currently completes about 80 features per week."), attributed as
+          // theirs; it was dropped with no line. No target means no threshold, so none is written, and the level sits on
+          // the cap rule's own scale for that figure. A level the brief never states (Olumi's) stays out, as before.
+          const written = model.goal.baseline_value;
+          const level = typeof written === 'number' && Number.isFinite(written) && written >= 0
+            && (!goalLevelIsEstimated(model.goal) || goalLevelStated(written, model.goal.unit) || briefWritesGoalLevel(model, brief)) ? written : null;
+          const scale = level === null ? null : resolveGoalThresholdCapWithProvenance(undefined, level, model.goal.unit, undefined);
           return {
             ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
             goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+            ...(level !== null && scale !== null && scale.cap > 0
+              ? { observed_state: briefGoalObservedState(level / scale.cap, model.goal.unit, level, scale.cap, verifiedGoalLevel(model, brief)) } : {}),
           };
         }
         // ⭐ R1 S4-core: a target stated as a CHANGE from today is written as one (`admitStatedGoalChange`); a level
         // target takes the path below, unchanged.
         if (model.goal.frame === 'change_abs' || model.goal.frame === 'change_rel') {
-          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, (levelReading.value = goalLevelFromBrief(model)));
+          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, (levelReading.value = goalLevelFromBrief(model)),
+            verifiedGoalLevel(model, brief));
           if (change.reading !== undefined) {
             loss.push({
               field_path: `nodes[${slugId(model.goal.metric)}].goal_level_reading`,
@@ -3797,7 +3835,12 @@ function admitOnce(
         // ⛔ "Known" alone is not enough (verdict 5824647383): the strict schema cannot tie
         // `baseline_known` to its provenance, so a level the model marks known but
         // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
-        const estimated = goalLevelIsEstimated(model.goal);
+        // DL 12 Oct (origin rule for goals): a drafter's estimate tag never withholds a level the brief writes for this goal
+        // (`goalLevelStated`, the change path's own check, or in the goal's frame: `briefWritesGoalLevel`); its role is then
+        // V2's (`verifiedGoalLevel`), label not withhold. A level the brief never writes stays withheld, with its line.
+        const estimated = goalLevelIsEstimated(model.goal)
+          && !(typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)
+            && (goalLevelStated(baselineRaw, model.goal.unit) || briefWritesGoalLevel(model, brief)));
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
           withheld(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
@@ -4334,8 +4377,34 @@ function admitOnce(
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
       if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
+      // ⭐ Row5, option settings (DL 12 Oct): a third party's range for this factor's quantity (D6: "A supplier says a
+      // specialist can contribute 10–30 features per week"), quoted, beside a setting it contains (20 and 10). Display
+      // only: never `range`, the engine's sampled input (`intervention-range.ts`), and dropped from the analysis wire
+      // (`withoutAttributedSettingRanges`), so no Run, limit or chance changes. Label, never withhold.
+      if (bundle[factorId]!.range === undefined) {
+        const factor = model.factors.find((f) => f.label === iv.factor_label);
+        const theirs = factor === undefined ? undefined : briefAttributedLevelRange(factor, brief);
+        const point = interventionPoint(bundle[factorId]);
+        if (theirs !== undefined && point !== undefined && theirs.low <= point && point <= theirs.high) {
+          bundle[factorId]!.attributed_range = { low: theirs.low, high: theirs.high, meaning: 'min_max', source: 'brief_extraction', source_quote: theirs.quote };
+        }
+      }
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
+  }
+  // Row5: one third party's range is about ONE quantity. When settings on two factors both fall inside the same quoted
+  // range ("10–20% churn" beside two churn factors), which one it describes is unknown, so it rides beside neither.
+  const quotedFactors = new Map<string, Set<string>>();
+  for (const bundle of interventionsByOption.values()) {
+    for (const [factorId, level] of Object.entries(bundle)) {
+      const quote = level.attributed_range?.source_quote;
+      if (quote !== undefined) quotedFactors.set(quote, (quotedFactors.get(quote) ?? new Set()).add(factorId));
+    }
+  }
+  for (const bundle of interventionsByOption.values()) {
+    for (const level of Object.values(bundle)) {
+      if (level.attributed_range !== undefined && quotedFactors.get(level.attributed_range.source_quote)!.size > 1) delete level.attributed_range;
+    }
   }
   /**
    * ⛔ AN OPTION THAT CHANGES NOTHING CANNOT BE COMPARED TO ANYTHING.

@@ -1,5 +1,5 @@
 {
-  "source_sha": "7872f085332057c0d4e7463b88e0f05f1cd12528",
+  "source_sha": "19d4b6f3d0f13c769e330e5fbd393fc641fe06f0",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -15,7 +15,7 @@
     },
     "goalChanceTargetCause": {
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 2,
+      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 4,
       "src/orchestrator-v5/goal-target/goal-chance-range.ts": 3
     },
     "goalDeadlineOf": {
@@ -300,7 +300,7 @@
       "src/orchestrator-v5/tools/handlers/analysis-ready-core.ts": 2,
       "src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts": 6,
       "src/orchestrator-v5/tools/handlers/run-analysis-participation-guard.ts": 2,
-      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 36,
+      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 37,
       "src/orchestrator-v5/tools/handlers/run-input-residual.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-input-snapshot.ts": 3,
       "src/orchestrator-v5/tools/registry.ts": 1,
@@ -758,7 +758,7 @@
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 2,
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 3,
-      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 2,
+      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 3,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 2,
       "src/orchestrator-v5/goal-target/goal-record.ts": 4,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 1
@@ -813,7 +813,7 @@
   "counts": {
     "extractPersistedGoalTarget": 14,
     "findSoleGoalNode": 3,
-    "goalChanceTargetCause": 7,
+    "goalChanceTargetCause": 9,
     "goalDeadlineOf": 1,
     "goalKindOf": 22,
     "goalUnitOf": 5,
@@ -823,7 +823,7 @@
     "goal_horizon": 52,
     "goal_horizon_months": 43,
     "goal_level_reading": 19,
-    "goal_node_id": 287,
+    "goal_node_id": 288,
     "goal_period": 3,
     "goal_scope": 48,
     "goal_sense_reading": 15,
@@ -841,12 +841,12 @@
     "resolveGoalThresholdStrict": 13,
     "scoredGoalIdOf": 8,
     "soleGoalOf": 15,
-    "statedGoalTargetOf": 30,
+    "statedGoalTargetOf": 31,
     "success_threshold": 20,
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2465,
+  "total_references": 2469,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

@@ -129,7 +129,12 @@ type Body = { assistant_text: string; _answer_shape?: AnswerShape; narration?: {
 function expectWithheldContract(body: Body, rootLine?: string): void {
   const shape = body._answer_shape;
   expect(shape, body.assistant_text).toBeDefined();
-  expect(shape!.headline).toBe('Not shown yet; why is under More detail');
+  // Score run 4 U2-1 (DL 12 Oct; re-pinned from the pointer headline): the withheld cells' ONE recorded reason (the Run's
+  // GOAL_FIGURES_TARGET_NOT_TESTABLE words, read by code) leads in its own declarative sentences: the change adds no ask.
+  const recorded = ((SERVED.block.enrichment as { inference_warnings: { code: string; message: string }[] }).inference_warnings)
+    .find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!.message;
+  expect(shape!.headline).toBe(sentencesOf(recorded).filter((s) => !s.trim().endsWith('?')).join(' '));
+  expect(body.assistant_text).not.toContain('Not shown yet; why is under More detail');
   const rootOwnsAsk = rootLine?.includes('?') === true;
   const targetAsk = rootOwnsAsk ? null : decisionInputAsk(graphWith(riskValued, riskLabel), {
     restingText: [RUN_RESULT_READY_TEXT, rootLine, WITHHELD_FINDING].filter(Boolean).join('\n\n'),

@@ -39,7 +39,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -347,7 +347,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
     // when it is verbatim brief text (`admit-model.ts` `decisionEntityFor`). REQUIRED so strict output must say "no
     // question" (null) rather than omit it.
     decision_question: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
-      'The question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none.' },
+      'The brief\'s own governing question or statement of intent, copied VERBATIM as one span of 8–240 characters. Include statements such as \'We need to decide whether ...\'. Keep every purpose and condition within that span. Use null only when the brief contains no such span. Do not reword it or turn exploration into a decision.' },
   }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'decision_question']);
 }
 
@@ -487,7 +487,7 @@ export const BUILD_INSTRUCTIONS = [
   + 'TARGET SEMANTICS. Whenever the goal states a target, give goal.basis: reference "today", or "launch" when the targets are measured from a launch; denominator, for a change, what 100% is, in words (for example "today\u2019s monthly development capacity"), null for a level target; period_months, the months at which or over which the target is measured; period_kind "at_end" for the level or change AT that month, "over_period" for a rate or a count over the first period_months; effect_unit, the unit every link into the goal states its effect in; effects_at_period_end is true only when every incoming effect is sized for the selected period_kind: the effect at that month for at_end, or the cumulative count/period rate over the stated window for over_period, including relevant recruitment and ramp-up. Otherwise false. A deadline or period label alone does not establish the timing basis. also_required, the other conditions the user says the goal needs that this target does not include, in their words (for example "code quality maintained", "spend within \u00a3200,000"), else null; open_question, when the user\u2019s own words let the target be read more than one way (for example productivity described as a share of time, so "+10%" could mean 10% more than today or 10 more percentage points), the ONE question that asks which \u2014 never pick a reading \u2014 else null. With no stated target, basis is null. '
   + 'SEVERAL TARGETS. When the user names several success targets, keep one as the goal and each other as a constraint with role target. Give each its stated comparator and target frame by the same level/change rules; never force a change target into level. For the conversion/new-customer example both are level targets over the same first three months after launch, conversion>15% and new customers>=20. Preserve any distinct reference or period the user states; where this contract cannot represent or support it, retain the condition in also_required/unknowns with a focused clarification, rather than inventing a shared period or claiming the full conjunction. Budget, time and other constraints keep role limit. A period count is the cumulative total from that period\'s start, and a period conversion rate is the conversion rate over that window, never a month-end snapshot.',
   'Labels are NAMES, not sentences.',
-  'Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.',
+  'Set decision_question to the brief\'s governing question or statement of intent, copied VERBATIM as one span of 8–240 characters, including a statement such as \'We need to decide whether ...\'. Preserve its compound purposes and conditions. Use null only when no such span exists. Never reword it or turn exploration into a decision.',
   'Output only the schema.',
 ].join(' ');
 
@@ -2163,7 +2163,8 @@ export async function buildModelFromBrief(
     // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
     // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
     const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
-      (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief));
+      (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief),
+      verifiedGoalLevel(candidate, brief));
     if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
     // ⛔ R3-B 5893233864 / AIQ 5893340150: a target typed as a DECREASE, the drafter's own comparator a ceiling and none of
     // the user's held → Olumi's reading of the sense, typed on the goal (`goal-sense-reading.ts`) and said below.
@@ -2244,7 +2245,7 @@ export async function buildModelFromBrief(
     // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
     // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
     const setAside = setAsideEstimatesOf(admitted.loss);
-    const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
+    const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside, candidate);
     // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
     // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
     // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
@@ -2691,12 +2692,44 @@ function setAsideEstimatesOf(loss: readonly unknown[]): SetAsideEstimate[] {
   });
 }
 
-/** The drafter's questions, less any that writes the amount of a size Olumi set aside (it is asked in the contract's words). */
-function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAsideEstimate[]): string[] {
-  const amounts = setAside.map((s) => s.amount).filter((a): a is number => a !== null && a !== 0).map(Math.abs);
-  if (amounts.length === 0) return questions;
+/**
+ * The drafter's questions, less any that restates the size of a link Olumi set aside (it is asked once, in the contract's
+ * words). ⛔ BY THAT LINK'S IDENTITY, never an equal number (DL 12 Oct; T5 D3, `recovery/t5-meaning/DIAGNOSIS.md` §3): the
+ * question names THAT link (every word of one end, a word of the other) and writes its size as that link's kind of
+ * quantity (its target's unit: money, a percentage or a count). D3 A r2 lost "The interview evidence gives a 10–20% churn
+ * range …" because its 20% equalled an unrelated set-aside £20 per paying customer.
+ */
+const STOP_WORDS = new Set(['the', 'and', 'for', 'per', 'after', 'before', 'from', 'with', 'into', 'onto', 'over', 'under', 'than']);
+const contentWords = (text: string): string[] => (text.toLowerCase().match(/\p{L}{3,}/gu) ?? [])
+  .filter((w) => !STOP_WORDS.has(w)).map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w));
+const slugOf = (label: string): string => label.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '');
+function namesLink(question: string, from: string, to: string): boolean {
+  const said = new Set(contentWords(question));
+  const [a, b] = [contentWords(from), contentWords(to)];
+  const all = (ws: string[]): boolean => ws.length > 0 && ws.every((w) => said.has(w));
+  const any = (ws: string[]): boolean => ws.some((w) => said.has(w));
+  return (all(a) && any(b)) || (all(b) && any(a));
+}
+function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAsideEstimate[], candidate: unknown): string[] {
+  const sized = setAside.filter((s): s is SetAsideEstimate & { amount: number } => s.amount !== null && s.amount !== 0);
+  if (sized.length === 0) return questions;
+  // The drafted label and unit behind each admitted end (ids are slugs of the drafted labels).
+  const c = (candidate ?? {}) as { goal?: { metric?: unknown; unit?: unknown }; factors?: unknown; outcomes?: unknown; risks?: unknown };
+  const drafted = new Map<string, { label: string; unit?: string }>();
+  if (typeof c.goal?.metric === 'string') drafted.set(slugOf(c.goal.metric), { label: c.goal.metric, ...(typeof c.goal.unit === 'string' ? { unit: c.goal.unit } : {}) });
+  for (const list of [c.factors, c.outcomes, c.risks]) {
+    for (const n of Array.isArray(list) ? list as { label?: unknown; unit?: unknown }[] : []) {
+      if (typeof n?.label === 'string') drafted.set(slugOf(n.label), { label: n.label, ...(typeof n.unit === 'string' ? { unit: n.unit } : {}) });
+    }
+  }
+  const end = (id: string): { label: string; unit?: string } => drafted.get(slugOf(id)) ?? { label: id.replace(/_/g, ' ') };
   const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, a, b);
-  return questions.filter((q) => !findStatedAmounts(q).some((w) => amounts.some((a) => same(Math.abs(w.magnitude), a))));
+  return questions.filter((q) => !sized.some((s) => {
+    const [from, to] = [end(s.from), end(s.to)];
+    if (!namesLink(q, from.label, to.label)) return false;
+    const kind = to.unit === undefined ? undefined : readCurrencyUnitWithQualifiers(to.unit).kind;
+    return findStatedAmounts(q).some((w) => same(Math.abs(w.magnitude), Math.abs(s.amount)) && (kind === undefined || w.kind === kind));
+  }));
 }
 
 export function userFacingDrafterQuestions(parked: unknown): string[] {

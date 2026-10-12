@@ -1,48 +1,28 @@
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
-import type { EligibleIntervention } from '../turn-context/guidance-wire.js';
 import type { ReplyComposition } from './compose-reply.js';
 
-export const INTERVENTION_WHY_LABEL = 'Why?';
 const words = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length;
 
 /**
- * Append Science's exact disclosure; coaching also retains RC's selected action. E6 Why-once: when the policy's Why? was
- * already said on this state (`whySaid`), the action is still carried and only the repeated disclosure is left out.
+ * Coaching retains RC's selected action. ⭐ Technique (c) (AIE 6130197656 §3, DL 12 Oct): the policy's "Why?" is never
+ * attached to a reply. It stays with the guidance row (its own why, and its science basis as the row's detail:
+ * `guidance.slot1.science`), and an ordinary reply answers the user's ask. Served run 4: hiring 2 asked whether faint
+ * connections were a UI or a data issue and was told "Why? Assumption-based planning: …"; hiring 15 repeated the row's
+ * own visible why. The model's context still names the method, so a user who asks about it gets it explained.
  */
-export function composeEligibleIntervention(composed: ReplyComposition, intervention: EligibleIntervention,
-  actionLabel: string | undefined, faceContract: boolean, wholeProposal = false, whySaid = false): ReplyComposition {
-  // R2 N2r (friction audit N2): a whole proposal ships unshaped, so a <details> suffix reached the user as raw markup
-  // ("<details> <summary>Why?</summary>…", hiring step 5, deadline step 3). It keeps every byte and carries no Why.
-  if (wholeProposal) return composed;
-  // R3-1: the UI escapes HTML, so "<details>…" reached the user as tags (run 2: hiring 10–14, marketing 2–6). The same
-  // label and Science's words, byte for byte, ship as a plain final paragraph the chat renders.
-  const disclosure = whySaid ? '' : `${INTERVENTION_WHY_LABEL} ${intervention.why}`;
-  // Run/Draft H/W/E/N belongs to the existing composer, byte for byte.
-  if (faceContract) {
-    if (whySaid) return composed;
-    if (composed.shape === null) return { ...composed, text: `${composed.text}\n\n${disclosure}` };
-    const shape = { ...composed.shape, detail: [composed.shape.detail, disclosure].filter(Boolean).join('\n\n') };
-    return { ...composed, shape, text: deriveAnswerTextFromShape(shape) };
-  }
-  const lines = composed.text.split('\n');
-  const first = lines.findIndex(line => line.trim() !== '');
-  const shape: AnswerShape = composed.shape ?? { headline: lines[first] ?? composed.text, bullets: [],
-    detail: lines.slice(first + 1).join('\n').trim() };
-  if (words(shape.headline) > 80 && actionLabel !== undefined) {
-    const result = { headline: actionLabel, bullets: [], detail: whySaid ? composed.text : [composed.text, disclosure].join('\n\n') };
-    return { ...composed, text: deriveAnswerTextFromShape(result), shape: result, outcome: 'shaped' };
-  }
-  const bullets = [...(shape.bullets ?? [])];
-  const detail = [shape.detail ?? ''];
-  // Retain every original line; long next moves and overflow remain whole in detail.
-  if (actionLabel !== undefined && !bullets.includes(actionLabel)) bullets.push(actionLabel);
-  const face: string[] = [];
-  let budget = words(shape.headline);
-  for (const bullet of bullets) {
-    if ((words(bullet) <= 8 || bullet === actionLabel) && face.length < 3 && budget + words(bullet) <= 80) {
-      face.push(bullet); budget += words(bullet);
-    } else detail.push(`- ${bullet}`);
-  }
-  const result = { ...shape, bullets: face, detail: [...detail, disclosure].filter(Boolean).join('\n\n') };
+export function withInterventionAction(composed: ReplyComposition, actionLabel: string | undefined): ReplyComposition {
+  // Score run 3 (DL 12 Oct, R4): the answer stays where the composer put it. The appender once split a reply the composer
+  // shipped whole into its first line and "More detail" (deadline 2), and moved a face bullet over eight words, the
+  // specific question, under it (deadline 8), while the action label took the face.
+  const action = actionLabel === undefined
+    || composed.text.split('\n').some(line => line.replace(/^\s*[-•*]\s+/, '').trim() === actionLabel) ? undefined : actionLabel;
+  if (action === undefined) return composed;
+  // The composer shipped the reply whole (it is the face): every byte stays, then the action.
+  if (composed.shape === null) return { ...composed, text: `${composed.text}\n\n- ${action}` };
+  const shape: AnswerShape = composed.shape;
+  // The action joins the face only where it fits; otherwise it sits below.
+  const fits = shape.bullets.length < 3 && words([shape.headline, ...shape.bullets, action].join(' ')) <= 80;
+  const result = { ...shape, bullets: fits ? [...shape.bullets, action] : shape.bullets,
+    detail: [shape.detail ?? '', fits ? '' : `- ${action}`].filter(Boolean).join('\n\n') };
   return { ...composed, text: deriveAnswerTextFromShape(result), shape: result, outcome: 'shaped' };
 }

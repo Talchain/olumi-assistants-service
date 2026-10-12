@@ -1,6 +1,6 @@
 /** C1 acceptance: real Fastify route; storage/snapshot ports and scripted HTTP provider only. */
 import { it, expect, vi, describe, beforeAll } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { capture, object, array, valueAt, fixture, type Obj, type Snapshot } from './provider-harness.js';
 import c2Base from './fixtures/composer-c2-base.json';
 import policy from '../../../orchestrator-v5/agent-lane/guidance/reasoning-interventions.json';
@@ -13,6 +13,8 @@ const row = (id: string) => policy.rows.find(r => r.policy_id === id)!;
 // SYS2 G1: this fixture's W6 offer sits beside several real options, so its Why? is W6's own reason. RC-WIDEN's science
 // sentence ("a single alternative") holds for W2Z/W2 only; that negative is `sys2-why-matches-variant.test.ts`.
 const why = (row('RC-WIDEN').why_now as unknown as Readonly<Record<string, string>>).W6!;
+/** The AIE's technique (c) sentences, as posted (#94 6131186479). */
+const TECHNIQUE_C = readFileSync(new URL('../../../orchestrator-v5/agent-lane/__tests__/fixtures/aie-technique-c-6131186479.txt', import.meta.url), 'utf8');
 const message = 'Our churn is 3%. What should we examine next?';
 const reply = 'Our churn is 3%.\n\n- Name another risk.\n- Test it with customer evidence.\n\nWhich risk could change your plan?';
 const response = (text = reply): Obj => ({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }] });
@@ -45,17 +47,19 @@ function snapshot(s: Snapshot, trigger: Trigger): Snapshot {
   return s;
 }
 const carriers = (w: Awaited<ReturnType<typeof capture>>) => valueAt(w.calls.flatMap(c => c.payloads), 'eligible_intervention');
-function assertShape(b: Obj, science = why): void {
-  const shape = object(b._answer_shape);
-  expect(array(shape.bullets).length).toBeGreaterThan(0);
-  for (const bullet of array(shape.bullets)) expect(String(bullet).trim().split(/\s+/).length).toBeLessThanOrEqual(8);
-  expect([shape.headline, ...array(shape.bullets)].join(' ').trim().split(/\s+/).length).toBeLessThanOrEqual(80);
-  expect(String(b.assistant_text)).toContain('3%');
-  // Host-authored disclosure as a plain paragraph the chat renders (R3-1: the UI escapes HTML); model text cannot replace its body.
-  expect(String(b.assistant_text)).toContain(`Why? ${science}`);
+/**
+ * Score run 3 (R4, DL 12 Oct): this short reply is already the face, so the carrier keeps it whole, every byte, then the
+ * row's action. It is never split into a first line and "More detail" (served deadline 2 hid its whole answer that way).
+ * Technique (c) (AIE 6130197656 §3, DL 12 Oct; re-pinned from "then the Why as the last paragraph"): the method's Why?
+ * rides the guidance row, never the reply.
+ */
+function assertWhole(b: Obj, label: string): void {
+  expect(b._answer_shape).toBeUndefined();
+  expect(String(b.assistant_text)).toBe(`${reply}\n\n- ${label}`);
+  expect(String(b.assistant_text)).not.toContain('Why?');
   expect(String(b.assistant_text)).not.toContain('<details');
-  expect(String(b.assistant_text)).toContain('Which risk could change your plan?');
 }
+const labelOf = (w: Awaited<ReturnType<typeof capture>>): string => String(object(object(object(w.response.guidance).slot1).primary_action).label);
 async function run(trigger: Trigger, opts: Parameters<typeof capture>[2] = {}) {
   return capture('ordinary-converse', 'run2', { readSnapshot: async s => snapshot(s, trigger),
     payload: { message }, providerReply: () => response(), ...opts });
@@ -68,9 +72,31 @@ it('A1 recorded conversation: one W6 carrier, science verbatim, short actions, u
   }
   expect(carriers(w)).toEqual([{ policy_id: 'RC-WIDEN', variant_id: 'W6', name: row('RC-WIDEN').name, why,
     trigger: row('RC-WIDEN').trigger_predicate.variants![6].when }]);
-  assertShape(w.response);
-  expect(array(object(w.response._answer_shape).bullets)).toContain(object(object(object(w.response.guidance).slot1).primary_action).label);
+  assertWhole(w.response, labelOf(w));
   expect(object(object(w.response.guidance).slot1)).toMatchObject({ policy_id: 'RC-WIDEN', variant: 'W6' });
+  // W6's own why is the row's visible why; no science sentence is true of W6 (SYS2 G1), so the row carries none.
+  expect(object(object(object(w.response.guidance).slot1).copy).why).toBe(why);
+  expect(object(object(w.response.guidance).slot1)).not.toHaveProperty('science');
+  // Technique (c), AIE #94 6131186479: the model is told the row shows the Why?, and to explain it only when asked.
+  expect(w.calls[0]!.sentBody, 'the model is sent the AIE\'s sentences').toContain(JSON.stringify(TECHNIQUE_C).slice(1, -1));
+});
+/**
+ * Technique (c) (AIE #94 6131186479): a user who asks about the method itself gets its reason. No classifier and no extra
+ * call: the selected method's reason is in the model's context (eligible_intervention.why) beside the AIE's instruction,
+ * the model's answer ships whole, and the guidance row carries the same reason as its detail. The scripted provider
+ * stands for the model here: whether a live model follows the instruction is not measured by this row (UNVERIFIED).
+ */
+it('C-ASK an explicit question about the method: its reason is in the model\'s context with the instruction; the answer ships whole; the row carries it', async () => {
+  const science = row('RC-STRENGTHEN-ITEM').science_basis.summary;
+  const answer = `It comes from assumption-based planning. ${science}`;
+  const w = await run('S1', { payload: { message: 'Why does this method matter for my decision?' }, providerReply: () => response(answer) });
+  expect(w.calls).toHaveLength(1);
+  expect(w.calls[0]!.sentBody, 'the model is sent the AIE\'s sentences').toContain(JSON.stringify(TECHNIQUE_C).slice(1, -1));
+  expect(object(carriers(w)[0]).why, 'the reason, in the model\'s context').toBe(science);
+  expect(String(w.response.assistant_text).startsWith(answer), String(w.response.assistant_text)).toBe(true);
+  expect(String(w.response.assistant_text).split(science)).toHaveLength(2);
+  expect(String(w.response.assistant_text)).not.toContain('Why?');
+  expect(object(object(w.response.guidance).slot1).science, 'the visible row\'s detail').toBe(science);
 });
 it('A2 no trigger: no carrier, no Why?, direct grounded answer', async () => {
   const w = await run('none', { providerReply: () => response('Our churn is 3%.') });
@@ -138,8 +164,8 @@ describe('A6 persistence', () => {
   if (process.env.S8_CAPTURE_DIR) writeFileSync(`${process.env.S8_CAPTURE_DIR}/conversation-A6.json`, JSON.stringify({ shown: first.response, saved, reloaded: loaded.response, reload_provider_calls: loaded.calls.length }, null, 2));
   });
   it('A6-text shown = saved = reloaded', () => {
-    assertShape(first.response); expect(saved.assistant_message).toBe(first.response.assistant_text);
-    assertShape(loaded.response); expect(loaded.response.assistant_text).toBe(saved.assistant_message);
+    assertWhole(first.response, labelOf(first)); expect(saved.assistant_message).toBe(first.response.assistant_text);
+    assertWhole(loaded.response, labelOf(first)); expect(loaded.response.assistant_text).toBe(saved.assistant_message);
   });
   it('A6-history committed guidance policy id matches the pre-reply selection and round-trips through readGuidanceHistory', () => {
     const policyId = String(object(carriers(first)[0]).policy_id);
@@ -153,8 +179,9 @@ describe('A6 persistence', () => {
   });
 });
 
-describe('E6 Why-once on the route: a second Strengthen item on the same state carries its action, not the same Why?', () => {
-  it('turn 1 says the Strengthen Why?; turn 2 offers the next unsized link with its action and no Why?', async () => {
+// Technique (c) supersedes the reply's Why-once: neither reply carries the Why?; each row carries its science.
+describe('E6 on the route under technique (c): a second Strengthen item carries its action; the Why? rides each row', () => {
+  it('turn 1 and turn 2: each reply carries its action and no Why?; each row carries the Strengthen science', async () => {
     const rows = new Map<string, Obj>();
     const storage = {
       readCommittedTurn: vi.fn(async (_sid: string, tid: string) => rows.get(tid) ?? null),
@@ -180,12 +207,12 @@ describe('E6 Why-once on the route: a second Strengthen item on the same state c
     const [a, b] = [first, second].map(w => object(object(w.response.guidance).slot1));
     expect([a.policy_id, a.variant, b.policy_id, b.variant]).toEqual(['RC-STRENGTHEN-ITEM', 'S1', 'RC-STRENGTHEN-ITEM', 'S1']);
     expect(b.item, 'the next item is offered').not.toBe(a.item);
-    // R3-1 (staging 9bac9729): the Why? is a plain final paragraph, never HTML; E6 says it once per state.
-    expect(String(first.response.assistant_text)).toContain(`Why? ${row('RC-STRENGTHEN-ITEM').science_basis.summary}`);
+    expect(String(first.response.assistant_text)).toBe(`${reply}\n\n- ${String(object(a.primary_action).label)}`);
     expect(String(first.response.assistant_text)).not.toContain('<details>');
-    expect(String(second.response.assistant_text)).not.toContain(`Why? ${row('RC-STRENGTHEN-ITEM').science_basis.summary}`);
-    expect(array(object(second.response._answer_shape).bullets)).toContain(object(b.primary_action).label);
-    expect(object(carriers(second)[0]).why, 'the model is told the same method; only the display changes').toBe(row('RC-STRENGTHEN-ITEM').science_basis.summary);
+    expect(String(second.response.assistant_text)).not.toContain('Why?');
+    expect([a.science, b.science], 'each row carries its science basis').toEqual([row('RC-STRENGTHEN-ITEM').science_basis.summary, row('RC-STRENGTHEN-ITEM').science_basis.summary]);
+    expect(String(second.response.assistant_text)).toBe(`${reply}\n\n- ${String(object(b.primary_action).label)}`);
+    expect(object(carriers(second)[0]).why, 'the model is told the same method; only the display moves').toBe(row('RC-STRENGTHEN-ITEM').science_basis.summary);
   });
 });
 
@@ -207,7 +234,8 @@ it.each([false, true])('R-NOREG no Run W2, no packet=%s: existing post-reply row
   expect(object(object(w.response.guidance).slot1)).toMatchObject({ policy_id: 'RC-WIDEN', variant: 'W2', primary_action: { label: 'Suggest options' } });
   if (noPacket) expect(carriers(w)).toEqual([]);
 });
-it.each(['run', 'draft'] as const)('Run-turn face %s: carrier appends Why in detail with byte-identical H/W/E/N', faceContract => {
+// Technique (c) (re-pinned from "carrier appends Why in detail"): a Run/Draft face is byte-identical with the carrier.
+it.each(['run', 'draft'] as const)('Run-turn face %s: the carrier leaves H/W/E/N byte-identical and adds no Why', faceContract => {
   const input = { text: 'Our churn is 3%.\n\n- Test it with customer evidence.\n\nWhich risk could change your plan?',
     faceContract, profile: 'coaching' as const, widenedLine: 'Two routes were added.',
     chanceCells: [{ kind: 'figure' as const, display: '34%' }], horizonLine: 'The 12-month horizon remains untested.',
@@ -215,8 +243,8 @@ it.each(['run', 'draft'] as const)('Run-turn face %s: carrier appends Why in det
   const normal = composeReplyShape(input);
   const carried = composeReplyShape({ ...input, eligibleIntervention: { policy_id: 'RC-WIDEN', variant_id: 'W6', name: row('RC-WIDEN').name, why, trigger: row('RC-WIDEN').trigger_predicate.variants![6].when }, interventionActionLabel: 'Suggest risks' });
   expect(normal.shape).not.toBeNull();
-  expect(carried.shape).toEqual({ ...normal.shape, detail: [normal.shape!.detail, `Why? ${why}`].filter(Boolean).join('\n\n') });
-  expect(carried.text).toBe(`${normal.text}\n\nWhy? ${why}`);
+  expect(carried).toEqual(normal);
+  expect(carried.text).not.toContain('Why?');
 });
 
 
@@ -295,7 +323,9 @@ it('P3 host-only proposal: zero provider calls, base text unchanged and no Why',
   expect(w.response.assistant_text).toBe(c2Base.P3.assistant_text);
   expect(String(w.response.assistant_text)).not.toContain('Why?');
 });
-it('X4 carrier face caps: eight-word bullets, eighty-word face, long existing label whole in detail', async () => {
+// Score run 3 (R4, DL 12 Oct): the carrier no longer reshapes the face. It once moved every face bullet over eight words
+// under "More detail" (served deadline 8: the specific question went there while "Give your estimate" took the face).
+it('X4 the carrier keeps the composer\'s face: a long next move and the question stay whole where composed; the action that does not fit sits below (no Why: technique (c))', async () => {
   const longLabel = 'Test the impact of customer cancellations and downgrades after changing the Pro price';
   const headline = `${'Customer response matters '.repeat(24).trim()}.`;
   const short = ['Test customer evidence before changing the Pro price.', 'Check retention with the customer team.', 'Name another risk.'];
@@ -304,13 +334,12 @@ it('X4 carrier face caps: eight-word bullets, eighty-word face, long existing la
   recordC2('X4', w);
   expect(carriers(w)).toHaveLength(1);
   const shape = object(w.response._answer_shape);
-  const bullets = array(shape.bullets);
-  expect(bullets.length).toBeGreaterThan(0);
-  for (const bullet of bullets) expect(String(bullet).trim().split(/\s+/).length).toBeLessThanOrEqual(8);
-  expect([shape.headline, ...bullets].join(' ').trim().split(/\s+/).length).toBeLessThanOrEqual(80);
-  expect(String(shape.detail)).toContain(`- ${longLabel}`);
+  const bullets = array(shape.bullets).map(String);
+  expect(shape.headline).toBe(headline);
+  expect(bullets).toEqual([longLabel, 'Which risk could change your plan?']);
+  expect(String(shape.detail).endsWith(`- ${labelOf(w)}`)).toBe(true);
+  expect(String(w.response.assistant_text)).not.toContain(disclosure);
   for (const line of [longLabel, ...short, 'Which risk could change your plan?']) expect(String(w.response.assistant_text)).toContain(line);
-  expect(String(shape.detail)).toContain(disclosure);
 });
 it('X5 profile gate: method_step with carrier is byte-identical; proposal is byte-identical per P1 (R2 N2r)', async () => {
   const w = await capture('pre-mortem', 'run2', { evidenceLabel: 'X5', readSnapshot: async s => snapshot(s, 'S1'), providerReply: () => response(reply) });

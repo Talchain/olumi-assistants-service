@@ -1,0 +1,263 @@
+{
+ "source": {
+  "run": "live/runs/2026-10-12T172858Z (score run 4)",
+  "cee": "a770ce49fe29691b9e7f28982a100f01ab3b8eef",
+  "ui": "616bbf21ea5e5695b7f3c5dcd9b056635963d221",
+  "log": "Render logs, event agent_lane.reply_shaped, by x-request-id",
+  "selection": "every run 4 reply whose text ends with the appended \"Why? …\" paragraph (5 of 54 turns)",
+  "r4_composition": "R4 (2e7c4a46) composition of each rebuilt coaching input, recorded before technique (c); the rebuilt inputs reproduce the served replies byte for byte on the served composer (a770ce49 = 96b39f0 files)"
+ },
+ "cases": {
+  "capacity_03": {
+   "turn": "capacity/turns/03.json",
+   "request_id": "de559eb2-e03e-4679-a62f-fbfdd78b0b9a",
+   "user_message": "Explain this result",
+   "assistant_text": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates). It rests most on Olumi’s own estimate of how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?\n\n• At today's numbers; not projected forward yet\n• Not shown yet; why is under More detail\n\nThis result needs checking before it can answer your absolute-capacity question.\n\n- Check the target interpretation and capacity arithmetic.\n- “Add two specialists” was excluded from this comparison.\n\nYour target is “Weekly support capacity” of **at least 100 tickets per week**, but this run recorded its threshold as a change, not an absolute level. Its chance therefore cannot safely answer your stated question. The model also uses uncertain relationships where you defined capacity arithmetically.\n\nNot shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first.\n\n\"Additional specialists\": Not confirmed from your brief These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.\n\nProvisional: this result uses inputs whose sources have not been verified.\n\n‘Add two specialists’ is Olumi’s suggestion, so it was left out of this comparison until you add it.\n\nWhat would change it: how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’.\n\nOlumi's estimates: 3, see Check estimates.\n\nThis chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.\n\nWhy? Decisions framed with a single alternative ('whether or not') fail more often than ones with real alternatives; generating options before evaluating is a core decision-quality step.",
+   "text_sha256": "8e55179d8752980992e2780db42100d8e6f93a696d901ed4f92ea12ef028a692",
+   "served_why": "Decisions framed with a single alternative ('whether or not') fail more often than ones with real alternatives; generating options before evaluating is a core decision-quality step.",
+   "served_shape": {
+    "headline": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates). It rests most on Olumi’s own estimate of how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?",
+    "bullets": [
+     "At today's numbers; not projected forward yet",
+     "Not shown yet; why is under More detail"
+    ],
+    "detail": "This result needs checking before it can answer your absolute-capacity question.\n\n- Check the target interpretation and capacity arithmetic.\n- “Add two specialists” was excluded from this comparison.\n\nYour target is “Weekly support capacity” of **at least 100 tickets per week**, but this run recorded its threshold as a change, not an absolute level. Its chance therefore cannot safely answer your stated question. The model also uses uncertain relationships where you defined capacity arithmetically.\n\nNot shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first.\n\n\"Additional specialists\": Not confirmed from your brief These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.\n\nProvisional: this result uses inputs whose sources have not been verified.\n\n‘Add two specialists’ is Olumi’s suggestion, so it was left out of this comparison until you add it.\n\nWhat would change it: how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’.\n\nOlumi's estimates: 3, see Check estimates.\n\nThis chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.\n\nWhy? Decisions framed with a single alternative ('whether or not') fail more often than ones with real alternatives; generating options before evaluating is a core decision-quality step."
+   },
+   "guidance_slot1": {
+    "policy_id": "RC-WIDEN",
+    "priority": "P1",
+    "variant": "W2",
+    "target": "options",
+    "primary_action": {
+     "label": "Suggest options",
+     "action_kind": "choose_1_of_3",
+     "intent": "elicit_options"
+    },
+    "state_key_hash": "1a73966288a2",
+    "copy": {
+     "title": "Only one real option on the table. Decisions go better with alternatives.",
+     "why": "Alternatives expose trade-offs that a single proposed route leaves untested.",
+     "question": "Is it really just ‘Add one specialist’ or carry on as now? What other routes are there?"
+    }
+   },
+   "fast_path": "explain",
+   "provider_calls": 1,
+   "served_log": {
+    "outcome": "shaped",
+    "fast_path": "explain",
+    "profile": "coaching",
+    "obligations": 5,
+    "words_in": 262,
+    "units_in": 16,
+    "face_bullets": 2,
+    "detail_units": 13,
+    "face_words": 69
+   }
+  },
+  "deadline_02": {
+   "turn": "deadline/turns/02.json",
+   "request_id": "7fc1b771-f4b2-44c7-998d-5492c90c7bda",
+   "user_message": "Suggest what this model still needs before the analysis can run, so I can approve it.",
+   "assistant_text": "The immediate blocker is the feature-launch deadline. That is your constraint, so I should not invent it.\n\n• Give your estimate\n\n- I can propose your deadline for approval.\n\nWhen must the launch be finished—a date or a time from now?\n\nWhy? Assumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.",
+   "text_sha256": "cd3a429ce380104857cf817b01941e54fdcdd5f0a2d0e63cf126780ccd7137d7",
+   "served_why": "Assumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.",
+   "served_shape": {
+    "headline": "The immediate blocker is the feature-launch deadline. That is your constraint, so I should not invent it.",
+    "bullets": [
+     "Give your estimate"
+    ],
+    "detail": "- I can propose your deadline for approval.\n\nWhen must the launch be finished—a date or a time from now?\n\nWhy? Assumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it."
+   },
+   "guidance_slot1": {
+    "policy_id": "RC-STRENGTHEN-ITEM",
+    "priority": "P5",
+    "variant": "S3L",
+    "item": "event_capacity_1->event_goal",
+    "primary_action": {
+     "label": "Give your estimate",
+     "action_kind": "edit_inline",
+     "target": "event_capacity_1->event_goal"
+    },
+    "state_key_hash": "c5dbda6aedad",
+    "copy": {
+     "title": "The effect of hire a Tech lead adds capacity is Olumi's guess.",
+     "why": "It sits on the path to your goal.",
+     "question": "Does hire a Tech lead adds capacity really move share of next feature launch done by the deadline as much as Olumi assumed?"
+    },
+    "item_ref": {
+     "kind": "link",
+     "from_id": "event_capacity_1",
+     "to_id": "event_goal"
+    }
+   },
+   "fast_path": null,
+   "provider_calls": 1,
+   "served_log": {
+    "outcome": "shaped",
+    "fast_path": "agent",
+    "profile": "coaching",
+    "obligations": 0,
+    "words_in": 37,
+    "units_in": 4,
+    "face_bullets": 2,
+    "detail_units": 1,
+    "face_words": 26
+   },
+   "r4_composition": {
+    "commit": "2e7c4a46f1d61be98bd52e5eaf0ffd6cac83c725",
+    "text": "The immediate blocker is the feature-launch deadline. That is your constraint, so I should not invent it.\n\n- I can propose your deadline for approval.\n\nWhen must the launch be finished—a date or a time from now?\n\n- Give your estimate\n\nWhy? Assumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.",
+    "outcome": "already_in_shape"
+   }
+  },
+  "hiring_02": {
+   "turn": "hiring/turns/02.json",
+   "request_id": "c55f39aa-1cc9-4191-8bfc-0f6e546d6883",
+   "user_message": "Why can I barely see any of the connections between the factors, risks and outcome? Is this a UI or a data issue?",
+   "assistant_text": "The connections are saved, so this looks more like a display issue than missing model data.\n\n• Give your estimate\n\n- Ten causal links connect factors, risks and outcomes.\n- For example: Leadership guidance → Code quality → productivity.\n\nThat confirms the relationships exist, not that the canvas receives or renders them correctly. I can’t inspect the UI from here, so I can’t confirm whether it’s visibility settings, rendering or data delivery.\n\nCould you share a screenshot showing the faint or missing connections?\n\nWhy? Assumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.",
+   "text_sha256": "459768ddc4d14f4902d1283f115df06b2507a19cdf6da5a64611f9151bb03baf",
+   "served_why": "Assumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.",
+   "served_shape": {
+    "headline": "The connections are saved, so this looks more like a display issue than missing model data.",
+    "bullets": [
+     "Give your estimate"
+    ],
+    "detail": "- Ten causal links connect factors, risks and outcomes.\n- For example: Leadership guidance → Code quality → productivity.\n\nThat confirms the relationships exist, not that the canvas receives or renders them correctly. I can’t inspect the UI from here, so I can’t confirm whether it’s visibility settings, rendering or data delivery.\n\nCould you share a screenshot showing the faint or missing connections?\n\nWhy? Assumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it."
+   },
+   "guidance_slot1": {
+    "policy_id": "RC-STRENGTHEN-ITEM",
+    "priority": "P5",
+    "variant": "S3L",
+    "item": "code_quality->productivity",
+    "primary_action": {
+     "label": "Give your estimate",
+     "action_kind": "edit_inline",
+     "target": "code_quality->productivity"
+    },
+    "state_key_hash": "ea78824a50b6",
+    "copy": {
+     "title": "The effect of code quality is Olumi's guess.",
+     "why": "It sits on the path to your goal.",
+     "question": "Does code quality really move productivity as much as Olumi assumed?"
+    },
+    "item_ref": {
+     "kind": "link",
+     "from_id": "code_quality",
+     "to_id": "productivity"
+    }
+   },
+   "fast_path": null,
+   "provider_calls": 1,
+   "served_log": {
+    "outcome": "shaped",
+    "fast_path": "agent",
+    "profile": "coaching",
+    "obligations": 0,
+    "words_in": 79,
+    "units_in": 6,
+    "face_bullets": 3,
+    "detail_units": 2,
+    "face_words": 44
+   },
+   "r4_composition": {
+    "commit": "2e7c4a46f1d61be98bd52e5eaf0ffd6cac83c725",
+    "text": "The connections are saved, so this looks more like a display issue than missing model data.\n\n- Ten causal links connect factors, risks and outcomes.\n- For example: Leadership guidance → Code quality → productivity.\n\nThat confirms the relationships exist, not that the canvas receives or renders them correctly. I can’t inspect the UI from here, so I can’t confirm whether it’s visibility settings, rendering or data delivery.\n\nCould you share a screenshot showing the faint or missing connections?\n\n- Give your estimate\n\nWhy? Assumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.",
+    "outcome": "already_in_shape"
+   }
+  },
+  "hiring_15": {
+   "turn": "hiring/turns/15.json",
+   "request_id": "206cd0f6-7fbc-4b75-b0bb-436e495138e9",
+   "user_message": "Before we go further, remind me: how many developers do we have today, and what budget did I give you?",
+   "assistant_text": "You have **six mid-weight developers** today. You gave a **£200,000 budget**, and said you’d prefer to spend less.\n\n• Suggest risks\n\nWhy? Considering other plausible risks can reveal ways each option could fall short.",
+   "text_sha256": "32541ab122a01693fe85afaf29beba9c22364c0c06db59800154bf72e0e33b60",
+   "served_why": "Considering other plausible risks can reveal ways each option could fall short.",
+   "served_shape": {
+    "headline": "You have **six mid-weight developers** today. You gave a **£200,000 budget**, and said you’d prefer to spend less.",
+    "bullets": [
+     "Suggest risks"
+    ],
+    "detail": "Why? Considering other plausible risks can reveal ways each option could fall short."
+   },
+   "guidance_slot1": {
+    "policy_id": "RC-WIDEN",
+    "priority": "P3",
+    "variant": "W6",
+    "target": "risks",
+    "primary_action": {
+     "label": "Suggest risks",
+     "action_kind": "choose_1_of_3",
+     "intent": "elicit_risks"
+    },
+    "state_key_hash": "6e6a265a98fd",
+    "copy": {
+     "title": "Only one risk is on the map. What else could go wrong?",
+     "why": "Considering other plausible risks can reveal ways each option could fall short.",
+     "question": "What else could stop this working?"
+    }
+   },
+   "fast_path": null,
+   "provider_calls": 1,
+   "served_log": {
+    "outcome": "shaped",
+    "fast_path": "agent",
+    "profile": "coaching",
+    "obligations": 0,
+    "words_in": 18,
+    "units_in": 2,
+    "face_bullets": 1,
+    "detail_units": 0,
+    "face_words": 18
+   },
+   "r4_composition": {
+    "commit": "2e7c4a46f1d61be98bd52e5eaf0ffd6cac83c725",
+    "text": "You have **six mid-weight developers** today. You gave a **£200,000 budget**, and said you’d prefer to spend less.\n\n- Suggest risks\n\nWhy? Considering other plausible risks can reveal ways each option could fall short.",
+    "outcome": "already_in_shape"
+   }
+  },
+  "hiring_19": {
+   "turn": "hiring/turns/19.json",
+   "request_id": "c54192d3-6dba-4703-aed5-3aad40206f0d",
+   "user_message": "Explain this result",
+   "assistant_text": "You changed Capacity used for non-development tasks.\n\n• Olumi's estimates: 13, see Check estimates.\n\nYou changed Tech leads hired: 0 tech leads → 1 tech leads. The link from ‘Capacity used for non-development tasks’ to ‘Delivery capacity’ is now part of the analysis. Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone.\n\nThis Run shows a near tie, but cannot establish whether your budget limit is met, so no option can be put forward.\n- ‘Hire two developers’: goal chance not recorded.\n- Olumi’s ‘Hire one developer’ was excluded.\n‘Hiring spend’ cannot be checked in this model yet: Olumi hasn’t sized the links from its parts to it in this limit’s units.\nThe Run also treats ‘Launch date missed’ as zero; that is not evidence of no risk.\n\nNo single option can be put forward yet, because the options came out too close together on this run to tell apart, and a limit on your model was not shown to be met on this run, and running the analysis again as it stands will not change that; tell me what matters most to you between them.\n\n‘Hire one developer’ is Olumi’s suggestion, so it was left out of this comparison until you add it.\n\nWhy? Considering other plausible risks can reveal ways each option could fall short.",
+   "text_sha256": "ec2ffec87a1838cfbbfaf99e2b02e1f87361bb1829e796b28c7e5d8c33077a2e",
+   "served_why": "Considering other plausible risks can reveal ways each option could fall short.",
+   "served_shape": {
+    "headline": "You changed Capacity used for non-development tasks.",
+    "bullets": [
+     "Olumi's estimates: 13, see Check estimates."
+    ],
+    "detail": "You changed Tech leads hired: 0 tech leads → 1 tech leads. The link from ‘Capacity used for non-development tasks’ to ‘Delivery capacity’ is now part of the analysis. Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone.\n\nThis Run shows a near tie, but cannot establish whether your budget limit is met, so no option can be put forward.\n- ‘Hire two developers’: goal chance not recorded.\n- Olumi’s ‘Hire one developer’ was excluded.\n‘Hiring spend’ cannot be checked in this model yet: Olumi hasn’t sized the links from its parts to it in this limit’s units.\nThe Run also treats ‘Launch date missed’ as zero; that is not evidence of no risk.\n\nNo single option can be put forward yet, because the options came out too close together on this run to tell apart, and a limit on your model was not shown to be met on this run, and running the analysis again as it stands will not change that; tell me what matters most to you between them.\n\n‘Hire one developer’ is Olumi’s suggestion, so it was left out of this comparison until you add it.\n\nWhy? Considering other plausible risks can reveal ways each option could fall short."
+   },
+   "guidance_slot1": {
+    "policy_id": "RC-WIDEN",
+    "priority": "P3",
+    "variant": "W6",
+    "target": "risks",
+    "primary_action": {
+     "label": "Suggest risks",
+     "action_kind": "choose_1_of_3",
+     "intent": "elicit_risks"
+    },
+    "state_key_hash": "6fb312951726",
+    "copy": {
+     "title": "Only one risk is on the map. What else could go wrong?",
+     "why": "Considering other plausible risks can reveal ways each option could fall short.",
+     "question": "What else could stop this working?"
+    }
+   },
+   "fast_path": "explain",
+   "provider_calls": 1,
+   "served_log": {
+    "outcome": "shaped",
+    "fast_path": "explain",
+    "profile": "coaching",
+    "obligations": 2,
+    "words_in": 215,
+    "units_in": 12,
+    "face_bullets": 1,
+    "detail_units": 10,
+    "face_words": 13
+   }
+  }
+ }
+}

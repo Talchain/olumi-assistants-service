@@ -5271,8 +5271,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult,
         text: reply,
         // A host-only answer did not consume the carrier and keeps its existing bytes.
-        ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label,
-          interventionWhySaid: preReplySelection?.whySaid === true }),
+        ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label }),
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
         ...(widenReceipt === null ? {} : { widenedLine: widenReceipt }),
@@ -5284,6 +5283,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...((faceContract === 'draft' || runOrExplainTurn) && profile === 'coaching' && estimates !== null && estimates.count > 0
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
+        // Score run 2 (deadline 13): a write this turn refused (its typed outcome) → what was not recorded is never folded.
+        ...(result.tool_calls.some((call) => call.ok === false && typeof call.refusal === 'string') ? { notRecorded: true as const } : {}),
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
         obligations: withA7AsDetail(obligations, a7Repeat, reply, chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')),
         graph: readbackGraph,

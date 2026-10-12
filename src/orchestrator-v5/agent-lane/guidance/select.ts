@@ -39,18 +39,6 @@ function cooled(draft: Draft, guidance: GuidanceState): boolean {
   return recorded === stateKeyHash(draft.fields);
 }
 
-/**
- * E6 Why-once (DL 12 Oct, after Batch R's check): a policy's "Why?" (its science basis) is said once per state of the
- * policy; items are still offered. It was said when an item of this policy shown before is still offered and every such
- * item is unchanged (cooled). A shown item whose key has changed re-arms it; a resolved item, no longer offered, is
- * not part of the state. A whole-policy row is never said twice on one state, so this holds only for items. Display only.
- */
-export function policyWhySaid(policy_id: PolicyId, signals: GuidanceSignals, guidance: GuidanceState): boolean {
-  const shown = evaluate(policy_id, signals).candidates.filter(draft =>
-    SETTLED.has(guidance[entryKey(draft.policy_id, draft.policy_id === 'RC-STRENGTHEN-ITEM' ? draft.item : undefined)]?.status ?? ''));
-  return shown.length > 0 && shown.every(draft => cooled(draft, guidance));
-}
-
 type Candidate = { variant: Variant; priority: Priority; items: string[]; kind: 'link' | 'factor' };
 /** Every Strengthen variant that holds, before cooldown, each with its items in pick order (goal distance, then id). */
 function strengthenCandidates(s: GuidanceSignals): Candidate[] {

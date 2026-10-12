@@ -9,7 +9,7 @@
  * the id string; an item no single entity answers to gets no `item_ref` (the row is then words only). Absent `guidance`
  * = no row this turn. Pure.
  */
-import { policyWhySaid, selectGuidance, type GuidanceState, type Selection, type SelectedRow } from '../guidance/index.js';
+import { selectGuidance, type GuidanceState, type Selection, type SelectedRow } from '../guidance/index.js';
 import type { LeaderLicence } from '../../compose/leader-licence.js';
 import { assembleGuidanceSignals, type GuidanceRequest } from './guidance-signals.js';
 import { POLICY } from '../guidance/policy.js';
@@ -18,7 +18,15 @@ import { selectorSignalsOf } from './selector-signals.js';
 export type GuidanceItemRef =
   | { readonly kind: 'link'; readonly from_id: string; readonly to_id: string }
   | { readonly kind: 'factor'; readonly factor_id: string };
-export type GuidanceWireRow = SelectedRow & { readonly item_ref?: GuidanceItemRef };
+export type GuidanceWireRow = SelectedRow & {
+  readonly item_ref?: GuidanceItemRef;
+  /**
+   * Technique (c) (AIE 6130197656 §3, DL 12 Oct): slot 1's science basis in one sentence, its detail on click (RC-WIDEN
+   * `progressive_detail`), only where that sentence is true of the row's variant (`ROW_SCIENCE_ONLY_FOR`). The reply
+   * never carries it; the row does, beside its own why.
+   */
+  readonly science?: string;
+};
 export interface GuidanceWire { readonly slot1?: GuidanceWireRow; readonly slot2?: GuidanceWireRow }
 
 type Rec = Record<string, unknown>;
@@ -44,11 +52,21 @@ const wireRow = (row: SelectedRow, graph: unknown): GuidanceWireRow => {
   return { ...row, ...(ref !== undefined ? { item_ref: ref } : {}) };
 };
 
+/** The policy's science basis, only where it is true of this row's variant (SYS2 G1, `ROW_SCIENCE_ONLY_FOR`). */
+function scienceOf(row: SelectedRow): string | undefined {
+  const policy = POLICY.rows.find(r => r.policy_id === row.policy_id);
+  const only = ROW_SCIENCE_ONLY_FOR[row.policy_id];
+  if (policy === undefined || (only !== undefined && (row.variant === undefined || !only.includes(row.variant)))) return undefined;
+  const summary = policy.science_basis.summary;
+  return typeof summary === 'string' && summary.trim() !== '' ? summary : undefined;
+}
+
 /** The wire carrier for a selection; undefined when neither slot holds a row. */
 export function guidanceWireFor(selection: Selection, graph: unknown): GuidanceWire | undefined {
   if (selection.slot1 === undefined && selection.slot2 === undefined) return undefined;
+  const science = selection.slot1 === undefined ? undefined : scienceOf(selection.slot1);
   return {
-    ...(selection.slot1 !== undefined ? { slot1: wireRow(selection.slot1, graph) } : {}),
+    ...(selection.slot1 !== undefined ? { slot1: { ...wireRow(selection.slot1, graph), ...(science === undefined ? {} : { science }) } } : {}),
     ...(selection.slot2 !== undefined ? { slot2: wireRow(selection.slot2, graph) } : {}),
   };
 }
@@ -108,13 +126,10 @@ export function selectTurnGuidance(i: Omit<TurnGuidanceInputs, 'assistantText' |
   return selectTurnGuidanceShown(i).wire;
 }
 
-/**
- * The wire, and whether its slot-1 row's "Why?" was already said on this state of its policy (`policyWhySaid`). The
- * flag is display only: it never changes the wire, the selection, or what the model is told.
- */
-export interface TurnGuidanceSelection { readonly wire: GuidanceWire | undefined; readonly whySaid: boolean }
+/** The wire for this turn's selection. */
+export interface TurnGuidanceSelection { readonly wire: GuidanceWire | undefined }
 export function selectTurnGuidanceShown(i: Omit<TurnGuidanceInputs, 'assistantText' | 'preReplySelection'>): TurnGuidanceSelection {
-  if (i.guidance === null) return { wire: undefined, whySaid: false };
+  if (i.guidance === null) return { wire: undefined };
   try {
     const signals = assembleGuidanceSignals({
       request: i.request, offeredSpecific: i.offeredSpecific, graph: i.state.graph, analysisState: i.state.analysisState,
@@ -124,11 +139,9 @@ export function selectTurnGuidanceShown(i: Omit<TurnGuidanceInputs, 'assistantTe
     });
     const selectedSignals = selectorSignalsOf(signals, null, i.runKey);
     const history = selectedSignals.guidance ?? {};
-    const wire = guidanceWireFor(selectGuidance(selectedSignals, history), i.state.graph);
-    const policy = wire?.slot1?.policy_id;
-    return { wire, whySaid: policy !== undefined && policyWhySaid(policy, selectedSignals, history) };
+    return { wire: guidanceWireFor(selectGuidance(selectedSignals, history), i.state.graph) };
   } catch {
-    return { wire: undefined, whySaid: false };
+    return { wire: undefined };
   }
 }
 
@@ -140,7 +153,8 @@ export interface EligibleIntervention {
   readonly why: string;
   readonly trigger: string;
 }
-export const ELIGIBLE_INTERVENTION_INSTRUCTION = 'Only name the scientific method in CURRENT MODEL STATE.eligible_intervention. If absent, give a direct grounded answer without a named method. Write next moves as plain action bullets of at most eight words each. Keep useful questions and user figures. Olumi supplies the Why? disclosure; do not write it.';
+/** Technique (c): the last two sentences are the AIE's words (#94 6131186479), byte for byte. */
+export const ELIGIBLE_INTERVENTION_INSTRUCTION = 'Only name the scientific method in CURRENT MODEL STATE.eligible_intervention. If absent, give a direct grounded answer without a named method. Write next moves as plain action bullets of at most eight words each. Keep useful questions and user figures. Olumi shows the method\'s Why? with its guidance row; do not repeat it in an ordinary reply. When the user asks about the method itself, explain the reason supplied with that method in your answer.';
 /**
  * ⛔ A ROW'S SCIENCE SENTENCE IS NOT ALWAYS TRUE OF EVERY VARIANT (SYS2 G1, served 11 Oct). RC-WIDEN's sentence ("Decisions
  * framed with a single alternative ('whether or not') fail more often…") describes W2 only, the one-proposed-route case
