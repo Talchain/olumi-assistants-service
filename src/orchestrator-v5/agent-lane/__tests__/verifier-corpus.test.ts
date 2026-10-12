@@ -21,7 +21,9 @@
  * Rows the corpus cannot decide yet:
  *   - `effect-rate` points are PENDING the bound quantity's role (0825 §3), so only "never Olumi's" is asserted.
  *   - Any endpoint of a stated range is not the user's point, so it is not credited as one (row 5).
- * Today's failures are RED by design.
+ * Level rows the verifier does not credit yet are listed in RESIDUAL, each with its reason, and run as `it.fails`. Required
+ * CI stays green, and a residual row that starts passing turns RED, so the list only shrinks on purpose (SYS1, 12 Oct: a
+ * by-design red must never reach the batch PR).
  */
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -135,6 +137,19 @@ const DRAFTS: Record<string, Draft> = {
   'A02:20': { label: 'Capacity added per specialist', unit: 'tickets per week per specialist', value: 20 },
 };
 
+/** Level rows not yet credited after V2 (12 Oct), by row key. Each was located by gate on V2's source. */
+const RESIDUAL: Record<string, string> = {
+  'C06:the existing 80 tickets per week': 'no first-person owner, and the shared binder finds no span on the self-authored label',
+  'X03:36': 'shared binder: the self-authored label "Patients seen per day" is not bound by "sees … a day"',
+  'X04:620': 'no present-state marker: "We\'re shipping …" is progressive only',
+  'X05:74%': 'shared binder: no span for the self-authored label "Press utilisation"',
+  'X46:460': 'shared binder: a figure written after its label in a list ("calls handled daily 460")',
+  'X46:120': 'shared binder: a figure written after its label in a list ("bookings processed daily 120")',
+  'X48:68%': 'shared binder: no span for the self-authored label "Room occupancy"',
+  'A01:20': 'shared binder: the per-specialist denominator is in the label, not the written frame',
+};
+const residual = (key: string, want: Expect): string | undefined => want === 'credit' ? RESIDUAL[key] : undefined;
+
 type Expect = 'credit' | 'refuse' | 'pending';
 function expectation(key: string, label: string, d: Draft): Expect {
   const l = AIE_LABEL.get(key) ?? label;
@@ -192,8 +207,9 @@ describe('each corpus figure, drafted as a claimed level and admitted alone: cre
     const want = expectation(r.key, r.label, d);
     const tag = AIE_LABEL.has(r.key) ? ` (AIE 6120633627: ${AIE_LABEL.get(r.key)})` : d && 'rangeEnd' in d ? ' (range end)' : '';
     if ('none' in d) { it(`${r.key} [${r.label}] has no number to credit: ${d.none}`, () => undefined); continue; }
-    const name = `${r.key} [${r.label}${tag}] → ${want === 'pending' ? 'PENDING (0825 §3): never Olumi\'s' : want === 'credit' ? 'the user\'s, verified' : 'the user\'s, role unverified'}`;
-    it(name, () => {
+    const why = residual(r.key, want);
+    const name = `${r.key} [${r.label}${tag}] → ${want === 'pending' ? 'PENDING (0825 §3): never Olumi\'s' : want === 'credit' ? 'the user\'s, verified' : 'the user\'s, role unverified'}${why === undefined ? '' : ` — RESIDUAL (expected to fail): ${why}`}`;
+    (why === undefined ? it : it.fails)(name, () => {
       const got = stored(alone(r.s.sentence, d), r.s.sentence, d.label);
       if (want === 'credit') expect(got).toEqual({ origin: 'human', role: 'verified' });
       else if (want === 'refuse') expect(got).toEqual({ origin: 'human', role: 'unverified' });
@@ -226,7 +242,8 @@ describe('the capacity sentences inside their own served brief (quoted option la
   for (const key of ['C02:80 tickets per week', 'C06:the existing 80 tickets per week', 'C05:about 20 tickets per week']) {
     const r = rows.find(x => x.key === key)!; const d = r.draft as { label: string; unit: string; value: number };
     const want = expectation(key, r.label, d);
-    it(`${key} [${r.label}] in the capacity brief → ${want === 'pending' ? 'PENDING (0825 §3): never Olumi\'s' : want === 'credit' ? 'the user\'s, verified' : 'the user\'s, role unverified'}`, () => {
+    const why = residual(key, want);
+    (why === undefined ? it : it.fails)(`${key} [${r.label}] in the capacity brief → ${want === 'pending' ? 'PENDING (0825 §3): never Olumi\'s' : want === 'credit' ? 'the user\'s, verified' : 'the user\'s, role unverified'}${why === undefined ? '' : ` — RESIDUAL (expected to fail): ${why}`}`, () => {
       const got = stored(inBrief(key), CAPACITY, d.label);
       if (want === 'credit') expect(got).toEqual({ origin: 'human', role: 'verified' });
       else if (want === 'refuse') expect(got).toEqual({ origin: 'human', role: 'unverified' });

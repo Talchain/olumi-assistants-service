@@ -9,6 +9,8 @@ import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } fro
 import { findLinkEffectAmounts } from './link-effect-figures.js';
 import { figureTheUserWroteForSpan, isChangeWord } from './stated-by-user.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
+import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
+import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
 
 type Option = CandidateModel['options'][number];
@@ -359,9 +361,88 @@ function currentLevelWords(text: string): string[] {
  * (AIE 0825 §2, "current versus past"). The figure stays the user's unverified claim. "Over the last year we …" is a
  * historical period scoping a current rate and is stripped first (`currentLevelWords`). */
 const PAST_ANCHOR = new Set(['last', 'previous', 'ago', 'yesterday']);
-function currentLevelRole(text: string): boolean {
-  return !FOREIGN_LEVEL.test(text) && !currentLevelWords(text).some(w => BOUNDS.has(w) || PAST_ANCHOR.has(w)
+/** V2: the credited figure's own unit, written right after it, is the quantity, not an attribution: "processing 1,400
+ * claims per week" reports no claim, while "The insurer claims: …" still does. */
+function currentLevelRole(text: string, frame?: { span: { start: number; end: number }; unit: unknown }): boolean {
+  let attributed = text;
+  if (frame !== undefined) {
+    const unitWords = words(typeof frame.unit === 'string' ? frame.unit : '');
+    const tail = text.slice(frame.span.end).match(/^(?:[\s/]*[\p{L}]{1,64})*/u)?.[0] ?? '';
+    const run = [...tail.matchAll(/[\p{L}]{1,64}/gu)];
+    const stop = run.findIndex(m => !unitWords.some(u => sameName(u, m[0].toLowerCase())) && !grammar(m[0].toLowerCase()));
+    const end = frame.span.end + (stop < 0 ? tail.length : run[stop]!.index!);
+    attributed = text.slice(0, frame.span.start) + text.slice(end);
+  }
+  return !FOREIGN_LEVEL.test(attributed) && !currentLevelWords(text).some(w => BOUNDS.has(w) || PAST_ANCHOR.has(w)
     || ['goal', 'target', 'limit', 'plan', 'forecast', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w));
+}
+
+/**
+ * ⭐ Recovery Batch B, S4 V2 (AIE 0825 §2; #94 6122028727): POSITIVE ownership and currentness, with no verb list.
+ * "Our existing team resolves 80 tickets per week" names its owner and says the level is current, yet `ownsFactorLevel`
+ * reads only its finite STATE_VERBS, so Paul's 80 was withheld on every served capacity draft (9/9, 11–12 Oct). Here:
+ *   - WHO: the figure's own clause (after any ':' or ';') opens on the first person ("we", "our");
+ *   - between that owner and the figure stand only the factor's own words, frame grammar and the markers below, plus ONE
+ *     word in the predicate slot just before the figure ("resolves", "processing"); any other word names another entity
+ *     ("Our pub sales share" is not the taproom's) and a fronted frame ("In the imagined setup, our team…") refuses;
+ *   - CURRENT, positively: a present-state marker of the shared readers in that clause, `cee/signals/brief-signals.ts`
+ *     STATE_VERBS ("currently", "existing", "right now", "we're at" …) or the occurrence reader's present-state governor
+ *     (`occurrenceRoleOf`: "is", "running at", "now" …), and that reader finds no aim, past or conditional governing it.
+ * Quantity, unit and period stay `factorLevelSpans`'s; role words, quotation and neighbours stay the existing gates.
+ */
+const STATE_MARK = STATE_MARKERS.map(p => new RegExp(`(?<![\\p{L}\\p{N}'])${p.split(' ').join('\\s+')}(?![\\p{L}\\p{N}])`, 'iu'));
+const STATE_WORDS = new Set(STATE_MARKERS.flatMap(p => words(p)));
+const COPULA = new Set(['is', 'are', 'am', 're', 's']);
+const plainQuotes = (text: string): string => text.replace(/[’‘]/gu, '\'');
+function ownCurrentClause(text: string, span: { start: number; end: number }, factor: Factor): boolean {
+  const plain = plainQuotes(text);
+  const start = Math.max(plain.lastIndexOf(':', span.start), plain.lastIndexOf(';', span.start)) + 1;
+  const tail = plain.slice(span.end).search(/[;:]/u);
+  const clause = plain.slice(start, tail < 0 ? plain.length : span.end + tail);
+  const lead = words(plain.slice(start, span.start));
+  if (lead[0] !== 'we' && lead[0] !== 'our') return false;
+  const own = [...words(factor.label), ...words(typeof factor.unit === 'string' ? factor.unit : '')];
+  const body = lead.slice(1);
+  // The predicate slot: the last word before the figure, past any copula, "at" or approximation ("is at about 80").
+  let slot = body.length - 1;
+  while (slot >= 0 && (CLAUSE.has(body[slot]!) || body[slot] === 'at' || COPULA.has(body[slot]!))) slot -= 1;
+  const named = (w: string): boolean => grammar(w) || OWN_ORGANISATION.has(w) || CLAUSE.has(w) || STATE_WORDS.has(w)
+    || COPULA.has(w) || own.some(v => sameName(v, w));
+  // Every other word names the factor's own subject: "Our pub sales share" is not the taproom's (b5 rival entity).
+  if (!body.every((w, i) => i === slot || named(w))) return false;
+  // A regular past predicate ("resolved 80") is history, whatever marker the subject carries.
+  const predicate = body[slot] ?? '';
+  if (/ed$/u.test(predicate) && !STATE_WORDS.has(predicate)) return false;
+  const role = occurrenceRoleOf(plain, span.start);
+  return role !== 'aim' && role !== 'past' && role !== 'conditional'
+    && (role === 'current' || STATE_MARK.some(r => r.test(clause)));
+}
+/** V2: "… defined as the existing 80 tickets per week …" — the credited figure once, in the factor's own frame and naming
+ * nothing but the factor's own words ("1,500 other subscribers" is another quantity: typed-level-span RUN8), with a shared
+ * present-state marker right before it and no aim, past or conditional governing it: the same current claim said again,
+ * so it neither rivals nor qualifies the owned statement. */
+function restatesLevel(text: string, factor: Factor, value: number): boolean {
+  const plain = plainQuotes(text);
+  const amounts = findLinkEffectAmounts(plain).filter(n => n.magnitude === Math.abs(value));
+  if (amounts.length !== 1 || words(plain).filter(w => figure(w) === Math.abs(value)).length > 1) return false;
+  const amount = amounts[0]!;
+  const own = [...words(factor.label), ...words(typeof factor.unit === 'string' ? factor.unit : '')];
+  if (!(statedTailParts(plain, amount)?.noun ?? []).every(w => own.some(v => sameName(v, w)))) return false;
+  const role = occurrenceRoleOf(plain, amount.index);
+  return role !== 'aim' && role !== 'past' && role !== 'conditional'
+    && STATE_MARK.some(r => new RegExp(`${r.source}\\s+$`, 'iu').test(plain.slice(0, amount.index)))
+    && sameFrame(plain, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount);
+}
+/** V2: "Keep current staffing adds no specialist." — every qualifier quantifies ANOTHER factor's own noun (the next word
+ * names it) and nothing in the sentence names the credited factor: an independent claim, not a bound on this figure. */
+function qualifiesOtherQuantity(model: CandidateModel, factor: Factor, text: string): boolean {
+  const ws = words(text);
+  const mine = [...words(factor.label), ...(readUnitParts(factor.unit)?.noun ?? [])].filter(w => !grammar(w));
+  if (ws.some(w => mine.some(m => sameName(m, w)))) return false;
+  const nouns = model.factors.filter(f => f !== factor)
+    .flatMap(f => [...(readUnitParts(f.unit)?.noun ?? []), labelHead(f.label) ?? '']).filter(n => n !== '');
+  const qualifiers = ws.flatMap((w, i) => NOT_POINT.has(w) ? [i] : []);
+  return qualifiers.length > 0 && qualifiers.every(i => nouns.some(n => sameName(n, ws[i + 1] ?? '')));
 }
 
 /** Set aside a rival only on the located amount's complete typed frame, never on its name alone. */
@@ -518,9 +599,10 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     if (matches.length !== 1) return false;
     const span = matches[0]!;
     if (insideQuotation(brief, a, span)) return false;
-    if (!ownsFactorLevel(a.text.slice(0, span.start), factor)
-      || !currentLevelRole(a.text)) return false;
+    if (!(ownsFactorLevel(a.text.slice(0, span.start), factor) || ownCurrentClause(a.text, span, factor))
+      || !currentLevelRole(a.text, { span, unit: factor.unit })) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {
+      if (text.length <= MAX_ASSERTION && restatesLevel(text, factor, value)) return true;
       // An elliptical bound, correction, retraction or attributed sentence remains ambiguous.
       if (text.length > MAX_ASSERTION || !currentLevelRole(text) || words(text).some(w => NOT_POINT.has(w))) return false;
       const amounts = findLinkEffectAmounts(text);
@@ -534,7 +616,7 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
         && currentQuantityLabel(claims[0]!.label) !== currentQuantityLabel(factor.label)
         && readUnitParts(claims[0]!.unit) !== null
         && JSON.stringify(readUnitParts(claims[0]!.unit)) !== JSON.stringify(readUnitParts(factor.unit));
-    }, text => differentGoalBound(model, factor, text));
+    }, text => differentGoalBound(model, factor, text) || qualifiesOtherQuantity(model, factor, text));
   } catch (err) {
     log.warn({ event: 'agent_lane.stated_level_unverifiable', err: err instanceof Error ? err.message : String(err) },
       'agent-lane: a stated factor level could not be verified on a malformed draft; credit is withheld');
