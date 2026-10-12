@@ -135,12 +135,19 @@ describe('S4G — WIRE: a change goal reaches /graph/register in the contract\'s
     expect(JSON.stringify(r), 'no promise of a chat path that does not exist yet').not.toMatch(/Tell me the current level/);
   });
 
-  it('S4G-6: Olumi\'s estimate of the current level is never the base (the level path\'s own rule)', async () => {
-    const { registered } = await run(candidate({ baseline_known: true, baseline_value: 45000, baseline_provenance: 'ai_proposed' }));
+  it('S4G-6: Olumi\'s estimate of the current level is never the base (the level path\'s own rule): an ai_proposed £40,000 the brief never writes', async () => {
+    expect(BRIEF, 'its reason: the brief writes no £40,000').not.toMatch(/40,000|40000|40k/);
+    const { registered } = await run(candidate({ baseline_known: true, baseline_value: 40000, baseline_provenance: 'ai_proposed' }));
     const g = goalOf(registered);
     expect(g['goal_threshold_frame']).toBe('change_rel');
     expect(Object.keys(g)).not.toContain('observed_state');
     expect(Object.keys(g)).not.toContain('goal_threshold');
+  });
+  it('S4G-6b (DL GO 12 Oct): a drafter\'s estimate tag never withholds the level the brief writes: the stated £45,000 tagged ai_proposed is the base, as S4G-3', async () => {
+    const { registered } = await run(candidate({ baseline_known: true, baseline_value: 45000, baseline_provenance: 'ai_proposed' }));
+    const g = goalOf(registered);
+    expect(g['goal_threshold']).toBeCloseTo(-0.15, 12);
+    expect(g['observed_state']).toMatchObject({ source: 'brief_extraction', raw_value: 45000, cap: g['goal_threshold_cap'] });
   });
 
   // PR Review CHANGES_REQUIRED on #2262 @ 338e4268: the drafter's "known" + "explicit" is its word, not the brief's.
