@@ -145,7 +145,7 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
     if (out['type'] === 'object' && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
       for (const name of Object.keys(properties)) {
-        if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence')) continue;
+        if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence' || name === 'evidence')) continue;
         if (!required.includes(name)) required.push(name);
       }
       out['required'] = required;
@@ -333,14 +333,14 @@ export function buildCandidateSchema(): Record<string, unknown> {
      * drafter states the definition; `admit-model.ts` checks it against the admitted links and
      * marks whether its sign is provable. REQUIRED so "none" is an empty list, never an omission.
      */
-    identities: { type: 'array', description:
-      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (accumulation) a stock worked out month by month to the goal\u2019s deadline, including the goal itself. Empty when none.',
+    identities: { type: 'array', description: AIE_APPROVED_DECLARED_SUM.identities_description,
       items: obj({
-        outcome: { type: 'string', description: 'The EXACT label of the quantity that is the product, or the stock at the deadline.' },
-        operation: { type: 'string', enum: ['product', 'accumulation'] },
-        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied; for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month; for a stated net change EXACTLY two: the level today, the net amount added per month.' },
+        outcome: { type: 'string', description: AIE_APPROVED_DECLARED_SUM.outcome_description },
+        operation: AIE_APPROVED_DECLARED_SUM.operation,
+        factors: { type: 'array', items: { type: 'string' }, description: AIE_APPROVED_DECLARED_SUM.factors_description },
         provenance,
         reading: { anyOf: [{ type: 'string', enum: ['net', 'gross'] }, { type: 'null' }] },
+        evidence: AIE_APPROVED_DECLARED_SUM.evidence,
       }, ['outcome', 'operation', 'factors', 'provenance']) },
     unknowns: { type: 'array', items: { type: 'string' } },
     // ⭐ THE QUESTION CARD'S TITLE (Paul, 27 Sep: served "Decision: MRR"). COPIED, never written: admission takes it only
@@ -351,34 +351,47 @@ export function buildCandidateSchema(): Record<string, unknown> {
   }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'decision_question']);
 }
 
-/**
- * ⛔ AIE_TEXT_PENDING (L2, DL brief 12 Oct; AIE #94 6134029017). The PROPOSED drafter text for a declared SUM, held here
- * and NOT SENT: the AIE signs prompt text (CLAUDE.md §7.2), so `buildCandidateSchema` and `BUILD_INSTRUCTIONS` are
- * unchanged and the drafter cannot emit `sum` yet. Admission already reads what this text would produce
- * (`admit-model.ts` `checkDeclaredSums`: the declared set checked whole; the quote located by CEE, never trusted).
- * Wiring it changes the sent schema and instructions, so the J1 recordings must be re-recorded (§7.4).
- *  · `identities.description`, `identities.items.operation` and `identities.items.factors.description` REPLACE today's;
- *  · `identities.items.evidence` is a NEW nullable key (in `required` at the provider boundary, as `baseline_evidence`);
- *  · `instruction` is one NEW line for `BUILD_INSTRUCTIONS`, after the `baseline_evidence` line.
- */
-export const AIE_TEXT_PENDING_DECLARED_SUM = {
-  identities_description:
-    'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (sum) added together, or (accumulation) a stock worked out month by month to the goal’s deadline, including the goal itself. Empty when none.',
-  operation: { type: 'string', enum: ['product', 'sum', 'accumulation'] },
-  factors_description:
-    'The EXACT labels of every quantity multiplied, or for a sum every quantity added (each once, in the same unit as the total); for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month; for a stated net change EXACTLY two: the level today, the net amount added per month.',
-  evidence: {
-    anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, properties: { quote: { type: 'string' } }, required: ['quote'] }],
-    description: 'For a sum the brief itself defines: the complete verbatim brief sentence that defines it. null when the sum is your own reading, and for every product or accumulation.',
+/** AIE #6134594584: approved declared-sum schema and instruction, including the outcome amendment. */
+export const AIE_APPROVED_DECLARED_SUM = {
+  "identities_description": "Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (sum) added together, or (accumulation) a stock worked out month by month to the goal’s deadline, including the goal itself. Empty when none.",
+  "outcome_description": "The EXACT label of the quantity defined by the product or sum, or the stock at the deadline.",
+  "operation": {
+    "type": "string",
+    "enum": [
+      "product",
+      "sum",
+      "accumulation"
+    ]
   },
-  instruction:
-    'When the brief DEFINES a quantity as other quantities added together ("total = the existing 80 plus the additional capacity"), declare it in identities with operation sum: the total’s exact label, every part’s exact label, and evidence.quote the complete defining sentence. Every part is a quantity in this model with its level today, in the total’s unit: a stated amount ("the existing 80") is a factor at that level, and a part that does not exist yet is a factor at 0 today. Link each part to the total at +1 per 1 with definitional true. A sum the brief does not define is your own reading: declare it only with evidence null.',
+  "factors_description": "The EXACT labels of every quantity multiplied, or for a sum every quantity added (each once, in the same unit as the total); for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month; for a stated net change EXACTLY two: the level today, the net amount added per month.",
+  "evidence": {
+    "anyOf": [
+      {
+        "type": "null"
+      },
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "quote": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "quote"
+        ]
+      }
+    ],
+    "description": "For a sum the brief itself defines: the complete verbatim brief sentence that defines it. null when the sum is your own reading, and for every product or accumulation."
+  },
+  "instruction": "When the brief DEFINES a quantity as other quantities added together (\"total = the existing 80 plus the additional capacity\"), declare it in identities with operation sum: the total’s exact model label, every part’s exact model label, and evidence.quote the complete defining sentence. Include every addend once; represent a stated constant as a part with its own stated level and unit. Every part needs a level today in the total’s unit, using the supported factor/quantity shape. A stated amount (\"the existing 80\") remains that amount. Use zero today only when the brief establishes that this contribution is absent, or when the quantity is an additional increment from today that is zero by construction; retain which reading it is, rather than calling a derived zero an observed fact. If its level today is unknown, keep that uncertainty or identify your proposed estimate as yours; never invent zero merely to make the sum computable. Link each sum part to the total at +1 per 1 with definitional true. A sum the brief does not define is your own modelling interpretation: declare it only with evidence null and inferred provenance, preserving any uncertainty or unresolved qualification. An addition-only sum must not encode subtraction, a missing addend, or an overlapping component counted twice."
 } as const;
 
 export const BUILD_INSTRUCTIONS = [
   'For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. Ask for the date first, then how long today’s team takes, then when new people start. Never ask today’s level of the event goal.',
   'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
   'For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership.',
+  AIE_APPROVED_DECLARED_SUM.instruction,
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
   'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',

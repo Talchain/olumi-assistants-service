@@ -11,17 +11,18 @@
  * → construction (`buildModelFromBrief`, one scripted drafter call) → the registered graph → the production snapshot
  * loader → the real Run handler, whose probe captures the exact PLoT request body. 0 LLM calls; PLoT is never called.
  *
- * ⚠ WHAT IS SELF-AUTHORED, SAID PLAINLY: no served draft can declare a sum (the sent schema's `operation` enum is product |
- * accumulation; the proposed text is `AIE_TEXT_PENDING_DECLARED_SUM`, unsigned and unsent). Every row below adds ONE
- * declaration to the served draft, shaped as that pending text asks: the total, the parts, the defining sentence, and
+ * ⚠ WHAT IS SELF-AUTHORED, SAID PLAINLY: the recorded served draft predates sum support. The AIE-approved text is now
+ * wired, but no provider call has been made with it here. Every admission row below adds ONE
+ * declaration to the served draft, shaped as the approved text asks: the total, the parts, the defining sentence, and
  * each part as a quantity with its level today. The GREEN row also types the goal's 80 `explicit`, as run 5's stored goal
  * held it (`reads/02-04`: `brief_extraction`, raw 80). These rows prove ADMISSION → PAYLOAD; they prove nothing about what
  * the drafter will emit. Expectations are written by hand, never read back from the code. No chance is asserted.
  */
+import Ajv from 'ajv';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AIE_TEXT_PENDING_DECLARED_SUM, buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { AIE_APPROVED_DECLARED_SUM, BUILD_INSTRUCTIONS, buildCandidateSchema, strictForTheDrafter, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
@@ -58,7 +59,7 @@ const declare = (c: Rec, evidence?: Rec | null): Rec => ({ ...c, identities: [..
   provenance: 'explicit', reading: null, ...(evidence === undefined ? {} : { evidence }) }] });
 /** Run 5 held the brief's 80 as the goal's level (`brief_extraction`); the served c85817f2 draft typed it "inferred". */
 const goalLevelAsRun5 = (c: Rec): Rec => ({ ...c, goal: { ...c.goal, baseline_provenance: 'explicit' } });
-/** The pending text's part: a quantity with its level today (0: no specialist is added today), in the total's unit. */
+/** The approved text's part: a quantity with its level today (0: no specialist is added today), in the total's unit. */
 const partWithLevel = (c: Rec, value = 0, unit = 'tickets per week'): Rec => ({ ...c,
   outcomes: c.outcomes.filter((o: Rec) => o.label !== 'Additional specialist capacity'),
   factors: [...c.factors, { label: 'Additional specialist capacity', role: 'observable', baseline_known: false, baseline_evidence: null,
@@ -137,18 +138,41 @@ function naturalLinks(g: Rec): Map<string, Rec> {
 const without = (m: Map<string, Rec>, keys: readonly string[]): Map<string, Rec> => new Map([...m].filter(([k]) => !keys.includes(k)));
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-describe('PRECONDITIONS: the served draft, and the pending text that is not sent', () => {
+describe('PRECONDITIONS: the served draft, and the approved text now sent', () => {
   it('the brief is the run-5 capacity brief text; the served draft declares only a product, never a sum', () => {
     expect(FX.source.drafter_raw.row_id).toBe('470fa988-8f8c-461f-b410-908f123124f3');
     expect(FX.brief).toContain(SENTENCE);
     expect(served().identities.map((i: Rec) => i.operation)).toEqual(['product']);
   });
 
-  it('AIE_TEXT_PENDING: the sent schema still cannot say "sum"; the proposed text can (unsigned, unwired)', () => {
+  it('the AIE-approved schema and instruction are wired, with evidence required only at the provider boundary', () => {
     const items = ((buildCandidateSchema().properties as Rec).identities as Rec).items as Rec;
-    expect(items.properties.operation.enum).toEqual(['product', 'accumulation']);
-    expect(items.properties.evidence).toBeUndefined();
-    expect(AIE_TEXT_PENDING_DECLARED_SUM.operation.enum).toEqual(['product', 'sum', 'accumulation']);
+    expect(items.properties.operation.enum).toEqual(['product', 'sum', 'accumulation']);
+    expect(items.properties.evidence).toEqual(AIE_APPROVED_DECLARED_SUM.evidence);
+    expect(items.properties.outcome.description).toBe('The EXACT label of the quantity defined by the product or sum, or the stock at the deadline.');
+    expect(BUILD_INSTRUCTIONS).toContain(AIE_APPROVED_DECLARED_SUM.instruction);
+    for (const providerBoundary of [false, true]) {
+      const schema = strictForTheDrafter(buildCandidateSchema(), { providerBoundary }) as Rec;
+      expect(schema.properties.identities.items.required.includes('evidence')).toBe(providerBoundary);
+    }
+  });
+
+  it('the drafter schema accepts a sum with a quote; a product identity is unchanged', () => {
+    const schema = strictForTheDrafter(buildCandidateSchema()) as Rec;
+    const validate = new Ajv({ strict: false }).compile(schema.properties.identities.items);
+    const sum = { outcome: 'Weekly support capacity', operation: 'sum',
+      factors: ['Existing team capacity', 'Additional specialist capacity'], provenance: 'explicit', reading: null,
+      evidence: { quote: SENTENCE } };
+    expect(validate(sum), JSON.stringify(validate.errors)).toBe(true);
+    expect(validate({ ...sum, evidence: {} })).toBe(false);
+    expect(validate({ ...sum, evidence: { quote: 80 } })).toBe(false);
+    expect(validate({ ...sum, evidence: { quote: SENTENCE, stated: true } })).toBe(false);
+    const product = served().identities[0];
+    const before = JSON.stringify(product);
+    const candidate = new Ajv({ strict: false }).compile((buildCandidateSchema() as Rec).properties.identities.items);
+    expect(candidate(product), JSON.stringify(candidate.errors)).toBe(true);
+    expect(validate({ ...product, reading: product.reading ?? null, evidence: null }), JSON.stringify(validate.errors)).toBe(true);
+    expect(JSON.stringify(product)).toBe(before);
   });
 });
 
