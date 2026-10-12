@@ -126,12 +126,12 @@ describe('SCIENCE review rows and controls', () => {
   });
   it('S2-OLumi-ESTIMATES: each added-capacity line names its Olumi estimates', () => {
     const lines = goalChanceScreenLinesForAgent(saved(graph()), graph(), true);
-    expect(lines.find(l => l.option_id === 'hire')?.chance).toContain("using Olumi's estimates of hiring time (3–5 months) and the new team's pace (10% of the feature launch a month)");
+    expect(lines.find(l => l.option_id === 'hire')?.chance).toContain("using Olumi’s estimates of hiring time (3–5 months) and of the additional progress from the hires (10% of the feature launch per month)");
   });
   it('S2-OLumi-ESTIMATES control: carry-on line names no Olumi capacity estimates', () => {
     const carry = goalChanceScreenLinesForAgent(saved(graph()), graph(), true).find(l => l.option_id === 'carry')?.chance;
     expect(carry).not.toContain('hiring time');
-    expect(carry).not.toContain("new team's pace");
+    expect(carry).not.toContain('additional progress from the hires');
     expect(carry).toContain(", using Olumi's estimates for 1 relationship (see Check estimates).");
   });
   it('S2-FAILING-INPUT: invalid Olumi lead names hiring time, not user team time', () => {
@@ -204,7 +204,7 @@ describe('SCIENCE review rows and controls', () => {
     expect(goalChanceLicenceOf(result(), graph(), 'goal')?.pct_by_option.hire).toBe(39);
     expect(gate(HIRE, 1).form).toBe('point');
     expect(goalChanceScreenLinesForAgent(saved(graph()), graph(), true).find(l => l.option_id === 'hire')?.chance)
-      .toBe("‘Hire two developers’: about 39% chance of launching by 7 April 2027, in this model, using Olumi's estimates of hiring time (3–5 months) and the new team's pace (10% of the feature launch a month), using Olumi's estimates for 1 relationship (see Check estimates).");
+      .toBe("‘Hire two developers’: about 39% chance of launching by 7 April 2027, in this model, using Olumi’s estimates of hiring time (3–5 months) and of the additional progress from the hires (10% of the feature launch per month), using Olumi's estimates for 1 relationship (see Check estimates).");
   });
   it.each([6.2, 6.3, 6.4].flatMap(low => (['Run', 'saved-read'] as const).map(door => ({ low, door }))))('S4-P40-CLASS $door door: low=$low projects the licensed extreme, including the 20/4000 producer', async ({ low, door }) => {
       const g = graph(low, 10), parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low, high: 10 } };

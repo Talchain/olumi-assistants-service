@@ -4,20 +4,25 @@
  * "Two developers, one within 2 months and another a month or so later" is TWO parts (a second switch factor with its own
  * carrier, the construction's own per-part shape), summed by the chance, never averaged into one start.
  *
- * Each bound records whose figure it is (`figures.<bound> = {value, origin, quote}`); a bound the user did not give stays
- * Olumi's, labelled. `olumi_estimate` keeps the option's own estimate so a later statement is mapped against Olumi's figure,
- * never against an earlier answer. Rules (DL + AIE S8 rule set, 12 Oct):
- * - "at least N": soonest N (yours); latest Olumi's, refused when Olumi's latest is below N;
- * - "within N": latest N (yours); soonest min(Olumi's soonest, N) (Olumi's);
- * - "about N" / "in N" / "N or so": N to N (yours); "N–M": N to M (yours);
- * - "another M later": the previous start shifted by M, yours only where both figures are yours; only after a start
- *   fixed to one figure (PL AMEND 6121889192: a range would make the two starts dependent, never independent parts).
- * The pace stays Olumi's estimate, split equally across the option's starts.
+ * r2 (AIE 6122268035 science, 6122431786 text; PL 6122371497/6122519782; DL rulings (a)–(c) and the CUT):
+ * - each part keeps the user's statement (`statement: {quote, form}`) beside its modelled timing;
+ * - each figure records its ROLE (stated | olumi_estimate | derived) and an observed-state-shaped stamp that the shared
+ *   origin reader classifies (`valueAuthorshipOf`'s mapping, `authorshipOf`: the user's stated figure is 'user_override' → yours; a figure Olumi
+ *   supplied, accepted by the card press, is 'user_assumption' + confirm → olumi_accepted). Origin and role are separate;
+ *   a missing or mismatched record is UNKNOWN, never Olumi's;
+ * - every figure that is not the user's stated bound is labelled, even when its number equals the user's.
+ * Rules: "at least N": soonest N (stated), latest Olumi's estimate; "within N": latest N (stated), soonest Olumi's estimate;
+ * "in N" / "N–M": stated; "about N" / "N or so": derived (its exact figure is Olumi's disclosed reading, AIE 6122738619); "another M later": derived from
+ * the previous start, only when that start is one figure. Anything else is refused, never guessed: a ranged start before
+ * "another M later" (the coupled law is DEFERRED, DL (c): the two starts would be one draw), an "at least N" beyond Olumi's
+ * latest or a "within N" below Olumi's soonest (DL CUT). The pace stays Olumi's estimate, split equally across the starts.
  */
 import { extraShareMoments } from './event-by-date-share.js';
 import { timeBetween } from './deadline-date.js';
 import { withEventShareDate } from './event-by-date-model.js';
 import { goalDeadlineFromRecord } from './goal-kind.js';
+import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
+import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../cee/transforms/provenance-display.js';
 import { isDeepStrictEqual } from 'node:util';
 
 type Rec = Record<string, any>;
@@ -27,8 +32,18 @@ export type HiringForm =
   | { readonly kind: 'at_least'; readonly months: number } | { readonly kind: 'within'; readonly months: number }
   | { readonly kind: 'about'; readonly months: number } | { readonly kind: 'after_previous'; readonly months: number }
   | { readonly kind: 'range'; readonly low: number; readonly high: number };
-export interface Figure { readonly value: number; readonly origin: 'user' | 'olumi'; readonly quote?: string }
-export interface PlannedPart { readonly lead_low: Figure; readonly lead_high: Figure; readonly monthly_share: Figure }
+export type FigureRole = 'stated' | 'olumi_estimate' | 'derived';
+/** One stored figure: its number, its role, and the stamp the shared origin reader reads (`valueAuthorshipOf`). */
+export interface Figure {
+  readonly value: number;
+  readonly role: FigureRole;
+  readonly source: 'user_override' | 'user_assumption';
+  readonly reviewed_by_user?: { readonly intent: 'confirm' };
+  /** The user's words this figure is read from (a stated or derived figure). */
+  readonly quote?: string;
+}
+export interface Statement { readonly quote: string; readonly form: HiringForm['kind'] }
+export interface PlannedPart { readonly statement: Statement; readonly lead_low: Figure; readonly lead_high: Figure; readonly monthly_share: Figure }
 export interface PlannedOption {
   readonly option_id: string;
   readonly label: string;
@@ -53,6 +68,8 @@ const NUMBER_WORDS: Readonly<Record<string, number>> = { a: 1, an: 1, one: 1, tw
   seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 const NUM = '(\\d+(?:\\.\\d+)?|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)';
 const months = (s: string): number => NUMBER_WORDS[s] ?? Number(s);
+/** Words that make a stated time approximate; the exact figure Olumi models from it is then disclosed as its reading. */
+const APPROXIMATE = /\b(?:about|around|roughly|approximately|or so|or thereabouts)\b|~/;
 
 export function plainWords(t: string): string {
   return t.toLowerCase().replace(/[‘’]/g, "'").replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim();
@@ -81,21 +98,45 @@ export function readHiringStart(quote: string): HiringForm | null {
   return f.kind === 'range' ? (ok(f.low) && ok(f.high) && f.high > f.low ? f : null) : ok(f.months) ? f : null;
 }
 
-/** The quote is the user's, in this message, as whole words; its sentence names the option (a label word, not "hire"). */
+/**
+ * The quote is the user's own words, in this message OR an earlier one (E2's source-bound path: the conversation the host
+ * retains), matched as whole words by the shared `quoteSpansIn`; the sentence holding it names the option (a label word,
+ * not "hire" or a number word), so one option's time is never offered for another.
+ */
 const GENERIC = new Set(['hire', 'hiring', 'hired', 'the', 'and', 'add', 'adds', 'more', 'new', 'extra', 'capacity', 'option', 'with', 'for', 'get',
   ...Object.keys(NUMBER_WORDS)]);
 const stem = (w: string): string => w.replace(/(?:es|s)$/, '');
-export function quoteStatedFor(message: string, quote: string, optionLabel: string): 'ok' | 'not_stated' | 'not_for_option' {
-  const text = plainWords(message), q = plainWords(quote);
+export function quoteStatedFor(texts: { readonly now?: string | null; readonly conversation?: string | null }, quote: string,
+  optionLabel: string): 'ok' | 'not_stated' | 'not_for_option' {
+  const q = plainWords(quote);
   if (q === '') return 'not_stated';
-  const at = new RegExp(`(?:^|[^\\p{L}\\p{N}])${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}])`, 'u').exec(text);
-  if (at === null) return 'not_stated';
-  const start = Math.max(text.lastIndexOf('. ', at.index), text.lastIndexOf('? ', at.index), text.lastIndexOf('! ', at.index)) + 1;
-  const ends = ['. ', '? ', '! '].map(e => text.indexOf(e, at.index + at[0].length)).filter(i => i >= 0);
-  const sentence = text.slice(start, ends.length === 0 ? text.length : Math.min(...ends));
-  const words = new Set((sentence.match(/\p{L}+/gu) ?? []).map(stem));
   const named = (plainWords(optionLabel).match(/\p{L}+/gu) ?? []).filter(w => w.length >= 3 && !GENERIC.has(w)).map(stem);
-  return named.some(w => words.has(w)) ? 'ok' : 'not_for_option';
+  let found = false;
+  for (const raw of [texts.now, texts.conversation]) {
+    const text = typeof raw === 'string' ? plainWords(raw) : '';
+    for (const at of quoteSpansIn(text, q)) {
+      found = true;
+      const start = Math.max(text.lastIndexOf('. ', at), text.lastIndexOf('? ', at), text.lastIndexOf('! ', at)) + 1;
+      const ends = ['. ', '? ', '! '].map(e => text.indexOf(e, at + q.length)).filter(i => i >= 0);
+      const words = new Set((text.slice(start, ends.length === 0 ? text.length : Math.min(...ends)).match(/\p{L}+/gu) ?? []).map(stem));
+      if (named.some(w => words.has(w))) return 'ok';
+    }
+  }
+  return found ? 'not_for_option' : 'not_stated';
+}
+
+/**
+ * The statements the option's held parts were approved from, when every figure of that part still reads with a known origin
+ * (AIE 6122738619 R6: "retain the unchanged timings and their sources"). A held statement is a verified human statement
+ * already bound to this option, so re-quoting it for the complete card needs no fresh typed authority — never a quote for
+ * a timing Olumi estimated (a construction part has no statement).
+ */
+export function heldStatementsOf(parts: readonly unknown[]): string[] {
+  return parts.flatMap((n) => {
+    const st = rec(n) ? n.observed_state?.extra_share_by_date?.statement : undefined;
+    const known = (['lead_low', 'lead_high', 'monthly_share'] as const).every(b => heldFigureOf(n, b)?.role !== 'unknown');
+    return rec(st) && typeof st.quote === 'string' && st.quote !== '' && known ? [st.quote] : [];
+  });
 }
 
 /** The option's capacity parts, first to last (the order of their links into the goal). */
@@ -108,48 +149,53 @@ export function capacityPartsOf(graph: unknown, optionId: string, goalId: string
     .filter((n: Rec | undefined): n is Rec => n !== undefined && rec(n.observed_state?.extra_share_by_date) && on(n.id));
 }
 
-const olumi = (value: number): Figure => ({ value, origin: 'olumi' });
-const yours = (value: number, quote: string): Figure => ({ value, origin: 'user', quote });
+const stated = (value: number, quote: string): Figure => ({ value, role: 'stated', source: 'user_override', quote });
+const olumiFigure = (value: number, role: Exclude<FigureRole, 'stated'>, quote?: string): Figure =>
+  ({ value, role, source: 'user_assumption', reviewed_by_user: { intent: 'confirm' }, ...(quote === undefined ? {} : { quote }) });
 
-export type PlanRefusal = { readonly refusal: 'start_unreadable' | 'first_start_relative' | 'relative_to_range' | 'too_many_starts'
-  | 'fewer_starts_than_held' | 'least_beyond_latest'; readonly quote?: string; readonly months?: number; readonly latest?: number };
+/** DL CUT: one refusal for every form Olumi cannot model as quoted; R16 stays its own (the deferred coupled law). */
+export type PlanRefusal = { readonly refusal: 'hiring_timings_unusable' | 'relative_to_range' | 'too_many_starts' | 'fewer_starts_than_held'; readonly quote?: string };
 
 /** The option's planned parts from the user's starts and Olumi's estimate; the pace split equally. */
 export function planStarts(quotes: readonly string[], estimate: PlannedOption['olumi_estimate'], heldParts: number):
   { readonly parts: PlannedPart[] } | PlanRefusal {
   if (quotes.length === 0 || quotes.length > MAX_STARTS_PER_OPTION) return { refusal: 'too_many_starts' };
   if (quotes.length < heldParts) return { refusal: 'fewer_starts_than_held' };
-  const pace = estimate.monthly_share / quotes.length;
+  const pace = (v: number): Figure => olumiFigure(v, 'olumi_estimate');
+  const share = estimate.monthly_share / quotes.length;
   const parts: PlannedPart[] = [];
   for (const [i, quote] of quotes.entries()) {
     const form = readHiringStart(quote);
-    if (form === null) return { refusal: 'start_unreadable', quote };
+    if (form === null) return { refusal: 'hiring_timings_unusable', quote };
     let low: Figure, high: Figure;
     if (form.kind === 'after_previous') {
       const prev = parts[i - 1];
-      if (prev === undefined) return { refusal: 'first_start_relative', quote };
-      // ⛔ PL AMEND 6121889192: "another M later" binds this start to the one before it. Summed as independent parts, a
-      // range before it would lose that dependency, so only a start fixed to one figure can anchor it (until the AIE rules
-      // on paired draws); the dependent start is then that figure shifted, with no spread of its own to mis-add.
+      if (prev === undefined) return { refusal: 'hiring_timings_unusable', quote };
+      // ⛔ "another M later" is the SAME draw as the start before it (AIE 6122268035). Only a start fixed to one figure can
+      // anchor it while the coupled law is deferred (DL (c)): a ranged one would be summed as an independent part.
       if (prev.lead_low.value !== prev.lead_high.value) return { refusal: 'relative_to_range', quote };
-      const shift = (f: Figure): Figure => f.origin === 'user' ? yours(f.value + form.months, quote) : olumi(f.value + form.months);
-      low = shift(prev.lead_low); high = shift(prev.lead_high);
+      low = olumiFigure(prev.lead_low.value + form.months, 'derived', quote);
+      high = olumiFigure(prev.lead_high.value + form.months, 'derived', quote);
     } else if (form.kind === 'at_least') {
-      if (estimate.lead_high < form.months) return { refusal: 'least_beyond_latest', quote, months: form.months, latest: estimate.lead_high };
-      low = yours(form.months, quote); high = olumi(estimate.lead_high);
+      if (estimate.lead_high < form.months) return { refusal: 'hiring_timings_unusable', quote };
+      low = stated(form.months, quote); high = olumiFigure(estimate.lead_high, 'olumi_estimate');
     } else if (form.kind === 'within') {
-      low = olumi(Math.min(estimate.lead_low, form.months)); high = yours(form.months, quote);
+      if (estimate.lead_low > form.months) return { refusal: 'hiring_timings_unusable', quote };
+      low = olumiFigure(estimate.lead_low, 'olumi_estimate'); high = stated(form.months, quote);
+    } else if (form.kind === 'about' && APPROXIMATE.test(plainWords(quote))) {
+      // AIE 6122738619: the exact figure modelled from "about N" is Olumi's disclosed choice, never a human-stated endpoint.
+      low = olumiFigure(form.months, 'derived', quote); high = olumiFigure(form.months, 'derived', quote);
     } else if (form.kind === 'about') {
-      low = yours(form.months, quote); high = yours(form.months, quote);
+      low = stated(form.months, quote); high = stated(form.months, quote);
     } else {
-      low = yours(form.low, quote); high = yours(form.high, quote);
+      low = stated(form.low, quote); high = stated(form.high, quote);
     }
-    parts.push({ lead_low: low, lead_high: high, monthly_share: olumi(pace) });
+    parts.push({ statement: { quote, form: form.kind }, lead_low: low, lead_high: high, monthly_share: pace(share) });
   }
   return { parts };
 }
 
-/** Olumi's own estimate for the option: the first part's recorded estimate, else its carrier as Olumi wrote it. */
+/** Olumi's own estimate for the option: the first part's recorded estimate, else its carrier as the construction wrote it. */
 export function olumiEstimateOf(parts: readonly Rec[]): PlannedOption['olumi_estimate'] | null {
   const first = parts[0]?.observed_state?.extra_share_by_date;
   if (!rec(first)) return null;
@@ -161,11 +207,11 @@ export function olumiEstimateOf(parts: readonly Rec[]): PlannedOption['olumi_est
     && est.monthly_share >= 0 && est.monthly_share <= 100 ? est : null;
 }
 
-/** The carrier a planned part becomes; numbers are the computation's, `figures` say whose each one is. */
+/** The carrier a planned part becomes; numbers are the computation's, `figures` say whose each one is and why. */
 function carrierOf(prior: Rec, part: PlannedPart, a: ApprovedHiringTimes, estimate: PlannedOption['olumi_estimate']): Rec {
   return { ...prior, monthly_share: part.monthly_share.value, lead_low: part.lead_low.value, lead_high: part.lead_high.value,
-    deadline: a.deadline, reference_date: a.reference_date,
-    figures: { lead_low: part.lead_low, lead_high: part.lead_high, monthly_share: part.monthly_share },
+    deadline: a.deadline, reference_date: a.reference_date, statement: { ...part.statement },
+    figures: { lead_low: { ...part.lead_low }, lead_high: { ...part.lead_high }, monthly_share: { ...part.monthly_share } },
     olumi_estimate: { ...estimate } };
 }
 
@@ -190,7 +236,7 @@ export function withHiringTimes(graph: unknown, a: ApprovedHiringTimes): unknown
       }
       const id = secondStartId(first.id, i);
       // The construction's own part shape (`admitEventByDate`), never a copy of the first part's ids or references.
-      const { figures: _f, olumi_estimate: _e, ...base } = first.observed_state.extra_share_by_date;
+      const { figures: _f, olumi_estimate: _e, statement: _s, ...base } = first.observed_state.extra_share_by_date;
       out.nodes.push({ id, kind: 'factor', category: 'controllable', label: `${first.label} (start ${i + 1})`,
         ...(first.provenance === undefined ? {} : { provenance: first.provenance }),
         observed_state: { value: 0, source: 'cee_inference', extra_share_by_date: carrierOf(base, part, a, o.olumi_estimate) } });
@@ -206,9 +252,8 @@ export function withHiringTimes(graph: unknown, a: ApprovedHiringTimes): unknown
 }
 
 /** Key order is not kept by the store (jsonb), so each field is compared, never the serialised bytes. */
-function sameFigure(held: unknown, f: Figure): boolean {
-  return rec(held) && held.value === f.value && held.origin === f.origin && held.quote === f.quote
-    && Object.keys(held).length === Object.keys(f).length;
+function sameRecord(held: unknown, f: Statement | Figure): boolean {
+  return isDeepStrictEqual(held, JSON.parse(JSON.stringify(f)));
 }
 
 /**
@@ -224,7 +269,10 @@ export function hiringTimesStillApply(a: ApprovedHiringTimes, graph: unknown): b
   });
 }
 
-/** Read-back: every approved option holds exactly its planned starts, figures and recomputed link strengths. */
+/**
+ * Read-back, and "already held" (AIE 243 R11): every approved option holds exactly its planned starts — the user's statement,
+ * every figure's number, role and stamp, and the recomputed link strength — never the numbers alone.
+ */
 export function hiringTimesHeld(after: unknown, a: ApprovedHiringTimes): boolean {
   if (!rec(after) || !Array.isArray(after.edges)) return false;
   return a.options.every((o) => {
@@ -236,60 +284,135 @@ export function hiringTimesHeld(after: unknown, a: ApprovedHiringTimes): boolean
       if (!(D > 0) || c.deadline !== a.deadline || link?.defaulted === true) return false;
       const m = extraShareMoments(p.monthly_share.value / 100, D, p.lead_low.value, p.lead_high.value);
       return c.lead_low === p.lead_low.value && c.lead_high === p.lead_high.value && c.monthly_share === p.monthly_share.value
-        && rec(c.figures) && sameFigure(c.figures.lead_low, p.lead_low) && sameFigure(c.figures.lead_high, p.lead_high)
-        && sameFigure(c.figures.monthly_share, p.monthly_share)
+        && sameRecord(c.statement, p.statement) && rec(c.figures) && sameRecord(c.figures.lead_low, p.lead_low)
+        && sameRecord(c.figures.lead_high, p.lead_high) && sameRecord(c.figures.monthly_share, p.monthly_share)
         && link?.strength?.mean === m.mean && link?.strength?.std === m.sd;
     });
   });
 }
 
-/** Whose each figure is, for the summary and the provisional label: a stated figure only while it still holds the number. */
-export function figureOf(carrier: unknown, bound: 'lead_low' | 'lead_high' | 'monthly_share'): Figure | null {
-  if (!rec(carrier) || typeof carrier[bound] !== 'number') return null;
-  const f = rec(carrier.figures) ? carrier.figures[bound] : undefined;
-  return rec(f) && f.value === carrier[bound] && f.origin === 'user' && typeof f.quote === 'string' && f.quote !== ''
-    ? { value: carrier[bound], origin: 'user', quote: f.quote } : { value: carrier[bound], origin: 'olumi' };
+/**
+ * Whose one figure stamp is, by the shared origin reader (DL (b): the stand-in until C's `provenanceOf`). This is
+ * `valueAuthorshipOf`'s own mapping over `observedValueAuthorship` / `isAcceptedOlumiEstimate`; importing
+ * `valueAuthorshipOf` itself would cycle (the guidance assembler imports the share-gate readers that import this module).
+ * Parity with it, on every stamp this module writes, is pinned by `e5-hiring-times.test.ts`.
+ */
+export type Whose = 'yours' | 'olumi_estimate' | 'olumi_accepted' | 'unknown';
+export function authorshipOf(stamp: unknown): Whose {
+  if (isAcceptedOlumiEstimate(stamp)) return 'olumi_accepted';
+  const a = observedValueAuthorship(stamp);
+  return a === undefined || a.provenance === 'unverified_brief' ? 'unknown' : a.provenance === 'ai_inferred' ? 'olumi_estimate' : 'yours';
+}
+
+/** One figure as the model holds it: its number, whose it is by the shared reader, and its role. */
+export interface HeldFigure {
+  readonly value: number;
+  readonly whose: Whose;
+  readonly role: FigureRole | 'unknown';
+  readonly quote?: string;
+}
+/**
+ * Whose a carrier's figure is, read by the shared origin reader (DL (b): `valueAuthorshipOf` until C's `provenanceOf`).
+ * A carrier the construction wrote (no `figures`, an Olumi-drafted part) is Olumi's estimate, as before E5. A carrier with
+ * figures is read figure by figure; a missing record, or one whose number is not the carrier's, is UNKNOWN — never Olumi's.
+ */
+export function heldFigureOf(node: unknown, bound: 'lead_low' | 'lead_high' | 'monthly_share'): HeldFigure | null {
+  const c = rec(node) && rec(node.observed_state) ? node.observed_state.extra_share_by_date : undefined;
+  if (!rec(c) || typeof c[bound] !== 'number') return null;
+  if (c.figures === undefined) {
+    return (node as Rec).provenance === 'ai_inferred' ? { value: c[bound], whose: 'olumi_estimate', role: 'olumi_estimate' }
+      : { value: c[bound], whose: 'unknown', role: 'unknown' };
+  }
+  const f = rec(c.figures) ? c.figures[bound] : undefined;
+  const role: FigureRole | undefined = rec(f) && ['stated', 'olumi_estimate', 'derived'].includes(f.role) ? f.role : undefined;
+  if (!rec(f) || f.value !== c[bound] || role === undefined) return { value: c[bound], whose: 'unknown', role: 'unknown' };
+  const whose = authorshipOf(f);
+  // A stated figure must read as the user's; anything else Olumi supplied. A stamp that says otherwise is unknown.
+  const coherent = role === 'stated' ? whose === 'yours' : whose === 'olumi_accepted' || whose === 'olumi_estimate';
+  return coherent ? { value: c[bound], whose, role, ...(typeof f.quote === 'string' && f.quote !== '' ? { quote: f.quote } : {}) }
+    : { value: c[bound], whose: 'unknown', role: 'unknown' };
 }
 
 const figure = (x: number): string => x.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-const span = (p: PlannedPart): string => p.lead_low.value === p.lead_high.value ? figure(p.lead_low.value)
-  : `${figure(p.lead_low.value)}–${figure(p.lead_high.value)}`;
+const spanOf = (low: number, high: number): string => low === high ? figure(low) : `${figure(low)}–${figure(high)}`;
+const listed = (items: readonly string[]): string => items.length <= 1 ? (items[0] ?? '')
+  : `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+type StartView = { readonly statement?: Statement; readonly low: HeldFigure; readonly high: HeldFigure; readonly pace: HeldFigure };
 
-/** Olumi's start figures said as Olumi's: only where one differs from the user's own figure for the same start. */
-export function olumiStartBounds(p: Pick<PlannedPart, 'lead_low' | 'lead_high'>): { kind: 'soonest' | 'latest'; value: number }[] {
-  const out: { kind: 'soonest' | 'latest'; value: number }[] = [];
-  if (p.lead_low.origin === 'olumi' && !(p.lead_high.origin === 'user' && p.lead_high.value === p.lead_low.value)) out.push({ kind: 'soonest', value: p.lead_low.value });
-  if (p.lead_high.origin === 'olumi' && !(p.lead_low.origin === 'user' && p.lead_low.value === p.lead_high.value)) out.push({ kind: 'latest', value: p.lead_high.value });
-  return out;
+/** Every figure that is not the user's stated bound, said as what it is (DL CUT: four start items and the pace). */
+function assumptionsOf(starts: readonly StartView[], deliverable: string): string[] {
+  const items: string[] = [];
+  for (const s of starts) {
+    const derived = s.low.role === 'derived' && s.high.role === 'derived';
+    if (derived && s.statement?.form === 'after_previous') {
+      const offset = readHiringStart(s.statement.quote);
+      const m = offset?.kind === 'after_previous' ? offset.months : NaN;
+      items.push(`the second start taken as ${figure(m)} month${m === 1 ? '' : 's'} after the first (Olumi’s reading of “${s.statement.quote}”)`);
+      continue;
+    }
+    if (derived && s.statement?.form === 'about') {
+      items.push(`“${s.statement.quote}” taken as ${figure(s.low.value)} months (Olumi’s reading)`);
+      continue;
+    }
+    for (const [f, kind] of [[s.low, 'soonest'], [s.high, 'latest']] as const) {
+      if (f.role === 'olumi_estimate') items.push(`Olumi’s estimate of the ${kind} start (${figure(f.value)} months)`);
+      if (f.role === 'unknown' || f.role === 'derived') items.push(`a figure whose source could not be confirmed (${figure(f.value)} months)`);
+    }
+  }
+  const total = starts.reduce((t, s) => t + s.pace.value, 0);
+  if (starts.some(s => s.pace.role === 'unknown')) items.push(`a figure whose source could not be confirmed (${figure(total)}% of ${deliverable} per month)`);
+  else items.push(`Olumi’s estimate of the additional progress from the hires (${figure(total)}% of ${deliverable} per month${starts.length === 2 ? ', split equally between the two starts' : ''})`);
+  return items;
 }
 
-/** The ONE card for every option's hiring times (DL ACK of SYS1-E5-STRINGS §2 pending). */
+const viewOfPlanned = (p: PlannedPart): StartView => ({ statement: p.statement,
+  low: { value: p.lead_low.value, whose: authorshipOf(p.lead_low), role: p.lead_low.role },
+  high: { value: p.lead_high.value, whose: authorshipOf(p.lead_high), role: p.lead_high.role },
+  pace: { value: p.monthly_share.value, whose: authorshipOf(p.monthly_share), role: p.monthly_share.role } });
+
+/** The ONE card covering all proposed hiring timings (r2; DL/AIE ACK of SYS1-E5-STRINGS r2 pending). */
 export function hiringTimesCard(a: ApprovedHiringTimes, deliverable: string): string {
   const lines = a.options.map((o) => {
-    const said = `you said “${o.quotes.join('”, then “')}”`;
-    const olumiNotes = o.parts.flatMap(olumiStartBounds).map(b => `; ${figure(b.value)} months is Olumi’s estimate of the ${b.kind} start`).join('');
-    if (o.parts.length === 1) return `‘${o.label}’: starts after ${span(o.parts[0]!)} months (${said}${olumiNotes}).`;
-    return `‘${o.label}’: one person after ${span(o.parts[0]!)} months and another after ${span(o.parts[1]!)} months (${said}${olumiNotes}); `
-      + `Olumi’s estimate of its pace, ${figure(o.olumi_estimate.monthly_share)}% of ${deliverable} a month, is split equally between them.`;
+    const views = o.parts.map(viewOfPlanned), said = `you said “${o.quotes.join('”, then “')}”`;
+    const timing = views.length === 1 ? `starts after ${spanOf(views[0]!.low.value, views[0]!.high.value)} months`
+      : `one person after ${spanOf(views[0]!.low.value, views[0]!.high.value)} months and another after ${spanOf(views[1]!.low.value, views[1]!.high.value)} months`;
+    return `‘${o.label}’: ${said}. Modelled timing: ${timing}, with ${listed(assumptionsOf(views, deliverable))}.`;
   });
-  return `Use your hiring times? ${lines.join(' ')}`;
+  return `Use these hiring assumptions? ${lines.join(' ')}`;
 }
 
-/** How the model summary says whose each figure is (DL ACK of SYS1-E5-STRINGS §3 pending). */
-export const HIRING_TIMES_USE = 'Each option’s start times and pace as the model holds them, with whose each figure is. Say a figure is the user’s only where whose is "yours"; never present Olumi’s estimates as theirs.';
-const whose = (f: Figure | null): Record<string, unknown> | undefined => f === null ? undefined
-  : { value: f.value, whose: f.origin === 'user' ? 'yours' : 'Olumi’s estimate', ...(f.quote === undefined ? {} : { quote: f.quote }) };
+/**
+ * The provisional chance's words for an option's starts (r2): the user's quotes, the modelled timing, and every assumption.
+ * '' when no start carries the user's statement (the caller keeps Olumi's own words for a construction-only option).
+ */
+export function hiringTimesLabel(nodes: readonly unknown[], deliverable: string): string {
+  const views: StartView[] = [];
+  for (const n of nodes) {
+    const low = heldFigureOf(n, 'lead_low'), high = heldFigureOf(n, 'lead_high'), pace = heldFigureOf(n, 'monthly_share');
+    if (low === null || high === null || pace === null) return '';
+    const st = (n as Rec).observed_state.extra_share_by_date.statement;
+    views.push({ ...(rec(st) && typeof st.quote === 'string' ? { statement: st as Statement } : {}), low, high, pace });
+  }
+  const quotes = views.flatMap(v => v.statement === undefined ? [] : [v.statement.quote]);
+  if (quotes.length === 0) return '';
+  const spans = views.map(v => spanOf(v.low.value, v.high.value)).join(' and ');
+  return `using your hiring time${quotes.length === 1 ? '' : 's'} (“${quotes.join('”, then “')}”) as modelled: ${spans} months, with ${listed(assumptionsOf(views, deliverable))}`;
+}
 
-/** Every option's capacity parts as the model holds them: each start's soonest and latest months and its pace, with whose. */
+/** How the model summary says whose each figure is (r2; DL/AIE ACK pending). */
+export const HIRING_TIMES_USE = 'Each option’s hiring timings as the model holds them: the user’s own words, then each modelled figure with whose it is (yours, olumi_estimate, olumi_accepted or unknown) and its role (stated, olumi_estimate, derived or unknown). Call a figure the user’s only where whose is "yours" and role is "stated"; an estimated or derived figure is Olumi’s modelling even when it equals the user’s number; never call an unknown figure Olumi’s.';
+
+/** Every option's capacity parts as the model holds them: the statement, each start's figures and its pace, with whose and role. */
 export function hiringTimesSummaryOf(graph: unknown, goalId: string): Record<string, unknown>[] {
   if (!rec(graph) || !Array.isArray(graph.nodes)) return [];
   return graph.nodes.filter((n: Rec) => n.kind === 'option' && typeof n.id === 'string').flatMap((o: Rec) => {
     const parts = capacityPartsOf(graph, o.id, goalId);
     if (parts.length === 0) return [];
     return [{ option_id: o.id, option: o.label, starts: parts.map((p) => {
-      const c = p.observed_state.extra_share_by_date;
-      return { soonest_months: whose(figureOf(c, 'lead_low')), latest_months: whose(figureOf(c, 'lead_high')),
-        pace_percent_a_month: whose(figureOf(c, 'monthly_share')) };
+      const st = p.observed_state.extra_share_by_date.statement;
+      return { ...(rec(st) ? { statement: { quote: st.quote, form: st.form } } : {}),
+        soonest_months: heldFigureOf(p, 'lead_low'), latest_months: heldFigureOf(p, 'lead_high'),
+        pace_percent_per_month: heldFigureOf(p, 'monthly_share') };
     }) }];
   });
 }

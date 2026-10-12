@@ -20,10 +20,11 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { GOAL_CHANCE_RANGE } from '../goal-chance-range.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../orchestrator/context/option-result-source.js';
+import { valueAuthorshipOf } from '../../agent-lane/turn-context/guidance-signals.js';
 import { shareByDateGoalOf } from '../goal-kind.js';
 import { exactChance, normalChance, gate, extraShareMoments, MULTI_PART_STEPS, type ShareParts } from '../event-by-date-share.js';
 import { sharePartsForOption, shareGateForOption, shareChanceInputFailure } from '../share-by-date-run.js';
-import { capacityPartsOf, hiringTimesHeld, olumiEstimateOf, planStarts, quoteStatedFor, readHiringStart, withHiringTimes,
+import { authorshipOf, capacityPartsOf, hiringTimesHeld, olumiEstimateOf, planStarts, quoteStatedFor, readHiringStart, withHiringTimes,
   type ApprovedHiringTimes, type PlannedOption } from '../hiring-times.js';
 
 type Rec = Record<string, any>;
@@ -119,42 +120,58 @@ describe('Paul\'s sentence → each start, with whose figure it is (AIE S8 rule 
   ] as const)('%s', (quote, form) => expect(readHiringStart(quote)).toEqual(form));
   it.each(['soon', 'at least 3 months, within 5 months', 'a while', '3 months then 5 months'])('unreadable: %s', q => expect(readHiringStart(q)).toBeNull());
 
-  it('the quote must be his, in this message, in a sentence naming that option', () => {
-    expect(quoteStatedFor(PAUL, 'at least 3 months', 'Hire a Tech lead')).toBe('ok');
-    expect(quoteStatedFor(PAUL, 'within 2 months', 'Hire two developers')).toBe('ok');
-    expect(quoteStatedFor(PAUL, 'another a month or so later', 'Hire two developers')).toBe('ok');
+  const Y = (value: number, quote: string) => ({ value, role: 'stated', source: 'user_override', quote });
+  const O = (value: number) => ({ value, role: 'olumi_estimate', source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } });
+  const D = (value: number, quote: string) => ({ value, role: 'derived', source: 'user_assumption', reviewed_by_user: { intent: 'confirm' }, quote });
+
+  it('the quote must be his, in this message OR an earlier one, in a sentence naming that option', () => {
+    expect(quoteStatedFor({ now: PAUL }, 'at least 3 months', 'Hire a Tech lead')).toBe('ok');
+    expect(quoteStatedFor({ now: PAUL }, 'within 2 months', 'Hire two developers')).toBe('ok');
+    expect(quoteStatedFor({ now: PAUL }, 'another a month or so later', 'Hire two developers')).toBe('ok');
+    // E2's source-bound path: his earlier message is still his words; the current turn ("Yes") is not where they are.
+    expect(quoteStatedFor({ now: 'Can you use those?', conversation: PAUL }, 'at least 3 months', 'Hire a Tech lead')).toBe('ok');
     // ⛔ Attribution: his Tech-lead figure is never the developers', nor the reverse.
-    expect(quoteStatedFor(PAUL, 'at least 3 months', 'Hire two developers')).toBe('not_for_option');
-    expect(quoteStatedFor(PAUL, 'within 2 months', 'Hire a Tech lead')).toBe('not_for_option');
-    expect(quoteStatedFor(PAUL, 'at least 4 months', 'Hire a Tech lead')).toBe('not_stated');
+    expect(quoteStatedFor({ now: PAUL }, 'at least 3 months', 'Hire two developers')).toBe('not_for_option');
+    expect(quoteStatedFor({ now: PAUL }, 'within 2 months', 'Hire a Tech lead')).toBe('not_for_option');
+    expect(quoteStatedFor({ now: PAUL }, 'at least 4 months', 'Hire a Tech lead')).toBe('not_stated');
+    // Whole words only (the shared `quoteSpansIn`): "2 months" is not cut from "12 months".
+    expect(quoteStatedFor({ now: 'A tech lead takes 12 months.' }, '2 months', 'Hire a Tech lead')).toBe('not_stated');
   });
 
-  it('Tech lead: soonest 3 is his; latest 4 stays Olumi\'s; the pace stays Olumi\'s 12%', () => {
+  it('Tech lead: soonest 3 is his stated bound; latest 4 is Olumi\'s estimate; the pace is Olumi\'s 12%', () => {
     const g = paulsModel();
-    expect(plan(g, TECH, ['at least 3 months']).parts).toEqual([{
-      lead_low: { value: 3, origin: 'user', quote: 'at least 3 months' }, lead_high: { value: 4, origin: 'olumi' },
-      monthly_share: { value: 12, origin: 'olumi' } }]);
+    expect(plan(g, TECH, ['at least 3 months']).parts).toEqual([{ statement: { quote: 'at least 3 months', form: 'at_least' },
+      lead_low: Y(3, 'at least 3 months'), lead_high: O(4), monthly_share: O(12) }]);
   });
-  it('two developers: two starts, 2 then 3 months; the pace is Olumi\'s 20% split 10% + 10%', () => {
+  it('two developers: "within 2" is his LATEST only (soonest is Olumi\'s 2, labelled though equal); the second start is DERIVED', () => {
     const g = paulsModel();
     expect(plan(g, DEVS, ['within 2 months', 'another a month or so later']).parts).toEqual([
-      { lead_low: { value: 2, origin: 'olumi' }, lead_high: { value: 2, origin: 'user', quote: 'within 2 months' }, monthly_share: { value: 10, origin: 'olumi' } },
-      { lead_low: { value: 3, origin: 'olumi' }, lead_high: { value: 3, origin: 'user', quote: 'another a month or so later' }, monthly_share: { value: 10, origin: 'olumi' } },
+      { statement: { quote: 'within 2 months', form: 'within' }, lead_low: O(2), lead_high: Y(2, 'within 2 months'), monthly_share: O(10) },
+      { statement: { quote: 'another a month or so later', form: 'after_previous' },
+        lead_low: D(3, 'another a month or so later'), lead_high: D(3, 'another a month or so later'), monthly_share: O(10) },
     ]);
   });
-  it('"within N" keeps min(Olumi\'s soonest, N) as Olumi\'s, never forced to N', () => {
-    const p = planStarts(['within 3 months'], { lead_low: 2, lead_high: 4, monthly_share: 20 }, 1);
-    expect('parts' in p && p.parts[0]!.lead_low).toEqual({ value: 2, origin: 'olumi' });
+  it('the shared origin reader agrees on every stamp E5 writes (parity with valueAuthorshipOf)', () => {
+    const stamps = [Y(3, 'q'), O(4), D(3, 'q'), { value: 1, role: 'stated' }, {}];
+    expect(stamps.map(authorshipOf)).toEqual(stamps.map(valueAuthorshipOf));
+    expect(stamps.map(authorshipOf)).toEqual(['yours', 'olumi_accepted', 'olumi_accepted', 'unknown', 'unknown']);
   });
-  it('refusals: "at least N" past Olumi\'s latest; a first start stated as "later"; three starts; fewer starts than held', () => {
+  it('DL CUT: forms Olumi cannot model as quoted get ONE refusal; R16 and the two-start limit keep their own', () => {
     const est = { lead_low: 2, lead_high: 4, monthly_share: 20 };
-    expect(planStarts(['at least 5 months'], est, 1)).toEqual({ refusal: 'least_beyond_latest', quote: 'at least 5 months', months: 5, latest: 4 });
-    expect(planStarts(['another a month later'], est, 1)).toEqual({ refusal: 'first_start_relative', quote: 'another a month later' });
+    expect(planStarts(['at least 5 months'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'at least 5 months' });
+    expect(planStarts(['within 1 month'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'within 1 month' });
+    expect(planStarts(['another a month later'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'another a month later' });
+    expect(planStarts(['soon'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'soon' });
+    expect(planStarts(['in 2 months'], est, 2)).toEqual({ refusal: 'fewer_starts_than_held' }); // AIE R6 keeps its own words
     expect(planStarts(['in 2 months', 'in 3 months', 'in 4 months'], est, 1)).toEqual({ refusal: 'too_many_starts' });
-    expect(planStarts(['in 2 months'], est, 2)).toEqual({ refusal: 'fewer_starts_than_held' });
-    // PL AMEND 6121889192: a start said relative to a RANGE would be a dependent draw, never an independent part.
+    // AIE 6122268035 / DL (c): a start said relative to a RANGE is one draw with it; deferred, refused, never summed.
     expect(planStarts(['in 2-3 months', 'another a month later'], est, 1)).toEqual({ refusal: 'relative_to_range', quote: 'another a month later' });
     expect('parts' in planStarts(['in 2 months', 'another a month later'], est, 1)).toBe(true);
+    // DL: "about N" stays: a point N, the user's (its exactness is disclosed on the card and label).
+    const about = planStarts(['about 3 months'], est, 1), exact = planStarts(['in 3 months'], est, 1);
+    // AIE 6122738619: the exact figure modelled from "about N" is Olumi's disclosed choice, never a human-stated endpoint.
+    expect('parts' in about && about.parts[0]).toMatchObject({ lead_low: D(3, 'about 3 months'), lead_high: D(3, 'about 3 months') });
+    expect('parts' in exact && exact.parts[0]).toMatchObject({ lead_low: Y(3, 'in 3 months'), lead_high: Y(3, 'in 3 months') });
   });
 });
 

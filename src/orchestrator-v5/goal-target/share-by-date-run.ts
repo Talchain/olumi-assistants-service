@@ -3,7 +3,7 @@ import { draftedTeamPartOf, eventShareCarrierOf, isEventShareForecast, unresolve
 import { goalDeadlineFromRecord, shareByDateGoalOf, soleGoalOf, statedTeamShareOf } from './goal-kind.js';
 import { timeBetween, todayInLondon } from './deadline-date.js';
 import { extrasOf, gate, MAX_RANGED_PARTS, rangedPartCount, type ExtraShare, type ShareGate, type ShareParts } from './event-by-date-share.js';
-import { figureOf, olumiStartBounds } from './hiring-times.js';
+import { hiringTimesLabel } from './hiring-times.js';
 import type { GoalChanceDisplayRounding } from './goal-chance-display.js';
 
 type Rec = Record<string, any>;
@@ -92,14 +92,14 @@ export function shareChanceInputFailure(graph: unknown, optionId?: string): stri
   return null;
 }
 
-/** The capacity carriers an option switches on, in the order of the goal's parts; null when there is no such option. */
-function activeCarriersOf(g: Rec, share: NonNullable<ReturnType<typeof shareByDateGoalOf>>, optionId: string): Rec[] | null {
+/** The capacity parts an option switches on, in the order of the goal's parts; null when there is no such option. */
+function activePartsOf(g: Rec, share: NonNullable<ReturnType<typeof shareByDateGoalOf>>, optionId: string): Rec[] | null {
   const option = g.nodes.find((n: Rec) => n.id === optionId && n.kind === 'option');
   if (option === undefined) return null;
   return share.parts.filter(p => {
     const v = option.interventions[p.from];
     return p.from !== share.team_part_id && (typeof v === 'number' ? v : v?.value) === 1;
-  }).map(p => g.nodes.find((n: Rec) => n.id === p.from).observed_state.extra_share_by_date);
+  }).map(p => g.nodes.find((n: Rec) => n.id === p.from));
 }
 
 export function sharePartsForOption(graph: unknown, optionId: string): ShareParts | null {
@@ -110,10 +110,11 @@ export function sharePartsForOption(graph: unknown, optionId: string): SharePart
   const g = graph as Rec;
   const teamNode = g.nodes.find((n: Rec) => n.id === share.team_part_id);
   const team = statedTeamShareOf(teamNode, share.deadline, share.goal.goal_threshold_unit as string)!;
-  const carriers = activeCarriersOf(g, share, optionId);
-  if (carriers === null) return null;
-  if (carriers.length === 0) return { team };
-  const extras = carriers.map(c => {
+  const active = activePartsOf(g, share, optionId);
+  if (active === null) return null;
+  if (active.length === 0) return { team };
+  const extras = active.map(n => {
+    const c = n.observed_state.extra_share_by_date;
     return { monthlyShare: c.monthly_share / 100,
       D: timeBetween(c.reference_date, share.deadline, 'months'), leadLow: c.lead_low, leadHigh: c.lead_high };
   });
@@ -132,8 +133,9 @@ export function shareGateForOption(graph: unknown, optionId: string, displayedPo
 }
 
 /**
- * Per-option words: only the active capacity contributes an Olumi estimate. E5: whose each start figure is — the user's
- * stated start (quoted) or Olumi's estimate — so the provisional chance never presents one as the other.
+ * Per-option words: only the active capacity contributes an Olumi estimate. E5 r2: where a start carries the user's own
+ * statement, the words quote it and say every assumption Olumi made from it (`hiringTimesLabel`); a construction-only
+ * option keeps Olumi's own words (AIE 6122738619: the additional progress from the hires, never "the new team's pace").
  */
 export function shareOptionEstimateWords(graph: unknown, optionId: string): string {
   const share = shareByDateGoalForChanceOf(graph), parts = sharePartsForOption(graph, optionId);
@@ -141,13 +143,12 @@ export function shareOptionEstimateWords(graph: unknown, optionId: string): stri
   const extras = extrasOf(parts), number = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
   const lead = (x: ExtraShare): string => x.leadLow === x.leadHigh ? number(x.leadLow) : `${number(x.leadLow)}–${number(x.leadHigh)}`;
   const deliverable = String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
-  const starts = (activeCarriersOf(graph as Rec, share, optionId) ?? []).map(c => ({ lead_low: figureOf(c, 'lead_low')!, lead_high: figureOf(c, 'lead_high')! }));
-  const quotes = [...new Set(starts.flatMap(s => [s.lead_low, s.lead_high].flatMap(f => f.origin === 'user' ? [f.quote!] : [])))];
-  const paces = extras.map(x => number(x.monthlyShare * 100)).join('% + ');
-  if (quotes.length === 0) {
-    if (extras.length === 1) return `using Olumi's estimates of hiring time (${lead(extras[0]!)} months) and the new team's pace (${paces}% of ${deliverable} a month)`;
-    return `using Olumi's estimates of hiring times (${extras.map(lead).join(' months, then ')} months) and the new team's pace (${paces}% of ${deliverable} a month)`;
+  const yours = hiringTimesLabel(activePartsOf(graph as Rec, share, optionId) ?? [], deliverable);
+  if (yours !== '') return yours;
+  if (extras.length === 1) {
+    // AIE 6122738619: "the new team's pace" read as the whole team's productivity; this is the hires' ADDITIONAL progress.
+    return `using Olumi’s estimates of hiring time (${lead(extras[0]!)} months) and of the additional progress from the hires (${number(extras[0]!.monthlyShare * 100)}% of ${deliverable} per month)`;
   }
-  const olumiLead = starts.flatMap(olumiStartBounds).map(b => `, Olumi’s estimate of the ${b.kind} start (${number(b.value)} months)`).join('');
-  return `using your hiring time${quotes.length === 1 ? '' : 's'} (${quotes.join(', then ')})${olumiLead}, and Olumi’s estimate of the new team’s pace (${paces}% of ${deliverable} a month)`;
+  const total = extras.reduce((t, x) => t + x.monthlyShare * 100, 0);
+  return `using Olumi’s estimates of hiring times (${extras.map(lead).join(' months, then ')} months) and of the additional progress from the hires (${number(total)}% of ${deliverable} per month, split equally between the two starts)`;
 }

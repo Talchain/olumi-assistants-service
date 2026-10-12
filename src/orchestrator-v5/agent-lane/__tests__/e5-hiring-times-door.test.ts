@@ -57,18 +57,19 @@ function world(initial = paulsModel()) {
   let json = JSON.stringify(initial);
   const graph = (): Rec => JSON.parse(json);
   const registers: Rec[] = [];
-  const knobs = { registerStatus: 200, afterStore: undefined as ((g: Rec) => void) | undefined };
+  const knobs = { registerStatus: 200, statusAfterStore: 200, afterStore: undefined as ((g: Rec) => void) | undefined };
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
       const b = body as Rec, now = graph();
       registers.push(b);
-      if (knobs.registerStatus !== 200) return { status: knobs.registerStatus, json: { details: { code: 'GRAPH_STALE' } } };
+      if (knobs.registerStatus !== 200) return { status: knobs.registerStatus, json: knobs.registerStatus === 409 ? { details: { code: 'GRAPH_STALE' } } : {} };
       // The route's compare-and-set: analysis space AND identity space, against what is stored now.
       if (b.expected_graph_hash !== computeAnalysisAffectingGraphHash(now as never)
         || b.expected_graph_identity_hash !== computeGraphIdentityHash(now as never)!.value) return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
       const next = stored(b.graph);
       knobs.afterStore?.(next);
       json = JSON.stringify(next);
+      if (knobs.statusAfterStore !== 200) return { status: knobs.statusAfterStore, json: {} };
       return { status: 200, json: { registered: true, model_version: { version_number: 2, version_id: 'v-e5', mutation_id: 'm-e5' } } };
     }
     if (path.endsWith('/graph')) {
@@ -90,9 +91,11 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     const w = world();
     const r = await dispatchTool('propose_hiring_times', JSON.stringify(PAULS_ARGS), ctx(PAUL) as never, w.caps) as Rec;
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(r.public_label).toBe('Use your hiring times? ‘Hire a Tech lead’: starts after 3–4 months (you said “at least 3 months”; 4 months is Olumi’s estimate of the latest start). '
-      + '‘Hire two developers’: one person after 2 months and another after 3 months (you said “within 2 months”, then “another a month or so later”); '
-      + 'Olumi’s estimate of its pace, 20% of next feature launch a month, is split equally between them.');
+    expect(r.public_label).toBe('Use these hiring assumptions? ‘Hire a Tech lead’: you said “at least 3 months”. Modelled timing: starts after 3–4 months, '
+      + 'with Olumi’s estimate of the latest start (4 months), and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month). '
+      + '‘Hire two developers’: you said “within 2 months”, then “another a month or so later”. Modelled timing: one person after 2 months and another after 3 months, '
+      + 'with Olumi’s estimate of the soonest start (2 months), the second start taken as 1 month after the first (Olumi’s reading of “another a month or so later”), '
+      + 'and Olumi’s estimate of the additional progress from the hires (20% of next feature launch per month, split equally between the two starts).');
     expect(w.registers).toHaveLength(0);
   });
 
@@ -108,33 +111,85 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
       furtherExtras: [{ monthlyShare: 0.1, leadLow: 3, leadHigh: 3 }] });
     expect(sharePartsForOption(after, TECH)).toMatchObject({ extra: { monthlyShare: 0.12, leadLow: 3, leadHigh: 4 } });
     // The provisional chance says whose each figure is.
-    expect(shareOptionEstimateWords(after, TECH)).toBe('using your hiring time (at least 3 months), Olumi’s estimate of the latest start (4 months), '
-      + 'and Olumi’s estimate of the new team’s pace (12% of next feature launch a month)');
-    expect(shareOptionEstimateWords(after, DEVS)).toBe('using your hiring times (within 2 months, then another a month or so later), '
-      + 'and Olumi’s estimate of the new team’s pace (10% + 10% of next feature launch a month)');
+    expect(shareOptionEstimateWords(after, TECH)).toBe('using your hiring time (“at least 3 months”) as modelled: 3–4 months, with Olumi’s estimate of the latest start (4 months), '
+      + 'and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month)');
+    expect(shareOptionEstimateWords(after, DEVS)).toBe('using your hiring times (“within 2 months”, then “another a month or so later”) as modelled: 2 and 3 months, '
+      + 'with Olumi’s estimate of the soonest start (2 months), the second start taken as 1 month after the first (Olumi’s reading of “another a month or so later”), '
+      + 'and Olumi’s estimate of the additional progress from the hires (20% of next feature launch per month, split equally between the two starts)');
     // The model summary the Agent reads carries each option's starts and pace, with whose.
     const summary = projectModelContext({ nodes: after.nodes, edges: after.edges, raw: after, analysis_state: null, analysis_ready: null } as never) as Rec;
+    const acc = (value: number, role: string, quote?: string) => ({ value, whose: 'olumi_accepted', role, ...(quote === undefined ? {} : { quote }) });
     expect(summary.hiring_times.options.find((o: Rec) => o.option_id === DEVS).starts).toEqual([
-      { soonest_months: { value: 2, whose: 'Olumi’s estimate' }, latest_months: { value: 2, whose: 'yours', quote: 'within 2 months' }, pace_percent_a_month: { value: 10, whose: 'Olumi’s estimate' } },
-      { soonest_months: { value: 3, whose: 'Olumi’s estimate' }, latest_months: { value: 3, whose: 'yours', quote: 'another a month or so later' }, pace_percent_a_month: { value: 10, whose: 'Olumi’s estimate' } },
+      { statement: { quote: 'within 2 months', form: 'within' }, soonest_months: acc(2, 'olumi_estimate'),
+        latest_months: { value: 2, whose: 'yours', role: 'stated', quote: 'within 2 months' }, pace_percent_per_month: acc(10, 'olumi_estimate') },
+      { statement: { quote: 'another a month or so later', form: 'after_previous' }, soonest_months: acc(3, 'derived', 'another a month or so later'),
+        latest_months: acc(3, 'derived', 'another a month or so later'), pace_percent_per_month: acc(10, 'olumi_estimate') },
     ]);
     expect(summary.hiring_times.options.find((o: Rec) => o.option_id === TECH).starts).toEqual([
-      { soonest_months: { value: 3, whose: 'yours', quote: 'at least 3 months' }, latest_months: { value: 4, whose: 'Olumi’s estimate' }, pace_percent_a_month: { value: 12, whose: 'Olumi’s estimate' } }]);
+      { statement: { quote: 'at least 3 months', form: 'at_least' }, soonest_months: { value: 3, whose: 'yours', role: 'stated', quote: 'at least 3 months' },
+        latest_months: acc(4, 'olumi_estimate'), pace_percent_per_month: acc(12, 'olumi_estimate') }]);
     // A retry of the same press applies nothing twice.
     expect(await press(w, r.proposal_id)).toMatchObject({ ok: true, applied: true, already_applied: true });
     expect(w.registers).toHaveLength(1);
   });
 
-  it('a quoted figure is his only while the model still holds that number: changed later, it is said as Olumi\'s', async () => {
+  it('a quoted figure is his only while the model still holds that number: changed later, its source is UNKNOWN, never Olumi\'s', async () => {
     const w = world();
     const r = await dispatchTool('propose_hiring_times', JSON.stringify(PAULS_ARGS), ctx(PAUL) as never, w.caps) as Rec;
     await press(w, r.proposal_id);
     const g = w.graph();
     g.nodes.find((n: Rec) => n.id === 'event_capacity_1').observed_state.extra_share_by_date.lead_low = 2.5;
     const moved = withEventShareDate(g, DATE, REF) as Rec;
-    expect(shareOptionEstimateWords(moved, TECH)).toBe("using Olumi's estimates of hiring time (2.5–4 months) and the new team's pace (12% of next feature launch a month)");
+    expect(shareOptionEstimateWords(moved, TECH)).toBe('using your hiring time (“at least 3 months”) as modelled: 2.5–4 months, with a figure whose source could not be confirmed (2.5 months), '
+      + 'Olumi’s estimate of the latest start (4 months), and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month)');
     const summary = projectModelContext({ nodes: moved.nodes, edges: moved.edges, raw: moved, analysis_state: null, analysis_ready: null } as never) as Rec;
-    expect(summary.hiring_times.options.find((o: Rec) => o.option_id === TECH).starts[0].soonest_months).toEqual({ value: 2.5, whose: 'Olumi’s estimate' });
+    expect(summary.hiring_times.options.find((o: Rec) => o.option_id === TECH).starts[0].soonest_months).toEqual({ value: 2.5, whose: 'unknown', role: 'unknown' });
+  });
+
+  it('an ambiguous save failure is read back, never "not set": landed → set; not held → unknown (A5), no raw http', async () => {
+    const landed = world();
+    const r1 = await dispatchTool('propose_hiring_times', JSON.stringify(PAULS_ARGS), ctx(PAUL) as never, landed.caps) as Rec;
+    landed.knobs.statusAfterStore = 502;
+    expect(await press(landed, r1.proposal_id)).toMatchObject({ ok: true, applied: true });
+    const lost = world();
+    const r2 = await dispatchTool('propose_hiring_times', JSON.stringify(PAULS_ARGS), ctx(PAUL) as never, lost.caps) as Rec;
+    lost.knobs.registerStatus = 502;
+    const out = await press(lost, r2.proposal_id);
+    expect(out).toMatchObject({ ok: false, applied: false, refusal: 'not_confirmed' });
+    expect(JSON.stringify(out)).not.toMatch(/http|502/);
+  });
+
+  it('an option he gave no timing for keeps Olumi\'s own words, byte-unchanged', async () => {
+    const w = world();
+    expect(shareOptionEstimateWords(w.graph(), TECH)).toBe("using Olumi’s estimates of hiring time (2–4 months) and of the additional progress from the hires (12% of next feature launch per month)");
+  });
+
+  it('AIE R6: a change to one of two held starts re-quotes the other from the model; fewer starts get the AIE\'s own words', async () => {
+    const w = world();
+    const r = await dispatchTool('propose_hiring_times', JSON.stringify(PAULS_ARGS), ctx(PAUL) as never, w.caps) as Rec;
+    await press(w, r.proposal_id);
+    const later = 'Actually the second developer would join two months after the first.';
+    // Only one start for an option that holds two: the AIE's R6, verbatim.
+    expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: DEVS, starts: [{ quote: 'two months after the first' }] }] }),
+      ctx(later) as never, w.caps)).toMatchObject({ ok: false, refusal: 'fewer_starts_than_held',
+      detail: 'This card replaces all 2 hiring timings for ‘Hire two developers’ together, so nothing was prepared. Retain the unchanged timings and their sources and prepare the complete card for the requested change. If a held timing cannot be verified, ask only about that missing input.' });
+    // The complete card: the held, verified statement is re-quoted from the model (not in this message), the change is new.
+    const again = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: DEVS,
+      starts: [{ quote: 'within 2 months' }, { quote: 'the second developer would join two months after the first' }] }] }), ctx(later) as never, w.caps) as Rec;
+    expect(again.ok, JSON.stringify(again)).toBe(true);
+    expect(again.public_label).toContain('one person after 2 months and another after 4 months');
+    // A quote the model never held, and the user never typed, still binds nothing.
+    expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: DEVS,
+      starts: [{ quote: 'within 1 month' }, { quote: 'the second developer would join two months after the first' }] }] }), ctx(later) as never, w.caps))
+      .toMatchObject({ ok: false, refusal: 'hiring_time_not_stated' });
+  });
+
+  it('"about N" is offered as Olumi\'s reading of the user\'s approximate time, never as an exact human figure', async () => {
+    const w = world();
+    const said = 'For the tech lead, about 3 months.';
+    const r = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: 'about 3 months' }] }] }), ctx(said) as never, w.caps) as Rec;
+    expect(r.public_label).toBe('Use these hiring assumptions? ‘Hire a Tech lead’: you said “about 3 months”. Modelled timing: starts after 3 months, '
+      + 'with “about 3 months” taken as 3 months (Olumi’s reading), and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month).');
   });
 
   it('a typed "yes" is not the press: nothing is written', async () => {
@@ -153,13 +208,13 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);
   });
 
-  it('a figure he did not type is refused; "at least" past Olumi\'s latest is refused and asks for the latest', async () => {
+  it('a figure he did not type is refused (re-read, never retyped); "at least" past Olumi\'s latest gets the ONE cut refusal', async () => {
     const w = world();
     expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: 'at least 4 months' }] }] }),
       ctx(PAUL) as never, w.caps)).toMatchObject({ ok: false, refusal: 'hiring_time_not_stated' });
     const later = 'For the tech lead it would be at least 6 months.';
     expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: 'at least 6 months' }] }] }),
-      ctx(later) as never, w.caps)).toMatchObject({ ok: false, refusal: 'least_beyond_latest' });
+      ctx(later) as never, w.caps)).toMatchObject({ ok: false, refusal: 'hiring_timings_unusable' });
   });
 
   it('field-scoped stale: a carrier changed after the offer (outside the analysis hash) refuses; nothing is written', async () => {

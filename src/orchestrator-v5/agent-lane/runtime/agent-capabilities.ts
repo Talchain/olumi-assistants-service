@@ -4,7 +4,7 @@ import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
-import { capacityPartsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
+import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
@@ -171,7 +171,7 @@ const NOT_A_FACTOR_NOTE =
  */
 const SET_HIRING_TIMES = 'set_hiring_times' as string as StructuredProposal['operations'][number]['op'];
 /** E5: the applied hiring-times card's follow-up (DL ACK of SYS1-E5-STRINGS §3 pending). */
-const HIRING_TIMES_APPLIED = 'The hiring times are now in the model, with Olumi’s estimates labelled where the user gave none. Run the analysis now so each option’s chance uses them; never state a chance before it returns.';
+const HIRING_TIMES_APPLIED = "These hiring assumptions are saved, with your inputs and Olumi's estimates distinguished. Run the analysis so it uses them; do not state a chance before it returns.";
 
 /** The approval-facing disclosure of what was left out (empty when nothing was). */
 function leftOutClause(notAFactor: readonly { label: string; kind: string }[]): string {
@@ -3368,13 +3368,13 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const pid = parent.proposal_id, a = parent.operations[0]!.value as ApprovedHiringTimes;
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
-    if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'These hiring times are set only by pressing their own card, so nothing was changed.');
+    if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'These hiring timings are set only by pressing their own card, so nothing was changed.');
     if (hiringTimesHeld(before.raw, a)) {
       proposals.markApplied(pid, []);
       return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: HIRING_TIMES_APPLIED };
     }
     if (!hiringTimesStillApply(a, before.raw)) {
-      return notApplied('superseded', 'The hiring times in the model changed after this card was offered, so nothing was set. Offer it again only if it still applies.');
+      return notApplied('superseded', 'The hiring timings in the model changed after this card was offered, so nothing was set. Offer it again only if it still applies.');
     }
     const postimage = withHiringTimes(before.raw, a) as Record<string, unknown>;
     const operationId = constructionOperationId(ctx.scenario_id, `hiring_times:${before.graph_identity_hash}:${pid}`);
@@ -3382,17 +3382,16 @@ export function createAgentCapabilities(
       graph: { ...postimage },
       expected_graph_hash: before.graph_hash, expected_graph_identity_hash: before.graph_identity_hash, operation_id: operationId,
     });
-    if (reg.status !== 200) {
-      const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
-      return /STALE/.test(code)
-        ? notApplied('superseded', 'The model changed just before the hiring times were written, so nothing was set. Offer it again only if it still applies.')
-        : notApplied('not_applied', `The hiring times could not be saved (http ${reg.status}), so nothing was set.`);
+    const code = reg.status === 200 ? '' : String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+    if (/STALE/.test(code)) {
+      return notApplied('superseded', 'The model changed just before the hiring timings were written, so nothing was set. Offer it again only if it still applies.');
     }
-    // ⛔ CONFIRMED FROM STATE: every option holds exactly its planned starts, figures and recomputed link strengths.
+    // ⛔ CONFIRMED FROM STATE — also after an ambiguous failure, which does NOT prove no save (AIE 6122431786 §4): every option
+    // holds exactly its planned starts, figures and recomputed link strengths, or the outcome is unknown, never "not set".
     const after = await readGraph(ctx.scenario_id);
     if (after === null || !hiringTimesHeld(after.raw, a)) {
       return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
-        detail: 'The hiring times were sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+        detail: 'The hiring timings were sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
           + 'offer to check the model again, and never say they were set or that they were not.' };
     }
     const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
@@ -5255,50 +5254,53 @@ export function createAgentCapabilities(
     },
 
     /**
-     * ⭐ E5 (Paul's manual test, 12 Oct): the hiring times the user states, per option, on ONE card. Each start is the
-     * user's quote, in THIS message, in a sentence naming that option; the months are read from the quote (`hiring-times.ts`),
-     * never from the model's arguments, and mapped per the S8 rule set with whose each figure is. Nothing is written here.
+     * ⭐ E5 (Paul's manual test, 12 Oct): the hiring timings the user states, per option, on ONE card. Each start is the
+     * user's quote, from this message or an earlier one (E2's source-bound path), in a sentence naming that option; the months
+     * are read from the quote (`hiring-times.ts`), never from the model's arguments, and every figure keeps its role and
+     * origin. r2 (DL CUT): one refusal for every form Olumi cannot model as quoted. Nothing is written here.
      */
     async proposeHiringTimes(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const text = typeof ctx.user_turn_text === 'string' ? ctx.user_turn_text : '';
+      const texts = { now: ctx.user_turn_text, conversation: ctx.user_text };
       const refuse = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
+      const unusable = (): ToolResult => refuse('hiring_timings_unusable', 'Olumi could not use these hiring timings as quoted, so nothing was prepared. '
+        + 'Re-read the user\'s own words and quote each start exactly, in the order they happen; if Olumi still cannot use them, say so plainly.');
       const asked = Array.isArray(args?.options) ? args.options : [];
-      if (asked.length === 0) return refuse('hiring_times_missing', 'No hiring time was given for any option, so nothing was prepared.');
+      if (asked.length === 0) return unusable();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
-      if (part === null || deadline === undefined) {
-        return refuse('deadline_not_held', 'First type and confirm the deadline, for example "7 April 2027". Then give the hiring times again.');
-      }
       const reference = todayInLondon((opts.now ?? (() => new Date()))());
-      if (reference >= deadline) return refuse('deadline_passed', 'That deadline has passed. Type a future deadline and confirm it, then give the hiring times again.');
+      if (part === null || deadline === undefined || reference >= deadline) {
+        return refuse('deadline_not_held', 'The deadline must be confirmed before these timings can be applied. Keep the supplied timings and prepare them once the deadline is confirmed.');
+      }
       const goalId = String(part.goal.id), planned: PlannedOption[] = [];
       for (const o of asked) {
         const id = typeof o?.option_id === 'string' ? o.option_id : '';
         const option = g.nodes.find(n => n.id === id && n.kind === 'option');
         if (option === undefined) return refuse('unknown_option', `"${id}" is not an option in this model. Nothing was prepared.`);
         const label = String(option.label);
-        if (planned.some(p => p.option_id === id)) return refuse('option_twice', `‘${label}’ is given twice, so nothing was prepared. Give each option’s starts once.`);
+        if (planned.some(p => p.option_id === id)) return unusable();
         const held = capacityPartsOf(g.raw, id, goalId), estimate = olumiEstimateOf(held);
         if (held.length === 0 || estimate === null) return refuse('adds_no_people', `‘${label}’ adds no people in this model, so it has no start time. Nothing was prepared.`);
         const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
+        const heldQuotes = heldStatementsOf(held);
         for (const quote of quotes) {
-          const stated = quoteStatedFor(text, quote, label);
-          if (stated === 'not_stated') return refuse('hiring_time_not_stated', `"${quote}" is not in the user's message, so nothing was prepared. Ask them for the hiring time in their own words.`);
+          if (heldQuotes.includes(quote)) continue;
+          const stated = quoteStatedFor(texts, quote, label);
+          if (stated === 'not_stated') return refuse('hiring_time_not_stated', `"${quote}" is not in the user's messages, so nothing was prepared. Copy the hiring time exactly from the user's own message and call again; do not ask the user to retype it.`);
           if (stated === 'not_for_option') return refuse('hiring_time_not_for_option', `"${quote}" is not said about ‘${label}’ in the user's message, so nothing was prepared. Ask which option that time is for.`);
         }
         const plan = planStarts(quotes, estimate, held.length);
         if (!('parts' in plan)) {
-          const detail = {
-            start_unreadable: `Olumi could not read one start time in "${plan.quote}", so nothing was prepared. Ask for it in months, for example "at least 3 months" or "within 2 months".`,
-            first_start_relative: `The first start for ‘${label}’ is said as later than another ("${plan.quote}"), so nothing was prepared. Ask when the first person would start.`,
-            relative_to_range: `"${plan.quote}" for ‘${label}’ is said after a start given as a range, so nothing was prepared. Ask when that person would start, in months.`,
-            too_many_starts: `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly.`,
-            fewer_starts_than_held: `‘${label}’ already has ${held.length} start times in the model, so nothing was prepared. Ask for a time for each.`,
-            least_beyond_latest: `The user said at least ${plan.months} months for ‘${label}’, later than Olumi's latest estimate (${plan.latest} months), so nothing was prepared. Ask the user for the latest time it could take.`,
-          }[plan.refusal];
-          return refuse(plan.refusal, detail);
+          if (plan.refusal === 'too_many_starts') return refuse('too_many_starts', `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly.`);
+          if (plan.refusal === 'fewer_starts_than_held') {
+            return refuse('fewer_starts_than_held', heldQuotes.length === held.length
+              ? `This card replaces all ${held.length} hiring timings for ‘${label}’ together, so nothing was prepared. Retain the unchanged timings and their sources and prepare the complete card for the requested change. If a held timing cannot be verified, ask only about that missing input.`
+              : `This card replaces all ${held.length} hiring timings for ‘${label}’ together, and Olumi cannot yet keep a timing it estimated while another changes, so nothing was prepared. Say so plainly.`);
+          }
+          if (plan.refusal === 'relative_to_range') return refuse('relative_to_range', `"${plan.quote}" for ‘${label}’ ties this start to an earlier one given as a range, which Olumi cannot model yet, so nothing was prepared. Say so plainly; the user's timings stay in the conversation.`);
+          return unusable();
         }
         planned.push({ option_id: id, label, part_ids: held.map(n => String(n.id)), expected: held.map(n => n.observed_state.extra_share_by_date),
           olumi_estimate: estimate, parts: plan.parts, quotes });
@@ -5306,10 +5308,10 @@ export function createAgentCapabilities(
       const a: ApprovedHiringTimes = { goal_id: goalId, deadline, reference_date: reference, options: planned };
       if (hiringTimesHeld(g.raw, a)) return refuse('already_held', 'Those hiring times are already in the model. Nothing was changed.');
       // The postimage must hold exactly what the card says before it is offered, never only after the press.
-      if (!hiringTimesHeld(withHiringTimes(g.raw, a), a)) return refuse('not_supported', 'Olumi could not prepare these hiring times in this model, so nothing was prepared.');
+      if (!hiringTimesHeld(withHiringTimes(g.raw, a), a)) return unusable();
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_HIRING_TIMES, path: goalId, value: a }],
-        provenance: { authored_by: 'user_stated', basis: text },
+        provenance: { authored_by: 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: hiringTimesCard(a, part.deliverable) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
