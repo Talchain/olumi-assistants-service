@@ -45,11 +45,9 @@ function snapshot(s: Snapshot, trigger: Trigger): Snapshot {
   return s;
 }
 const carriers = (w: Awaited<ReturnType<typeof capture>>) => valueAt(w.calls.flatMap(c => c.payloads), 'eligible_intervention');
-function assertShape(b: Obj, science = why): void {
-  const shape = object(b._answer_shape);
-  expect(array(shape.bullets).length).toBeGreaterThan(0);
-  for (const bullet of array(shape.bullets)) expect(String(bullet).trim().split(/\s+/).length).toBeLessThanOrEqual(8);
-  expect([shape.headline, ...array(shape.bullets)].join(' ').trim().split(/\s+/).length).toBeLessThanOrEqual(80);
+function assertWholeAnswer(b: Obj, science = why): void {
+  expect(b._answer_shape).toBeUndefined();
+  expect(b.assistant_text).toBe(`${reply}\n\nSuggest risks\n\nWhy? ${science}`);
   expect(String(b.assistant_text)).toContain('3%');
   // Host-authored disclosure as a plain paragraph the chat renders (R3-1: the UI escapes HTML); model text cannot replace its body.
   expect(String(b.assistant_text)).toContain(`Why? ${science}`);
@@ -60,7 +58,7 @@ async function run(trigger: Trigger, opts: Parameters<typeof capture>[2] = {}) {
   return capture('ordinary-converse', 'run2', { readSnapshot: async s => snapshot(s, trigger),
     payload: { message }, providerReply: () => response(), ...opts });
 }
-it('A1 recorded conversation: one W6 carrier, science verbatim, short actions, user figure, same wire', async () => {
+it('A1 recorded conversation: one W6 carrier, whole answer, science verbatim, plain action, user figure, same wire', async () => {
   const w = await run('W6');
   if (process.env.S8_CAPTURE_DIR) {
     mkdirSync(process.env.S8_CAPTURE_DIR, { recursive: true });
@@ -68,8 +66,8 @@ it('A1 recorded conversation: one W6 carrier, science verbatim, short actions, u
   }
   expect(carriers(w)).toEqual([{ policy_id: 'RC-WIDEN', variant_id: 'W6', name: row('RC-WIDEN').name, why,
     trigger: row('RC-WIDEN').trigger_predicate.variants![6].when }]);
-  assertShape(w.response);
-  expect(array(object(w.response._answer_shape).bullets)).toContain(object(object(object(w.response.guidance).slot1).primary_action).label);
+  assertWholeAnswer(w.response);
+  expect(String(w.response.assistant_text).split('\n\n')).toContain(object(object(object(w.response.guidance).slot1).primary_action).label);
   expect(object(object(w.response.guidance).slot1)).toMatchObject({ policy_id: 'RC-WIDEN', variant: 'W6' });
 });
 it('A2 no trigger: no carrier, no Why?, direct grounded answer', async () => {
@@ -138,8 +136,8 @@ describe('A6 persistence', () => {
   if (process.env.S8_CAPTURE_DIR) writeFileSync(`${process.env.S8_CAPTURE_DIR}/conversation-A6.json`, JSON.stringify({ shown: first.response, saved, reloaded: loaded.response, reload_provider_calls: loaded.calls.length }, null, 2));
   });
   it('A6-text shown = saved = reloaded', () => {
-    assertShape(first.response); expect(saved.assistant_message).toBe(first.response.assistant_text);
-    assertShape(loaded.response); expect(loaded.response.assistant_text).toBe(saved.assistant_message);
+    assertWholeAnswer(first.response); expect(saved.assistant_message).toBe(first.response.assistant_text);
+    assertWholeAnswer(loaded.response); expect(loaded.response.assistant_text).toBe(saved.assistant_message);
   });
   it('A6-history committed guidance policy id matches the pre-reply selection and round-trips through readGuidanceHistory', () => {
     const policyId = String(object(carriers(first)[0]).policy_id);
@@ -184,7 +182,9 @@ describe('E6 Why-once on the route: a second Strengthen item on the same state c
     expect(String(first.response.assistant_text)).toContain(`Why? ${row('RC-STRENGTHEN-ITEM').science_basis.summary}`);
     expect(String(first.response.assistant_text)).not.toContain('<details>');
     expect(String(second.response.assistant_text)).not.toContain(`Why? ${row('RC-STRENGTHEN-ITEM').science_basis.summary}`);
-    expect(array(object(second.response._answer_shape).bullets)).toContain(object(b.primary_action).label);
+    expect(object(b.primary_action).label).toBe('Give your estimate');
+    expect(String(second.response.assistant_text).split('\n\n')).toContain(object(b.primary_action).label);
+    expect(second.response.assistant_text).toBe(`${reply}\n\nGive your estimate`);
     expect(object(carriers(second)[0]).why, 'the model is told the same method; only the display changes').toBe(row('RC-STRENGTHEN-ITEM').science_basis.summary);
   });
 });
@@ -295,7 +295,7 @@ it('P3 host-only proposal: zero provider calls, base text unchanged and no Why',
   expect(w.response.assistant_text).toBe(c2Base.P3.assistant_text);
   expect(String(w.response.assistant_text)).not.toContain('Why?');
 });
-it('X4 carrier face caps: eight-word bullets, eighty-word face, long existing label whole in detail', async () => {
+it('X4 carrier whole answer: long headline and action labels retained verbatim, guidance follows as plain paragraphs', async () => {
   const longLabel = 'Test the impact of customer cancellations and downgrades after changing the Pro price';
   const headline = `${'Customer response matters '.repeat(24).trim()}.`;
   const short = ['Test customer evidence before changing the Pro price.', 'Check retention with the customer team.', 'Name another risk.'];
@@ -303,14 +303,11 @@ it('X4 carrier face caps: eight-word bullets, eighty-word face, long existing la
   const w = await run('W6', { evidenceLabel: 'X4', providerReply: () => response(text) });
   recordC2('X4', w);
   expect(carriers(w)).toHaveLength(1);
-  const shape = object(w.response._answer_shape);
-  const bullets = array(shape.bullets);
-  expect(bullets.length).toBeGreaterThan(0);
-  for (const bullet of bullets) expect(String(bullet).trim().split(/\s+/).length).toBeLessThanOrEqual(8);
-  expect([shape.headline, ...bullets].join(' ').trim().split(/\s+/).length).toBeLessThanOrEqual(80);
-  expect(String(shape.detail)).toContain(`- ${longLabel}`);
+  expect(w.response._answer_shape).toBeUndefined();
+  expect(w.response.assistant_text).toBe(`${text}\n\nSuggest risks\n\n${disclosure}`);
+  expect(String(w.response.assistant_text)).toContain(`- ${longLabel}`);
   for (const line of [longLabel, ...short, 'Which risk could change your plan?']) expect(String(w.response.assistant_text)).toContain(line);
-  expect(String(shape.detail)).toContain(disclosure);
+  expect(String(w.response.assistant_text).split('\n\n')).toContain(disclosure);
 });
 it('X5 profile gate: method_step with carrier is byte-identical; proposal is byte-identical per P1 (R2 N2r)', async () => {
   const w = await capture('pre-mortem', 'run2', { evidenceLabel: 'X5', readSnapshot: async s => snapshot(s, 'S1'), providerReply: () => response(reply) });
