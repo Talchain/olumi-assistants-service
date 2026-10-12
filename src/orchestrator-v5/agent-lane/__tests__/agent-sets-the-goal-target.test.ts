@@ -24,7 +24,7 @@ import { SystemEventTurnPayloadSchema } from '@talchain/schemas/boundary';
 import { authorisationTurnId, createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { AGENT_TOOLS, MUTATION_TOOLS, dispatchTool, toolsFor } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
-import { comparatorTheUserWrote, userWordsOf } from '../stated-by-user.js';
+import { comparatorTheUserWrote, comparatorTheUserWroteFor, userWordsOf } from '../stated-by-user.js';
 import { statedGoalOperatorFor } from '../stated-goal-operator-context.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
@@ -601,5 +601,55 @@ describe('comparatorTheUserWrote — the direction is the user\'s own words, aff
     // A request to act names it, even as a question; words are whole words ("capacity" is not "cap").
     expect(comparatorTheUserWrote('Can you set the target to at least £60k?')).toBe('at_least');
     expect(comparatorTheUserWrote('We have capacity for £60k.')).toBeNull();
+  });
+});
+
+/**
+ * ⭐ ONE COMPARATOR PER FIGURE (Batch B, DL 12 Oct). Paul's marketing L20, verbatim from the served run (020148Z turn 02),
+ * states two targets in one turn with ONE comparator word. The whole-turn reader gave that "over" to every figure, so
+ * "20 new customers" became the user's own strict "above 20". A comparator now belongs only to the figure it is bound to.
+ */
+const L20 = 'I have two goals: For our new feature launch to be successful, we need to have a conversion rate of over 15% and secure 20 new customers within the first 3 months.';
+describe('comparatorTheUserWroteFor — the comparator the user wrote for THIS figure', () => {
+  it('RED (Paul L20): "over" is 15%\'s, never 20\'s; the whole-turn reader gave it to both', () => {
+    expect(comparatorTheUserWrote(L20), 'the defect: the whole turn reads one strict comparator').toBe('above');
+    expect(comparatorTheUserWroteFor(L20, 15)).toBe('above');
+    expect(comparatorTheUserWroteFor(L20, 20)).toBeNull();
+    expect(comparatorTheUserWroteFor(L20, 3)).toBeNull();
+  });
+
+  it('each of two targets keeps its own comparator', () => {
+    const turn = 'Conversion above 15% and at least 20 new customers.';
+    expect(comparatorTheUserWroteFor(turn, 15)).toBe('above');
+    expect(comparatorTheUserWroteFor(turn, 20)).toBe('at_least');
+  });
+
+  it('PARITY with the whole-turn reader on one figure: prefixes, suffixes, strictness, asked and denied', () => {
+    expect(comparatorTheUserWroteFor('We need at least £60k.', 60000)).toBe('at_least');
+    expect(comparatorTheUserWroteFor('A minimum of 20 new customers.', 20)).toBe('at_least');
+    expect(comparatorTheUserWroteFor('Keep churn under 4%.', 4)).toBe('below');
+    expect(comparatorTheUserWroteFor('20 or more new customers.', 20)).toBe('at_least');
+    expect(comparatorTheUserWroteFor('less than or equal to 4%', 4)).toBe('at_most');
+    expect(comparatorTheUserWroteFor('Under 4%. Last year, 4% or more of cancellations came from one plan.', 4)).toBe('below');
+    expect(comparatorTheUserWroteFor('At most 4%, under 4%.', 4)).toBeNull();
+    expect(comparatorTheUserWroteFor('Is at least £60k realistic?', 60000)).toBeNull();
+    expect(comparatorTheUserWroteFor('It must not fall below 4%.', 4)).toBeNull();
+    expect(comparatorTheUserWroteFor('We need £60k.', 60000)).toBeNull();
+  });
+
+  it('RED (capability, Paul L20): 20 new customers is never recorded as the user\'s strict "above 20" — the direction is a DECISION', async () => {
+    const w = world(graphWith([{ id: 'customers', kind: 'goal', label: 'New customers', goal_threshold_unit: 'customers' }]));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf(L20), { constraint_type: 'at_least', value: 20, unit: 'customers', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen: 'at_least', alternative: 'at_most' } }));
+    expect(String(p.public_label)).not.toMatch(/above 20/);
+    expect(w.sent).toEqual([]);
+  });
+
+  it('CONTROL (capability, Paul L20): 15% conversion keeps the strict "above" the user wrote, as theirs', async () => {
+    const w = world(graphWith([{ id: 'conversion', kind: 'goal', label: 'Conversion rate', goal_threshold_unit: '%' }]));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf(L20), { constraint_type: 'at_least', value: 15, unit: '%', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(p).not.toHaveProperty('direction_choice');
+    expect(String(p.public_label)).toContain('above 15%');
   });
 });
