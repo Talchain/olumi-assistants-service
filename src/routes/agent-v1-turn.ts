@@ -543,7 +543,8 @@ export function stillValidOffers(
   // The next step after a blocked Run stays offered while the model is KNOWN not to run (process-local,
   // like the approve chip: after a restart the replay carries the words only). A replay whose state read
   // failed is unknown, and an unknown state is never re-advertised as a refusal (#1885 pre-review 5827131835).
-  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && knownNotRunnable(now.analysisReady);
+  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && knownNotRunnable(now.analysisReady)
+    && !onlyUserCanUnblock(now.analysisReady);
   // Offered only on a refused run (`offersStartingAssumptions`): it stays while the run is KNOWN refused, as the next step does.
   const startingAssumptions = offered.some((a) => a.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id) && knownNotRunnable(now.analysisReady);
   // A rebuild stays offered only while there is still no model to build over.
@@ -1002,6 +1003,17 @@ export const RUN_OFFER_CHIP = {
 export function admitsRunOffer(analysisReady: unknown): boolean {
   const ar = (analysisReady ?? {}) as { may_run?: unknown; status?: unknown };
   return typeof ar.may_run === 'boolean' ? ar.may_run : ar.status === 'ready';
+}
+
+/**
+ * R2 T2 (friction audit): every blocker needs the user's own judgement (`human_input_required`), so "Suggest what it
+ * still needs" has nothing Olumi could prepare for approval (it produced nothing approvable 4/4); the face already asks.
+ */
+export function onlyUserCanUnblock(analysisReady: unknown): boolean {
+  const issues = (analysisReady as { readiness_issues?: unknown } | null | undefined)?.readiness_issues;
+  const blocking = (Array.isArray(issues) ? issues : []).filter((i): i is Record<string, unknown> => i !== null && typeof i === 'object')
+    .filter(i => i.obligation !== 'offered' && i.waived_by_exclusion !== true);
+  return blocking.length > 0 && blocking.every(i => i.repairability === 'human_input_required');
 }
 
 /**
@@ -4406,7 +4418,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? (() => { const chip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }); return chip === null ? [] : [chip]; })() : []),
       // The run is refused and Olumi can fill the gap: the one specific next step replaces the general one.
       ...(startingAssumptions.length > 0 ? startingAssumptions
-        : (runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+        : ((runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked) && !onlyUserCanUnblock(analysisReady) ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
       // The research control for each query the Agent offered THIS turn: the only way a query is ever sent. Only a
       // control the final egress would ship is offered, and so remembered as pressable.
