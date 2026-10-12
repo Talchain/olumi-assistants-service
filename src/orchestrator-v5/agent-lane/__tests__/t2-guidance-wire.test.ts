@@ -14,6 +14,7 @@ import { guidanceLeaderLicensed, guidanceRequestOf, itemRefOf, turnGuidanceFor, 
 import { NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
 import { guidanceHistoryOf, type AnswerGuidance } from '../turn-context/guidance-history.js';
 import { entryKey } from '../guidance/index.js';
+import policy from '../guidance/reasoning-interventions.json';
 
 // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
 const D1_SERVED = served.cases.find((c) => c.id === 'D1-sprint-run')!;
@@ -38,6 +39,8 @@ const S1_ROW = {
     question: 'How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it.',
   },
   item_ref: { kind: 'link', from_id: AI.from, to_id: AI.to },
+  // Technique (c) (AIE 6130197656 §3, DL 12 Oct): the row carries its science basis as its own detail, by identity.
+  science: policy.rows.find((r) => r.policy_id === 'RC-STRENGTHEN-ITEM')!.science_basis.summary,
 };
 
 const inputs = (over: Partial<TurnGuidanceInputs> = {}): TurnGuidanceInputs => ({
