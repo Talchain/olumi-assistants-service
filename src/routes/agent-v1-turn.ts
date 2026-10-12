@@ -3199,11 +3199,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
         // ⭐ S-D: what the user set vs what Olumi held, server-authored from the hold's own record, only once it landed.
         const editsApplied = applied.ok === true && applied.mutated === true ? readUserEdits(applied.user_edits) : undefined;
-        editsRefusedThisTurn = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true;
-        const editedLinks = editsApplied !== undefined && original !== undefined && original.operations.length > 0 && original.operations.every(o => o.op === 'set_link_strength');
         const refusedBinding = editsForThisCard?.fields.length === 0
           && (applied.refusal === 'edits_superseded' || applied.refusal === 'superseded' || applied.refusal === 'unknown_proposal');
-        const followUp = [editedLinks ? '' : guarded.text.trim(), editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
+        /**
+         * ⭐ E-TAIL (a) (run 4 deadline turns 7 and 14; §7.3, receipts are accurate): the card's plain "Yes" arrives with
+         * `fields: []`. When the CAPABILITY refused it (not a binding refusal of the press), no value was edited, so "Those
+         * values could not be applied" was false: the narrator's status and the capability's own reason are said instead,
+         * the reason through the same Agent-direction boundary as every follow-up.
+         */
+        const plainRefusedByCapability = editsForThisCard?.fields.length === 0 && applied.ok !== true && applied.mutated !== true
+          && !refusedBinding && applied.refusal !== 'edits_refused';
+        editsRefusedThisTurn = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true && !plainRefusedByCapability;
+        const ownReason = plainRefusedByCapability && guarded.text.trim() === '' && typeof applied.detail === 'string'
+          ? withoutAgentDirections(applied.detail).text.trim() : '';
+        const editedLinks = editsApplied !== undefined && original !== undefined && original.operations.length > 0 && original.operations.every(o => o.op === 'set_link_strength');
+        const followUp = [editedLinks ? '' : guarded.text.trim(), ownReason, editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
           editsRefusedThisTurn ? refusedBinding ? PLAIN_APPROVAL_SUPERSEDED
             : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
