@@ -7,7 +7,8 @@
  *   - Olumi's draft-time risk "Developer onboarding burdens team" was added to the model OUT of the Run
  *     (`retained_excluded`), and the reply then had to say the Run leaves it out.
  * Now:
- *   (1) a row and its Why? are said once per state; a shown item quiets its item row;
+ *   (1) a row and its Why? are said once per state; a shown item cools only itself, so the next item may follow
+ *       (Batch R round 2: E6's whole-policy item rule was removed after the independent check, CHECK-R P1);
  *   (2) the same holds for the chip: the build reply's thin-draft risks offer counts as RC-WIDEN's risks row shown;
  *   (3) no risk is added at draft time; the thin-draft offer suggests it for approval.
  *
@@ -75,14 +76,13 @@ describe('E6 replay of Paul\'s served session: each suggestion and its Why? are 
   });
 
   for (const [name, graph] of [['served build (with Olumi\'s draft-time risk)', SERVED], ['E6 build (no draft-time risk)', E6_DRAFT]] as const) {
-    it(`${name}: the risks suggestion is shown in ONE reply, and no Why? or row repeats across 13 replies`, () => {
+    it(`${name}: the risks suggestion is shown in ONE reply, and no row (with its Why?) repeats across 13 replies`, () => {
       const replies = replay(() => graph);
       expect(replies.filter(r => r.risksChip).map(r => r.turn), 'the "Suggest risks" offer, once').toEqual([1]);
       const rows = replies.flatMap(r => r.row === undefined ? [] : [r.row]);
       expect(new Set(rows).size, `each row once: ${JSON.stringify(rows)}`).toBe(rows.length);
-      const whys = replies.flatMap(r => r.why === undefined ? [] : [r.why]);
-      expect(new Set(whys).size, `each Why? once: ${JSON.stringify(replies.map(r => [r.turn, r.why?.slice(0, 30)]))}`).toBe(whys.length);
-      expect(whys.length).toBeLessThanOrEqual(1);
+      // Batch R round 2 (independent check P1): the whole-policy item rule is removed. Items cool per item and fall through,
+      // so two different Strengthen items may each carry the policy's one Why? text once; a row never repeats.
     });
   }
 
