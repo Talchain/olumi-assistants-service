@@ -2962,11 +2962,14 @@ export function admitStatedGoalChange(
    * ⭐ RECOVERY BATCH C (ruling 9; amendments 7 and 10): a RELATIVE change on Olumi's own starting value is no longer refused
    * outright. With a valid basis it is admitted as `estimate_only`: the base is written as OLUMI'S (`cee_inference`, never
    * the user's), and the licence labels the chance "Provisional estimate using Olumi's assumed starting value: B", adding that
-   * B's own uncertainty is not included. A missing base, a base claimed as the user's but not in the brief, or a missing
-   * denominator stays refused. A LEVEL target on Olumi's base stays withheld (amendment 7: `admitModel`'s level guard).
+   * B's own uncertainty is not included. A missing base, a base stated for another quantity, or a missing denominator stays
+   * refused. A LEVEL target on Olumi's base stays withheld (amendment 7: `admitModel`'s level guard).
+   * ⛔ S3 T5 D3 (L2): a base the drafter typed `explicit` that the brief does not write for this goal is OLUMI's too (C's rule:
+   * human only by positive attestation), never dropped. "400 paying customers at £20" drafted as £8,000 today was refused
+   * because only an `ai_proposed` base reached this branch, so the saved goal held no base at all.
    */
   const estimateOnly = notTheUsers !== null && fromBrief?.kind !== 'adopt' && frame === 'change_rel' && basis !== null
-    && typeof today === 'number' && Number.isFinite(today) && goalLevelIsEstimated(goal);
+    && typeof today === 'number' && Number.isFinite(today) && notTheUsers !== 'stated for another quantity';
   if (notTheUsers !== null && fromBrief?.kind !== 'adopt' && !estimateOnly) {
     // ⛔ AIQ 5894808343 (1), no-regret: the brief DID give a figure, so "was not stated" would be false.
     if (fromBrief?.kind === 'refused') {

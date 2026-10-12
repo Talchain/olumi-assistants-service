@@ -93,3 +93,39 @@ describe('L1: the drafter\'s horizon picks the brief\'s own span (D2: six months
     },
   );
 });
+
+describe('L2: a base the drafter produced is Olumi\'s unless the brief attests it — never dropped (D3: £8,000)', () => {
+  it('PRECONDITION: the raw answers give today\'s MRR as 8000 with a basis; the brief never writes it; T5 saved none', () => {
+    for (const key of ['D3_r1', 'D3_r2']) {
+      const g = rawGoal(ep(key));
+      expect([g.frame, g.baseline_known, g.baseline_value, g.baseline_provenance], key).toEqual(['change_rel', true, 8000, 'explicit']);
+      expect(g.basis, key).not.toBeNull();
+      expect(ep(key).t5_saved_goal.observed_state, `${key}: T5 saved none`).toBeNull();
+      expect(ep(key).brief).not.toMatch(/8,?000|8k/i);
+    }
+  });
+
+  it.each(['D3_r1', 'D3_r2'])('⭐ RED %s: the saved goal keeps £8,000 as OLUMI\'s starting value (estimate_only), never the user\'s', async (key) => {
+    const { goal, result } = await build(ep(key));
+    expect(goal.observed_state).toMatchObject({ raw_value: 8000, source: 'cee_inference' });
+    expect(goal.goal_threshold, 'a relative change is scored on that base').toBe(0.15);
+    expect(Object.hasOwn(goal, 'goal_level_reading'), 'not a reading of a brief figure').toBe(false);
+    expect(Object.hasOwn(goal, 'goal_target_basis'), 'the drafted basis is kept').toBe(true);
+    expect(JSON.stringify(result)).not.toMatch(/held as today's level of/);
+  });
+
+  it('CONTRAST: a base the drafter did NOT produce stays absent and is never invented (A′ D3 r2)', async () => {
+    const e = ep('D3_noBase_r2');
+    expect([rawGoal(e).baseline_known, rawGoal(e).baseline_value], 'PRECONDITION').toEqual([false, null]);
+    const { goal } = await build(e);
+    expect(Object.hasOwn(goal, 'observed_state')).toBe(false);
+    expect(Object.hasOwn(goal, 'goal_threshold')).toBe(false);
+    expect(JSON.stringify(goal)).not.toMatch(/8000/);
+  });
+
+  it('CONTRAST: a base the brief states ("8 weeks") stays the user\'s (D4)', async () => {
+    expect(ep('D4_r1').t5_saved_goal.observed_state, 'PRECONDITION: T5 saved it').toMatchObject({ raw_value: 8, source: 'brief_extraction' });
+    const { goal } = await build(ep('D4_r1'));
+    expect(goal.observed_state).toMatchObject({ raw_value: 8, source: 'brief_extraction' });
+  });
+});
