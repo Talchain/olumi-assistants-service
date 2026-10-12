@@ -479,7 +479,9 @@ describe('PJ-A1 £49 — propose_new_option carries a new graded factor\'s today
     const withToday = setup();
     await withToday.caps.proposeNewOption({ ...ctx, user_text: SAID }, call({ value: 5, unit: 'GBP/month' }) as never);
     expect(withToday.carried).toEqual([[{ label: 'AI add-on price',
-      observed_state: { value: 0.5, raw_value: 5, cap: 10, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction' } }]]);
+      // The typed door verified the figure, so it writes the attestation beside the stamp (DL 12 Oct).
+      observed_state: { value: 0.5, raw_value: 5, cap: 10, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction',
+        extractionType: 'explicit' } }]]);
     const without = setup();
     await without.caps.proposeNewOption({ ...ctx, user_text: SAID }, call() as never);
     expect(without.carried).toEqual([[]]);
@@ -516,7 +518,9 @@ describe('PJ-A1 £49 — propose_new_option carries a new graded factor\'s today
     acts_on: [{ factor_label: 'AI add-on price', direction: 'positive', ...(level !== undefined ? { level } : {}) }],
   });
   const ivsOf = (sent: { body: unknown }[]) => paramsOf(sent)?.['interventions'];
-  const TODAY_5_ON_100 = { value: 0.05, raw_value: 5, cap: 100, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction' };
+  // The typed door's verified today level carries its attestation (`explicit`, DL 12 Oct).
+  const TODAY_5_ON_100 = { value: 0.05, raw_value: 5, cap: 100, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction',
+    extractionType: 'explicit' };
 
   it('[A1-59] RED: the user wrote today £5 and the option\'s £12 → ONE sent change carries the option\'s 12 on today\'s frame (0–100), the user\'s', async () => {
     const { caps, sent, carried } = setup();

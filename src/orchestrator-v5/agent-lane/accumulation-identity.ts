@@ -27,7 +27,7 @@ import { readUnitParts, words } from './same-unit.js';
 import { periodAdverb, periodNoun, type UnitPeriod } from '../../utils/unit-alphabet.js';
 import { canonicalLabel } from './model-primitives.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
-import { classifyValueSource, reflectsAHumanAct } from '../../cee/graph-readiness/obligation-provenance.js';
+import { reflectsAHumanAct, valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import type { CandidateIdentity } from './admit-model.js';
 
 export interface AccumulationCarrier {
@@ -234,7 +234,7 @@ function admitAccumulationDeclarations(nodes: readonly NodeLike[], edges: readon
       factor_ids: [stock.id, rate.id, inflow.id],
       horizon_months: horizon,
       rate_scale: 0.01,
-      stated_in_brief: [stock, rate, inflow].every((n) => reflectsAHumanAct(classifyValueSource(n.observed_state?.source))),
+      stated_in_brief: [stock, rate, inflow].every((n) => reflectsAHumanAct(valueClassOf(n.observed_state))),
     });
   }
   return { carriers, loss, addedNodes, addedEdges, goalCarriers };
@@ -299,7 +299,7 @@ export function admitStructuralGoalAccumulation<N extends NodeLike, E extends Ed
   const periodCount = (unit: unknown): number => typeof unit === 'string' ? words(unit).filter(w => periodNoun(w) !== null || periodAdverb(w) !== null).length : 0;
   const levels = parents.filter(n => {
     const parts = readUnitParts(n.observed_state?.unit);
-    return classifyValueSource(n.observed_state?.source) === 'user_stated' && !edges.some(e => e.to === n.id && nodes.some(p => p.id === e.from && p.kind === 'option')) && parts !== null && (parts.period === null || dimension.period === 'month' && parts.period === 'month')
+    return valueClassOf(n.observed_state) === 'user_stated' && !edges.some(e => e.to === n.id && nodes.some(p => p.id === e.from && p.kind === 'option')) && parts !== null && (parts.period === null || dimension.period === 'month' && parts.period === 'month')
       && periodCount(n.observed_state?.unit) <= 1 && isDeepStrictEqual({ ...parts, period: null }, { ...dimension, period: null });
   });
   const flows = parents.filter(n => {
@@ -311,7 +311,7 @@ export function admitStructuralGoalAccumulation<N extends NodeLike, E extends Ed
   });
   if (levels.length !== 1 || flows.length !== 1 || levels[0]!.id === flows[0]!.id
     || parents.some(n => n.id !== levels[0]!.id && !flows.some(flow => flow.id === n.id) && readUnitParts(n.observed_state?.unit)?.period === 'month' && periodCount(n.observed_state?.unit) > periodCount(unit))
-    || ![levels[0]!, flows[0]!].every(n => classifyValueSource(n.observed_state?.source) === 'user_stated')
+    || ![levels[0]!, flows[0]!].every(n => valueClassOf(n.observed_state) === 'user_stated')
     || (levelOf(flows[0]!) ?? 0) <= 0) return { nodes: [...nodes], edges: [...edges] };
   const admission = admitAccumulationDeclarations(nodes, edges, [{ outcome: String(goal.label), operation: 'accumulation',
     factors: [String(levels[0]!.label), String(flows[0]!.label)], reading: 'net', provenance: 'inferred' }]);

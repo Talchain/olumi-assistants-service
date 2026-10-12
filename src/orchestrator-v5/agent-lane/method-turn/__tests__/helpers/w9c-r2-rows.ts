@@ -32,6 +32,23 @@ function captureReadback(name: string): MethodReadback {
   if (name.startsWith('A-')) return servedReadback(name);
   return readback(capture(name));
 }
+/**
+ * ONE PROVENANCE AUTHORITY (DL ruling; AIE 6119326092; CHANGED-ANSWERS 25): an absent-type `cee_inference` is Olumi's
+ * estimate on every reader. 591cc1a0's F1 alone read it 'unknown', and these R2 contracts were recorded on that reading.
+ * They are held on the same captures with those figures' stamp replaced by one the authority does not recognise (origin
+ * UNESTABLISHED, still stamped) — the class every reader now reads 'unknown' — exactly as `premortem-near-tie-path` and
+ * `premortem-empty-leader-path` hold W9/W9b. The as-captured behaviour is pinned there (as-captured rows).
+ */
+const UNRECOGNISED = 'unrecognised_stamp';
+function unestablished(rb: MethodReadback): MethodReadback {
+  const copy = structuredClone(rb); // keeps the readback's Sets (identityEvaluated)
+  for (const n of (copy.graph as { nodes: { observed_state?: Record<string, unknown> }[] }).nodes) {
+    const os = n.observed_state;
+    if (os?.source === 'cee_inference' && os.extractionType === undefined && os.user_material_unverified !== true) os.source = UNRECOGNISED;
+  }
+  return copy;
+}
+const recordedReadback = (name: string): MethodReadback => unestablished(captureReadback(name));
 
 r2Rows['P1-1: all 29 historical checker fixtures keep exact matches, failures and targets'] = () => {
   const fixtures = load('../../../__tests__/fixtures/reasoning-coach-acceptance.json').method_turn_fixtures;
@@ -138,7 +155,7 @@ r2Rows['P1-3 served A-STALE-SILENT: exact kind-correct link fallback without lev
 
 for (const name of ['w9b-2', 'w9b-3', 'C', 'A-Q-D1-BUILD', 'draw2']) {
   r2Rows[`P1-4 union + A2 option-grounding intersection: ${name}`] = () => {
-    const rb = captureReadback(name);
+    const rb = recordedReadback(name);
     const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, rb));
     const items = out.context.supplied_items;
     assert.ok(items.some(i => i.lever_option_labels !== undefined));
@@ -195,7 +212,7 @@ r2Rows['P2: near-tie C WHOLE turn, check_inputs, directive and exact fallback/se
   assert.equal(JSON.stringify(settleMethodTurn(out, '')), JSON.stringify(pinned.C.settled));
 };
 r2Rows['P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical'] = () => {
-  const rb = captureReadback('draw1');
+  const rb = recordedReadback('draw1');
   const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, rb));
   assert.equal(JSON.stringify(out), JSON.stringify(base.draw1.turn));
   assert.equal(fallbackReply(out.context), base.draw1.fallback);
@@ -212,7 +229,7 @@ r2Rows['P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay 
 };
 r2Rows['P2 scope: non-near-tie D1 and stale decision changes are whole-object pinned'] = () => {
   for (const name of ['A-Q-D1-BUILD', 'A-STALE-SILENT', 'draw2']) {
-    const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, captureReadback(name)));
+    const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, recordedReadback(name)));
     assert.notEqual(JSON.stringify(out), JSON.stringify(base[name].turn));
     assert.equal(JSON.stringify(out), JSON.stringify(pinned[name].turn));
     assert.equal(fallbackReply(out.context), pinned[name].fallback);

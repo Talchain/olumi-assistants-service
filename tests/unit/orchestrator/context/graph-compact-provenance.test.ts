@@ -144,10 +144,11 @@ describe('compactGraph — provenance projection (Test M)', () => {
     expect(n._raw_provenance).toBeUndefined();
   });
 
-  it('unrecognised extractionType → safe default ai_inferred + _raw_provenance preserved', () => {
+  // ONE PROVENANCE AUTHORITY (AIE 6121121310): an origin nobody established is never told to the model as Olumi's.
+  it('unrecognised extractionType → unverified_brief (never ai_inferred wholesale) + _raw_provenance preserved', () => {
     const n = byId.get('n_unknown')!;
     expect(n.source).toBe('system');
-    expect(n.provenance).toBe('ai_inferred');
+    expect(n.provenance).toBe('unverified_brief');
     expect(n._raw_provenance).toBe('mystery_value');
   });
 
@@ -158,9 +159,9 @@ describe('compactGraph — provenance projection (Test M)', () => {
     expect(n._raw_provenance).toBeUndefined();
   });
 
-  it('every output node carries one of the three CompactProvenance values', () => {
+  it('every output node carries one of the four CompactProvenance values', () => {
     for (const n of compact.nodes) {
-      expect(['from_brief', 'ai_inferred', 'user_set']).toContain(n.provenance);
+      expect(['from_brief', 'ai_inferred', 'user_set', 'unverified_brief']).toContain(n.provenance);
     }
   });
 
@@ -188,15 +189,15 @@ describe('compactGraph — provenance projection (Test M)', () => {
     expect(e._raw_provenance).toBeUndefined();
   });
 
-  it('edge provenance: unrecognised value → ai_inferred + _raw_provenance preserved', () => {
+  it('edge provenance: unrecognised value → unverified_brief (who drew it is not established) + _raw_provenance preserved', () => {
     const e = compact.edges.find((x) => x.from === 'n_unknown' && x.to === 'n_no_state')!;
-    expect(e.provenance).toBe('ai_inferred');
+    expect(e.provenance).toBe('unverified_brief');
     expect(e._raw_provenance).toBe('something_new');
   });
 
-  it('edge provenance: absent → ai_inferred (safe default), no _raw_provenance', () => {
+  it('edge provenance: absent → unverified_brief (never ai_inferred wholesale), no _raw_provenance', () => {
     const e = compact.edges.find((x) => x.from === 'n_explicit' && x.to === 'n_no_state')!;
-    expect(e.provenance).toBe('ai_inferred');
+    expect(e.provenance).toBe('unverified_brief');
     expect(e._raw_provenance).toBeUndefined();
   });
 });

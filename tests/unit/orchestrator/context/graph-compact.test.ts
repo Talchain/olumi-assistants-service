@@ -596,11 +596,12 @@ describe("compactGraph", () => {
     expect(n).not.toHaveProperty("_raw_provenance");
   });
 
-  it("node unknown extractionType → provenance=ai_inferred, _raw_provenance preserves the raw string", () => {
+  // ONE PROVENANCE AUTHORITY (AIE 6121121310): an origin nobody established is never told to the model as Olumi's.
+  it("node unknown extractionType → provenance=unverified_brief, _raw_provenance preserves the raw string", () => {
     const node = makeNode("n_unknown", { observed_state: { value: 10, extractionType: "future_unknown_value" } });
     const result = compactGraph(makeGraph([node], []));
     const n = result.nodes[0];
-    expect(n.provenance).toBe("ai_inferred");
+    expect(n.provenance).toBe("unverified_brief");
     expect(n._raw_provenance).toBe("future_unknown_value");
   });
 
@@ -645,19 +646,19 @@ describe("compactGraph", () => {
     expect(e).not.toHaveProperty("_raw_provenance");
   });
 
-  it("edge with no provenance field → provenance=ai_inferred, no _raw_provenance", () => {
+  it("edge with no provenance field → provenance=unverified_brief (who drew it is not established), no _raw_provenance", () => {
     const edge = makeEdge("a", "b");
     const result = compactGraph(makeGraph([], [edge]));
     const e = result.edges[0];
-    expect(e.provenance).toBe("ai_inferred");
+    expect(e.provenance).toBe("unverified_brief");
     expect(e).not.toHaveProperty("_raw_provenance");
   });
 
-  it("edge unknown provenance.source → provenance=ai_inferred, _raw_provenance preserves the raw string", () => {
+  it("edge unknown provenance.source → provenance=unverified_brief, _raw_provenance preserves the raw string", () => {
     const edge = makeEdge("a", "b", { provenance: { source: "future_source_value" } });
     const result = compactGraph(makeGraph([], [edge]));
     const e = result.edges[0];
-    expect(e.provenance).toBe("ai_inferred");
+    expect(e.provenance).toBe("unverified_brief");
     expect(e._raw_provenance).toBe("future_source_value");
   });
 

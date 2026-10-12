@@ -93,8 +93,9 @@ describe('PJ-E-FIG — the figure and its frame', () => {
   });
 
   it('S1: £120,000 and £65,000 frame exactly as the ruling says, on Olumi\'s default range, as the user\'s', () => {
-    expect(SENIOR).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_EDIT_SOURCE });
-    expect(JUNIOR).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_EDIT_SOURCE });
+    // The typed door verified each figure (`figureTheUserWrote`), so its formatter writes the attestation (`explicit`, DL 12 Oct).
+    expect(SENIOR).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_EDIT_SOURCE, extractionType: 'explicit' });
+    expect(JUNIOR).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_EDIT_SOURCE, extractionType: 'explicit' });
     expect(isUserTodayObservedState(SENIOR)).toBe(true);
     expect(isUserTodayObservedState(JUNIOR)).toBe(true);
   });

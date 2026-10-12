@@ -49,8 +49,11 @@ describe('the shared projection', () => {
   it('NEGATIVE: a review on any OTHER literal is left to that literal\'s own row (a typed figure stays the user\'s)', () => {
     expect(observedValueAuthorship({ source: 'user_override', reviewed_by_user: { intent: 'confirm', at: AT } }))
       .toEqual({ source: 'user', provenance: 'user_set' });
+    // ONE PROVENANCE AUTHORITY (DL ruling; AIE 6119326092): an absent-type `cee_inference` is Olumi's on every reader — the
+    // total reading says so; the stamp-only row still defers to an extraction type it does not have.
     expect(observedValueAuthorship({ source: 'cee_inference', reviewed_by_user: { intent: 'confirm', at: AT } }))
-      .toEqual(valueSourceAuthorship('cee_inference'));
+      .toEqual({ source: 'system', provenance: 'ai_inferred' });
+    expect(valueSourceAuthorship('cee_inference')).toBeUndefined();
   });
 
   it('CONTROL: the bare literal\'s own row is unchanged, and a non-record reads as nothing', () => {

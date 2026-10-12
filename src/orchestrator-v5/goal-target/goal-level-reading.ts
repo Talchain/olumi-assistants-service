@@ -9,7 +9,7 @@
  * ⛔ AIQ 5895379601 condition 2: the TARGET clause is composed HERE, from the goal's CURRENT target, never stored: after a
  * target edit (−20% → −25%) the reading still speaks for the level, and says the target as it now stands.
  */
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
 
 type Rec = Record<string, unknown>;
@@ -48,7 +48,7 @@ export function goalLevelReadingWords(graph: unknown, goalNodeId: unknown): stri
   if (!num(os.raw_value) || os.raw_value !== reading.level) return null;
   const unit = typeof os.unit === 'string' ? os.unit : '';
   if (unit !== reading.level_unit) return null;
-  if (classifyValueSource(os.source) === 'user_stated') return null;
+  if (valueClassOf(os) === 'user_stated') return null;
   // ⛔ AIQ 5895590866 (3) nit: while Olumi's level still feeds the model, the reading SPEAKS even when the target is no
   // longer a change (edited to a level frame, or removed): the lead alone, with no target clause to compose.
   const leadAlone = `${reading.lead}.`;

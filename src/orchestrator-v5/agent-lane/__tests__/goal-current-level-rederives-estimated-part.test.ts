@@ -155,7 +155,9 @@ describe('never — the goal\'s level is recorded alone, every other node as it 
   });
 
   it('no part is Olumi\'s (the subscribers are the user\'s)', async () => {
-    await recordedAlone(served_with('pro_paying_subscribers', (n) => ({ ...n, observed_state: { ...n.observed_state, source: 'brief_extraction' } })));
+    // ONE PROVENANCE AUTHORITY: the extraction type decides for a brief stamp, so the user's figure carries `explicit`
+    // (a brief stamp beside Olumi's `inferred` marker is Olumi's estimate).
+    await recordedAlone(served_with('pro_paying_subscribers', (n) => ({ ...n, observed_state: { ...n.observed_state, source: 'brief_extraction', extractionType: 'explicit' } })));
   });
 
   it('the other part is nobody\'s (no source): not the user\'s figure to derive from', async () => {

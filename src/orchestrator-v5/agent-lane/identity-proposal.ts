@@ -1,4 +1,5 @@
 import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
+import { edgeProvenanceDisplay } from '../../cee/provenance/provenance-of.js';
 import { goalStockAccumulationOf, goalStockNetReadingLine, goalStockOneOffChoice } from '../goal-target/goal-horizon-detail.js';
 import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
 /**
@@ -27,7 +28,7 @@ import { accumulationStockFor, GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoney
 import { sayFigure } from './say-figure.js';
 import { readUnitParts } from './same-unit.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 
 /** The figure just typed for an asked product part, carried inside its one confirmation. */
 export interface IdentityPartLevel {
@@ -63,7 +64,7 @@ const text = (v: unknown): string | undefined => (typeof v === 'string' && v.tri
  */
 function usersLevel(node: Rec): { value: number; unit: string } | null {
   const os = node.observed_state;
-  if (!isRec(os) || isUnverifiedUserMaterial(os) || classifyValueSource(os.source) !== 'user_stated') return null;
+  if (!isRec(os) || isUnverifiedUserMaterial(os) || valueClassOf(os) !== 'user_stated') return null;
   const value = os.raw_value;
   const unit = text(os.unit);
   if (typeof value !== 'number' || !Number.isFinite(value) || value === 0 || unit === undefined) return null;
@@ -85,7 +86,7 @@ function otherParent(node: Rec | undefined, goal: { code: string; period: 'month
   const m = money && goal !== null ? readMoneyTotal(unit, text(node?.label) ?? '') : null;
   const inGoalTerms = m !== null && m.code === goal!.code && m.period === goal!.period;
   const figure = typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) ? os.raw_value : null;
-  return { figure, money, inGoalTerms, users: figure !== null && !isUnverifiedUserMaterial(os) && classifyValueSource(os?.source) === 'user_stated' };
+  return { figure, money, inGoalTerms, users: figure !== null && !isUnverifiedUserMaterial(os) && valueClassOf(os) === 'user_stated' };
 }
 
 const carriesIdentity = (node: Rec): boolean => node.nonlinear_identity !== undefined && node.nonlinear_identity !== null;
@@ -249,7 +250,7 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     const n = byId.get(e.from);
     if (n === undefined || n.kind === 'option' || n.kind === 'decision' || n.analysis_participation === 'retained_excluded') continue;
     const prov = isRec(e.provenance) ? e.provenance : undefined;
-    const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || prov?.source === 'user_specified';
+    const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || edgeProvenanceDisplay(prov?.source) === 'user_set';
     if (prov?.definitional !== true || userAuthored) return null;
     addends.push(termOf(n, e).words);
   }
@@ -262,7 +263,7 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   const currentState = isRec(goal.observed_state) ? goal.observed_state : undefined;
   // Science §(e) Q1.3 also covers a stated zero or unreadable current level; usersLevel's
   // legacy null for those must not turn a contradictory statement into an absent one.
-  if (current === null && currentState !== undefined && classifyValueSource(currentState.source) === 'user_stated') return null;
+  if (current === null && currentState !== undefined && valueClassOf(currentState) === 'user_stated') return null;
   // Condition 4: a stated CURRENT level must reconcile at the factors' current raw values within the existing 5%.
   if (current !== null) {
     // Codex r1 P2: currency AND period read in the goal's own context ("Monthly recurring revenue" + GBP = £/month).
@@ -370,7 +371,7 @@ function todaysCause(id: string, byId: Map<string, Rec2>, edges: readonly Rec2[]
   // still credits the user's cause, never this node; its own level stays Olumi's and a Yes does not re-author it.
   // ⛔ AIQ 5906521706 (P0 PARTNER row E): an exact copy is the same figure in the SAME UNIT. 1,500 "customers" beside the
   // user's 1,500 "subscribers" may count another population (free or non-Pro), so the value match proves nothing: no card.
-  if (typeof os?.raw_value === 'number' && (classifyValueSource(os.source) === 'user_stated' || os.raw_value !== level.value
+  if (typeof os?.raw_value === 'number' && (valueClassOf(os) === 'user_stated' || os.raw_value !== level.value
     || !sameUnit(os.unit, level.unit))) return null;
   return { n, f, level };
 }

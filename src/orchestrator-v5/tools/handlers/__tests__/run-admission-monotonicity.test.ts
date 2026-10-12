@@ -544,8 +544,16 @@ function buildStamped(specs: readonly OptionSpec[], optStamp: string, facStamp: 
   };
 }
 
-/** Both ends the user's — the axis this file records as KNOWN-OPEN. */
-const buildUserStated = (specs: readonly OptionSpec[]) => buildStamped(specs, 'explicit', 'explicit');
+/**
+ * Both ends the user's — the axis this file records as KNOWN-OPEN.
+ *
+ * ⚠ THE OPTION END IS `user_specified`, THE PERSON'S OWN INTERVENTION STAMP. `InterventionV3.source` is
+ * `brief_extraction | cee_hypothesis | user_specified`; `explicit` is not a member. The one provenance authority
+ * (`settingProvenanceOf`) reads only declared setting stamps, so an undeclared `explicit` on a SETTING is unknown — the
+ * fixture-vocabulary error the note above warns about, at the option position (12 Oct, Batch C). The factor end keeps
+ * `explicit`, a declared observed-state stamp. Same class measured: user-stated structure at both ends.
+ */
+const buildUserStated = (specs: readonly OptionSpec[]) => buildStamped(specs, 'user_specified', 'explicit');
 
 /**
  * Both ends the DRAFTER's — what a fresh Olumi draft carries. A distinct

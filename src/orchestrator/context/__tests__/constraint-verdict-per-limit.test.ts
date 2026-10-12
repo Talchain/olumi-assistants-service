@@ -487,7 +487,7 @@ describe('R1 S4-core — ISL frame_verdict on the per-limit rows', () => {
     const { graph } = load('17d1cd3a.graph.json');
     const env = load('17d1cd3a.plot-response.json');
     graph.goal_constraints[0].value_frame = frame;
-    if (owner === 'user') nodeOf(graph, 'monthly_churn').observed_state.source = 'brief_extraction';
+    if (owner === 'user') { nodeOf(graph, 'monthly_churn').observed_state.source = 'brief_extraction'; delete nodeOf(graph, 'monthly_churn').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
     if (verdict !== undefined) env.constraint_results[0].frame_verdict = verdict;
     const v = verdictFor(env, graph, leaderOf(env.option_comparison));
     expectContractValid(v);

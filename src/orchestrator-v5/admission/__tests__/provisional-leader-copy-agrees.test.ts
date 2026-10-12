@@ -108,7 +108,13 @@ describe('⭐ admission\'s sentence agrees with a caveated leader', () => {
   });
 
   it('CONTROL: once one deciding figure is the user\'s, the sentence is unchanged', () => {
-    const a = admissionOf(stamp('ai_assistant_reliability_score', 'user_specified'));
+    // The person's own figure as their edit writes it: `user_specified`, with Olumi's `inferred` extraction type cleared
+    // (`set-factor-value-clears-inferred-extraction.test.ts`). ONE PROVENANCE AUTHORITY: the extraction type decides for
+    // the stamps that defer to it, so a `user_specified` stamp left beside `inferred` is not a shape any writer produces.
+    const a = admissionOf((g) => {
+      stamp('ai_assistant_reliability_score', 'user_specified')(g);
+      delete (g.nodes as Json[]).find((n) => n.id === 'ai_assistant_reliability_score')!.observed_state.extractionType;
+    });
     expect(sentence(a, 'semantic_quality_sufficient')).toBe(
       'At least one of the estimates this comparison rests on is yours, so a leading option can be named.',
     );

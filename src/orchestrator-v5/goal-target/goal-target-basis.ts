@@ -32,7 +32,43 @@ const words = (v: unknown, max: number): string | undefined => {
 
 export const BASIS_TEXT_MAX = 120;
 export const BASIS_QUESTION_MAX = 300;
-export const BASIS_ALSO_REQUIRED_MAX = 5;
+/**
+ * ⛔ RECOVERY BATCH C RE-SCOPE (DL after independent check r2, BLOCKING 2; re-scope check r1, BLOCKING 1): ONE RULE — a goal
+ * condition the drafter retained is NEVER silently dropped and NEVER changed. Up to `BASIS_ALSO_REQUIRED_MAX` are kept, every
+ * one (six in → six everywhere), each BYTE-FOR-BYTE as drafted from the user's words: its comparison ("> 15%", "<= £200,000",
+ * "= 12"), its figure, its period and its reference are the drafter's own characters, never cut, re-spaced or filtered. A
+ * condition that cannot be kept so — more than one line, or longer than `BASIS_CONDITION_MAX` — refuses the WHOLE reading
+ * with its reason (`'condition_text'`), as more conditions than the maximum do (`'conditions'`).
+ */
+export const BASIS_ALSO_REQUIRED_MAX = 20;
+export const BASIS_CONDITION_MAX = 500;
+
+type ConditionVerdict = { readonly kind: 'blank' } | { readonly kind: 'unkeepable' } | { readonly kind: 'kept'; readonly text: string };
+
+/**
+ * One retained condition's verdict: kept exactly; `blank` (null or whitespace only — no condition at all); or not keepable
+ * faithfully (not text, more than one line, or too long).
+ */
+function conditionVerdict(v: unknown): ConditionVerdict {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return { kind: 'blank' };
+  // eslint-disable-next-line no-control-regex
+  if (typeof v !== 'string' || v.length > BASIS_CONDITION_MAX || /[\u0000-\u001f\u007f\u2028\u2029]/.test(v)) return { kind: 'unkeepable' };
+  return { kind: 'kept', text: v };
+}
+
+/** Every retained condition exactly as drafted, or why the reading cannot keep them all faithfully. */
+function conditionsOf(v: unknown): { readonly kept: string[] } | { readonly refused: 'conditions' | 'condition_text' } {
+  if (!Array.isArray(v)) return { kept: [] };
+  const verdicts = v.map(conditionVerdict).filter((x) => x.kind !== 'blank');
+  if (verdicts.length > BASIS_ALSO_REQUIRED_MAX) return { refused: 'conditions' };
+  const kept = verdicts.flatMap((x) => (x.kind === 'kept' ? [x.text] : []));
+  return kept.length === verdicts.length ? { kept } : { refused: 'condition_text' };
+}
+
+/** How many conditions a drafted (or stored) basis retains (each non-blank text), kept or not. */
+export function goalConditionCount(basis: unknown): number {
+  return isRec(basis) && Array.isArray(basis.also_required) ? basis.also_required.filter((x) => conditionVerdict(x).kind !== 'blank').length : 0;
+}
 
 /** The drafter's statement of the target's semantics (`buildCandidateSchema` `goal.basis`). Every member is required in what is sent. */
 export interface DraftedGoalTargetBasis {
@@ -64,7 +100,8 @@ export interface GoalTargetBasis {
   readonly source: 'olumi_reading';
 }
 
-export type GoalTargetBasisRefusal = 'reference' | 'denominator' | 'period' | 'period_conflict' | 'effect_unit' | 'frame';
+export type GoalTargetBasisRefusal = 'reference' | 'denominator' | 'period' | 'period_conflict' | 'effect_unit' | 'frame' | 'conditions'
+  | 'condition_text';
 
 /**
  * Validate the drafter's basis for a goal target (ruling 11). `null` basis → `{ basis: null }` (no reading; every older
@@ -92,8 +129,10 @@ export function admitGoalTargetBasis(args: {
   if (finite(args.horizonMonths) && args.horizonMonths !== period) return { refused: 'period_conflict' };
   const effectUnit = words(d.effect_unit, BASIS_TEXT_MAX);
   if (effectUnit === undefined) return { refused: 'effect_unit' };
-  const also = Array.isArray(d.also_required)
-    ? d.also_required.map((x) => words(x, BASIS_TEXT_MAX)).filter((x): x is string => x !== undefined).slice(0, BASIS_ALSO_REQUIRED_MAX) : [];
+  // Every retained condition, exactly as drafted, or the whole reading refused with its reason — never a subset, never changed.
+  const conditions = conditionsOf(d.also_required);
+  if ('refused' in conditions) return { refused: conditions.refused };
+  const also = conditions.kept;
   const question = words(d.open_question, BASIS_QUESTION_MAX);
   return { basis: {
     quantity_frame: args.quantityFrame,
@@ -111,8 +150,42 @@ export function admitGoalTargetBasis(args: {
   } };
 }
 
+/**
+ * ⛔ RE-SCOPE 2 (R5-5; AIE e58 handback, text simplification): the unsupported-condition face. A reading refused because its
+ * conditions cannot all be kept whole says only that — never the implementation's bounds (how many, how long, one line),
+ * which would have the person reformat conditions the drafter may have written. The bounds stay in validation
+ * (`BASIS_ALSO_REQUIRED_MAX`, `BASIS_CONDITION_MAX`, `conditionsOf`) and in the refusal code (`conditions` / `condition_text`).
+ */
+export function unsupportedConditionWords(metric: string): string {
+  return `No chance of meeting the target for ‘${metric}’ is shown yet: ${CONDITIONS_NOT_KEPT}`;
+}
+
+/**
+ * ⛔ RE-SCOPE 2 (R5-5 (a); DL ruling): the AIE's reason, VERBATIM — the ONE value admission writes into the stored reading's
+ * `open_question` when the reading is refused because its conditions cannot all be kept whole (`conditions` /
+ * `condition_text`), so that the refusal survives save → cold reopen in an existing persisted field: the licence withholds on
+ * any `open_question` (amendment 3), and the open-question gate says THIS sentence — never "can be read more than one way",
+ * never a question whose answer is claimed to restore a chance. The rejected conditions' own text is NOT kept (no new store:
+ * an OPEN residual, DL 12 Oct).
+ */
+export const CONDITIONS_NOT_KEPT = 'Olumi cannot keep every additional condition intact in this analysis.';
+
+/**
+ * The persisted reason for a reading refused for its conditions: the same validated reading WITHOUT any condition (every other
+ * member was valid — conditions are checked last), carrying `CONDITIONS_NOT_KEPT` as its `open_question`. `undefined` for any
+ * other verdict: only this refusal writes it.
+ */
+export function conditionsRefusedBasis(
+  args: Parameters<typeof admitGoalTargetBasis>[0], verdict: { readonly refused: GoalTargetBasisRefusal } | { readonly basis: unknown },
+): GoalTargetBasis | undefined {
+  if (!('refused' in verdict) || (verdict.refused !== 'conditions' && verdict.refused !== 'condition_text') || !isRec(args.drafted)) return undefined;
+  const rest = admitGoalTargetBasis({ ...args, drafted: { ...args.drafted, also_required: null, open_question: null } });
+  return 'basis' in rest && rest.basis !== null ? { ...rest.basis, open_question: CONDITIONS_NOT_KEPT } : undefined;
+}
+
 /** The refusal in the user's words, for the build's ledger. */
 export function goalTargetBasisRefusalWords(metric: string, refusal: GoalTargetBasisRefusal): string {
+  if (refusal === 'conditions' || refusal === 'condition_text') return unsupportedConditionWords(metric);
   const what = {
     reference: 'where the change is measured from (today, or the launch)',
     denominator: 'what the percentage is a percentage of (for example, today\'s level of it)',
@@ -122,6 +195,23 @@ export function goalTargetBasisRefusalWords(metric: string, refusal: GoalTargetB
     frame: 'whether the target is a level or a change in the quantity\'s own unit',
   }[refusal];
   return `No chance of meeting the target for "${metric}" is shown yet: Olumi needs ${what}, and will not guess it.`;
+}
+
+/**
+ * ⛔ Re-scope (r2 BLOCKING 2): a reading refused while the drafter retained conditions beside the target refuses the WHOLE
+ * goal reading — no threshold is written, so no chance is shown — with why. Without this, a target admitted on its own would
+ * be scored and said with none of the conditions the user set beside it. `undefined` when nothing is lost (a valid reading, or
+ * one that retained no condition: exactly as before).
+ */
+export function goalReadingRefusedWords(
+  metric: string, verdict: { readonly refused: GoalTargetBasisRefusal } | { readonly basis: unknown }, drafted: unknown,
+): string | undefined {
+  if (!('refused' in verdict)) return undefined;
+  const n = goalConditionCount(drafted);
+  if (n === 0) return undefined;
+  const why = goalTargetBasisRefusalWords(metric, verdict.refused);
+  return verdict.refused === 'conditions' || verdict.refused === 'condition_text' ? why
+    : `${why} No chance is shown without the ${n === 1 ? 'condition' : `${n} conditions`} you set beside it.`;
 }
 
 /** Read the stored basis, or `undefined` when there is none, it is malformed, or the target it describes has since changed. */
@@ -139,7 +229,9 @@ export function goalTargetBasisOf(goal: unknown): GoalTargetBasis | undefined {
   if (effectUnit === undefined || typeof b.effects_at_period_end !== 'boolean') return undefined;
   const denominator = words(b.denominator, BASIS_TEXT_MAX);
   if (targetFrame !== 'level' && denominator === undefined) return undefined;
-  const also = Array.isArray(b.also_required) ? b.also_required.map((x) => words(x, BASIS_TEXT_MAX)).filter((x): x is string => x !== undefined) : [];
+  const conditions = conditionsOf(b.also_required);
+  if ('refused' in conditions) return undefined;
+  const also = conditions.kept;
   const question = words(b.open_question, BASIS_QUESTION_MAX);
   return {
     quantity_frame: quantityFrame, target_frame: targetFrame, target_raw: b.target_raw,
@@ -231,6 +323,22 @@ export function statusQuoAssumptionWords(labels: string | readonly string[], bas
 /** Amendment 1: the status quo row's own line. Never a Monte Carlo figure or interval. */
 export function statusQuoRowWords(label: string): string {
   return `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
+}
+
+/**
+ * AIE status-quo disposition (12 Oct): a Run read on the same-draw reference whose status-quo result does NOT sit at that
+ * reference disagrees with its own inputs (source, transport or currentness) until checked — withheld with this reason,
+ * never relabelled as a finding or as "no change".
+ */
+export function statusQuoMovedWords(labels: readonly string[]): string {
+  const named = labels.map((l) => `‘${l}’`);
+  const list = named.length <= 1 ? (named[0] ?? '') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return `Not shown: this run’s result for carrying on as now doesn’t match ${list} as it stands today in the model, so it needs checking first.`;
+}
+
+/** AIE status-quo disposition (12 Oct): a forecast whose status quo varies is carrying on's own projection, with its uncertainty. */
+export function statusQuoProjectionWords(statusQuoLabel: string): string {
+  return `‘${statusQuoLabel}’ is this model’s projection for carrying on as now, with its own uncertainty — not an assumption that nothing changes.`;
 }
 
 /** Amendment 2 + DL hiring decision: the timing basis and the additive reading, said beside the chance. */

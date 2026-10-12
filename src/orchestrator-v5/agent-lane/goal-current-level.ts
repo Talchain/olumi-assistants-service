@@ -71,7 +71,7 @@ import { ratePeriodOf, unitComparisonKey } from '../tools/handlers/d1-shared/eva
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from './proposal.js';
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
 import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
@@ -84,6 +84,7 @@ import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWith
 import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { hasUserStatedSize, heldFigureOwnerOf } from '../../cee/provenance/provenance-of.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -212,7 +213,7 @@ export function rederivedEstimatedPart(nodes: GoalLevelRead['nodes'], goalId: st
     return matches.length === 1 && matches[0]!.kind === 'factor' ? matches[0]! : undefined;
   });
   if (parts.length < 2 || parts.some((p) => p === undefined)) return null;
-  const whose = (p: (typeof nodes)[number]): string => classifyValueSource(p.observed_state?.source);
+  const whose = (p: (typeof nodes)[number]): string => valueClassOf(p.observed_state);
   const estimated = parts.filter((p) => OLUMIS.has(whose(p!)));
   if (estimated.length !== 1) return null;
   const part = estimated[0]!;
@@ -606,7 +607,7 @@ export function levelUnitForChangeGoal(
     if (e.to !== goal.id) return false;
     const p = rec(e.provenance) ? e.provenance : {};
     const natural = rec(p.natural_effect) ? p.natural_effect : undefined;
-    return p.magnitude === 'user_stated' || p.definitional === true || (natural !== undefined && readPercentUnit(natural.amount_unit) !== null);
+    return hasUserStatedSize(e) || p.definitional === true || (natural !== undefined && readPercentUnit(natural.amount_unit) !== null);
   });
   const rows = (Array.isArray(graph.goal_constraints) ? graph.goal_constraints.filter(rec) : []).filter((r) => r.node_id === goal.id);
   const level = rec(goal.observed_state) && typeof goal.observed_state.raw_value === 'number';
@@ -1035,16 +1036,16 @@ function nodesHoldingEarlierFigure(
   goalUnit: string | undefined,
 ): { label: string; options: string[]; fromBrief: boolean }[] {
   if (goalUnit === undefined) return [];
-  const users = (source: unknown): boolean => classifyValueSource(source) === 'user_stated';
+  const users = (observed: unknown): boolean => valueClassOf(observed) === 'user_stated';
   const rawNodes = Array.isArray((g.raw as { nodes?: unknown }).nodes) ? (g.raw as { nodes: Record<string, unknown>[] }).nodes : [];
   const options = rawNodes.filter((n) => n?.kind === 'option');
   return g.nodes
     .filter((n) => n.id !== goalId && n.kind !== 'goal' && n.kind !== 'option' && n.kind !== 'decision')
-    .filter((n) => n.observed_state?.raw_value === earlier && users(n.observed_state?.source)
+    .filter((n) => n.observed_state?.raw_value === earlier && users(n.observed_state)
       && typeof n.observed_state?.unit === 'string' && unitComparisonKey(n.observed_state.unit) === unitComparisonKey(goalUnit))
     .map((n) => ({
       label: n.label,
-      fromBrief: n.observed_state?.source === 'brief_extraction',
+      fromBrief: heldFigureOwnerOf(n.observed_state) === 'brief',
       options: options.filter((o) => {
         const iv = (o.interventions ?? {}) as Record<string, unknown>;
         const set = iv[n.id] as { raw_value?: unknown } | undefined;
@@ -1075,7 +1076,7 @@ function productStillGives(nodes: GoalLevelRead['nodes'], goal: GoalLevelRead['n
   if (parts.length < 2 || parts.some((p) => p === undefined || !num(p.observed_state?.raw_value))) return null;
   // ⛔ #2851 buddy r2 P1 (DL ruling 2): a part's figure is the user's or none; Olumi's basis-less 250 gave "those figures
   // still give £12,250 / month" on an approval while the card asked for that count.
-  if (parts.some((p) => { const o = classifyValueSource(p!.observed_state?.source); return o !== 'user_stated' && o !== 'user_ratified'; })) return null;
+  if (parts.some((p) => { const o = valueClassOf(p!.observed_state); return o !== 'user_stated' && o !== 'user_ratified'; })) return null;
   return {
     parts: parts.map((p) => `"${p!.label}"`).join(' × '),
     value: parts.reduce((product, p) => product * (p!.observed_state!.raw_value as number), 1),

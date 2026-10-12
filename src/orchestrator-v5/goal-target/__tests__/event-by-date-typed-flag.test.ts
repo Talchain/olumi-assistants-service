@@ -148,7 +148,8 @@ function beforeAiLevelTypes(g: Rec, candidate: CandidateModel, key: string): Rec
     if (!ids.includes(n.id)) return n;
     const { extractionType: _type, ...legacy } = n.observed_state;
     // The frozen old stored numeric carrier keeps UNKNOWN authorship; do not migrate it.
-    expect(valueAuthorshipOf(legacy), n.id).toBe('unknown');
+    // ONE PROVENANCE AUTHORITY (DL 12 Oct): the absent-type carrier reads by its stamp — Olumi's (S7's 'unknown' reversed; flagged).
+    expect(valueAuthorshipOf(legacy), n.id).toBe('olumi_estimate');
     expect(nodeProvenanceDisplay(legacy.extractionType, legacy), n.id).toBe('ai_inferred');
     return { ...n, observed_state: legacy };
   }) };

@@ -23,11 +23,11 @@ import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareOptionEstimateWords 
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { sayDate } from '../goal-target/deadline-date.js';
-import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
+import { shortfallNoteLabel, UNVERIFIED_SOURCES_NOTE } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
-import { goalChanceEstimateLinkCount, olumiEstimateWords } from './goal-chance-estimate-attribution.js';
+import { goalChanceEstimateCounts, goalChanceEstimateLinkCount, olumiEstimateWords, type GoalChanceEstimateCounts } from './goal-chance-estimate-attribution.js';
 import { sentencesOf } from './reply/compose-reply.js';
 import { sayDisplayedPct } from '../goal-target/goal-targets-joint.js';
 
@@ -58,6 +58,12 @@ const estimatePointSentence = (l: GoalChanceScreenLine): string => l.chance.slic
 
 type ComposedChanceLine = Omit<GoalChanceScreenLine, 'label'> & { readonly label?: string };
 
+/** The ranges' census: this Run's options and the scored goal's own upstream set (`goalChanceEstimateCounts`). */
+function rangeCensusOf(facts: ReturnType<typeof goalChanceFactsForAgent>, graph: unknown): GoalChanceEstimateCounts | undefined {
+  return Object.keys(facts.goal_chance_range_display ?? {}).length === 0 ? undefined
+    : goalChanceEstimateCounts(graph, facts.goal_chance_licence?.option_ids, facts.goal_chance_licence?.goal_node_id);
+}
+
 /** Pure extraction of the existing sentence composer; consumers keep their own label/narration gates. */
 function composeGoalChanceLines(result: unknown, graph: unknown, current: boolean): {
   points: ComposedChanceLine[]; ranges: ComposedChanceLine[]; pointsOwed: boolean;
@@ -77,11 +83,23 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
   const settingsOf = (optionId: string): number => facts.goal_chance_licence?.olumi_estimate_settings_by_option?.[optionId] ?? 0;
   const olumiInputsOf = (optionId: string): string | undefined => facts.goal_chance_display === undefined ? undefined
     : olumiEstimateWords({ links: k, values, settings: settingsOf(optionId) });
+  // ⭐ Condition 6 of a correct chance / r1 item 6 (DL, 12 Oct): a RANGE rests on the same Olumi inputs as a point and says
+  // so in the point's own words — the same census (`goalChanceEstimateCounts`) over this Run's options and scored goal, with
+  // THIS option's own settings only. A deadline range keeps its own estimate words (`shareOptionEstimateWords`).
+  // ⛔ RE-SCOPE 2 (DL AMEND item 3; AIE 0518): a range measures the GOAL's own event, so it keeps the goal's own dependency
+  // set (its upstream inputs) — never the joint's union, which would claim the range rests on inputs it does not.
+  const rangeCounts = rangeCensusOf(facts, graph);
+  const rangeInputsOf = (optionId: string): { readonly words: string; readonly links: number } | undefined => {
+    const words = rangeCounts === undefined ? undefined
+      : olumiEstimateWords({ links: rangeCounts.links, values: rangeCounts.values, settings: rangeCounts.settingsByOption[optionId] ?? 0 });
+    return words === undefined ? undefined : { words, links: rangeCounts!.links };
+  };
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
     .map((n) => [n.id as string, n.label as string]));
-  const line = (optionId: string, figure: string, depends: string, spreadNote?: string, shortfallNote?: string, point = false): ComposedChanceLine[] => {
+  const line = (optionId: string, figure: string, depends: string, spreadNote?: string, shortfallNote?: string, point = false,
+    rangeInputs?: { readonly words: string; readonly links: number }): ComposedChanceLine[] => {
     const recorded = rec(facts.goal_chance_licence?.option_labels_by_option)?.[optionId];
     const label = typeof recorded === 'string' && recorded.trim() !== '' ? recorded : labels.get(optionId);
     // Narration still drops unnamed options below. A cell can carry the same
@@ -90,12 +108,12 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
     // The licence checks the two exact templates; this reader owns whether their named option is the graph's label.
     const shortfall = shortfallNoteLabel(shortfallNote) === label ? shortfallNote : undefined;
     const estimates = shareOptionEstimateWords(graph, optionId);
-    const olumiInputs = olumiInputsOf(optionId);
-    const estimateRelationships = point && olumiInputs !== undefined ? `, using Olumi's estimates for ${olumiInputs} (see Check estimates)` : '';
+    const olumiInputs = point ? olumiInputsOf(optionId) : rangeInputs?.words;
+    const estimateRelationships = olumiInputs !== undefined ? `, using Olumi's estimates for ${olumiInputs} (see Check estimates)` : '';
     return [{ option_id: optionId, label, figure,
       chance: `${prefix}${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}${estimateRelationships}.`
         + (spreadNote === undefined ? '' : ` ${spreadNote}`) + (shortfall === undefined ? '' : ` ${shortfall}`), depends,
-      ...(estimateRelationships === '' ? {} : { olumi_estimate_link_count: k }),
+      ...(estimateRelationships === '' ? {} : { olumi_estimate_link_count: point ? k : rangeInputs!.links }),
       ...(spreadNote === undefined ? {} : { spread_note: spreadNote }),
       ...(shortfall === undefined ? {} : { shortfall_note: shortfall }) }];
   };
@@ -135,7 +153,7 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
     const link = d.depends_on.kind === 'link_strength'
       ? `how strongly ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’, which isn’t sized in the model yet.`
       : `whether ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’ at all, which Olumi assumed.`;
-    return line(id, d.range, `${lead} ${link}`);
+    return line(id, d.range, `${lead} ${link}`, undefined, undefined, false, rangeInputsOf(id));
   });
   return { points, ranges, pointsOwed };
 }
@@ -182,6 +200,14 @@ export function goalChanceNotesForAgent(result: unknown, graph: unknown, current
   }
   if (facts.goal_chance_status_quo !== undefined) out.push(facts.goal_chance_status_quo.line);
   for (const note of facts.goal_chance_notes ?? []) out.push(note);
+  // ⛔ RE-SCOPE 2 (R5-2): a range resting on an unverified input says so once too (never "zero estimates"), unless said already.
+  const ranges = rangeCensusOf(facts, graph);
+  const rangeIds = Object.keys(facts.goal_chance_range_display ?? {});
+  if (ranges !== undefined && !out.includes(UNVERIFIED_SOURCES_NOTE)
+    && (ranges.unread || ranges.unverifiedValues > 0 || ranges.unverifiedLinks > 0
+      || rangeIds.some((id) => (ranges.unverifiedSettingsByOption[id] ?? 0) > 0))) {
+    out.push(UNVERIFIED_SOURCES_NOTE);
+  }
   return out;
 }
 

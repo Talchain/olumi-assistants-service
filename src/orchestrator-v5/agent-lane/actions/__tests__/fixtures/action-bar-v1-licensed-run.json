@@ -140,7 +140,7 @@
       {
         "claim_id": "DSK-B-001",
         "name": "Anchoring",
-        "why": "Olumi’s starting figure for ‘Migration preparation effort’ could pull later estimates towards it.",
+        "why": "Olumi’s starting figure for ‘GCP workload share’ could pull later estimates towards it.",
         "action_id": "bias_anchoring",
         "press_id": "act:bias_anchoring",
         "offer_key": "be2a321235e1a126",

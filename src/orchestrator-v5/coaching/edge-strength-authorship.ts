@@ -19,7 +19,7 @@
  */
 import { readRecord } from './fragile-link-challenge.js';
 import { edgeReviewedByUser } from '../../cee/graph-readiness/obligation-provenance.js';
-import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { linkProvenanceOf } from '../../cee/provenance/provenance-of.js';
 
 export type EdgeAuthorship = 'olumi_assumed' | 'not_olumi_assumed' | 'not_tested';
 
@@ -28,13 +28,14 @@ export const OLUMI_ASSUMED_EDGE_SOURCES: readonly string[] = Object.freeze(['cee
 
 /** Classify one graph edge record. */
 export function classifyEdgeAuthorship(edge: Record<string, unknown>): Exclude<EdgeAuthorship, 'not_tested'> {
-  const source = readRecord(edge.provenance)?.source;
   // R11: a confirmed link is still Olumi's size, but the user has given their view of it: it is not asked about again.
   // Science 393023 LICENCE ruling 1: a user-DRAWN link whose mean Olumi projected holds Olumi's numbers (the source records
   // who drew it). Only that explicit carrier class is added; an unknown or absent source still never asserts an origin.
-  const projectedUserDrawn = source === 'user_specified' && linkSizing(edge) === 'placeholder';
-  return !edgeReviewedByUser(edge) && ((edge.defaulted === true && typeof source === 'string' && OLUMI_ASSUMED_EDGE_SOURCES.includes(source))
-    || projectedUserDrawn)
+  // ⭐ ONE PROVENANCE AUTHORITY (AIE 6121121310): Olumi's assumed strength is a size `linkProvenanceOf` reads as Olumi's —
+  // a placeholder (a user-drawn link with a projected mean included) or an Olumi size CEE flagged `defaulted`. An UNMARKED
+  // link is never Olumi's wholesale: its size is unverified and disclosed by the census, not described as Olumi's here.
+  const size = linkProvenanceOf(edge);
+  return !edgeReviewedByUser(edge) && size.origin === 'ai' && !size.structural && (size.placeholder || edge.defaulted === true)
     ? 'olumi_assumed'
     : 'not_olumi_assumed';
 }

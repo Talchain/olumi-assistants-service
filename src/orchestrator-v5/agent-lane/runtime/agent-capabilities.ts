@@ -292,7 +292,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
-import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
+import { heldFigureOwnerOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
@@ -884,12 +884,19 @@ const ADOPTED_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumpt
  * Whose figure it is (AIQ 5924240860 (1)): a source that DEFERS (`brief_extraction`, `cee_inference`) is decided by its
  * `extractionType`, so a figure read from the user's brief is never said as Olumi's.
  */
-function heldFigureOwner(node: { observed_state?: unknown; extractionType?: unknown } | undefined): NonNullable<NotSavedValue['still']>['owner'] | undefined {
-  const os = (node?.observed_state ?? undefined) as Record<string, unknown> | undefined;
-  if (os === undefined || os === null) return undefined;
-  if (isAcceptedOlumiEstimate(os)) return 'olumi_accepted';
-  const display = observedValueAuthorship(os)?.provenance ?? nodeProvenanceDisplay(os.extractionType ?? node?.extractionType);
-  return display === 'unverified_brief' ? 'unverified_brief' : display === 'user_set' ? 'yours' : display === 'from_brief' ? 'brief' : 'olumi';
+export function heldFigureOwner(node: { observed_state?: unknown; extractionType?: unknown } | undefined): NonNullable<NotSavedValue['still']>['owner'] | undefined {
+  // ⭐ ONE PROVENANCE AUTHORITY: the owner is `provenanceOf`'s (the extraction type on the figure itself decides for the
+  // stamps that defer to it; an unestablished origin, or a human figure whose role is unverified, is `unverified_brief`).
+  return heldFigureOwnerOf(node?.observed_state ?? undefined);
+}
+
+/** The receipt's words for whose an option's level is — `provenanceOf`'s answer for the cell (and the node it sets). */
+export function optionLevelSourceWords(level: unknown, target: unknown): string {
+  // A structural switch cell is not an estimate and has no recorded author (its words are unchanged).
+  if (settingProvenanceOf(level, target).structural) return 'source not recorded';
+  const display = settingDisplayOf(level, target);
+  return display === 'ai_inferred' ? "Olumi's suggested estimate" : display === 'user_set' ? 'set by you'
+    : display === 'from_brief' ? 'from your original brief' : 'source not recorded';
 }
 
 function valuesNotSaved(
@@ -1272,7 +1279,9 @@ export function projectOptionLevels(
       ...(typeof factor?.label === 'string' && factor.label !== '' ? { factor: factor.label } : {}),
       level: frame === null ? cell.value : cell.value * frame,
       ...(typeof unit === 'string' && unit !== '' ? { unit } : {}),
-      ...(typeof cell.source === 'string' && cell.source !== '' ? { set_by: cell.source } : {}),
+      // ONE PROVENANCE AUTHORITY: who set it, in the authority's words — never the raw stamp for the Agent to interpret.
+      // A cell with no stamp carries no `set_by`, as before.
+      ...(typeof cell.source === 'string' && cell.source !== '' ? { set_by: settingDisplayOf(raw, factor) } : {}),
     });
   }
   return out;
@@ -1306,10 +1315,14 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
           // history, which a cold session does not have (52f8cd, #75 5921124922; AIQ 5921018606).
           const review = os.reviewed_by_user !== null && typeof os.reviewed_by_user === 'object'
             ? (os.reviewed_by_user as { intent?: unknown }).intent : undefined;
+          // ⭐ ONE PROVENANCE AUTHORITY: `whose` is `provenanceOf`'s answer — the Agent is told whose the figure is, never
+          // left to interpret the stamps, which stay beside it as the record.
+          const whose = num(os.value) || num(os.raw_value) ? heldFigureOwnerOf(os) : undefined;
           const valueProvenance = {
             ...(str(os.source) ? { source: os.source } : {}),
             ...(str(os.extractionType) ? { extraction_type: os.extractionType } : {}),
             ...(str(review) ? { reviewed_by_user: review } : {}),
+            ...(whose !== undefined ? { whose } : {}),
           };
           return {
             // ⭐ THE ID. Without it the only way to act on an entity was a fuzzy
@@ -2577,7 +2590,10 @@ export function createAgentCapabilities(
       const labelOf = (fid: string): string => quoted(String(after!.nodes.find((x) => x.id === fid)?.label ?? fid));
       const unlevelled = factorIds.filter((fid) => !hasLevel(node, fid)).map(labelOf);
       // Whose each level is, from what was COMMITTED: Olumi's estimates are said as that (C2), never as the user's.
-      const estimated = factorIds.filter((fid) => ((node?.interventions ?? {}) as Record<string, { source?: unknown } | undefined>)[fid]?.source === 'cee_hypothesis').map(labelOf);
+      const estimated = factorIds.filter((fid) => {
+        const p = settingProvenanceOf(((node?.interventions ?? {}) as Record<string, unknown>)[fid], after!.nodes.find((x) => x.id === fid));
+        return p.origin === 'ai' && !p.structural;
+      }).map(labelOf);
       return `Added "${String(node?.label ?? id)}", linked from the decision and acting on ${factorIds.map(labelOf).join(', ')}.`
         + (estimated.length > 0 ? ` Its level for ${estimated.join(', ')} is Olumi's estimate, for you to correct.` : '')
         + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
@@ -2640,7 +2656,7 @@ export function createAgentCapabilities(
         if (typeof cap === 'number' && Number.isFinite(cap) && cap > 1) rangesAdded.push({ factor: String(f.label ?? fid), value: statedRaw, range: cap });
         continue;
       }
-      if (todayIds.has(fid) && os?.source === 'brief_extraction' && typeof statedRaw === 'number') {
+      if (todayIds.has(fid) && heldFigureOwnerOf(os) === 'brief' && typeof statedRaw === 'number') {
         const u = (os as { unit?: unknown }).unit;
         sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
           + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, as you said.`);
@@ -8668,9 +8684,7 @@ export function createAgentCapabilities(
             const unit = (storedRaw !== null || frame !== null) && typeof unitValue === 'string' && unitValue !== ''
               ? unitValue.replace(/(\bper\s+\w+)\s+per\s+(month|year|week|day)$/i, '$1 / $2') : '';
             const scaleNote = storedRaw === null && frame === null && normalized !== null ? ' (normalized scale; no user-facing unit verified)' : '';
-            const source = level.source === 'cee_hypothesis' ? "Olumi's suggested estimate"
-              : level.source === 'user_specified' ? 'set by you'
-                : level.source === 'brief_extraction' ? 'from your original brief' : 'source not recorded';
+            const source = optionLevelSourceWords(level, factor);
             const saidFigure = typeof figure === 'number'
               ? (sayFigureExactly(figure, unit) ?? `${figure}${unit !== '' ? ` ${unit}` : ''}`) + scaleNote
               : 'no level set';

@@ -174,7 +174,7 @@ describe('m1: after the Yes, the Run is not blocked for want of a frame (served 
   });
 
   it('CONTROL: two user-levelled causes (which is today\'s?) → no range', () => {
-    const x = g((y) => { Object.assign(node(y, 'monthly_new_subscriber_additions').observed_state, { source: 'brief_extraction' }); });
+    const x = g((y) => { Object.assign(node(y, 'monthly_new_subscriber_additions').observed_state, { source: 'brief_extraction', extractionType: undefined }); });
     expect(todaysFrameFor(M1, 'paying_subscribers_at_12_months')).toBe(10000);
     expect(todaysFrameFor(x, 'paying_subscribers_at_12_months')).toBeNull();
   });

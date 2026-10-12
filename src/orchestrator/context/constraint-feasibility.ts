@@ -31,7 +31,6 @@
  * dead on the live object wire — this module does not share that limitation.
  */
 
-import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
 import {
   ConstraintVerdictSchema,
   type ConstraintVerdict as ContractConstraintVerdict,
@@ -48,7 +47,8 @@ import {
   limitUnitsOf,
   type PlaceholderPartsReason,
 } from "./placeholder-parts.js";
-import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
+import { earnsAuthorshipCredit, settingClassOf, valueClassOf } from "../../cee/graph-readiness/obligation-provenance.js";
+import { isAssumptionFigure, valueClassOfStateOrStamp } from "../../cee/provenance/provenance-of.js";
 
 export interface WinnerConstraintFeasibility {
   /** True when the WINNING option violates a hard constraint. */
@@ -1077,10 +1077,13 @@ export function collectLeaderEstimatedTargetIds(
   for (const c of ratified) {
     if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
     if (!Object.prototype.hasOwnProperty.call(setBy, c.node_id)) continue;
-    const stamp = heldFactors.has(c.node_id)
-      ? sourceOf(asObject(nodeById(c.node_id))?.observed_state)
-      : (sourceOf(setBy[c.node_id]) ?? sourceOf(graphInterventions?.[c.node_id]));
-    if (earnsAuthorshipCredit(classifyValueSource(stamp))) continue;
+    // ONE PROVENANCE AUTHORITY: a held factor's value, else the leader's setting (the wire's cell when it carries a stamp,
+    // else the stored cell), each by `provenanceOf`.
+    const cell = sourceOf(setBy[c.node_id]) !== undefined ? setBy[c.node_id] : graphInterventions?.[c.node_id];
+    const owned = heldFactors.has(c.node_id)
+      ? valueClassOf(asObject(nodeById(c.node_id))?.observed_state)
+      : settingClassOf(cell, nodeById(c.node_id));
+    if (earnsAuthorshipCredit(owned)) continue;
     out.add(c.constraint_id);
   }
   return out;
@@ -1099,8 +1102,6 @@ export function collectLeaderEstimatedTargetIds(
  */
 export type EstimateOnlyReason = 'level_user_assumption' | 'level_olumi_estimate';
 
-/** The contract literal for a figure the user accepted as an assumption — their own or Olumi's (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */
-const USER_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption';
 
 /**
  * The owner of one level stamp, from the ONE authority: `classifyValueSource`. `null` = the user's own figure
@@ -1110,10 +1111,11 @@ const USER_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption
  * authorship. They differ in whose NUMBER it is, which is the question here, so that class alone is split by its
  * stamp. Every other class decides the owner by itself. Pure.
  */
-export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null {
-  const provenance = classifyValueSource(stamp);
+export function limitLevelOwnerReason(level: unknown): EstimateOnlyReason | null {
+  // ONE PROVENANCE AUTHORITY: the level's whole `observed_state` (a bare stamp is read as a state with no extraction type).
+  const provenance = valueClassOfStateOrStamp(level);
   if (earnsAuthorshipCredit(provenance)) return null;
-  return provenance === 'user_ratified' && stamp === USER_ASSUMPTION_SOURCE ? 'level_user_assumption' : 'level_olumi_estimate';
+  return provenance === 'user_ratified' && isAssumptionFigure(level) ? 'level_user_assumption' : 'level_olumi_estimate';
 }
 
 /**
@@ -1185,7 +1187,7 @@ export function collectLimitLevelOwners(
     const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
     const level = readRecord(readRecord(node)?.observed_state);
     if (level === null) continue;
-    const owner = limitLevelOwnerReason(level.source);
+    const owner = limitLevelOwnerReason(level);
     if (owner === null) out.userBaselineIds.add(c.constraint_id);
     else if (owner === 'level_user_assumption') out.userAssumptionIds.add(c.constraint_id);
   }
