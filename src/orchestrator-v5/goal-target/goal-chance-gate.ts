@@ -17,6 +17,7 @@ import { GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES
 import { CONDITIONS_NOT_KEPT, goalTargetBasisOf } from './goal-target-basis.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { resolveGoalDirection } from './goal-direction.js';
+import { inputOriginOf } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -213,4 +214,51 @@ export function withholdForOpenTargetQuestion<E>(envelope: E, graph: unknown, go
   // the model and their own readers are unchanged. (The UI and the canonical view already prefer this code over that one.)
   if (!conditions || !isRec(out) || !Array.isArray(out.inference_warnings)) return out;
   return { ...out, inference_warnings: out.inference_warnings.filter((w) => !(isRec(w) && w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) } as E;
+}
+
+/**
+ * ⛔ AMEND item 2 (kept; DL 12 Oct "KEEP (a)"): the scored goal's own level is Olumi's estimate (origin ai, never accepted),
+ * so no chance of a LEVEL (or an absolute change of one) is shown — admission never admits Olumi's own estimate of a goal's
+ * current level (`admit-model.ts` `goalLevelIsEstimated`). Olumi's disclosed reading of the brief's figure keeps its own
+ * words; a relative change keeps `estimate_only`. ONE predicate: the licence refuses on it, and the Run says why with the
+ * next step ({@link withholdForOlumiGoalLevel}), so the two can never disagree.
+ */
+export function goalLevelIsOlumisEstimate(graph: unknown, goalId: unknown): boolean {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  if (goal === undefined || isRec(goal.goal_level_reading)) return false;
+  const target = statedGoalTargetOf(graph as Rec, goal);
+  if (target === null || target.frame === 'change_rel') return false;
+  const os = isRec(goal.observed_state) ? goal.observed_state : undefined;
+  const holds = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v);
+  return os !== undefined && (holds(os.value) || holds(os.raw_value)) && inputOriginOf(os) === 'ai';
+}
+
+/** The refusal's words: why, and the next step (DL 12 Oct: "confirm or give today's level"). AIE text check. */
+export function olumiGoalLevelWords(label: string): { readonly message: string; readonly say: string } {
+  const say = `To see it, confirm Olumi’s estimate of today’s ‘${label}’, or tell me what it is today.`;
+  return { message: `Not shown. Today’s ‘${label}’ in this model is Olumi’s estimate, not a figure you gave, so no chance of `
+    + `reaching your target is shown. ${say}`, say };
+}
+
+/**
+ * The Run says why the licence refused ({@link goalLevelIsOlumisEstimate}) and what to do next, through the ONE goal-figure
+ * seam — the outcome and the ordering stay; never a figure on a guessed starting level.
+ */
+export function withholdForOlumiGoalLevel<E>(envelope: E, graph: unknown, goalId: unknown): E {
+  if (!isRec(envelope) || !goalLevelIsOlumisEstimate(graph, goalId)) return envelope;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const label = typeof goal?.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'your goal';
+  const scored = [...new Set(readOptionResultSources(envelope).flat().flatMap((r) => {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    return id === undefined ? [] : [id];
+  }))];
+  if (scored.length === 0) return envelope;
+  const words = olumiGoalLevelWords(label);
+  // `detail.reason` is CEE-local (as `target_reading_open`); the UI renders `message` for this code.
+  return withholdOptionGoalFigures(envelope, new Set(scored), {
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: words.message, say: words.say,
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: 'goal_level_olumi_estimate' },
+  }, { keepOutcome: true, keepOrdering: true });
 }

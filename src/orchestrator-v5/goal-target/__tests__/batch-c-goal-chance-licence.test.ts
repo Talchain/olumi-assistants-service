@@ -10,7 +10,7 @@ import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { conditionsRefusedBasis, CONDITIONS_NOT_KEPT, targetChanceWords } from '../goal-target-basis.js';
-import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
+import { goalLevelIsOlumisEstimate, withholdForOlumiGoalLevel, withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
 import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../../agent-lane/goal-chance-estimate-egress.js';
@@ -749,12 +749,13 @@ describe('RE-SCOPE 2 (R5-2): an input whose source is unverified is disclosed on
     ['no source at all', { value: 0.6, raw_value: 6, cap: 10, unit: 'people' }],
     ['user material the receipt gate could not verify', { value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'brief_extraction', user_material_unverified: true }],
     ['an unrecognised source', { value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'something_else' }],
-  ])('RED on e58b8dbd: a starting value with %s on the goal path → licensed, the note said once, not provisional, no Olumi count', (_name, os) => {
+  ])('RED on e58b8dbd: a starting value with %s on the goal path → licensed, the note said once, labelled provisional, no Olumi count', (_name, os) => {
     const g = unverifiedFactor(os);
     const l = capacityLicence(g)! as unknown as Loose;
     expect(Object.keys(l.pct_by_option)).toEqual(['lead', 'two']);
     expect(unverifiedNotes(l)).toBe(1);
-    expect(l.provisional).toBeUndefined();
+    // LABEL, DON'T WITHHOLD (DL 12 Oct): shown, never unlabelled — provisional, the note saying what it rests on.
+    expect(l.provisional).toBe(true);
     expect(l).not.toHaveProperty('olumi_estimate_value_count');
     // The screen's face is the ordinary one (no estimate words): the note, not a count, says it.
     const env = withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {});
@@ -768,7 +769,7 @@ describe('RE-SCOPE 2 (R5-2): an input whose source is unverified is disclosed on
     const l = capacityLicence(capacityGraph({ setting: { value: 0.6, raw_value: 6, target_match: { node_id: 'devs' } } }))! as unknown as Loose;
     expect(unverifiedNotes(l)).toBe(1);
     expect(l).not.toHaveProperty('olumi_estimate_settings_by_option');
-    expect(l.provisional).toBeUndefined();
+    expect(l.provisional).toBe(true);
   });
   it('CONTROL: admission\'s own goal-level stamp (`brief_extraction`, no extraction type) and every attested input → no note', () => {
     const l = capacityLicence()! as unknown as Loose;
@@ -786,6 +787,27 @@ describe('RE-SCOPE 2 (R5-2): an input whose source is unverified is disclosed on
   it('RED on e58b8dbd: the scored goal\'s own LEVEL as Olumi\'s estimate → no chance licensed (refusal kept)', () => {
     const os = { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'cee_inference', extractionType: 'inferred' };
     expect(capacityLicence(capacityGraph({ goal: { observed_state: os } }))).toBeNull();
+  });
+  it('DL 12 Oct (KEEP (a)): that refusal is never silent — the Run says why and names the next step (confirm, or give today\'s level)', () => {
+    const os = { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'cee_inference', extractionType: 'inferred' };
+    const g = capacityGraph({ goal: { observed_state: os } });
+    expect(goalLevelIsOlumisEstimate(g, 'capacity')).toBe(true);
+    const out = withholdForOlumiGoalLevel(capacityRun(), g, 'capacity') as Rec;
+    const w = (out.inference_warnings as Rec[]).filter((x) => x.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+    expect(w).toHaveLength(1);
+    expect(w[0]!.detail).toEqual({ reason: 'goal_level_olumi_estimate' });
+    expect(w[0]!.option_ids).toEqual(['lead', 'two', 'carry_on']);
+    expect(w[0]!.message).toBe('Not shown. Today’s ‘Development capacity’ in this model is Olumi’s estimate, not a figure you gave, so no '
+      + 'chance of reaching your target is shown. To see it, confirm Olumi’s estimate of today’s ‘Development capacity’, or tell me what it is today.');
+    expect(w[0]!.say).toBe('To see it, confirm Olumi’s estimate of today’s ‘Development capacity’, or tell me what it is today.');
+    // CONTRAST, same commit: the person's level (and an accepted estimate) → nothing withheld, the envelope untouched.
+    for (const goalOs of [undefined, { ...os, source: 'user_assumption', extractionType: undefined, reviewed_by_user: { intent: 'confirm' } }]) {
+      const h = goalOs === undefined ? capacityGraph() : capacityGraph({ goal: { observed_state: goalOs } });
+      expect(goalLevelIsOlumisEstimate(h, 'capacity')).toBe(false);
+      const env = capacityRun();
+      expect(withholdForOlumiGoalLevel(env, h, 'capacity')).toBe(env);
+      expect(capacityLicence(h)).not.toBeNull();
+    }
   });
   it.each([
     ['no source', { source: undefined }],
@@ -1373,7 +1395,7 @@ describe('RE-SCOPE 2 (marginals, (B)): each target\'s own chance says what it re
     const l = licenceFor(marketingRun(), g)! as unknown as Loose;
     expect(l.targets.joint.status).toBe('licensed');
     expect(unverifiedNotes(l)).toBe(1);
-    expect(l.provisional).toBeUndefined();
+    expect(l.provisional).toBe(true); // LABEL, DON'T WITHHOLD (DL 12 Oct)
     expect(marginalNotes(l)).toEqual([]);
     expect(unverifiedNotes(goalAlone(g))).toBe(0);
   });

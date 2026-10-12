@@ -213,7 +213,7 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
-import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
+import { withholdForOlumiGoalLevel, withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { sentGoalThresholdOf, withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
@@ -2211,6 +2211,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // ⭐ Recovery Batch C (amendment 3): a target read more than one way is not tested until the user says which.
     response = withholdForOpenTargetQuestion(response, graphForAnalysis, snapshot.goal_node_id);
+    // ⛔ AMEND item 2 (kept, DL 12 Oct): a level chance on Olumi's own estimate of the goal's level is refused by the licence;
+    // the Run says why, with the next step (confirm the estimate, or give today's level) — never a silent gap.
+    response = withholdForOlumiGoalLevel(response, graphForAnalysis, snapshot.goal_node_id);
 
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
     // stated": PLoT's GOAL_DIRECTION_UNATTESTED is taken off the run it would mislabel, before the headline and the store.

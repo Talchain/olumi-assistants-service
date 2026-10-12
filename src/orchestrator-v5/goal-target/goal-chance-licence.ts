@@ -39,12 +39,12 @@ import { withholdStatusQuoIntervals } from '../../orchestrator/context/constrain
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
-import { goalChanceTargetCause } from './goal-chance-gate.js';
+import { goalChanceTargetCause, goalLevelIsOlumisEstimate } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
-import { goalChanceEstimateCounts, inputOriginOf, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
+import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import {
@@ -385,8 +385,8 @@ export function goalChanceLicenceOf(
   // never licenses that refused result. Not a new human-only rule (AIE item 2): a goal level whose source is UNVERIFIED is
   // disclosed by the unverified note like any other input; an accepted estimate and Olumi's disclosed reading of the brief's
   // figure keep their own words; a relative change keeps `estimate_only`.
-  const goalOrigin = goalState !== undefined && (finite(goalState.value) || finite(goalState.raw_value)) ? inputOriginOf(goalState) : undefined;
-  if (changeFrame !== 'change_rel' && goalOrigin === 'ai' && !levelReadingHeld) return null;
+  // ONE predicate with the Run's refusal words (`goal-chance-gate.ts` `withholdForOlumiGoalLevel`: why, and the next step).
+  if (goalLevelIsOlumisEstimate(graph, goalId)) return null;
   const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
   // The Run's own option records, current-first: the first carrier that has any is the comparison.
   const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
@@ -589,8 +589,9 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   const basis = c.basis !== undefined && c.basis.effects_at_period_end ? c.basis : undefined;
   const alsoRequired = c.basis?.also_required ?? [];
   // Amendment 7: any Olumi input (a starting value, an option setting or an effect size) on the path makes it provisional.
-  // (R5-2: an unverified input is not Olumi's — it is disclosed by its own note, never by this label.)
-  const provisional = c.estimateOnly || c.olumiInputs;
+  // ⭐ LABEL, DON'T WITHHOLD (DL 12 Oct): an input whose origin is not established (R5-2) is shown too, never unlabelled —
+  // provisional, with its own note saying what it rests on. It is never counted as Olumi's (that is `olumiInputs`).
+  const provisional = c.estimateOnly || c.olumiInputs || c.unverifiedInputs;
   const unverified = c.unverifiedInputs ? [UNVERIFIED_SOURCES_NOTE] : [];
   // Amendment 1, every frame: the status quo's own line, by assumption — never a figure or an interval.
   const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
@@ -672,7 +673,8 @@ const NO_ESTIMATES: GoalChanceEstimates = { links: 0, values: 0, settingsByOptio
 /**
  * ⛔ RE-SCOPE 2 (R5-2; DL AMEND item 1; AIE R5 handback item 1, its minimal existing-notes wording): an input whose origin is
  * unverified — neither attested as the person's nor a recognised AI source — or a census that could not read the event whole.
- * Said ONCE beside the result; never a count of Olumi's estimates, never a provisional label, never "zero estimates".
+ * Said ONCE beside the result; never a count of Olumi's estimates, never "zero estimates". LABEL, DON'T WITHHOLD (DL 12 Oct):
+ * the result it stands beside is shown with the provisional label — never withheld for this alone, never unlabelled.
  */
 export const UNVERIFIED_SOURCES_NOTE = 'This result uses inputs whose sources have not been verified.';
 
@@ -856,15 +858,18 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   }
   if (block.joint.status === 'licensed') {
     const quoted = block.joint.pct_by_option;
-    // R5-2: one note, beside the result, when the joint or any marginal said rests on an unverified input.
-    if (unverifiedOn(je, Object.keys(quoted)) || marginalUnverified) notes.push(UNVERIFIED_SOURCES_NOTE);
+    // R5-2: one note, beside the result, when the joint or any marginal said rests on an unverified input — and the joint is
+    // then provisional (LABEL, DON'T WITHHOLD, DL 12 Oct).
+    const jointUnverified = unverifiedOn(je, Object.keys(quoted)) || marginalUnverified;
+    if (jointUnverified) notes.push(UNVERIFIED_SOURCES_NOTE);
     // ⛔ Re-scope (r2 BLOCKING 4): the joint rests on every input feeding ANY of its targets: it is provisional, and says on
     // what, from the one census over the union of their paths — each quoted option's own Olumi settings only.
     const { olumi_estimate_link_count: _k, olumi_estimate_value_count: _v, olumi_estimate_settings_by_option: _s, provisional: _p,
       // R5-3: the joint's own withheld set replaces the single target's (a status quo the joint now quotes is not withheld).
       withheld_option_ids: _singleWithheld, ...jointKept } = kept;
     const settings = Object.fromEntries(Object.entries(je.settingsByOption).filter(([id, n]) => Object.hasOwn(quoted, id) && n > 0));
-    const provisional = c.estimateOnly || kept.provisional === true || je.links + je.values + Object.keys(settings).length > 0;
+    const provisional = c.estimateOnly || kept.provisional === true || jointUnverified
+      || je.links + je.values + Object.keys(settings).length > 0;
     return {
       ...jointKept,
       ...(je.links > 0 ? { olumi_estimate_link_count: je.links } : {}),

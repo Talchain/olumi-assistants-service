@@ -168,8 +168,9 @@ function expected(input: Input, which: Which, as: 'olumi' | 'unknown'): Rec {
     return { ...ZERO, provisional: true,
       ...(input.kind === 'link' ? { links: 1 } : input.kind === 'value' ? { values: 1 } : { settings: { [input.option!]: 1 } }) };
   }
-  // UNVERIFIED: never counted, never provisional — the one note, beside the result.
-  return { ...ZERO, unverified: 1 };
+  // UNVERIFIED: never counted as Olumi's — the one note, beside the result, and PROVISIONAL (LABEL, DON'T WITHHOLD, DL 12 Oct:
+  // shown, never unlabelled).
+  return { ...ZERO, provisional: true, unverified: 1 };
 }
 
 /** The joint's marginal notes one Olumi input must produce: one per target whose own upstream set it is on (DL ruling (B)). */
@@ -242,7 +243,7 @@ describe('RE-SCOPE 2 — the census spec, generatively: every node / every optio
   });
 
   it.each(INPUTS.filter((x) => x.toUnknown !== undefined).flatMap((x) => (['single', 'joint'] as const).map((which) => [x.name, which] as const)))(
-    'UNVERIFIED: %s alone (%s) — never "zero estimates" where it feeds the event: the note once, never counted, never provisional', (name, which) => {
+    'UNVERIFIED: %s alone (%s) — never "zero estimates" where it feeds the event: the note once, never counted, labelled provisional', (name, which) => {
       const input = INPUTS.find((x) => x.name === name)!;
       const g = allHuman();
       input.toUnknown!(g);
@@ -277,7 +278,8 @@ describe('RE-SCOPE 2 — the census spec, generatively: every node / every optio
       const g = allHuman();
       const cell = g.nodes.find((n: Rec) => n.id === input.option).interventions[input.feeds];
       if (source === 'user_specified + estimate: true') { cell.source = 'user_specified'; cell.estimate = true; } else cell.source = source;
-      expect(countsOf(licenceOf(g, 'joint'))).toEqual({ ...ZERO, unverified: 1 });
+      // LABEL, DON'T WITHHOLD (DL 12 Oct): shown, provisional, the note once.
+      expect(countsOf(licenceOf(g, 'joint'))).toEqual({ ...ZERO, provisional: true, unverified: 1 });
     });
   it.each(['user_specified', 'brief_extraction'])('POLARITY CONTROL: a setting stamped "%s" is the person\'s — nothing is added', (source) => {
     const g = allHuman();
@@ -300,8 +302,9 @@ describe('RE-SCOPE 2 — the census spec, generatively: every node / every optio
     expect(countsOf(licenceOf(withSwitch(true, figure), 'joint'))).toEqual(ZERO);
   });
   it('STRUCTURAL CONTRAST: a sourceless level of 0.6 on the switch, or a sourceless 1 on a node without the marker, is UNVERIFIED', () => {
-    expect(countsOf(licenceOf(withSwitch(true, 0.6), 'single'))).toEqual({ ...ZERO, unverified: 1 });
-    expect(countsOf(licenceOf(withSwitch(false, 1), 'single'))).toEqual({ ...ZERO, unverified: 1 });
+    // LABEL, DON'T WITHHOLD (DL 12 Oct): shown, provisional, the note once.
+    expect(countsOf(licenceOf(withSwitch(true, 0.6), 'single'))).toEqual({ ...ZERO, provisional: true, unverified: 1 });
+    expect(countsOf(licenceOf(withSwitch(false, 1), 'single'))).toEqual({ ...ZERO, provisional: true, unverified: 1 });
   });
 
   // The same named marker on the switch node's OWN starting value: admission writes `{ value: 0, source: 'cee_inference',
