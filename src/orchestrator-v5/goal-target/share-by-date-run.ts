@@ -103,6 +103,20 @@ function activePartsOf(g: Rec, share: NonNullable<ReturnType<typeof shareByDateG
   }).map(p => g.nodes.find((n: Rec) => n.id === p.from));
 }
 
+/**
+ * ⭐ E-TAIL (b), AIE 6130197656 §2, EXACT LABEL: said once beside the chances when a licensed option's hire link was limited to
+ * the whole deliverable on Olumi's own pace (`extraShareLinkMoments`; the carrier's `link_limit`, Olumi's assumption).
+ */
+export const OLUMI_HIRE_LIMIT_NOTE = "Olumi's provisional modelling estimate limits typical extra progress from these hires to 100% of the launch. "
+  + 'The bell-curve analysis can still simulate values outside that figure.';
+/** True when any active hire part of these options rests on Olumi's limit (`link_limit.origin === 'olumi_assumption'`). */
+export function hireLinkLimitedFor(graph: unknown, optionIds: readonly string[]): boolean {
+  const share = shareByDateGoalForChanceOf(graph);
+  if (share === null) return false;
+  return optionIds.some(id => (activePartsOf(graph as Rec, share, id) ?? [])
+    .some(n => n?.observed_state?.extra_share_by_date?.link_limit?.origin === 'olumi_assumption'));
+}
+
 export function sharePartsForOption(graph: unknown, optionId: string): ShareParts | null {
   if (shareChanceInputFailure(graph, optionId) !== null) return null;
   if (unresolvedEventOptionIds(graph).includes(optionId)) return null;

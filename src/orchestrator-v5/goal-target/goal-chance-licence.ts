@@ -44,7 +44,7 @@ import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
-import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
+import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { goalOwnConstraintChanceRecords, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
@@ -599,8 +599,12 @@ export function goalChanceLicenceOf(
   });
   // ⭐ AIE 6125204695 (3): beside a deadline chance on Olumi's range assumed from the user's single forecast, the input time
   // range is said once (the input, never a probability interval), on the licence's own notes.
-  const assumedRange = share !== null && share.goal.id === goalId && licensed.length > 0 ? olumiAssumedTeamRange(graph) : null;
-  return assumedRange === null ? worded : { ...worded, notes: [...(worded.notes ?? []), olumiAssumedRangeLine(assumedRange)] };
+  const onShare = share !== null && share.goal.id === goalId && licensed.length > 0;
+  const assumedRange = onShare ? olumiAssumedTeamRange(graph) : null;
+  // ⭐ E-TAIL (b), AIE 6130197656 §2: a licensed option whose hire link rests on Olumi's limit says so once, verbatim.
+  const notes = [...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
+    ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : [])];
+  return notes.length === 0 ? worded : { ...worded, notes: [...(worded.notes ?? []), ...notes] };
 }
 
 /**

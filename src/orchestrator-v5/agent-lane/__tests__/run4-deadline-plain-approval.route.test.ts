@@ -118,19 +118,7 @@ describe('E-tail (a): run 4 deadline turns 7 and 14, the plain "Yes" the writer 
     expect(FX.served_reply).toMatch(/^Those values could not be applied to this change/);
   });
 
-  it.each([['turn 7', 'request_turn7'], ['turn 14', 'request']])('%s: the plain "Yes" says the capability\'s own reason, never "Those values…"', async (_t, key) => {
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: FX[key] });
-    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
-    const b = r.json() as Rec;
-    expect(b._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'not_applied',
-      proposal_id: 'prop_b9ca206131b318f52cb6df4d85f9b4e9' }));
-    expect(b.assistant_text).not.toContain('Those values could not be applied');
-    // The capability's own reason (its Agent-directed "Tell the user plainly." dropped), then the narrator's status.
-    expect(b.assistant_text).toBe('The deadline was not recorded, and nothing on the model changed.\n\nNot saved: none of it was applied.');
-    expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
-    expect(providerCalls).toBe(0);
-  }, 120_000);
-
+  // Runs FIRST: the Agent's proposal store is per process, and the rows below consume this card.
   it('PERMANENT (independent of the deadline cap): another writer moved the goal\'s date; the plain "Yes" says that reason', async () => {
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     const moved = structuredClone(FX.graph) as Rec;
@@ -145,5 +133,52 @@ describe('E-tail (a): run 4 deadline turns 7 and 14, the plain "Yes" the writer 
     // The capability's own reason ("Read it again; …" is addressed to the Agent and dropped), then the narrator's status.
     expect(b.assistant_text).toBe('The goal\u2019s deadline changed after this was offered, so nothing was recorded.\n\nNot saved: none of it was applied.');
     expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
+  }, 120_000);
+
+  /**
+   * ⭐ E-TAIL (b) (AIE 6130197656 §2 ACK): with Olumi's 35 %-a-month link limited to the whole launch, run 4's own sequence
+   * now saves. Turn 7's plain "Yes" writes the deadline once and the read-back holds it, with the limited mean AND spread on
+   * the stored link, the raw ones and the pace beside them, and the same link on the engine's input. Turn 14's "Yes" to the
+   * same card (served then as "Those values could not be applied") writes nothing a second time.
+   */
+  it('turn 7 → the deadline saves and reads back (the limited link reaches the engine input); turn 14, the same card again → no second write', async () => {
+    const { extraShareMoments } = await import('../../goal-target/event-by-date-share.js');
+    const { toOutboundGraph } = await import('../../goal-target/outbound-graph.js');
+    const { withShareByDateFrame } = await import('../../goal-target/share-by-date-run.js');
+    const { withoutStatedLevelRanges } = await import('../../routing/add-factor-transaction.js');
+    const raw = extraShareMoments(0.35, 6, 2, 4);
+    const r7 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: FX.request_turn7 });
+    expect(r7.statusCode, r7.body.slice(0, 400)).toBe(200);
+    const b7 = r7.json() as Rec;
+    expect(b7._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true,
+      proposal_id: 'prop_b9ca206131b318f52cb6df4d85f9b4e9' }));
+    expect(b7.assistant_text).not.toContain('Those values could not be applied');
+    expect(b7.assistant_text).not.toContain('nothing on the model changed');
+    expect(graphWrites.get(SCENARIO)).toBe(1);
+    const held = graphOf.get(SCENARIO) as Rec;
+    expect((held.nodes as Rec[]).find((n) => n.id === 'event_goal')!.goal_horizon).toMatchObject({ deadline: '2027-04-12' });
+    const link = (g: Rec, from: string): Rec => (g.edges as Rec[]).find((e) => e.from === from && e.to === 'event_goal')!;
+    expect(link(held, 'event_capacity_2').strength).toEqual({ mean: 1, std: raw.sd / raw.mean });
+    const carrier = (held.nodes as Rec[]).find((n) => n.id === 'event_capacity_2')!.observed_state.extra_share_by_date;
+    expect(carrier).toMatchObject({ monthly_share: 35, lead_low: 2, lead_high: 4, deadline: '2027-04-12',
+      link_limit: { raw_mean: raw.mean, raw_sd: raw.sd, entered_mean: 1, entered_sd: raw.sd / raw.mean, origin: 'olumi_assumption' } });
+    // The engine's input: the Run's outbound projection of the stored graph carries the same limited mean and spread.
+    const wire = toOutboundGraph(withoutStatedLevelRanges(withShareByDateFrame(held, held))) as Rec;
+    expect(link(wire, 'event_capacity_2').strength).toEqual({ mean: 1, std: raw.sd / raw.mean });
+    for (const [id, pace] of [['event_capacity_1', 0.2], ['event_capacity_4', 0.18]] as const) {
+      const m = extraShareMoments(pace, 6, 2, 4);
+      expect(link(wire, id).strength).toEqual({ mean: m.mean, std: m.sd });
+    }
+    expect(providerCalls).toBe(0);
+
+    const r14 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: FX.request });
+    expect(r14.statusCode, r14.body.slice(0, 400)).toBe(200);
+    const b14 = r14.json() as Rec;
+    expect(b14._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal' }));
+    // The existing words for a card already used (pinned so any change shows; their accuracy is raised with the DL).
+    expect(b14.assistant_text).toBe('Nothing changed. That card is out of date: the change it shows has been replaced. Use the newest card for it.');
+    expect(b14.assistant_text).not.toContain('Those values could not be applied');
+    expect(graphWrites.get(SCENARIO), 'no second write').toBe(1);
+    expect(providerCalls).toBe(0);
   }, 120_000);
 });
