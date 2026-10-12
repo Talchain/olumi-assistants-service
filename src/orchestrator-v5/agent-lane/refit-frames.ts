@@ -260,9 +260,9 @@ function cuts(g: Rec): Rec[] {
 
 /**
  * `goalOwnRows`: the goal's OWN target/limit rows (`goal_constraints` naming the goal) do not refuse a goal widen. Opt-in,
- * passed only by `retireNormalisingGoalFrame` (F4, R3 #75 5922368144): those rows hold the RAW figure, and `reframed`
- * rescales the goal's normalised threshold and level with the frame, so the target the user approved reads the same.
- * Every other caller keeps v1's refusal byte for byte.
+ * passed by `retireNormalisingGoalFrame` (F4, R3 #75 5922368144) and by construction (`build-model.ts`, AIE 0418): those
+ * rows hold the RAW figure, and `reframed` rescales the goal's normalised threshold and level with the frame, so the target
+ * the user approved reads the same. Every other caller keeps v1's refusal byte for byte.
  */
 export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwnRows?: boolean } = {}): { readonly graph: Rec; readonly refits: FrameRefit[]; readonly refused: FrameRefusal[] } {
   let g = withStatedStrengths(graph);

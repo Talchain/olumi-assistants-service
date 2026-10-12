@@ -2222,7 +2222,10 @@ export async function buildModelFromBrief(
       ...(admitted.goal_constraints.length > 0
         ? { goal_constraints: admitted.goal_constraints }
         : {}),
-    } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
+    // The goal's OWN target row rescales with its frame (AIE 0418: "the constructor's own raw target row may be rescaled
+    // together with its frame through existing goalOwnRows"), as the Olumi pass below already does. Capacity A′: the user's
+    // 20 tickets a week per specialist was cut at β 1.6 because the goal's own ≥100 row refused the widen.
+    } as Record<string, any>, { goalOwnRows: true }).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
     const olumiFit = refitFramesForOlumiEstimates(statedFitGraph);
     const prePersistGraph = olumiFit.graph as typeof statedFitGraph;
     // Retire every obsolete disclosure for fitted endpoint identities at their one source of truth.
