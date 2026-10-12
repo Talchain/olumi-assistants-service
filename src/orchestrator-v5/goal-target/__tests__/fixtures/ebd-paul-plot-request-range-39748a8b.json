@@ -1,0 +1,352 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "id": "event_goal",
+        "kind": "goal",
+        "label": "Share of next feature launch done by 12 April 2027",
+        "goal_threshold": 1,
+        "goal_threshold_raw": 100,
+        "goal_threshold_unit": "% of next feature launch",
+        "goal_threshold_cap": 100,
+        "goal_threshold_cap_provenance": "metric_scale",
+        "goal_threshold_frame": "delta",
+        "goal_horizon": {
+          "deadline": "2027-04-12"
+        },
+        "goal_horizon_reference_date": "2026-10-12",
+        "goal_horizon_stated_months": 6,
+        "threshold_source": "definitional",
+        "goal_direction": ">=",
+        "goal_horizon_months": 6,
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "event_team",
+        "kind": "factor",
+        "label": "Share today's team finishes by 12 April 2027",
+        "observed_state": {
+          "value": 0.7662384356489861,
+          "unit": "% of next feature launch",
+          "source": "cee_inference",
+          "raw_value": 76.6238435648986,
+          "cap": 100,
+          "std": 0.11348418274893886,
+          "stated_time": {
+            "quantity": "months_to_finish",
+            "low": 6,
+            "high": 10,
+            "unit": "months",
+            "deadline": "2027-04-12",
+            "reference_date": "2026-10-12"
+          }
+        },
+        "category": "observable",
+        "unit_reading": {
+          "unit": "% of next feature launch",
+          "source": "olumi_reading",
+          "source_quote": "next feature launch"
+        },
+        "scale_frame": 100,
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "event_decision",
+        "kind": "decision",
+        "label": "We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "event_option_1",
+        "kind": "option",
+        "label": "Hire a Tech lead",
+        "interventions": {
+          "event_capacity_1": {
+            "value": 1
+          },
+          "event_capacity_2": {
+            "value": 0
+          }
+        },
+        "provenance": "from_brief"
+      },
+      {
+        "id": "event_capacity_1",
+        "kind": "factor",
+        "label": "Hire a Tech lead adds capacity",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "extra_share_by_date": {
+            "monthly_share": 12,
+            "lead_low": 2,
+            "lead_high": 4,
+            "unit": "% of next feature launch per month",
+            "deadline": "2027-04-12",
+            "reference_date": "2026-10-12"
+          },
+          "std": 0.0001
+        },
+        "category": "controllable",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "event_option_2",
+        "kind": "option",
+        "label": "Hire two developers",
+        "interventions": {
+          "event_capacity_2": {
+            "value": 1
+          },
+          "event_capacity_1": {
+            "value": 0
+          }
+        },
+        "provenance": "from_brief"
+      },
+      {
+        "id": "event_capacity_2",
+        "kind": "factor",
+        "label": "Hire two developers adds capacity",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "extra_share_by_date": {
+            "monthly_share": 20,
+            "lead_low": 2,
+            "lead_high": 4,
+            "unit": "% of next feature launch per month",
+            "deadline": "2027-04-12",
+            "reference_date": "2026-10-12"
+          },
+          "std": 0.0001
+        },
+        "category": "controllable",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "event_option_3",
+        "kind": "option",
+        "label": "Carry on as now",
+        "interventions": {
+          "event_capacity_1": {
+            "value": 0
+          },
+          "event_capacity_2": {
+            "value": 0
+          }
+        },
+        "is_baseline": true,
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "from": "event_team",
+        "to": "event_goal",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "natural_effect": {
+            "amount": 1,
+            "amount_unit": "% of next feature launch",
+            "per_source_change": 1,
+            "per_source_change_unit": "% of next feature launch",
+            "strength_mean": 1,
+            "strength_mean_frame": "edge_strength"
+          },
+          "definitional": true,
+          "share_by_date": {
+            "role": "team",
+            "team_id": "event_team",
+            "goal_id": "event_goal",
+            "deliverable": "next feature launch",
+            "option_ids": [
+              "event_option_1",
+              "event_option_2",
+              "event_option_3"
+            ],
+            "capacity_option_ids": [
+              "event_option_1",
+              "event_option_2"
+            ],
+            "unresolved_option_ids": []
+          }
+        }
+      },
+      {
+        "from": "event_decision",
+        "to": "event_option_1",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive"
+      },
+      {
+        "from": "event_capacity_1",
+        "to": "event_goal",
+        "strength": {
+          "mean": 0.36,
+          "std": 0.06928203230275508
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_estimate",
+          "natural_effect": {
+            "amount": 36,
+            "amount_unit": "% of next feature launch",
+            "per_source_change": 1,
+            "per_source_change_unit": "switch",
+            "strength_mean": 0.36,
+            "strength_mean_frame": "edge_strength"
+          }
+        }
+      },
+      {
+        "from": "event_decision",
+        "to": "event_option_2",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive"
+      },
+      {
+        "from": "event_capacity_2",
+        "to": "event_goal",
+        "strength": {
+          "mean": 0.6000000000000001,
+          "std": 0.1154700538379248
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_estimate",
+          "natural_effect": {
+            "amount": 60.00000000000001,
+            "amount_unit": "% of next feature launch",
+            "per_source_change": 1,
+            "per_source_change_unit": "switch",
+            "strength_mean": 0.6000000000000001,
+            "strength_mean_frame": "edge_strength"
+          }
+        }
+      },
+      {
+        "from": "event_decision",
+        "to": "event_option_3",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive"
+      },
+      {
+        "from": "event_option_1",
+        "to": "event_capacity_1",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive"
+      },
+      {
+        "from": "event_option_1",
+        "to": "event_capacity_2",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive"
+      },
+      {
+        "from": "event_option_2",
+        "to": "event_capacity_1",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive"
+      },
+      {
+        "from": "event_option_2",
+        "to": "event_capacity_2",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive"
+      },
+      {
+        "from": "event_option_3",
+        "to": "event_capacity_1",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive"
+      },
+      {
+        "from": "event_option_3",
+        "to": "event_capacity_2",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive"
+      }
+    ]
+  },
+  "options": [
+    {
+      "id": "event_option_1",
+      "option_id": "event_option_1",
+      "label": "Hire a Tech lead",
+      "interventions": {
+        "event_capacity_1": 1,
+        "event_capacity_2": 0
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "event_option_2",
+      "option_id": "event_option_2",
+      "label": "Hire two developers",
+      "interventions": {
+        "event_capacity_2": 1,
+        "event_capacity_1": 0
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "event_option_3",
+      "option_id": "event_option_3",
+      "label": "Carry on as now",
+      "interventions": {
+        "event_capacity_1": 0,
+        "event_capacity_2": 0
+      },
+      "is_baseline": true
+    }
+  ],
+  "goal_node_id": "event_goal",
+  "request_id": "ebd-run"
+}

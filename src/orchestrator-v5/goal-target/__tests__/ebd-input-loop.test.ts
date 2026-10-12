@@ -296,7 +296,9 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
       caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels: commit, now: () => new Date('2026-10-12T09:14:24Z') }) };
   }
   const ctx = (text: string): Rec => ({ scenario_id: SID, authenticated_user_id: null, request_id: 'ebd-scope', user_text: text, user_turn_text: text });
-  const quote = "they're going to be a month late delivering the next feature (so, 7 months)";
+  // Recovery Batch B (independent check, BLOCKING 2): the quote-bound E2 reader is removed from B (it moves to B2), so these
+  // rows offer a range THIS message states; the field-scoped precondition they test is unchanged.
+  const TEAM_RANGE = 'It’ll take 6–10 months';
   /** What SYS1's E5 door writes for one option: its own hiring times on its capacity part (the team part untouched). */
   const hiringTimesLand = (g: Rec): Rec => {
     const out = structuredClone(g);
@@ -309,19 +311,19 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
 
   it('card offered → hiring times land → team time approved = APPLIED (the whole-model revision moved; what the card read did not)', async () => {
     const w = world();
-    const card = await w.caps.proposeTeamTime!(ctx(PAUL_TEAM) as never, { quote, low_months: 7, high_months: 7 }) as Rec;
+    const card = await w.caps.proposeTeamTime!(ctx(TEAM_RANGE) as never, { low_months: 6, high_months: 10 }) as Rec;
     expect(card.ok).toBe(true);
     const moved = hiringTimesLand(w.graph());
     expect(computeAnalysisAffectingGraphHash(moved as never)).not.toBe(card.base_revision);
     w.replace(moved);
     expect(await approve(w, card.proposal_id)).toMatchObject({ ok: true, applied: true });
-    expect(draftedTeamPartOf(w.graph())!.team.observed_state.stated_time).toMatchObject({ low: 3.5, high: 10.5, forecast: 7 });
+    expect(draftedTeamPartOf(w.graph())!.team.observed_state.stated_time).toMatchObject({ low: 6, high: 10 });
     // The hiring times that landed first are kept: the write is scoped to the team part.
     expect(w.graph().nodes.find((n: Rec) => n.id === 'event_capacity_2').observed_state.extra_share_by_date).toMatchObject({ lead_low: 1, lead_high: 3 });
   });
   it('reverse order: hiring times land → card offered → approved = APPLIED', async () => {
     const w = world(hiringTimesLand(dated()));
-    const card = await w.caps.proposeTeamTime!(ctx(PAUL_TEAM) as never, { quote, low_months: 7, high_months: 7 }) as Rec;
+    const card = await w.caps.proposeTeamTime!(ctx(TEAM_RANGE) as never, { low_months: 6, high_months: 10 }) as Rec;
     expect(await approve(w, card.proposal_id)).toMatchObject({ ok: true, applied: true });
   });
   it.each([
@@ -331,7 +333,7 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     ['the deadline changed', (g: Rec): Rec => { const out = structuredClone(g); out.nodes.find((n: Rec) => n.kind === 'goal').goal_horizon = { deadline: '2027-05-12' }; return out; }],
   ])('CONTROL: %s → refused as superseded, nothing written', async (_name, change) => {
     const w = world();
-    const card = await w.caps.proposeTeamTime!(ctx(PAUL_TEAM) as never, { quote, low_months: 7, high_months: 7 }) as Rec;
+    const card = await w.caps.proposeTeamTime!(ctx(TEAM_RANGE) as never, { low_months: 6, high_months: 10 }) as Rec;
     const changed = change(w.graph()); w.replace(changed);
     expect(await approve(w, card.proposal_id)).toMatchObject({ ok: false, refusal: 'superseded' });
     expect(w.rows).toHaveLength(0);
@@ -359,16 +361,16 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     const w = world();
     const hiring = await w.caps.proposeHiringTimes!(ctx(PAUL_HIRING) as never, HIRING_ARGS as never) as Rec;
     expect(hiring.ok).toBe(true);
-    const team = await w.caps.proposeTeamTime!(ctx(PAUL_TEAM) as never, { quote, low_months: 7, high_months: 7 }) as Rec;
+    const team = await w.caps.proposeTeamTime!(ctx(TEAM_RANGE) as never, { low_months: 6, high_months: 10 }) as Rec;
     expect(await approve(w, team.proposal_id)).toMatchObject({ ok: true, applied: true });
     expect(computeAnalysisAffectingGraphHash(w.graph() as never)).not.toBe(hiring.base_revision);
     expect(await approve(w, hiring.proposal_id)).toMatchObject({ ok: true, applied: true, mutated: true });
-    expect(draftedTeamPartOf(w.graph())!.team.observed_state.stated_time).toMatchObject({ low: 3.5, high: 10.5, forecast: 7 });
+    expect(draftedTeamPartOf(w.graph())!.team.observed_state.stated_time).toMatchObject({ low: 6, high: 10 });
     const devs = sharePartsForOption(w.graph(), 'event_option_2')!;
     expect([devs.extra, ...(devs.furtherExtras ?? [])]).toHaveLength(2);
     // ONE label, both attributions: EBD's assumed team range, then the user's hiring statement and every Olumi assumption.
-    expect(shareOptionEstimateWords(w.graph(), 'event_option_1')).toBe('using your 7-month forecast and Olumi’s bell-curve approximation based on an assumed 3.5–10.5-month range, '
-      + 'and your hiring time (“at least 3 months”) as modelled: 3–4 months, with Olumi’s estimate of the latest start (4 months), '
+    // The team's 6–10 months is the user's own range here, so no team-time assumption of Olumi's is attributed.
+    expect(shareOptionEstimateWords(w.graph(), 'event_option_1')).toBe('using your hiring time (“at least 3 months”) as modelled: 3–4 months, with Olumi’s estimate of the latest start (4 months), '
       + 'and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month)');
   });
   it('CONTROL (E5 combine): a hiring-times card whose own carriers changed is still refused as superseded, nothing written', async () => {
