@@ -151,6 +151,8 @@ const UNCONFIRMED_WORDS: Record<string, string> = {
  * Agent (it reads the result's `refusal` and `detail`); the user reads one plain sentence with a next step.
  */
 const GENERIC_NOT_SAVED = 'the change could not be made this time — ask me to try again';
+/** R2 T1 words, FOR AIE ACK: an unapproved change is waiting, not failed. */
+export const APPROVAL_REQUIRED_WORDS = 'Not saved yet: press the approval button on the card, or type its words.';
 const GENERIC_PARTLY_SAVED = 'not all of the change could be made — ask me what is still missing';
 const GENERIC_NOT_BUILT = 'something went wrong while building it — ask me to try again';
 
@@ -505,6 +507,8 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
   const unconfirmed = UNCONFIRMED_WORDS[code];
   if (unconfirmed !== undefined) return unconfirmed;
   const mutated = r.mutated === true;
+  // R2 T1 (friction audit): "could not be made this time — ask me to try again" was false here; the change waits for its card.
+  if (code === 'approval_required' && !mutated) return APPROVAL_REQUIRED_WORDS;
   return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? (mutated ? GENERIC_PARTLY_SAVED : GENERIC_NOT_SAVED)}.`;
 }
 

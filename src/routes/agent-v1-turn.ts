@@ -2209,7 +2209,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // An approval wins over Run and retains its verification reads.
     if (!typedRunOf(body) || typedApprovalOf(body) !== undefined) readCache.prefetch();
 
-    const approvedProposal = typedApprovalOf(body);
+    // `let`: R2 T1 binds a composer message that is exactly the ONE waiting card's own button words, below.
+    let approvedProposal = typedApprovalOf(body);
     /**
      * ⭐ S-D: the values the user set in the change's panel, sent with that card's press (`proposal_edits`). `undefined`
      * = none sent (a plain approve); `null` = sent but unusable (nothing is applied). Their digest is part of this
@@ -2950,7 +2951,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...heldAtStart.map(h => proposalRecord(h, undefined)?.approve_action)]
       .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
     // A product hold is its own durable card; confirmHeld checks these words against that exact live hold.
-    const pressedApproval = approvedProposal !== undefined
+    let pressedApproval: Partial<AgentToolContext> = approvedProposal !== undefined
       ? { typed_approval_of: approvedProposal,
         ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
@@ -2966,6 +2967,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (waiting.length === 1 && waiting[0]?.proposal_id === id && proposal !== undefined
         && proposal.operations.length > 0 && proposal.operations.every(op => op.op === 'add_edge' || op.op === 'update_edge')) {
         composerApproval = id;
+      }
+    }
+    /**
+     * ⭐ R2 T1 (friction audit): words typed into the composer that EXACTLY equal the ONE waiting card's own button words
+     * ("Yes, that is my deadline.") ARE that press: the UI's chip sends the same words (DGAI `sendChip` → `chip.message`).
+     * Bound by card identity, never by reading words: exactly one card held in this conversation (the durable carrier
+     * this turn found) and no other proposal outstanding. A near match, two cards or no card stays refused, and a resend of
+     * the same turn replays its stored answer, so it never writes twice.
+     */
+    if (approvedProposal === undefined && typedNow !== null && heldAtStart.length === 1) {
+      const card = proposalRecord(heldAtStart[0]!, undefined)?.approve_action;
+      const id = card !== undefined && card.message === typedNow ? typedApprovalOf({ chip: { id: card.id } }) : undefined;
+      if (id !== undefined && proposals.outstanding(scenarioId, userId).every(p => p.proposal_id === id)) {
+        approvedProposal = id;
+        pressedApproval = { typed_approval_of: id, typed_approval_words: typedNow };
       }
     }
     // Client turn_id controls durable replay when supplied. Every request also has a host
