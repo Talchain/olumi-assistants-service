@@ -411,15 +411,16 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   const { goalLabel, changeFrame } = c;
   // A level target's period is said only on an at-period-end basis (ruling 12); otherwise today's words, unchanged.
   const basis = c.basis !== undefined && c.basis.effects_at_period_end ? c.basis : undefined;
+  const alsoRequired = c.basis?.also_required ?? [];
   if (goalLabel === undefined || (basis === undefined && changeFrame === undefined)) {
     // No stated basis: today's single-target licence, plus the several-targets block if the Run sent target rows.
-    return withSeveralTargets(single, { ...c, basis });
+    return withSeveralTargets(single, { ...c, basis, alsoRequired });
   }
   const words = targetChanceWords({
     label: goalLabel, frame: changeFrame ?? 'level', comparator: c.comparatorHeld, value: c.target.value, unit: c.target.unit ?? '',
     ...(basis !== undefined ? { basis } : {}),
   });
-  if (words === undefined) return withSeveralTargets(single, { ...c, basis });
+  if (words === undefined) return withSeveralTargets(single, { ...c, basis, alsoRequired });
   const notes: string[] = [];
   // Ruling 21: the base a relative change is read from is said; on Olumi's value, as Olumi's (amendments 7, 10).
   if (changeFrame === 'change_rel' && c.base !== undefined) {
@@ -448,7 +449,7 @@ function withBatchCWords(single: GoalChanceLicence, c: {
     ...(c.estimateOnly && c.base !== undefined ? { estimate_only: { base: c.base, unit: c.target.unit ?? '' } } : {}),
     ...(provisional ? { provisional: true as const } : {}),
   };
-  return withSeveralTargets(out, { ...c, basis });
+  return withSeveralTargets(out, { ...c, basis, alsoRequired });
 }
 
 const sentTargetRows = (c: GoalChanceConstraintInputs): boolean => {
@@ -481,8 +482,10 @@ function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs): 
 function withSeveralTargets(l: GoalChanceLicence, c: {
   readonly envelope: unknown; readonly graph: unknown; readonly basis: GoalTargetBasis | undefined;
   readonly statusQuoId: string | undefined; readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
+  /** The drafter's retained conditions (`goal_target_basis.also_required`), whatever the basis' timing (AIE C clause 3). */
+  readonly alsoRequired: readonly string[];
 }): GoalChanceLicence {
-  const block = goalTargetsBlockOf({
+  let block = goalTargetsBlockOf({
     envelope: c.envelope, graph: c.graph, storedConstraints: c.constraints.storedConstraints,
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
     ...(c.statusQuoId !== undefined ? { statusQuoId: c.statusQuoId } : {}),
@@ -500,6 +503,21 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   const targetNames = block.conditions.filter((x) => x.role === 'target').map((x) => x.label);
   const notes = (l.notes ?? []).flatMap((n) => n.startsWith('This chance covers ') ? []
     : n.startsWith('This assumes carrying on as now') && targetNames.length > 0 ? [statusQuoAssumptionWords(targetNames, c.basis)] : [n]);
+  // ⭐ AIE C clause 3 (12 Oct): a condition the drafter RETAINED because this contract cannot represent it (a distinct
+  // period or reference) is said beside the joint, never claimed by it. One the joint already names (its figure) is not repeated.
+  const named = block.conditions.map((x) => sayFigureAsWritten(x.value, x.unit));
+  const retained = c.alsoRequired.filter((t) => !named.some((f) => t.includes(f)));
+  const covers = partialGoalWords(targetNames, retained);
+  if (covers !== undefined && targetNames.length > 0) notes.push(covers);
+  // ⭐ AIE C clause 3: when the goal's OWN target cannot join the joint (stated as a change), its own licensed chance is kept
+  // as one of the targets, said on its own — the same figure and words the single-target licence already licensed.
+  const goalAlone = block.joint.status === 'withheld' && block.joint.reason === 'target_not_supported'
+    && typeof l.chance_words === 'string' && l.chance_words.startsWith('chance of ') && Object.keys(l.pct_by_option).length > 0
+    && typeof l.goal_node_id === 'string' && !block.conditions.some((x) => x.role === 'target' && x.node_id === l.goal_node_id)
+    ? [{ constraint_id: `goal:${l.goal_node_id}`, words: l.chance_words.slice('chance of '.length), pct_by_option: l.pct_by_option,
+      ...(l.display_rounding_by_option !== undefined ? { display_rounding_by_option: l.display_rounding_by_option } : {}) }]
+    : [];
+  if (goalAlone.length > 0) block = { ...block, per_target: [...goalAlone, ...block.per_target] };
   // Amendment 1: carrying on as now is the reference for every target, by assumption — never given a figure here.
   const targetLabels = targetNames.map((x) => `‘${x}’`);
   const statusQuo = c.statusQuoId !== undefined && c.option_ids.includes(c.statusQuoId) && targetLabels.length > 0

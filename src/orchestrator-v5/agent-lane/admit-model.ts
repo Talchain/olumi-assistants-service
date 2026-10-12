@@ -3041,11 +3041,12 @@ function withGoalTargetRows(
   nodeIdFor: (metric: string) => string | undefined,
 ): ConstraintAdmissionResult {
   const goal = nodes.find((n) => n.kind === 'goal');
-  const targetNodes = new Set(model.constraints.filter((c) => c.role === 'target' && (c.frame ?? 'level') === 'level')
+  // AIE C clause 3 (12 Oct): a target keeps its OWN frame. A change-frame target row is still one of the goal's targets
+  // (never re-read as a limit, never forced into a level); the joint names it and waits (`goal-targets-joint.ts`).
+  const targetNodes = new Set(model.constraints.filter((c) => c.role === 'target')
     .map((c) => nodeIdFor(c.metric)).filter((id): id is string => id !== undefined && id !== goal?.id));
   if (goal === undefined || typeof goal.id !== 'string' || targetNodes.size === 0) return result;
-  const marked = result.constraints.map((c) => (targetNodes.has(c.node_id) && (c.value_frame ?? 'level') === 'level'
-    ? { ...c, role: 'goal_target' as const } : c));
+  const marked = result.constraints.map((c) => (targetNodes.has(c.node_id) ? { ...c, role: 'goal_target' as const } : c));
   if (!marked.some((c) => c.role === 'goal_target')) return result;
   const raw = goal.goal_threshold_raw;
   const op = model.goal.operator;

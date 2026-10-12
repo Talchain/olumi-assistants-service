@@ -58,4 +58,25 @@ describe('the Batch C drafter contract', () => {
     expect(BUILD_INSTRUCTIONS).toContain('including recruitment, notice and ramp-up');
     expect(BUILD_INSTRUCTIONS).toContain('never a month-end snapshot');
   });
+
+  it('AIE C drafter changeset (12 Oct): the three clauses are in the instruction VERBATIM, and the replaced wording is gone', () => {
+    // 1. The additive hiring reading is a disclosed provisional assumption, never linear staffing as a fact.
+    expect(BUILD_INSTRUCTIONS).toContain('For the provisional hiring calculation, use additive per-person effects at that horizon; '
+      + 'this assumes no diminishing returns or additional onboarding interaction beyond the stated per-person estimate. '
+      + 'Keep that assumption explicit rather than presenting linear scaling as a fact.');
+    expect(BUILD_INSTRUCTIONS).not.toContain('two people are twice one person');
+    // 2. Effect timing matches the target's period_kind (at the end vs over the period).
+    expect(BUILD_INSTRUCTIONS).toContain('effects_at_period_end is true only when every incoming effect is sized for the selected '
+      + 'period_kind: the effect at that month for at_end, or the cumulative count/period rate over the stated window for '
+      + 'over_period, including relevant recruitment and ramp-up. Otherwise false. A deadline or period label alone does not '
+      + 'establish the timing basis.');
+    expect(BUILD_INSTRUCTIONS).not.toContain('effects_at_period_end true ONLY when every effect_amount into the goal is its size at the end');
+    // 3. Each secondary target keeps its own frame, reference and period; an unsupported one is retained, never forced.
+    expect(BUILD_INSTRUCTIONS).toContain('Give each its stated comparator and target frame by the same level/change rules; never force a '
+      + 'change target into level. For the conversion/new-customer example both are level targets over the same first three '
+      + 'months after launch, conversion>15% and new customers>=20. Preserve any distinct reference or period the user states; '
+      + 'where this contract cannot represent or support it, retain the condition in also_required/unknowns with a focused '
+      + 'clarification, rather than inventing a shared period or claiming the full conjunction.');
+    expect(BUILD_INSTRUCTIONS).not.toContain('frame "level", the comparator exactly as written');
+  });
 });

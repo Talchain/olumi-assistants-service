@@ -229,9 +229,11 @@ export function effectsBasisWords(basis: GoalTargetBasis): string | undefined {
 }
 
 /** Amendment 4: a chance that covers the target alone, while the user's goal also requires other conditions. */
-export function partialGoalWords(label: string, others: readonly string[]): string | undefined {
+export function partialGoalWords(label: string | readonly string[], others: readonly string[]): string | undefined {
   if (others.length === 0) return undefined;
-  return `This chance covers ‘${label}’ only. It does not include: ${others.join('; ')}.`;
+  const labels = (typeof label === 'string' ? [label] : [...label]).map((x) => `‘${x}’`);
+  const named = labels.length <= 1 ? (labels[0] ?? '') : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  return `This chance covers ${named} only. It does not include: ${others.join('; ')}.`;
 }
 
 /** Amendments 7 and 10: a change_rel on Olumi's starting value. */

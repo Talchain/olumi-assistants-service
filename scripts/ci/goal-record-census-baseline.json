@@ -1,5 +1,5 @@
 {
-  "source_sha": "ebf93c86bfa8c5900655ca011813d70c41bc8949",
+  "source_sha": "0a9cbdcdf9bfb69f3e88a31a48066ec497e69fa8",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -276,7 +276,7 @@
       "src/orchestrator-v5/context/graph-identity.ts": 1,
       "src/orchestrator-v5/goal-target/decide-goal-target-ask.ts": 6,
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 6,
+      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 9,
       "src/orchestrator-v5/goal-target/goal-record.ts": 1,
       "src/orchestrator-v5/handlers/chip-click-dispatch.ts": 1,
       "src/orchestrator-v5/handlers/edit-graph-dispatch.ts": 6,
@@ -814,7 +814,7 @@
     "goal_horizon": 52,
     "goal_horizon_months": 43,
     "goal_level_reading": 19,
-    "goal_node_id": 281,
+    "goal_node_id": 284,
     "goal_period": 3,
     "goal_scope": 48,
     "goal_sense_reading": 15,
@@ -837,7 +837,7 @@
     "threshold_source": 37,
     "unit_reading": 79
   },
-  "total_references": 2432,
+  "total_references": 2435,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

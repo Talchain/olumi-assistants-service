@@ -20,6 +20,7 @@
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { comparatorWords, periodWords, type GoalTargetBasis } from './goal-target-basis.js';
+import { readGoalRecord } from './goal-record.js';
 import { displayedPctAt, displayRoundingFor, wilsonHalfWidthPoints, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
 
 type Rec = Record<string, unknown>;
@@ -30,7 +31,8 @@ const unit01 = (v: unknown): v is number => finite(v) && v >= 0 && v <= 1;
 /** The marker on a `goal_constraints` row that makes it one of the goal's TARGETS (absent = a limit, as before). */
 export const GOAL_TARGET_ROLE = 'goal_target';
 
-export type JointWithholdReason = 'not_returned' | 'precision_missing' | 'strict_not_preserved' | 'condition_not_named' | 'olumi_base' | 'no_option';
+export type JointWithholdReason = 'not_returned' | 'precision_missing' | 'strict_not_preserved' | 'condition_not_named' | 'olumi_base' | 'no_option'
+  | 'target_not_supported';
 
 export interface GoalCondition {
   readonly constraint_id: string;
@@ -60,6 +62,11 @@ export type GoalJoint =
 
 export interface GoalTargetsBlock {
   readonly conditions: readonly GoalCondition[];
+  /**
+   * AIE C clause 3 (12 Oct): the labels of the goal's targets this analysis cannot yet combine (a target stated as a
+   * change, including the goal's own). They are kept and named; the joint is withheld with `target_not_supported`.
+   */
+  readonly unsupported_targets?: readonly string[];
   readonly per_target: readonly GoalTargetChance[];
   readonly joint: GoalJoint;
 }
@@ -79,8 +86,12 @@ function listWords(parts: readonly string[]): string {
 }
 
 /** The Run's one joint-withheld sentence (DL scope decision 2's words, kept for both and for more). */
-export function jointWithheldLine(n: number, reason: JointWithholdReason): string {
+export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupported: readonly string[] = []): string {
   const all = n === 2 ? 'both' : 'all of them';
+  if (reason === 'target_not_supported' && unsupported.length > 0) {
+    const names = listWords(unsupported.map((x) => `‘${x}’`));
+    return `The chance of meeting ${all} together isn’t shown: ${names} ${unsupported.length === 1 ? 'is' : 'are'} stated as a change, which can’t yet be combined with the other targets in this analysis.`;
+  }
   if (reason === 'strict_not_preserved') return `The chance of meeting ${all} together isn’t shown: the comparison the analysis used is not the one you stated.`;
   if (reason === 'condition_not_named') return `The chance of meeting ${all} together isn’t shown: one of its conditions can’t be said in your units.`;
   if (reason === 'olumi_base') return `The chance of meeting ${all} together isn’t shown yet: it rests on Olumi’s own assumed starting value for a target, which you haven’t given.`;
@@ -131,6 +142,8 @@ export function goalTargetsBlockOf(args: {
   let unnamed = false;
   let strictLost = false;
   const conditions: GoalCondition[] = [];
+  // AIE C clause 3: a target kept in its own (change) frame is named here, never forced into a level clause.
+  const unsupported: string[] = [];
   for (const row of sent) {
     const id = row.constraint_id;
     const node = row.node_id;
@@ -146,6 +159,7 @@ export function goalTargetsBlockOf(args: {
     const bound = comparatorWords(op);
     // A condition stated as a change, or with no unit or label, cannot be said exactly in this sentence form: the joint waits.
     const frame = storedRow?.value_frame ?? row.value_frame;
+    if (targetIds.has(id) && label !== undefined && frame !== undefined && frame !== 'level') { unsupported.push(label); continue; }
     if (label === undefined || unit === undefined || !finite(value) || bound === undefined || (frame !== undefined && frame !== 'level')) {
       unnamed = true; continue;
     }
@@ -157,6 +171,13 @@ export function goalTargetsBlockOf(args: {
   }
   const ordered = [...conditions.filter((c) => c.role === 'target'), ...conditions.filter((c) => c.role === 'limit')];
   const targets = ordered.filter((c) => c.role === 'target');
+  // The goal's own target is one of the joint's conditions only when its own row was sent. A goal whose target is a CHANGE
+  // has no such row (`admit-model.ts` writes it for a level target only): the joint would leave the goal out, so it waits.
+  const goalNode = nodes.find((x) => x.kind === 'goal');
+  const goalLabel = labelOf(goalNode?.id);
+  const goalStates = typeof goalNode?.id === 'string' && finite(readGoalRecord(args.graph, goalNode.id)?.target?.raw);
+  if (goalNode !== undefined && goalLabel !== undefined && goalStates
+    && !targets.some((t) => t.node_id === goalNode.id) && !unsupported.includes(goalLabel)) unsupported.unshift(goalLabel);
   // ⛔ Amendment 7: a LEVEL target read against OLUMI's own starting value is the most sensitive to it, and the goal's own
   // such target is withheld at admission (`admit-model.ts`, the kept guard). The same holds for every target row: its own
   // chance is not said, and the joint that includes it waits (never relabelled as the user's).
@@ -195,15 +216,16 @@ export function goalTargetsBlockOf(args: {
       ...(Object.keys(rounding).length > 0 ? { display_rounding_by_option: rounding } : {}) }];
   });
 
-  const n = Math.max(ordered.length + (unnamed ? 1 : 0), 2);
+  const n = Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2);
   const withheld = (reason: JointWithholdReason): GoalJoint => ({
-    status: 'withheld', reason, line: jointWithheldLine(n, reason),
+    status: 'withheld', reason, line: jointWithheldLine(n, reason, unsupported),
     // Amendment 6: the bound needs each named target's own chance on the screen, for every compared option.
-    ...(perTarget.length >= 2 && perTarget.length === targets.length && !unnamed && ordered.length === targets.length
+    ...(perTarget.length >= 2 && perTarget.length === targets.length && !unnamed && unsupported.length === 0 && ordered.length === targets.length
       && compared.every((id) => perTarget.every((t) => Object.hasOwn(t.pct_by_option, id))) ? { frechet_line: frechetLine(targets.length) } : {}),
   });
   let joint: GoalJoint;
-  if (unnamed) joint = withheld('condition_not_named');
+  if (unsupported.length > 0) joint = withheld('target_not_supported');
+  else if (unnamed) joint = withheld('condition_not_named');
   else if (strictLost) joint = withheld('strict_not_preserved');
   else if (olumiBase.size > 0) joint = withheld('olumi_base');
   else {
@@ -238,7 +260,7 @@ export function goalTargetsBlockOf(args: {
       };
     }
   }
-  return { conditions: ordered, per_target: perTarget, joint };
+  return { conditions: ordered, per_target: perTarget, joint, ...(unsupported.length > 0 ? { unsupported_targets: unsupported } : {}) };
 }
 
 /** The stored block as a reader may use it, or `undefined` when it is malformed (a record at odds with itself speaks for nothing). */

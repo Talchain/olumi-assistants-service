@@ -231,3 +231,33 @@ describe('readback — marketing: both targets are stored as the goal\'s targets
     expect(sentDigest(second.payload)).toBe(sentDigest(first.payload));
   });
 });
+
+describe('readback — AIE clause 3 and L6: each target is stored in its OWN frame, bound to its own row, and survives reopening', () => {
+  it('RED (AIE clause 3): a secondary target stated as a change is stored as one of the goal\'s targets in its change frame — never forced into a level', () => {
+    const m = marketing();
+    const changed = { ...m, constraints: [
+      { metric: 'Conversion rate', operator: '>=', value: 5, unit: '%', provenance: 'explicit', frame: 'change_abs', role: 'target' },
+      ...m.constraints.filter((c) => (c as Rec).role === 'limit'),
+    ] } as CandidateModel;
+    const rows = (JSON.parse(store(changed)) as Rec).goal_constraints as Rec[];
+    const conv = rows.find((r) => r.node_id === 'conversion_rate')!;
+    expect(conv).toMatchObject({ value_frame: 'change_abs', value: 5, role: 'goal_target' });
+    expect(conv.value_frame).not.toBe('level');
+  });
+
+  it('L6: every stored target row is bound BY IDENTITY to its own node and label, and a second save/reopen is byte-identical', async () => {
+    const bytes = store(marketing());
+    const g = JSON.parse(bytes) as Rec;
+    const targets = (g.goal_constraints as Rec[]).filter((r) => r.role === 'goal_target');
+    expect(targets.map((r) => [r.node_id, node(g, r.node_id).label, r.operator_as_stated ?? r.operator, r.value, r.unit])).toEqual([
+      ['new_customers', 'New customers', '>=', 20, 'customers'],
+      ['conversion_rate', 'Conversion rate', '>', 15, '%'],
+    ]);
+    // Reopen → save again: the store's own contract parse keeps every target row exactly (no role, operator or binding lost).
+    expect(JSON.stringify(GraphV3.parse(JSON.parse(bytes)))).toBe(bytes);
+    // And the production loader hands the Run the same bound rows.
+    const { payload } = await runFromStore(bytes);
+    const sent = payload.goal_constraints as Rec[];
+    for (const t of targets) expect(sent.find((r) => r.constraint_id === t.constraint_id)).toMatchObject({ node_id: t.node_id, value: t.value });
+  });
+});

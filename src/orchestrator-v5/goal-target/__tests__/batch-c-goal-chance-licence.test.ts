@@ -382,3 +382,66 @@ describe('DL contract rulings (12 Oct): precision names follow PLoT\'s wire; nev
     expect(kept.option_comparison).toEqual(run.option_comparison);
   });
 });
+
+// ── AIE C drafter clause 3 (12 Oct): each secondary target keeps its own frame; what the joint cannot support is refused
+//    honestly and named, never forced into a level or silently left out of a "both" headline ───────────────────────────
+describe('AIE clause 3: a target the joint cannot support is kept, named and refused honestly — never forced or dropped', () => {
+  it('RED: a secondary target stated as a CHANGE keeps its frame; the joint is withheld naming it, and only level targets get a figure', () => {
+    const g = marketingGraph([
+      { constraint_id: 'target:new_customers', node_id: 'new_customers', operator: '>=', value: 20, unit: 'customers', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'target:conversion_rate', node_id: 'conversion_rate', operator: '>=', value: 5, unit: '%', value_frame: 'change_abs', role: 'goal_target' },
+    ]);
+    const l = licenceFor(marketingRun(), g)!;
+    expect(l.pct_by_option).toEqual({});
+    expect(l.targets!.joint).toEqual({ status: 'withheld', reason: 'target_not_supported',
+      line: 'The chance of meeting both together isn’t shown: ‘Conversion rate’ is stated as a change, which can’t yet be combined with the other targets in this analysis.' });
+    // The level target is still said on its own; the change target is given no figure (its scoring is not supported here).
+    expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
+    expect(JSON.stringify(l.targets)).not.toMatch(/Meeting both is no more likely/);
+  });
+
+  it('RED: with a third target unsupported, no bound over "the two chances" is said (it would leave the third out)', () => {
+    const g = marketingGraph([...(marketingGraph().goal_constraints as Rec[]),
+      { constraint_id: 'target:repeat_rate', node_id: 'annual_spend', operator: '>=', value: 5, unit: '%', value_frame: 'change_rel', role: 'goal_target' }]);
+    const l = licenceFor(marketingRun(), g)!;
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'target_not_supported' });
+    expect((l.targets!.joint as Rec).line).toMatch(/^The chance of meeting all of them together isn’t shown: ‘Annual spend’ is stated as a change/);
+    expect(l.targets!.per_target).toHaveLength(2);
+    expect(l.targets!.joint).not.toHaveProperty('frechet_line');
+  });
+
+  it('RED: a CHANGE goal beside a level secondary target — the joint never claims "both" without the goal; the goal keeps its own chance', () => {
+    const g = hiringGraph({}, { goal_constraints: [
+      { constraint_id: 'agent-lane:cost:<=', node_id: 'cost', operator: '<=', value: 200000, unit: 'GBP', value_frame: 'level' },
+      { constraint_id: 'target:quality', node_id: 'quality', operator: '>=', value: 80, unit: 'score', value_frame: 'level', role: 'goal_target' },
+    ] });
+    (g.nodes as Rec[]).push({ id: 'quality', kind: 'factor', label: 'Code quality score' });
+    const run = { option_comparison: (hiringRun().option_comparison as Rec[]).map((r) => ({ ...r,
+      probability_of_joint_goal: 0.2, probability_of_joint_goal_precision: PRECISION,
+      constraint_probabilities: { 'target:quality': 0.7, 'agent-lane:cost:<=': 0.9 },
+      constraint_probabilities_precision: { 'target:quality': PRECISION, 'agent-lane:cost:<=': PRECISION } })) };
+    const l = goalChanceLicenceOf(run, g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
+    expect(l.pct_by_option).toEqual({});
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'target_not_supported' });
+    expect((l.targets!.joint as Rec).line).toContain('‘Productivity’ is stated as a change');
+    // The goal's own licensed chance is still said, as its own target, beside the level target's.
+    expect(l.targets!.per_target.map((t) => [t.words, t.pct_by_option])).toEqual([
+      ['‘Productivity’ being at least 10% higher than today at three months', { hire_a_tech_lead: 46, hire_two_developers: 31 }],
+      ['‘Code quality score’ being at least 80 score at three months', { hire_a_tech_lead: 70, hire_two_developers: 70 }],
+    ]);
+  });
+
+  it('RED: a condition the drafter retained in also_required (a distinct period) is disclosed beside the joint — never claimed', () => {
+    const g = marketingGraph();
+    (g.nodes as Rec[])[0] = { ...(g.nodes as Rec[])[0], goal_target_basis: { ...MARKETING_BASIS, also_required: ['repeat purchases from 30% of them within six months'] } };
+    const l = licenceFor(marketingRun(), g)!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect(l.notes).toContain('This chance covers ‘New customers’ and ‘Conversion rate’ only. It does not include: repeat purchases from 30% of them within six months.');
+  });
+
+  it('CONTROL: the supported marketing AND (both level, same period) is unchanged — licensed, no "covers only" note', () => {
+    const l = licenceFor(marketingRun())!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect((l.notes ?? []).some((n) => n.startsWith('This chance covers'))).toBe(false);
+  });
+});
