@@ -5098,6 +5098,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const faceContract = result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true)
         ? 'draft' as const : fastPath === 'run' || fastPath === 'explain' || screenLines.length > 0 || goalChanceOwed !== null || coHold !== undefined
           ? 'run' as const : undefined;
+      // R2 N1 (friction audit): only a Run/Explain turn leads with the chance status; a draft, Run or Explain shows estimates.
+      const runOrExplainTurn = ranAnalysisThisTurn || fastPath === 'explain';
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
       const runWidenWords = faceContract === 'run' || firstAnalysisExists || screenLines.length > 0
@@ -5220,7 +5222,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(runWidenWords.widenedRiskMarker === undefined ? {} : { widenedRiskMarker: runWidenWords.widenedRiskMarker }),
         ...(horizonLine === null ? {} : { horizonLine }),
         ...(whatChanges === null ? {} : { whatChanges }),
-        ...(faceContract !== undefined && profile === 'coaching' && estimates !== null && estimates.count > 0
+        ...(faceContract !== undefined && !runOrExplainTurn ? { notRunOrExplain: true as const } : {}),
+        ...((faceContract === 'draft' || runOrExplainTurn) && profile === 'coaching' && estimates !== null && estimates.count > 0
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
