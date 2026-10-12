@@ -22,6 +22,8 @@ import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js
 import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { runShareViolations } from '../../compose/__tests__/support/run-share-property.support.js';
 import type { ReplyRunEvidence } from '../../compose/run-share-text.js';
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 
 type Rec = Record<string, any>;
 const spy = vi.hoisted(() => ({ exits: [] as { exitPath: string; evidence: ReplyRunEvidence; input: Rec; output: Rec }[] }));
@@ -145,7 +147,17 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(found, `${exitPath} ran once`).toHaveLength(1);
     return found[0]!;
   };
-  const truthOf = (e: ReplyRunEvidence) => ({ ran: e.surface === 'run_result', explains: e.surface === 'run_explanation' });
+  const truthOf = (e: ReplyRunEvidence) => ({ ran: e.surface === 'run_result', explains: e.surface === 'run_explanation',
+    replayed: e.surface !== 'reasoning' && e.basis.startsWith('replayed_') });
+  /** AIE #94 6132355107: the FINAL edited body at the real exit — its V5 members pass the strict schema, and a shape that
+   *  ships still derives exactly the words that ship. */
+  const V5_KEYS = ['response_version', 'assistant_text', 'blocks', 'suggested_actions', 'insights', 'stage_indicator'] as const;
+  const expectValidAtExit = (b: Rec) => {
+    const v5 = Object.fromEntries(V5_KEYS.filter((k) => k in b).map((k) => [k, b[k]]));
+    const parsed = OlumiResponseSchema.safeParse(v5);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues?.slice(0, 3))).toBe(true);
+    if (b._answer_shape !== undefined) expect(deriveAnswerTextFromShape(b._answer_shape as AnswerShape)).toBe(b.assistant_text);
+  };
 
   it('(f5689c76 blocker) a model reply that ran NOTHING states a share: reasoning, by reference, never a Run claim', async () => {
     const { b } = await asked(ALL);
@@ -156,6 +168,7 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(exit.input.assistant_text, 'the control: the model\'s share sentences reached the exit').toContain(SHARE);
     expect(b.assistant_text).not.toContain(RUN_RESULT_TEMPLATE);
     expect(runShareViolations({ ran: false, explains: false }, exit.input, exit.output)).toEqual([]);
+    expectValidAtExit(b);
   });
 
   it('the Agent\'s own run_analysis call RAN, all-share reply: the locked Run template, and no share anywhere on the reply', async () => {
@@ -166,6 +179,7 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(exit.output.assistant_text).toBe(RUN_RESULT_TEMPLATE);
     expect(runShareViolations(truthOf(exit.evidence), exit.input, b)).toEqual([]);
     expect(statesRunShare(b.assistant_text)).toBe(false);
+    expectValidAtExit(b);
   });
 
   it('the Agent\'s own run_analysis call RAN, partial reply: the share sentence is removed and the rest ships', async () => {
@@ -176,6 +190,7 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(b.assistant_text).toContain(KEEP);
     expect(b.assistant_text).not.toContain(RUN_RESULT_TEMPLATE);
     expect(runShareViolations(truthOf(exit.evidence), exit.input, b)).toEqual([]);
+    expectValidAtExit(b);
   });
 
   it('Explain on the current Run: removal only — the host\'s own caveat after the model\'s words is kept, never the template', async () => {
@@ -188,6 +203,7 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(p.output.assistant_text).toBe(`${KEEP} ${ROBUST}`);
     expect(partial.b.assistant_text).not.toContain(SHARE);
     expect(runShareViolations(truthOf(p.evidence), p.input, partial.b)).toEqual([]);
+    expectValidAtExit(partial.b);
 
     const all = await explained(ALL);
     const a = exitAt('agent_lane_v1_final');
@@ -195,6 +211,7 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(a.output.assistant_text).toBe(ROBUST);
     expect(all.b.assistant_text).not.toContain(RUN_RESULT_TEMPLATE);
     expect(runShareViolations(truthOf(a.evidence), a.input, all.b)).toEqual([]);
+    expectValidAtExit(all.b);
   });
 
   it('REPLAY of a pre-rule explanation row is filtered by THAT ROW\'s evidence (the Explain press on the current Run)', async () => {
@@ -210,6 +227,7 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(replay.assistant_text).not.toContain(SHARE);
     expect(replay.assistant_text).toContain(KEEP);
     expect(runShareViolations(truthOf(exit.evidence), exit.input, exit.output)).toEqual([]);
+    expectValidAtExit(replay);
 
     // The same row stored with ONLY share sentences: the whole words and the AIE qualifier, never the Run template.
     rows.set(turnId, { ...rows.get(turnId)!, assistant_message: ALL });
@@ -220,6 +238,7 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(replayAll.assistant_text).toContain(RUN_SHARE_QUALIFIER);
     expect(replayAll.assistant_text).not.toContain(RUN_RESULT_TEMPLATE);
     expect(runShareViolations(truthOf(exitAll.evidence), exitAll.input, exitAll.output)).toEqual([]);
+    expectValidAtExit(replayAll);
   });
 
   it('REPLAY of a pre-rule row with NO proof ships untouched (today\'s readback lends it nothing), never a Run claim', async () => {
@@ -233,6 +252,7 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(exit.output).toBe(exit.input);
     expect(exit.input.assistant_text, 'the control: the stored share sentences reached the replay exit').toContain(SHARE);
     expect(replay.assistant_text).not.toContain(RUN_RESULT_TEMPLATE);
+    expectValidAtExit(replay);
   });
 
   it('REPLAY of a row carrying Olumi\'s fixed Run line is a Run reply BY ITS OWN ROW: filtered', async () => {
@@ -247,5 +267,6 @@ describe('the Agent route: the class property at its final and replay exits', ()
     expect(replay.assistant_text).not.toContain(SHARE);
     expect(replay.assistant_text).toContain(KEEP);
     expect(runShareViolations(truthOf(exit.evidence), exit.input, exit.output)).toEqual([]);
+    expectValidAtExit(replay);
   });
 });

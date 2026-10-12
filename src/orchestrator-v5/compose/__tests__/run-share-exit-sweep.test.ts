@@ -127,16 +127,19 @@ const AGENT_FINAL: Exit<AgentFlip> = {
 };
 
 // ── the Agent's replay: the STORED ROW's own evidence ─────────────────────────────────────────────────────────────────
-type ReplayFlip = Flip & { readonly row: 'ran' | 'explains' | 'plain'; readonly explainsCurrentRun: boolean };
+type ReplayFlip = Flip & { readonly row: 'ran' | 'explains' | 'plain'; readonly explainsCurrentRun: boolean; readonly rebuilt?: true };
+const REPLAYED = (t: RunShareTruth): RunShareTruth => ({ ...t, replayed: true });
 const AGENT_REPLAY: Exit<ReplayFlip> = {
   exit: 'Agent replay',
   flips: [
-    { name: 'a stored Run reply (Olumi\'s fixed Run line)', truth: RAN, row: 'ran', explainsCurrentRun: false },
-    { name: 'a stored explanation of the Run still current', truth: EXPLAINS, row: 'explains', explainsCurrentRun: true },
-    { name: 'a stored explanation whose Run moved', truth: NONE, row: 'explains', explainsCurrentRun: false },
-    { name: 'a pre-rule row with no proof (today\'s turn ran nothing it can lend)', truth: NONE, row: 'plain', explainsCurrentRun: false },
+    { name: 'a stored Run reply (Olumi\'s fixed Run line)', truth: REPLAYED(RAN), row: 'ran', explainsCurrentRun: false },
+    // The row proves a Run, but the words being replayed are only share sentences: filtered, never a new Run claim.
+    { name: 'a stored Run row whose replayed words are only share sentences', truth: REPLAYED(RAN), row: 'ran', explainsCurrentRun: false, rebuilt: true },
+    { name: 'a stored explanation of the Run still current', truth: REPLAYED(EXPLAINS), row: 'explains', explainsCurrentRun: true },
+    { name: 'a stored explanation whose Run moved', truth: REPLAYED(NONE), row: 'explains', explainsCurrentRun: false },
+    { name: 'a pre-rule row with no proof (today\'s turn ran nothing it can lend)', truth: REPLAYED(NONE), row: 'plain', explainsCurrentRun: false },
   ],
-  text: (f, share) => (f.row === 'ran' ? `${RUN_RESULT_READY_TEXT}\n\n${SHARE_TEXT[share]}` : SHARE_TEXT[share]),
+  text: (f, share) => (f.row === 'ran' && f.rebuilt !== true ? `${RUN_RESULT_READY_TEXT}\n\n${SHARE_TEXT[share]}` : SHARE_TEXT[share]),
   evidence: (f) => replayedRowRunEvidence({ storedText: f.row === 'ran' ? `${RUN_RESULT_READY_TEXT}\n\n${SHARE_TEXT.all}` : SHARE_TEXT.all,
     explainsCurrentRun: f.explainsCurrentRun }),
 };
@@ -163,10 +166,12 @@ describe.each(EXITS as readonly Exit<Flip>[])('the class property at $exit', (ex
     expect(runShareViolations(flip.truth, before, after)).toEqual([]);
     const textAfter = String(after.assistant_text);
     // The flips the property states in words (removal and the template are separate permissions):
-    if (flip.truth.ran && share === 'all' && !text.includes(RUN_RESULT_READY_TEXT)) expect(textAfter).toBe(RUN_RESULT_TEMPLATE);
+    if (flip.truth.ran && flip.truth.replayed !== true && share === 'all') expect(textAfter).toBe(RUN_RESULT_TEMPLATE);
     // Anything else left: exactly those words ship (bound by identity, never by a pattern), never qualified or templated.
     if (share !== 'none' && (flip.truth.ran || flip.truth.explains) && SURVIVES.has(text)) expect(textAfter).toBe(SURVIVES.get(text));
-    if (flip.truth.explains && !flip.truth.ran && share === 'all') expect(textAfter).toBe(`${text}\n\n${RUN_SHARE_QUALIFIER}`);
+    if ((flip.truth.explains || flip.truth.replayed === true) && (flip.truth.ran || flip.truth.explains) && text === SHARE_TEXT.all) {
+      expect(textAfter, 'never a Run claim: the whole words and the qualifier').toBe(`${text}\n\n${RUN_SHARE_QUALIFIER}`);
+    }
     if (!flip.truth.ran && !flip.truth.explains) expect(after.assistant_text).toBe(before.assistant_text);
     // An unchanged body ships BY REFERENCE (route-v2 re-finalises only an edit); every edited body is a valid V5 body.
     if (share === 'none' && !shaped) expect(after).toBe(before);

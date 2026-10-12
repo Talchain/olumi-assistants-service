@@ -24,6 +24,8 @@ import type { ScenarioReader } from '../tools/handlers/run-analysis.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { runShareViolations, type RunShareTruth } from '../compose/__tests__/support/run-share-property.support.js';
 import type { ReplyRunEvidence } from '../compose/run-share-text.js';
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../routing/answer-shape.js';
 
 type Rec = Record<string, any>;
 const exits: { exitPath: string; evidence: ReplyRunEvidence; input: Rec; output: Rec }[] = [];
@@ -165,6 +167,14 @@ const executorExit = () => {
   return found[0]!;
 };
 const truthOf = (e: ReplyRunEvidence): RunShareTruth => ({ ran: e.surface === 'run_result', explains: e.surface === 'run_explanation' });
+/** AIE #94 6132355107: the FINAL edited body at the real exit — its V5 members pass the strict schema, and a shape that ships
+ *  still derives exactly the words that ship. */
+const V5_KEYS = ['response_version', 'assistant_text', 'blocks', 'suggested_actions', 'insights', 'stage_indicator'] as const;
+const expectValidAtExit = (b: Rec) => {
+  const parsed = OlumiResponseSchema.safeParse(Object.fromEntries(V5_KEYS.filter((k) => k in b).map((k) => [k, b[k]])));
+  expect(parsed.success, JSON.stringify(parsed.error?.issues?.slice(0, 3))).toBe(true);
+  if (b._answer_shape !== undefined) expect(deriveAnswerTextFromShape(b._answer_shape as AnswerShape)).toBe(b.assistant_text);
+};
 
 describe('route-v2 (turn_executor): the class property on the shipped bytes', () => {
   let app: FastifyInstance;
@@ -186,6 +196,7 @@ describe('route-v2 (turn_executor): the class property on the shipped bytes', ()
     expect(body.assistant_text).toBe(exit.output.assistant_text);
     expect(body.assistant_text).not.toContain(VALIDATION_FALLBACK);
     expect(statesRunShare(JSON.stringify(body.blocks))).toBe(false);
+    expectValidAtExit(body);
   });
 
   it('an explanation of the current Run (the model\'s words): the share sentence is removed and the rest ships exactly', async () => {
@@ -200,6 +211,7 @@ describe('route-v2 (turn_executor): the class property on the shipped bytes', ()
     expect(body.assistant_text).not.toContain(SHARE);
     expect(body.assistant_text).toContain(KEEP);
     expect(body.assistant_text).not.toContain(RUN_RESULT_TEMPLATE);
+    expectValidAtExit(body);
   });
 
   it('the explanation FALLBACK (the model\'s answer fails the side-band rules): its share sentence is removed, never a Run claim', async () => {
@@ -213,6 +225,7 @@ describe('route-v2 (turn_executor): the class property on the shipped bytes', ()
     expect(runShareViolations(truthOf(exit.evidence), exit.input, body)).toEqual([]);
     expect(statesRunShare(body.assistant_text)).toBe(false);
     expect(body.assistant_text).not.toContain(RUN_RESULT_TEMPLATE);
+    expectValidAtExit(body);
   });
 
   it('reasoning (what_would_flip): the exit returns its input BY REFERENCE and the share sentence ships', async () => {
@@ -226,6 +239,7 @@ describe('route-v2 (turn_executor): the class property on the shipped bytes', ()
     expect(exit.output.assistant_text).toBe(exit.input.assistant_text);
     expect(runShareViolations(truthOf(exit.evidence), exit.input, body)).toEqual([]);
     expect(body.assistant_text).toBe(exit.input.assistant_text);
+    expectValidAtExit(body);
   });
 
   it('a converse reply that states a share: reasoning, shipped untouched, never a Run claim', async () => {
@@ -237,5 +251,6 @@ describe('route-v2 (turn_executor): the class property on the shipped bytes', ()
     expect(exit.output).toBe(exit.input);
     expect(runShareViolations({ ran: false, explains: false }, exit.input, body)).toEqual([]);
     expect(body.assistant_text).not.toContain(RUN_RESULT_TEMPLATE);
+    expectValidAtExit(body);
   });
 });

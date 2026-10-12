@@ -10,8 +10,9 @@
  *      route reads its own tool results (`agent-lane/run-share-evidence.ts`); a replay reads the STORED ROW it replays.
  *   2. REMOVAL AND THE RUN TEMPLATE ARE SEPARATE PERMISSIONS. Every `analysis_result` summary is a result surface: its share
  *      sentences are removed wherever the block is shown. A reply is a result surface only on a turn that RAN (removal, and the
- *      locked Run template if nothing is left) or that EXPLAINS the current Run (removal only; a reply that would be left with
- *      nothing keeps its words, followed by the AIE's fixed qualifier, and is never called a Run).
+ *      locked Run template if nothing is left — only for a Run of THIS turn), that EXPLAINS the current Run, or that REPLAYS a
+ *      row proving either (removal only: a reply that would be left with nothing keeps its words, followed by the AIE's fixed
+ *      qualifier, and never claims an execution).
  *   3. A REASONING REPLY IS NEVER FILTERED OR TEMPLATED (tipping points, the advice gate, constraint disclosure, the decision
  *      review): the AIE's ruling keeps same-Run comparative support as supporting reasoning.
  * The structured `win_probability` data is not edited. A body with nothing to change is returned by reference, so an exit that
@@ -84,11 +85,14 @@ function summaryWords(summary: string): string {
   return summary.trim() !== '' && kept.trim() === '' ? RUN_RESULT_TEMPLATE : kept;
 }
 
-/** A result reply's words: removal, then (when nothing is left) the template only where the evidence says the turn ran. */
+/**
+ * A result reply's words: removal; when nothing is left, the Run template ONLY where THIS turn ran (AIE #94 6132355107: a
+ * replay filters its stored words without claiming a new execution), otherwise the whole words and the AIE qualifier.
+ */
 function replyWords(text: string, evidence: Exclude<ReplyRunEvidence, { surface: 'reasoning' }>): { text: string; outcome: string } {
   const kept = withoutRunShareSentences(text);
   if (kept.trim() !== '') return { text: kept, outcome: 'removed' };
-  if (evidence.surface === 'run_result') return { text: RUN_RESULT_TEMPLATE, outcome: 'templated' };
+  if (evidence.basis === 'ran_this_turn') return { text: RUN_RESULT_TEMPLATE, outcome: 'templated' };
   return { text: text.includes(RUN_SHARE_QUALIFIER) ? text : `${text.trimEnd()}\n\n${RUN_SHARE_QUALIFIER}`, outcome: 'qualified' };
 }
 

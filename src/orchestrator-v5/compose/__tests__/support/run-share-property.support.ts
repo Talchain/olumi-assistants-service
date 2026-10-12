@@ -5,11 +5,11 @@
  * row — run the analysis; does it explain the current Run), never against the evidence the exit itself computed, so an exit
  * that reads the wrong evidence is a violation here.
  *
- *   P1  no Run claim (the locked template) without this turn's, or the replayed row's own, run evidence;
- *   P2  no share text on a Run-evidenced result reply (its text, shape or chips);
+ *   P1  no Run claim (the locked template) without THIS turn's run evidence — a replay never claims a new execution;
+ *   P2  no share text on the reply (its text, shape or chips) of a turn that ran;
  *   P3  a reasoning reply is never filtered or templated: text, shape and chips byte-identical;
- *   P4  an explanation of the current Run: share sentences removed; a reply that would be left with nothing keeps its words
- *       followed by the AIE's fixed qualifier — never the Run template;
+ *   P4  an explanation of the current Run, or a replayed row proving a Run or an explanation: share sentences removed; a
+ *       reply that would be left with nothing keeps its words followed by the AIE's fixed qualifier — never the template;
  *   P5  no `analysis_result` summary states a share of runs, and none is left empty;
  *   P6  the structured `win_probabilities` data is never edited.
  */
@@ -20,6 +20,8 @@ type Rec = Record<string, unknown>;
 export interface RunShareTruth {
   /** This turn ran the analysis, or (for a replay) the stored row is a Run reply. */
   readonly ran: boolean;
+  /** The reply is a REPLAY of a stored row: it may be filtered by that row's evidence, never claim a new execution. */
+  readonly replayed?: boolean;
   /** This turn (or the replayed row) explains the Run that is still current. */
   readonly explains: boolean;
 }
@@ -36,8 +38,9 @@ export function runShareViolations(truth: RunShareTruth, before: Rec, after: Rec
   const textBefore = typeof before.assistant_text === 'string' ? before.assistant_text : '';
   const textAfter = typeof after.assistant_text === 'string' ? after.assistant_text : '';
   const claimsRun = (t: string) => t.includes(RUN_RESULT_TEMPLATE);
-  if (!truth.ran && claimsRun(textAfter) && !claimsRun(textBefore)) v.push('P1: a Run claim without run evidence');
-  if (truth.ran) {
+  const ranThisTurn = truth.ran && truth.replayed !== true;
+  if (!ranThisTurn && claimsRun(textAfter) && !claimsRun(textBefore)) v.push('P1: a Run claim without this turn\'s run evidence');
+  if (ranThisTurn) {
     if (statesRunShare(textAfter)) v.push('P2: share text on a Run-evidenced reply');
     if (statesRunShare(json(after._answer_shape))) v.push('P2: share text in a Run-evidenced reply\'s shape');
     if (chipLabels(after).some(statesRunShare)) v.push('P2: share text on a Run-evidenced reply\'s chip');
@@ -47,7 +50,7 @@ export function runShareViolations(truth: RunShareTruth, before: Rec, after: Rec
     if (json(after._answer_shape) !== json(before._answer_shape)) v.push('P3: a reasoning reply\'s shape was edited');
     if (json(after.suggested_actions) !== json(before.suggested_actions)) v.push('P3: a reasoning reply\'s chips were edited');
   }
-  if (truth.explains && !truth.ran) {
+  if ((truth.explains || truth.ran) && !ranThisTurn) {
     // A share sentence may remain on an explanation only as its WHOLE original words followed by the qualifier (the sweep's
     // partial flip separately requires removal whenever anything else is left).
     const whole = textBefore.endsWith(RUN_SHARE_QUALIFIER) ? textBefore : `${textBefore.trimEnd()}\n\n${RUN_SHARE_QUALIFIER}`;
