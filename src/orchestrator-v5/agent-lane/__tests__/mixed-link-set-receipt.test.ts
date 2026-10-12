@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
+import { formatEdgeStrengthConfirmed, formatEdgeStrengthUnchanged } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 
@@ -37,8 +38,10 @@ const SIX: { from: string; to: string; kept: boolean }[] = [
   { from: 'code_quality_deterioration', to: 'productivity', kept: false },
 ];
 const edgeOf = (g: Graph, l: { from: string; to: string }): Edge => g.edges.find((e) => key(e) === key(l))!;
-const args = { rationale: 'served mixed set', links: SIX.map((l) => ({ from_label: label(l.from), to_label: label(l.to),
-  strength: l.kept ? edgeBandFromMagnitude(Math.abs(edgeOf(FX.before.graph, l).strength.mean)) : 'moderate' })) };
+/** The served links at these SIX positions, as the Agent offered them (all six by default). */
+const argsFor = (at: readonly number[] = SIX.map((_, i) => i)) => ({ rationale: 'served mixed set', links: at.map((i) => SIX[i]!)
+  .map((l) => ({ from_label: label(l.from), to_label: label(l.to),
+    strength: l.kept ? edgeBandFromMagnitude(Math.abs(edgeOf(FX.before.graph, l).strength.mean)) : 'moderate' })) });
 
 /**
  * `variant`: one moved link (developer_hires → productivity) was drawn by the user but never sized, so moving it leaves it
@@ -74,9 +77,9 @@ function world(variant = false) {
   return { caps, sent, graph: () => graph };
 }
 
-async function approveServedSet(variant = false) {
+async function approveServedSet(variant = false, at?: readonly number[]) {
   const w = world(variant);
-  const p = await w.caps.proposeLinkStrengths!(ctx, args);
+  const p = await w.caps.proposeLinkStrengths!(ctx, argsFor(at));
   expect(p.ok, JSON.stringify(p)).toBe(true);
   const out = await w.caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
   expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true });
@@ -97,12 +100,12 @@ const EXPECTED_RECEIPT = 'Recorded 4 link strengths and 2 reviews. '
   + `"Tech lead hires" → "Code review leadership": ${REVIEW} "Code review leadership" → "Code quality deterioration": ${REVIEW} ${NEXT_STEP}`;
 /**
  * Expectation (b)'s own instrument: the four element matchers the live witness applies to a receipt that confirms a
- * placeholder (`recovery/live/live-journey.mjs` batchAReceipt, copied 12 Oct), with "still unsized" accepted as
- * not-sized-yet as the DL ruled for the AIE's wording (SendMessage to SYS1, 12 Oct; the witness owner updates the script).
+ * placeholder (`recovery/live/live-journey.mjs` batchAReceipt :885–888, copied 12 Oct after the DL's update accepting
+ * "still unsized" and "not been sized" for the AIE's wording).
  */
 const WITNESS_B = {
   review_recorded: /review(?:ed)?\b[^.]{0,60}\b(?:recorded|noted|kept)|recorded (?:your|the) review|\breviewed\b/i,
-  not_sized_yet: /(?:isn['’]t|is not|not) (?:yet )?sized(?: yet)?|still unsized|nobody has (?:sized|set)|whose strength nobody has set/i,
+  not_sized_yet: /(?:isn['’]t|is not|not) (?:yet )?sized(?: yet)?|still unsized|not been sized|nobody has (?:sized|set)|whose strength nobody has set/i,
   values_unchanged: /values? (?:are |is |stay |stays )?unchanged|unchanged|kept as it is/i,
   give_a_figure: /Give a figure, or ask Olumi to estimate it\.?/i,
 };
@@ -149,5 +152,79 @@ describe('served mixed link set: preview and receipt follow the stored outcome',
     expect(receipt.endsWith(`"Tech lead hires" → "Code review leadership": ${REVIEW} "Code review leadership" → "Code quality deterioration": ${REVIEW} ${NEXT_STEP}`)).toBe(true);
     expect(receipt.split(NEXT_STEP)).toHaveLength(2);
     expect(receipt).not.toMatch(/Olumi[’']s estimate for how much "Developer hires" changes "productivity"/);
+  });
+});
+
+/**
+ * A′ check round 1 (DL relay, 12 Oct): the contract held only for a MIXED set. One review, or reviews alone, still read
+ * "Recorded your review of this link: … reviewed, kept as it is." with no word that the link is still unsized and no next
+ * step, and the single-link receipts still said the MODEL's values were unchanged. Every set shape is pinned here from the
+ * same served approval: SIX positions 1 and 4 are the two reviewed links nobody has sized.
+ */
+const T_C = '"Tech lead hires" → "Code review leadership"';
+const C_Q = '"Code review leadership" → "Code quality deterioration"';
+const KEPT_ITEM = ', whose strength nobody has set yet (kept as it is)';
+const WHOLE_MODEL = /model[’']s values|model is (?:exactly )?(?:as it was|unchanged)|nothing (?:was )?changed/i;
+const witnessed = (text: string): void => {
+  for (const [element, re] of Object.entries(WITNESS_B)) expect(re.test(text), `${element}: ${text}`).toBe(true);
+  expect(text.split(NEXT_STEP), 'the next action once').toHaveLength(2);
+  expect(text).not.toMatch(WHOLE_MODEL);
+  expect(text).not.toContain('—');
+  expect(text).not.toMatch(/your own/i);
+};
+
+describe('every set shape: each review-only link says it is still unsized, its own values unchanged, then the next action once', () => {
+  it('RED: ONE review is counted as a review and carries the contract (was "Recorded your review of this link: … reviewed, kept as it is.")', async () => {
+    const { w, p, receipt } = await approveServedSet(false, [1]);
+    expect(linkSizing(edgeOf(w.graph(), SIX[1]!))).toBe('placeholder');
+    expect(String(p.public_label)).toBe(`Record 1 review: ${T_C}${KEPT_ITEM}`);
+    expect(receipt).toBe(`Recorded 1 review. ${T_C}: ${REVIEW} ${NEXT_STEP}`);
+    witnessed(receipt);
+  });
+
+  it('RED: ALL reviews are counted as reviews and each carries the contract (was "Recorded your reviews of these 2 links: …")', async () => {
+    const { w, p, receipt } = await approveServedSet(false, [1, 4]);
+    for (const i of [1, 4]) expect(linkSizing(edgeOf(w.graph(), SIX[i]!))).toBe('placeholder');
+    expect(String(p.public_label)).toBe(`Record 2 reviews: ${T_C}${KEPT_ITEM}; ${C_Q}${KEPT_ITEM}`);
+    expect(receipt).toBe(`Recorded 2 reviews. ${T_C}: ${REVIEW} ${C_Q}: ${REVIEW} ${NEXT_STEP}`);
+    witnessed(receipt);
+  });
+
+  it('CONTROL (held on f7aae41): reviews beside a change that leaves a link unsized carry the contract, the change is listed once', async () => {
+    const { w, p, receipt } = await approveServedSet(true, [1, 2, 4]);
+    expect(linkSizing(edgeOf(w.graph(), SIX[2]!))).toBe('placeholder');
+    expect(String(p.public_label)).toBe(`Record 1 change to an unsized link and 2 reviews: ${T_C}${KEPT_ITEM}; `
+      + `"Developer hires" → "productivity", whose strength nobody has set yet; ${C_Q}${KEPT_ITEM}`);
+    expect(receipt).toBe('Recorded 1 change to an unsized link and 2 reviews. "Developer hires" → "productivity" changed; it isn’t sized in the model yet. '
+      + `${T_C}: ${REVIEW} ${C_Q}: ${REVIEW} ${NEXT_STEP}`);
+    witnessed(receipt);
+  });
+
+  it('CONTROL (bytes unchanged from f7aae41): a set of Olumi\'s estimates alone names no review and no next step', async () => {
+    const { w, p, receipt } = await approveServedSet(false, [0, 2, 3, 5]);
+    for (const i of [0, 2, 3, 5]) expect(linkSizing(edgeOf(w.graph(), SIX[i]!))).toBe('olumi_accepted');
+    expect(String(p.public_label).startsWith('Record these 4 link strengths: ')).toBe(true);
+    expect(String(p.public_label)).not.toMatch(/review|nobody has set/i);
+    expect(receipt).toBe('Recorded these 4 link strengths: '
+      + '"Current mid-weight developers" → "productivity" as moderate; "Developer hires" → "productivity" as moderate; '
+      + '"Developer hires" → "Code quality deterioration" as moderate; "Code quality deterioration" → "productivity" as moderate. '
+      + 'You accepted Olumi\'s estimate for how much "Current mid-weight developers" changes "productivity". '
+      + 'You accepted Olumi\'s estimate for how much "Developer hires" changes "productivity". '
+      + 'You accepted Olumi\'s estimate for how much "Developer hires" changes "Code quality deterioration". '
+      + 'You accepted Olumi\'s estimate for how much "Code quality deterioration" changes "productivity". '
+      + 'Olumi’s estimates stay marked as Olumi’s, not yours: your approval applied them, it did not make them your judgement.');
+    expect(receipt).not.toContain(NEXT_STEP);
+  });
+
+  it('RED: the single-link receipts say THIS link\'s values are unchanged, never the model\'s (format-confirmation :722, :747)', () => {
+    const labels = { fromLabel: '"Tech lead hires"', toLabel: '"Code review leadership"' };
+    const confirmed = formatEdgeStrengthConfirmed({ ...labels, sizing: 'placeholder' });
+    expect(confirmed).toBe('Your review of the link between "Tech lead hires" and "Code review leadership" is recorded. '
+      + `It has not been sized yet. Its values are unchanged. ${NEXT_STEP}`);
+    witnessed(confirmed);
+    const unchanged = formatEdgeStrengthUnchanged({ ...labels, mean: 0.5, unsized: true });
+    expect(unchanged).toBe(`The link between "Tech lead hires" and "Code review leadership" has not been sized yet. Its values are unchanged. ${NEXT_STEP}`);
+    expect(unchanged).not.toMatch(WHOLE_MODEL);
+    expect(unchanged.split(NEXT_STEP)).toHaveLength(2);
   });
 });
