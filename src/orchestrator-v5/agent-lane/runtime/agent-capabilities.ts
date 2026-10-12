@@ -2,7 +2,7 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
@@ -5293,11 +5293,23 @@ export function createAgentCapabilities(
     /** Parse and propose this turn's current-team duration; a singleton is only the most likely time. */
     async proposeTeamTime(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const stated = readTeamTime(ctx.user_turn_text);
-      if (stated === null || !teamTimeArgumentsMatch(ctx.user_turn_text, args, stated)) {
-        return { ok: false, mutated: false, refusal: 'team_time_not_stated',
-          detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
+      const typed = readTeamTime(ctx.user_turn_text);
+      const typedNow = typed !== null && teamTimeArgumentsMatch(ctx.user_turn_text, args, typed) ? typed : null;
+      /**
+       * ⭐ B2-c CONFIRMATION (DL re-scope, 12 Oct; PL #94 6131809231; AIE #94 6132054663): a duration the user did not type
+       * as this whole answer is offered ONLY as a confirmation card: the quote is proved verbatim in their own typed words
+       * (`quotedTeamTime`, never whose it is), the card shows the complete source line and asks, and only its press records
+       * the figure as their selected forecast (`hasCardOnlyOperations`).
+       */
+      const quoted = typedNow === null && typeof (args as { quote?: unknown } | undefined)?.quote === 'string'
+        ? quotedTeamTime({ now: ctx.user_turn_text, conversation: ctx.user_text }, args as never) : undefined;
+      if (typedNow === null && quoted?.kind !== 'found') {
+        return quoted !== undefined ? { ok: false, mutated: false, refusal: 'team_time_not_stated', detail: quoted.detail }
+          : { ok: false, mutated: false, refusal: 'team_time_not_stated',
+            detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
       }
+      const stated = typedNow ?? (quoted as Extract<NonNullable<typeof quoted>, { kind: 'found' }>).time;
+      const confirmation = quoted?.kind === 'found' ? quoted.confirmation : undefined;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
@@ -5305,7 +5317,8 @@ export function createAgentCapabilities(
         detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
       const read = teamTimeReadDigest(g.raw);
       const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
-        reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}) };
+        reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}),
+        ...(confirmation !== undefined ? { confirmation } : {}) };
       if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
         detail: 'That deadline has passed. Type a future deadline and confirm it, then give the soonest and latest times with your current team.' };
       if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), g.raw)) {
@@ -5315,9 +5328,12 @@ export function createAgentCapabilities(
       }
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
-        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
+        // B2-c: Olumi's interpretation of the user's words until their press; the source line is its basis.
+        provenance: confirmation !== undefined ? { authored_by: 'model_proposed', basis: confirmation.source }
+          : { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
+        public_label: confirmation !== undefined ? teamTimeConfirmationCard(a, part.deliverable)
+          : teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
         if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === 'set_team_time')) proposals.discard(pending.proposal_id);
       }
