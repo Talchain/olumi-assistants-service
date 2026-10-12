@@ -1,5 +1,5 @@
 {
-  "source_sha": "2ecbae5234d2403f6a24a7196379519b9a4f04ea",
+  "source_sha": "e58b8dbdb66a222fa780cd6e5d8dfc3e3e8f5a35",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -389,7 +389,7 @@
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 1,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 6,
+      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 7,
       "src/orchestrator-v5/goal-target/goal-direction.ts": 2,
       "src/orchestrator-v5/goal-target/share-by-date-run.ts": 1,
       "src/orchestrator-v5/graph-management/field-safety.ts": 2,
@@ -578,7 +578,7 @@
       "src/orchestrator-v5/goal-target/decide-goal-target-ask.ts": 2,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 2,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 6,
+      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 7,
       "src/orchestrator-v5/goal-target/goal-direction.ts": 4,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 4,
       "src/orchestrator-v5/goal-target/goal-level-reading.ts": 2,
@@ -823,11 +823,11 @@
     "goal_scope": 48,
     "goal_sense_reading": 15,
     "goal_stated_as": 3,
-    "goal_threshold": 249,
+    "goal_threshold": 250,
     "goal_threshold_cap": 166,
     "goal_threshold_cap_provenance": 37,
     "goal_threshold_frame": 141,
-    "goal_threshold_raw": 246,
+    "goal_threshold_raw": 247,
     "goal_threshold_unit": 224,
     "pickGoalThresholdTrio": 18,
     "quantity_frame": 41,
@@ -841,7 +841,7 @@
     "threshold_source": 37,
     "unit_reading": 79
   },
-  "total_references": 2446,
+  "total_references": 2448,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

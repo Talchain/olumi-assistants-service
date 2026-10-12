@@ -38,7 +38,7 @@ import {
 import { withholdStatusQuoIntervals } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
-import { statedGoalTargetOf } from './stated-goal-target.js';
+import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
@@ -317,6 +317,15 @@ function zeroSpreadReasons(
   return out;
 }
 
+/** R5-5 (b): whether the Run sent the threshold of the target the goal states (see the guard in `goalChanceLicenceOf`). */
+function targetSent(graph: Rec, goal: Rec, constraints: GoalChanceConstraintInputs): boolean {
+  if (finite(goal.goal_threshold_raw)) return finite(goal.goal_threshold);
+  const row = goalTargetRow(graph, goal);
+  const sent = constraints.sentConstraints;
+  if (row === undefined || typeof row.constraint_id !== 'string' || !Array.isArray(sent)) return true;
+  return sent.some((r) => isRec(r) && r.constraint_id === row.constraint_id);
+}
+
 export function displayedGoalPct(p: number): number {
   return displayedPctAt(p, 'whole');
 }
@@ -343,6 +352,13 @@ export function goalChanceLicenceOf(
   // than one way is never licensed while its question is open (amendment 3).
   const changeFrame = target?.frame === 'change_abs' || target?.frame === 'change_rel' ? target.frame : undefined;
   if (target === null || (target.frame !== undefined && target.frame !== 'level' && changeFrame === undefined)) return null;
+  // ⛔ RE-SCOPE 2 (R5-5 (b); DL ruling): condition 1 — the RIGHT target. A goal that states a target the Run did not send a
+  // threshold for has no chance of meeting THAT target: whatever the engine returned was scored on something else (or
+  // nothing). Never licensed — on any Run, before or after a reopen. The target's own carrier decides what "sent" means
+  // (`targetSent`): a figure the goal node holds is sent as its finite normalised threshold on the graph this Run scored (none:
+  // a reading refused for its conditions, or a cap that could not be resolved); a target that is the goal's own limit row is
+  // sent as that row (checked where the Run's request is known).
+  if (goal === undefined || !targetSent(graph as Rec, goal, constraints)) return null;
   const basis: GoalTargetBasis | undefined = goal === undefined ? undefined : goalTargetBasisOf(goal);
   // ⛔ Ruling 12 / amendment 2: a change's "at three months" needs its effects stated at that month; never steady state.
   if ((changeFrame !== undefined && (basis === undefined || !basis.effects_at_period_end)) || basis?.open_question !== undefined) return null;

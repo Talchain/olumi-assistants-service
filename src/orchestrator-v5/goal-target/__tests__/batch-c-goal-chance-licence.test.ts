@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, nearestFiveGoalChancesForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence } from '../goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
-import { targetChanceWords } from '../goal-target-basis.js';
+import { conditionsRefusedBasis, CONDITIONS_NOT_KEPT, targetChanceWords } from '../goal-target-basis.js';
 import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
 import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
@@ -122,6 +122,42 @@ describe('hiring — a change of +10% from today has its ruled sentence (ruling 
     expect((held.inference_warnings as Rec[])[0]).toMatchObject({
       code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', message: `Not shown. Your target can be read more than one way. ${q}`,
     });
+  });
+
+  it('NEGATIVE (amendment 3, unchanged): the ambiguity framing and its reason stay as they were (by identity)', () => {
+    const q = 'Should “at least 10%” mean 10% more development capacity than today, or 10 more percentage points of time on development?';
+    const g = hiringGraph({ goal_target_basis: { ...HIRING_BASIS, open_question: q } });
+    const w = ((withholdForOpenTargetQuestion(hiringRun(), g, 'productivity') as Rec).inference_warnings as Rec[])
+      .find((x) => x.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!;
+    expect(w).toMatchObject({ message: `Not shown. Your target can be read more than one way. ${q}`, detail: { reason: 'target_reading_open' } });
+  });
+
+  // ⛔ RE-SCOPE 2 (R5-5 (a), DL ruling): admission's refusal for conditions rides the existing carrier as the AIE's sentence
+  // (`CONDITIONS_NOT_KEPT`); the gate says it as a statement — never as a question the person could answer — and its reason wins
+  // over the placeholder-path warning (nothing false beside it).
+  it('RED on e58b8dbd: open_question = CONDITIONS_NOT_KEPT → "Not shown. Olumi cannot keep every additional condition intact in this analysis."', () => {
+    expect(CONDITIONS_NOT_KEPT).toBe('Olumi cannot keep every additional condition intact in this analysis.');
+    const g = hiringGraph({ goal_target_basis: { ...HIRING_BASIS, also_required: null, open_question: CONDITIONS_NOT_KEPT } });
+    expect(goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))).toBeNull();
+    const held = withholdForOpenTargetQuestion(hiringRun(), g, 'productivity') as Rec;
+    expect((held.option_comparison as Rec[]).every((r) => !('probability_of_goal' in r))).toBe(true);
+    const warnings = held.inference_warnings as Rec[];
+    expect(warnings.filter((x) => x.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')).toEqual([expect.objectContaining({
+      message: 'Not shown. Olumi cannot keep every additional condition intact in this analysis.', detail: expect.objectContaining({ reason: 'conditions_not_kept' }) })]);
+    expect(JSON.stringify(warnings)).not.toMatch(/read more than one way|\?/);
+    expect(warnings.some((x) => x.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')).toBe(false);
+  });
+
+  it('admission writes CONDITIONS_NOT_KEPT only for a refusal FOR CONDITIONS — never for any other refusal', () => {
+    const args = { targetFrame: 'change_abs', targetRaw: 10, quantityFrame: 'change', horizonMonths: 3, drafted: { ...HIRING_BASIS } } as never;
+    expect(conditionsRefusedBasis(args, { refused: 'conditions' })?.open_question).toBe(CONDITIONS_NOT_KEPT);
+    expect(conditionsRefusedBasis(args, { refused: 'condition_text' })?.open_question).toBe(CONDITIONS_NOT_KEPT);
+    for (const other of ['reference', 'denominator', 'period', 'period_conflict', 'effect_unit', 'frame'] as const) {
+      expect(conditionsRefusedBasis(args, { refused: other }), other).toBeUndefined();
+    }
+    expect(conditionsRefusedBasis(args, { basis: {} })).toBeUndefined();
+    // Never a subset: the kept reading carries no condition at all.
+    expect(conditionsRefusedBasis(args, { refused: 'conditions' })?.also_required ?? null).toBeNull();
   });
 
   it('the horizon (amendment 2): at-horizon effects at the held month license "at three months"; anything else withholds', () => {
@@ -1340,5 +1376,53 @@ describe('RE-SCOPE 2 (marginals, (B)): each target\'s own chance says what it re
     expect(l.provisional).toBeUndefined();
     expect(marginalNotes(l)).toEqual([]);
     expect(unverifiedNotes(goalAlone(g))).toBe(0);
+  });
+});
+
+// ── RE-SCOPE 2 R5-5 (b) (DL ruling 2): THE CLASS GUARD AT THE LICENCE — never a chance for a stated target the Run did not send
+// a threshold for: single (no finite `goal_threshold` on the graph the Run scored, a cap that could not be resolved included),
+// marginal and joint (a stored target row the Run did not send). Independent of the open-question carrier: a graph stored before
+// this fix (a refused reading left NO basis, and no threshold) is guarded too.
+describe('RE-SCOPE 2 R5-5 (b): no chance is licensed for a stated target the Run sent no threshold for', () => {
+  it('RED on e58b8dbd (single): the goal states 85% but the Run sent no threshold → no licence', () => {
+    const g = capacityGraph({ goal: { goal_threshold: undefined } });
+    expect((g.nodes as Rec[])[0]).toMatchObject({ goal_threshold_raw: 85 });
+    expect(capacityLicence(g)).toBeNull();
+  });
+  it('RED on e58b8dbd (single): a cap that could not be resolved (no cap, no threshold) → no licence', () => {
+    expect(capacityLicence(capacityGraph({ goal: { goal_threshold: undefined, goal_threshold_cap: undefined } }))).toBeNull();
+  });
+  it('CONTROL (single): the same goal with its threshold sent (0.85) is licensed', () => {
+    expect(Object.keys(capacityLicence()!.pct_by_option)).toEqual(['lead', 'two']);
+  });
+  // A target that is the goal's OWN limit row (no figure on the node, `statedGoalTargetOf`) is sent as that row.
+  const ownRowGoal = (): Rec => {
+    const g = capacityGraph({ goal: { goal_threshold_raw: undefined, goal_threshold: undefined } });
+    g.goal_constraints = [{ constraint_id: 'capacity:>=', node_id: 'capacity', operator: '>=', value: 85, unit: '%', value_frame: 'level' }];
+    return g;
+  };
+  const ownRowLicence = (sent: unknown) => {
+    const g = ownRowGoal();
+    return goalChanceLicenceOf(capacityRun(), g, 'capacity', () => false, undefined, g, { storedConstraints: g.goal_constraints, sentConstraints: sent });
+  };
+  it('RED on e58b8dbd (single, own-row target): the goal\'s own target row not in the Run\'s request → no licence', () => {
+    expect(ownRowLicence([])).toBeNull();
+  });
+  it('CONTROL (single, own-row target): the row sent → licensed; no request known → read as before', () => {
+    expect(ownRowLicence(wireGoalConstraints(ownRowGoal().goal_constraints))).not.toBeNull();
+    expect(ownRowLicence(undefined)).not.toBeNull();
+  });
+  const sentWithout = (id: string): Rec[] => (wireGoalConstraints(marketingGraph().goal_constraints) as Rec[]).filter((r) => r.constraint_id !== id);
+  it('RED on e58b8dbd (joint + marginal): a stored second target the Run did not send → the joint waits; that target has no chance of its own', () => {
+    const l = licenceFor(marketingRun(), marketingGraph(), sentWithout('target:conversion_rate'))!;
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved' });
+    expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
+    expect(l.pct_by_option).toEqual({});
+  });
+  it('the goal\'s own stored target row not sent → the joint waits with the figure reason — never called "stated as a change"', () => {
+    const l = licenceFor(marketingRun(), marketingGraph(), sentWithout('target:new_customers'))!;
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved' });
+    expect(JSON.stringify(l.targets)).not.toMatch(/stated as a change/);
+    expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:conversion_rate']);
   });
 });

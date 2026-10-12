@@ -68,7 +68,7 @@ import { sayFigure } from './say-figure.js';
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
-import { admitGoalTargetBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
+import { admitGoalTargetBasis, conditionsRefusedBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
 import {
   admitCandidateConstraints,
   canonicalProvenance,
@@ -2902,9 +2902,12 @@ export function admitStatedGoalChange(
    * starting value as `estimate_only`, and (c) says the reference and period beside the chance.
    */
   const quantityFrame = goal.quantity_frame === 'change' ? 'change' : 'level';
-  const basisVerdict = admitGoalTargetBasis({
-    drafted: goal.basis, quantityFrame, targetFrame: frame, targetRaw: stored, horizonMonths: goal.horizon_months,
-  });
+  const basisArgs = { drafted: goal.basis, quantityFrame, targetFrame: frame, targetRaw: stored, horizonMonths: goal.horizon_months } as const;
+  const basisVerdict = admitGoalTargetBasis(basisArgs);
+  // ⛔ RE-SCOPE 2 (R5-5 (a)): a reading refused for its conditions persists that refusal in the stored reading's own
+  // `open_question` (`CONDITIONS_NOT_KEPT`), so no Run — before or after a reopen — shows a chance without them.
+  const refusedForConditions = conditionsRefusedBasis(basisArgs, basisVerdict);
+  const keptRefusal = refusedForConditions === undefined ? {} : { goal_target_basis: refusedForConditions };
   const basis = 'basis' in basisVerdict ? basisVerdict.basis : null;
   const withBasis = (n: Partial<AdmittedNode>): Partial<AdmittedNode> => (basis === null ? n : { ...n, goal_target_basis: basis });
   if (quantityFrame === 'change') {
@@ -2921,7 +2924,7 @@ export function admitStatedGoalChange(
     };
     const refusal = frame !== 'change_abs' ? 'frame' as const : 'refused' in basisVerdict ? basisVerdict.refused
       : basis === null ? 'denominator' as const : !goal.unit ? 'frame' as const : null;
-    if (refusal !== null) return { node: changeNode, withheld: goalTargetBasisRefusalWords(goal.metric, refusal) };
+    if (refusal !== null) return { node: { ...changeNode, ...keptRefusal }, withheld: goalTargetBasisRefusalWords(goal.metric, refusal) };
     const resolvedChange = stored !== 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(stored), goal.unit, undefined) : null;
     if (resolvedChange === null) {
       return { node: changeNode, withheld: `A change of ${raw}${goal.unit ? ` ${goal.unit}` : ''} in "${goal.metric}" does not sit on a scale Olumi can read, so no chance of reaching it is shown.` };
@@ -2937,7 +2940,7 @@ export function admitStatedGoalChange(
   // ⛔ Re-scope (r2 BLOCKING 2): a change of a LEVEL quantity whose reading is refused while the drafter retained conditions
   // refuses the whole goal reading, with why (a change quantity's refusal above already writes no threshold and says why).
   const conditionsRefused = goalReadingRefusedWords(goal.metric, basisVerdict, goal.basis);
-  if (conditionsRefused !== undefined) return { node, withheld: conditionsRefused };
+  if (conditionsRefused !== undefined) return { node: { ...node, ...keptRefusal }, withheld: conditionsRefused };
   const sign = raw > 0 ? '+' : '';
   const change = frame === 'change_rel' ? `${sign}${raw}%` : `${sign}${raw}${unit ? ` ${unit}` : ''}`;
   const today = goal.baseline_value;
@@ -3799,15 +3802,18 @@ function admitOnce(
         }
         // Recovery Batch C (rulings 18, 22; amendment 5): a LEVEL target's stated period and reference, held for the words
         // and the horizon verdict. An invalid or absent basis changes nothing here: the level path is exactly as before.
-        const levelBasis = admitGoalTargetBasis({
+        const levelBasisArgs = {
           drafted: model.goal.basis, quantityFrame: model.goal.quantity_frame === 'change' ? 'change' : 'level',
           targetFrame: 'level', targetRaw: raw, horizonMonths: model.goal.horizon_months,
-        });
+        } as const;
+        const levelBasis = admitGoalTargetBasis(levelBasisArgs);
         // ⛔ Recovery Batch C re-scope (r2 BLOCKING 2): goal conditions are never silently dropped. A reading refused while
         // the drafter retained conditions beside the target would lose them here (the plain sentence names none), so the
         // whole goal reading is refused instead: no threshold (no chance), and why is said. The user's level is kept.
         const conditionsRefused = goalReadingRefusedWords(model.goal.metric, levelBasis, model.goal.basis);
         if (conditionsRefused !== undefined) withheld(conditionsRefused);
+        // ⛔ RE-SCOPE 2 (R5-5 (a)): the refusal itself persists (the stored reading's `open_question`, `CONDITIONS_NOT_KEPT`).
+        const levelRefusal = conditionsRefusedBasis(levelBasisArgs, levelBasis);
         return {
           ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
           goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
@@ -3820,7 +3826,8 @@ function admitOnce(
               }
             : {}),
           ...(observed_state !== undefined ? { observed_state } : {}),
-          ...('basis' in levelBasis && levelBasis.basis !== null ? { goal_target_basis: levelBasis.basis } : {}),
+          ...('basis' in levelBasis && levelBasis.basis !== null ? { goal_target_basis: levelBasis.basis }
+            : levelRefusal !== undefined ? { goal_target_basis: levelRefusal } : {}),
         };
       })(),
     },

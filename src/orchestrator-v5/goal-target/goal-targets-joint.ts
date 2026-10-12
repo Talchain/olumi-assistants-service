@@ -199,12 +199,17 @@ export function goalTargetsBlockOf(args: {
   }
   const ordered = [...conditions.filter((c) => c.role === 'target'), ...conditions.filter((c) => c.role === 'limit')];
   const targets = ordered.filter((c) => c.role === 'target');
+  // ⛔ RE-SCOPE 2 (R5-5 (b); DL ruling): a stated TARGET the Run did not send (no row, so no threshold reached the engine) is
+  // never left out of a joint that claims every target — the joint waits, as for a figure not preserved.
+  const unsentTargets = stored.filter((r) => typeof r.constraint_id === 'string' && targetIds.has(r.constraint_id)
+    && !sent.some((x) => x.constraint_id === r.constraint_id));
   // The goal's own target is one of the joint's conditions only when its own row was sent. A goal whose target is a CHANGE
   // has no such row (`admit-model.ts` writes it for a level target only): the joint would leave the goal out, so it waits.
   const goalNode = nodes.find((x) => x.kind === 'goal');
   const goalLabel = labelOf(goalNode?.id);
   const goalStates = typeof goalNode?.id === 'string' && finite(readGoalRecord(args.graph, goalNode.id)?.target?.raw);
-  if (goalNode !== undefined && goalLabel !== undefined && goalStates
+  const goalRowStored = stored.some((r) => typeof r.constraint_id === 'string' && targetIds.has(r.constraint_id) && r.node_id === goalNode?.id);
+  if (goalNode !== undefined && goalLabel !== undefined && goalStates && !goalRowStored
     && !targets.some((t) => t.node_id === goalNode.id) && !unsupported.includes(goalLabel)) unsupported.unshift(goalLabel);
   // ⛔ Amendment 7: a LEVEL target read against OLUMI's own starting value is the most sensitive to it, and the goal's own
   // such target is withheld at admission (`admit-model.ts`, the kept guard). The same holds for every target row: its own
@@ -246,20 +251,21 @@ export function goalTargetsBlockOf(args: {
       ...(Object.keys(rounding).length > 0 ? { display_rounding_by_option: rounding } : {}) }];
   });
 
-  const n = Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2);
+  const n = Math.max(ordered.length + unsupported.length + unsentTargets.length + (unnamed ? 1 : 0), 2);
   const withheld = (reason: JointWithholdReason): GoalJoint => ({
     status: 'withheld', reason,
     line: jointWithheldLine(n, reason, unsupported, targets.filter((t) => (reason === 'figure_not_preserved' ? figureLostIds : strictLostIds)
       .has(t.constraint_id)).map((t) => t.clause)),
     // Amendment 6: the bound needs each named target's own chance on the screen, for every compared option.
-    ...(perTarget.length >= 2 && perTarget.length === targets.length && !unnamed && unsupported.length === 0 && ordered.length === targets.length
+    ...(perTarget.length >= 2 && perTarget.length === targets.length && !unnamed && unsupported.length === 0 && unsentTargets.length === 0
+      && ordered.length === targets.length
       && compared.every((id) => perTarget.every((t) => Object.hasOwn(t.pct_by_option, id))) ? { frechet_line: frechetLine(targets.length) } : {}),
   });
   let joint: GoalJoint;
   if (unsupported.length > 0) joint = withheld('target_not_supported');
   else if (unnamed) joint = withheld('condition_not_named');
   else if (strictLost) joint = withheld('strict_not_preserved');
-  else if (figureLostIds.size > 0) joint = withheld('figure_not_preserved');
+  else if (figureLostIds.size > 0 || unsentTargets.length > 0) joint = withheld('figure_not_preserved');
   else if (olumiBase.size > 0) joint = withheld('olumi_base');
   else {
     const pct: Record<string, number> = {};

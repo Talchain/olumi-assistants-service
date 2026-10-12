@@ -150,8 +150,42 @@ export function admitGoalTargetBasis(args: {
   } };
 }
 
+/**
+ * ⛔ RE-SCOPE 2 (R5-5; AIE e58 handback, text simplification): the unsupported-condition face. A reading refused because its
+ * conditions cannot all be kept whole says only that — never the implementation's bounds (how many, how long, one line),
+ * which would have the person reformat conditions the drafter may have written. The bounds stay in validation
+ * (`BASIS_ALSO_REQUIRED_MAX`, `BASIS_CONDITION_MAX`, `conditionsOf`) and in the refusal code (`conditions` / `condition_text`).
+ */
+export function unsupportedConditionWords(metric: string): string {
+  return `No chance of meeting the target for ‘${metric}’ is shown yet: ${CONDITIONS_NOT_KEPT}`;
+}
+
+/**
+ * ⛔ RE-SCOPE 2 (R5-5 (a); DL ruling): the AIE's reason, VERBATIM — the ONE value admission writes into the stored reading's
+ * `open_question` when the reading is refused because its conditions cannot all be kept whole (`conditions` /
+ * `condition_text`), so that the refusal survives save → cold reopen in an existing persisted field: the licence withholds on
+ * any `open_question` (amendment 3), and the open-question gate says THIS sentence — never "can be read more than one way",
+ * never a question whose answer is claimed to restore a chance. The rejected conditions' own text is NOT kept (no new store:
+ * an OPEN residual, DL 12 Oct).
+ */
+export const CONDITIONS_NOT_KEPT = 'Olumi cannot keep every additional condition intact in this analysis.';
+
+/**
+ * The persisted reason for a reading refused for its conditions: the same validated reading WITHOUT any condition (every other
+ * member was valid — conditions are checked last), carrying `CONDITIONS_NOT_KEPT` as its `open_question`. `undefined` for any
+ * other verdict: only this refusal writes it.
+ */
+export function conditionsRefusedBasis(
+  args: Parameters<typeof admitGoalTargetBasis>[0], verdict: { readonly refused: GoalTargetBasisRefusal } | { readonly basis: unknown },
+): GoalTargetBasis | undefined {
+  if (!('refused' in verdict) || (verdict.refused !== 'conditions' && verdict.refused !== 'condition_text') || !isRec(args.drafted)) return undefined;
+  const rest = admitGoalTargetBasis({ ...args, drafted: { ...args.drafted, also_required: null, open_question: null } });
+  return 'basis' in rest && rest.basis !== null ? { ...rest.basis, open_question: CONDITIONS_NOT_KEPT } : undefined;
+}
+
 /** The refusal in the user's words, for the build's ledger. */
 export function goalTargetBasisRefusalWords(metric: string, refusal: GoalTargetBasisRefusal): string {
+  if (refusal === 'conditions' || refusal === 'condition_text') return unsupportedConditionWords(metric);
   const what = {
     reference: 'where the change is measured from (today, or the launch)',
     denominator: 'what the percentage is a percentage of (for example, today\'s level of it)',
@@ -159,8 +193,6 @@ export function goalTargetBasisRefusalWords(metric: string, refusal: GoalTargetB
     period_conflict: 'one period: the target\'s period and its deadline disagree',
     effect_unit: 'the unit each option\'s effect on it is stated in',
     frame: 'whether the target is a level or a change in the quantity\'s own unit',
-    conditions: `the other conditions you set beside it as a list it can keep whole (at most ${BASIS_ALSO_REQUIRED_MAX}), so that none is left out`,
-    condition_text: `each other condition you set beside it kept word for word, on one line of at most ${BASIS_CONDITION_MAX} characters, so that none is changed`,
   }[refusal];
   return `No chance of meeting the target for "${metric}" is shown yet: Olumi needs ${what}, and will not guess it.`;
 }

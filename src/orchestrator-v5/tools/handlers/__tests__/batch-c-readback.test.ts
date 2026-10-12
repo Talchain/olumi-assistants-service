@@ -24,13 +24,15 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { sentDigest } from '../run-input-snapshot.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
-import { goalTargetBasisOf } from '../../../goal-target/goal-target-basis.js';
+import { CONDITIONS_NOT_KEPT, goalTargetBasisOf } from '../../../goal-target/goal-target-basis.js';
 import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { goalChanceTargetCause } from '../../../goal-target/goal-chance-gate.js';
 import { groupedGoalPathLinks } from '../../../compose/grouped-link-sizing.js';
 import { naturalAmountUnitsOf } from '../../../../cee/magnitude/frame-defaulted-links.js';
 import { goalChanceLicenceForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence } from '../../../goal-target/goal-chance-licence.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
+import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
+import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
 type Rec = Record<string, any>;
@@ -570,19 +572,25 @@ describe('CENSUS — goal conditions: the same bytes at admission, in the store,
     expect(hops.covers[0]).toContain('; conversion > 15%; conversion < 15%; spend <= £200,000; ');
   });
 
+  // ⛔ RE-SCOPE 2 (R5-5; AIE e58 text) — CHANGED EXPECTATION: the face says exactly the AIE's sentence; the bounds (20
+  // conditions, 500 characters, one line) stay in validation only and never reach the person's words.
+  const UNSUPPORTED = 'No chance of meeting the target for ‘Productivity’ is shown yet: Olumi cannot keep every additional condition intact in this analysis.';
   it.each([
-    ['more conditions than can be kept whole (21)', Array.from({ length: 21 }, (_, i) => `condition number ${i + 1} holds`),
-      'as a list it can keep whole (at most 20), so that none is left out'],
-    ['a condition too long to keep word for word (501 characters)', ['code quality maintained', `conversion > 15% ${'x'.repeat(484)}`],
-      'kept word for word, on one line of at most 500 characters, so that none is changed'],
-    ['a condition over two lines', ['code quality maintained', 'conversion > 15%\nwithin six months'],
-      'kept word for word, on one line of at most 500 characters, so that none is changed'],
-  ])('%s refuses the WHOLE reading, with the reason — never a subset, never a changed condition', (_name, also, why) => {
+    ['more conditions than can be kept whole (21)', Array.from({ length: 21 }, (_, i) => `condition number ${i + 1} holds`)],
+    ['a condition too long to keep word for word (501 characters)', ['code quality maintained', `conversion > 15% ${'x'.repeat(484)}`]],
+    ['a condition over two lines', ['code quality maintained', 'conversion > 15%\nwithin six months']],
+  ])('%s refuses the WHOLE reading, with the reason — never a subset, never a changed condition', (_name, also) => {
     const admitted = admitCandidateModel(hiringWith(also)) as unknown as Rec;
     const goal = node(admitted, 'productivity');
-    expect(goal.goal_target_basis).toBeUndefined();
+    // ⛔ RE-SCOPE 2 (R5-5 (a), DL ruling) — CHANGED EXPECTATION: the refused reading is no longer simply absent. Admission keeps
+    // the goal's reading WITHOUT any condition (never a subset) and carries the AIE's sentence on the existing carrier
+    // (`goal_target_basis.open_question` = `CONDITIONS_NOT_KEPT`), so the Run's gate says why no chance is shown after a reopen.
+    expect(goal.goal_target_basis).toMatchObject({ open_question: CONDITIONS_NOT_KEPT });
+    expect(goal.goal_target_basis.also_required ?? null).toBeNull();
     expect(goal).not.toHaveProperty('goal_threshold');
-    expect(JSON.stringify(admitted.loss ?? admitted.not_represented ?? admitted)).toContain(why);
+    const reasons = ((admitted.loss ?? []) as Rec[]).map((l) => l.reason);
+    expect(reasons).toContain(UNSUPPORTED);
+    expect(JSON.stringify(reasons)).not.toMatch(/at most 20|500 characters|one line|word for word|keep whole/);
   });
 });
 
@@ -714,5 +722,73 @@ describe('RE-SCOPE 2 R5-1 — the checker\'s case: Olumi\'s setting on the SCORE
     const faces = goalChanceCellFacesForAgent(view, reloaded, true);
     expect(faces.get('ai_planning_plus_advertising')).toMatch(/^‘AI planning plus advertising’: about 45% chance of ‘New customers’ being at least 20 customers and ‘Conversion rate’ being above 15% .*, in this model, using Olumi's estimates for 1 option setting \(see Check estimates\)\.$/);
     expect(faces.get('hire_a_marketing_manager')).not.toMatch(/Olumi's estimates/);
+  });
+});
+
+// ── RE-SCOPE 2 R5-5 (DL rulings 1 and 2): a reading refused FOR ITS CONDITIONS, through the real path ──────────────────────
+// The real constructor (`buildModelFromBrief`, scripted drafter) → admission → stored bytes → the production loader → the
+// Run handler's own request → the licence, the gate and the screen. The drafter keeps 21 conditions beside the target (more
+// than can be kept whole), one of them NOT in the brief ("no releases on weekends").
+// Hand-written expectations: the refused reading sends NO threshold, so no chance of meeting that target exists on the Run.
+const TWENTY_ONE = [...Array.from({ length: 20 }, (_, i) => `condition number ${i + 1} holds`), 'no releases on weekends'];
+const LEVEL_BRIEF = CAPACITY_BRIEF.replace('Goal: development capacity at least 10 percentage points higher than today at three months.',
+  'Goal: development capacity at least 85% at three months.');
+const NOT_KEPT = 'Not shown. Olumi cannot keep every additional condition intact in this analysis.';
+const levelDraft = (also: readonly string[] | null): Rec => {
+  const d = capacityDraft();
+  Object.assign(d.goal as Rec, { frame: 'level', value: 85 });
+  (d.goal as Rec).basis = { ...((d.goal as Rec).basis as Rec), denominator: null, also_required: also };
+  return d;
+};
+async function refusedRun(brief: string, draft: Rec): Promise<{ payload: Rec; result: Rec; view: Rec; reloaded: Rec }> {
+  const { bytes } = await constructedBytes(brief, draft);
+  expect(LEVEL_BRIEF).not.toContain('no releases on weekends');
+  return runAndRead(bytes, capacityAnswer);
+}
+const notTestable = (result: Rec): Rec[] => ((result.enrichment.inference_warnings ?? []) as Rec[]).filter((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+
+describe('RE-SCOPE 2 R5-5 — a reading refused for its conditions survives the reopen as "no chance", said truly', () => {
+  it('RED on e58b8dbd (LEVEL target): no threshold is sent, so no chance is licensed; the gate says the AIE\'s sentence on every cell', async () => {
+    const { payload, result, view, reloaded } = await refusedRun(LEVEL_BRIEF, levelDraft(TWENTY_ONE));
+    const goal = node(reloaded, 'development_capacity');
+    expect(goal).not.toHaveProperty('goal_threshold');
+    expect(goal.goal_target_basis).toMatchObject({ open_question: CONDITIONS_NOT_KEPT });
+    expect(node(payload.graph, 'development_capacity')).not.toHaveProperty('goal_threshold');
+    // e58b8dbd licensed 46% / 31% "chance of meeting your goal" here — scored on no target the person set.
+    expect(goalChanceLicenceForAgent(view) ?? null).toBeNull();
+    expect(notTestable(result)).toEqual([expect.objectContaining({ message: NOT_KEPT, detail: expect.objectContaining({ reason: 'conditions_not_kept' }) })]);
+    expect(((result.enrichment.inference_warnings ?? []) as Rec[]).map((w) => w.code)).not.toContain('GOAL_FIGURES_PLACEHOLDER_PATH');
+    const cells = projectCanonicalAnalysisCells(view as never, reloaded);
+    for (const id of ['hire_a_tech_lead', 'hire_two_developers']) {
+      expect(cells.find((c) => c.option_id === id)!.cell, id).toMatchObject({ kind: 'withheld', why: NOT_KEPT });
+    }
+    expect(cells.filter((c) => c.cell.kind === 'figure')).toEqual([]);
+    for (const c of cells.filter((x) => x.cell.kind === 'withheld')) expect((c.cell as Rec).why, c.option_id).toBe(NOT_KEPT);
+    expect([...goalChanceCellFacesForAgent(view, reloaded, true)]).toEqual([]);
+    // The Agent's chat says the same sentence, as a statement — never a question, never an invitation to size a link.
+    expect(goalChanceWithheldForAgent(view, reloaded)).toMatchObject({ withheld: true, say: CONDITIONS_NOT_KEPT });
+    expect(JSON.stringify([...goalChanceCellFacesForAgent(view, reloaded, true), goalChanceNotesForAgent(view, reloaded, true)])).not.toMatch(/\d+%/);
+  });
+
+  it('CONTROL (LEVEL target, no conditions): the threshold is sent (0.85) and the chance is licensed on it', async () => {
+    const { payload, view, reloaded } = await refusedRun(LEVEL_BRIEF, levelDraft(null));
+    expect(node(payload.graph, 'development_capacity').goal_threshold).toBe(0.85);
+    expect(goalChanceLicenceForAgent(view)).toBeDefined();
+    const faces = goalChanceCellFacesForAgent(view, reloaded, true);
+    expect(faces.get('hire_a_tech_lead')).toMatch(/^‘Hire a tech lead’: about 46% chance of ‘Development capacity’ being at least 85% at three months, in this model/);
+    expect(faces.get('hire_two_developers')).toMatch(/^‘Hire two developers’: about 31% chance of ‘Development capacity’ being at least 85% at three months, in this model/);
+  });
+
+  it('RED on e58b8dbd (CHANGE frame): the conditions sentence wins over the placeholder-path warning — nothing false beside it', async () => {
+    const draft = capacityDraft();
+    (draft.goal as Rec).basis = { ...((draft.goal as Rec).basis as Rec), also_required: TWENTY_ONE };
+    const { result, view, reloaded } = await refusedRun(CAPACITY_BRIEF, draft);
+    expect(goalChanceLicenceForAgent(view) ?? null).toBeNull();
+    expect(notTestable(result)).toEqual([expect.objectContaining({ message: NOT_KEPT })]);
+    expect(((result.enrichment.inference_warnings ?? []) as Rec[]).map((w) => w.code)).not.toContain('GOAL_FIGURES_PLACEHOLDER_PATH');
+    expect(goalChanceWithheldForAgent(view, reloaded)).toMatchObject({ withheld: true, say: CONDITIONS_NOT_KEPT });
+    for (const c of projectCanonicalAnalysisCells(view as never, reloaded).filter((x) => x.cell.kind === 'withheld')) {
+      expect((c.cell as Rec).why, c.option_id).toBe(NOT_KEPT);
+    }
   });
 });
