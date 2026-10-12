@@ -80,7 +80,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { quoteBindsFactorFigure, verifiedFactorLevel } from './verified-option-setting.js';
+import { quoteBindsFactorFigure, verifiedFactorLevel, verifiedOptionSetting } from './verified-option-setting.js';
 
 const MAX_ID = 100;
 
@@ -3072,31 +3072,40 @@ function withGoalTargetRows(
  * ⭐ RECOVERY BATCH C, L2 — NO LAST-WINS (SYS3 trace #94 6115410093; PL 6115488243). The drafter may write one option's
  * level on one factor twice: the user's stated addition (prepared into `derived_total`: a stated baseline plus the stated
  * change, 6 + 2 = 8) and its own absolute duplicate (8, `ai_proposed`). Keying cells by factor let the LAST entry win, so
- * the duplicate silently relabelled the user's total as Olumi's. One entry is kept per factor, by what it rests on:
- *   · a user-grounded derivation (`derived_total`, explicit) over the user's stated level (explicit) over Olumi's own
- *     derivation over Olumi's own figure — whatever their order;
- *   · two USER entries (explicit, either kind) that disagree are a conflict the user resolves: NO level is set, and the
- *     option is said to set the factor to both figures (never a silent overwrite);
- *   · among Olumi's own entries the higher-ranked stays; equal ranks keep the first written (they are Olumi's either way).
- * Returns the kept entries (by identity). Entries on a factor written once pass through untouched.
+ * the duplicate silently relabelled the user's total as Olumi's. One entry is kept per factor, by what it rests on.
+ *
+ * ⛔ A DRAFTER'S `explicit` LABEL IS NOT A USER FIGURE (independent check C-cee r1, item 2). Only an entry `bound` to the
+ * brief counts as the user's: the caller's L1/L3 binding (a derived total's baseline verified AND its addition written
+ * about that factor; an absolute level's own quote, quantity and role, `verifiedOptionSetting`). So:
+ *   · a bound derivation over a bound level over an unbound derivation over anything else — whatever their order;
+ *   · two BOUND entries that disagree are a conflict the user resolves: NO level is set, and the option is said to set
+ *     the factor to both figures (never a silent overwrite). Unbound entries never make a conflict;
+ *   · an unbound entry that is kept is Olumi's (`ai_proposed`), whatever the drafter called it; equal ranks keep the first.
+ * Returns each kept entry (by identity) mapped to the entry admitted for it. A factor written once passes through untouched.
  */
-function oneLevelPerFactor(
+export function oneLevelPerFactor(
   o: CandidateModel['options'][number], loss: RepairEntry[], ids: ReadonlyMap<string, string>,
-): ReadonlySet<NonNullable<CandidateModel['options'][number]['interventions']>[number]> {
+  bound: (iv: NonNullable<CandidateModel['options'][number]['interventions']>[number]) => boolean,
+): ReadonlyMap<NonNullable<CandidateModel['options'][number]['interventions']>[number], NonNullable<CandidateModel['options'][number]['interventions']>[number]> {
   type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
   const all = (o.interventions ?? []) as Iv[];
+  const boundOf = new Map<Iv, boolean>();
+  const isBound = (iv: Iv): boolean => {
+    if (!boundOf.has(iv)) boundOf.set(iv, iv.provenance === 'explicit' && bound(iv));
+    return boundOf.get(iv)!;
+  };
   const rank = (iv: Iv): number => {
     const derived = (iv as { derived_total?: unknown }).derived_total === true;
-    return iv.provenance === 'explicit' ? (derived ? 4 : 3) : derived ? 2 : 1;
+    return isBound(iv) ? (derived ? 4 : 3) : derived ? 2 : 1;
   };
-  const kept = new Set<Iv>();
+  const kept = new Map<Iv, Iv>();
   const byFactor = new Map<string, Iv[]>();
   for (const iv of all) {
     const key = ids.get(iv.factor_label) ?? `unresolved:${iv.factor_label}`;
     byFactor.set(key, [...(byFactor.get(key) ?? []), iv]);
   }
   for (const [key, group] of byFactor) {
-    if (group.length === 1 || key.startsWith('unresolved:')) { for (const iv of group) kept.add(iv); continue; }
+    if (group.length === 1 || key.startsWith('unresolved:')) { for (const iv of group) kept.set(iv, iv); continue; }
     const users = group.filter((iv) => rank(iv) >= 3);
     const values = [...new Set(users.map((iv) => iv.value))];
     if (values.length > 1) {
@@ -3111,7 +3120,8 @@ function oneLevelPerFactor(
       continue;
     }
     const best = Math.max(...group.map(rank));
-    kept.add(group.find((iv) => rank(iv) === best)!);
+    const chosen = group.find((iv) => rank(iv) === best)!;
+    kept.set(chosen, best < 3 && chosen.provenance === 'explicit' ? { ...chosen, provenance: 'ai_proposed' } as Iv : chosen);
   }
   return kept;
 }
@@ -4210,10 +4220,29 @@ function admitOnce(
     }
     const bundle: Record<string, ConstructedLevel> = {};
     // ⭐ Recovery Batch C, L2 (SYS3 #94 6115410093; PL 6115488243): ONE level per factor, never the last entry written.
-    const kept = oneLevelPerFactor(o, loss, ids);
-    for (const iv of o.interventions ?? []) {
-      if (!kept.has(iv)) {
-        const conflicted = ids.get(iv.factor_label);
+    // ⛔ Only an entry bound to the brief is the user's (C-cee r1 item 2): a derived total whose baseline the brief states
+    // (L1, `verifiedLevels`) and whose addition it writes about this factor; an absolute level by its own quote (L3).
+    const boundToBrief = (iv: NonNullable<CandidateModel['options'][number]['interventions']>[number]): boolean => {
+      const owners = model.factors.filter((f) => f.label === iv.factor_label);
+      if (owners.length !== 1) return false;
+      const factor = owners[0]!;
+      if ((iv as { derived_total?: unknown }).derived_total === true) {
+        const base = factor.baseline_value;
+        return verifiedLevels.has(factor) && typeof base === 'number' && Number.isFinite(iv.value - base)
+          && sizeWritten(Math.abs(iv.value - base), factor.unit ?? iv.unit, {
+            target: [factor.label],
+            others: [model.goal.metric, ...model.factors.map((f) => f.label), ...model.outcomes.map((x) => x.label), ...model.risks.map((x) => x.label)]
+              .filter((q) => q !== factor.label),
+          });
+      }
+      const alone = { ...o, interventions: (o.interventions ?? []).filter((other) => other === iv || other.factor_label !== iv.factor_label) };
+      return verifiedOptionSetting(model, alone, iv, brief);
+    };
+    const kept = oneLevelPerFactor(o, loss, ids, boundToBrief);
+    for (const drafted of o.interventions ?? []) {
+      const iv = kept.get(drafted);
+      if (iv === undefined) {
+        const conflicted = ids.get(drafted.factor_label);
         if (conflicted !== undefined) actsOn.add(conflicted);
         continue;
       }

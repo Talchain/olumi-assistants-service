@@ -15,8 +15,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, oneLevelPerFactor, type CandidateModel } from '../admit-model.js';
 import { verifiedFactorLevel } from '../verified-option-setting.js';
+import { figureTheUserWroteFor } from '../stated-by-user.js';
 import { prepareProvisionalCandidate } from '../runtime/build-model.js';
 
 type Rec = Record<string, any>;
@@ -27,8 +28,11 @@ const HIRING_BRIEF = 'Should I hire a Tech lead or two developers to increase pr
 const DEVS_SENTENCE = 'We currently have six mid-weight developers, so we\'re lacking leadership.';
 const raw = (): CandidateModel => JSON.parse(readFileSync(new URL('./fixtures/hiring-drafter-raw-3ad9cc58.json', import.meta.url), 'utf8'));
 const devsOf = (m: CandidateModel): Rec => (m.factors as unknown as Rec[]).find((f) => f.label === 'Mid-weight developers')!;
+// The brief readers injected exactly as production injects them (build-model.ts `admitForBuild`): a figure the brief writes
+// about a quantity, strict and scoped against every other quantity (`figureTheUserWroteFor`).
 const admitted = (m: CandidateModel, brief = HIRING_BRIEF): Rec =>
-  admitCandidateModel(prepareProvisionalCandidate(m, brief).candidate, {}, brief) as unknown as Rec;
+  admitCandidateModel(prepareProvisionalCandidate(m, brief).candidate, {}, brief, undefined, undefined, undefined,
+    (value, unit, scope) => figureTheUserWroteFor(value, unit, brief, { target: scope.target, others: scope.others, strict: true })) as unknown as Rec;
 const nodeOf = (g: Rec, label: string): Rec => (g.nodes as Rec[]).find((n) => n.label === label)!;
 const cellOf = (g: Rec, option: string, factor: string): Rec => nodeOf(g, option).interventions?.[nodeOf(g, factor).id];
 
@@ -114,7 +118,23 @@ describe('L2 — no last-wins: the checked baseline plus the stated addition is 
     expect(nine(true)).toMatchObject({ raw_value: 8, source: 'brief_extraction' });
   });
 
-  it('RED: two genuine but conflicting user settings are said, never silently overwritten — no level is set', () => {
+  // Batch C: independent check r1 item 2 — a drafter's `explicit` label is not a user figure; only a figure BOUND to the brief
+  // (its quote, quantity and role) is. The brief says six plus two, so 8 is the user's derived total; 8/9 totals with no
+  // evidence are NOT the user's, so they never make a "conflict" and are never credited.
+  it('RED (r1 item 2): unsupported 8 and 9 "explicit" totals beside the brief\'s six plus two — the user\'s derived 8 is kept, 9 is never credited, no conflict', () => {
+    const m = raw();
+    const two = twoOf(m);
+    two.interventions = [
+      ...two.interventions.filter((iv: Rec) => !(iv.factor_label === 'Mid-weight developers' && iv.value_kind === 'absolute')),
+      { factor_label: 'Mid-weight developers', value: 8, value_kind: 'absolute', unit: 'headcount', provenance: 'explicit', stated_evidence: null },
+      { factor_label: 'Mid-weight developers', value: 9, value_kind: 'absolute', unit: 'headcount', provenance: 'explicit', stated_evidence: null },
+    ];
+    const g = admitted(m);
+    expect(cellOf(g, 'Hire two developers', 'Mid-weight developers')).toMatchObject({ raw_value: 8, source: 'brief_extraction', value_confidence: 'medium' });
+    expect(((g.loss ?? []) as Rec[]).map((l) => String(l.reason)).join(' ')).not.toContain('to both');
+  });
+
+  it('RED (r1 item 2): 8 and 9 "explicit" totals with no evidence and no stated addition are NOT user figures — the level kept is Olumi\'s', () => {
     const m = raw();
     const two = twoOf(m);
     two.interventions = [
@@ -123,9 +143,17 @@ describe('L2 — no last-wins: the checked baseline plus the stated addition is 
       ...two.interventions.filter((iv: Rec) => iv.factor_label !== 'Mid-weight developers'),
     ];
     const g = admitted(m);
-    expect(cellOf(g, 'Hire two developers', 'Mid-weight developers')).toBeUndefined();
-    const said = ((g.loss ?? []) as Rec[]).map((l) => String(l.reason)).join(' ');
-    expect(said).toContain('“Hire two developers” sets “Mid-weight developers” to both 8 and 9');
+    expect(cellOf(g, 'Hire two developers', 'Mid-weight developers')).toMatchObject({ source: 'cee_hypothesis' });
+    expect(((g.loss ?? []) as Rec[]).map((l) => String(l.reason)).join(' ')).not.toContain('to both');
+  });
+
+  it('two genuine (brief-bound) user settings that disagree are said, never silently overwritten — no level is set', () => {
+    const iv = (value: number) => ({ factor_label: 'Mid-weight developers', value, value_kind: 'absolute', unit: 'headcount', provenance: 'explicit', stated_evidence: null });
+    const option = { label: 'Hire two developers', provenance: 'explicit', interventions: [iv(8), iv(9)] } as unknown as CandidateModel['options'][number];
+    const loss: Rec[] = [];
+    const kept = oneLevelPerFactor(option, loss as never, new Map([['Mid-weight developers', 'mid_weight_developers']]), () => true);
+    expect(kept.size).toBe(0);
+    expect(loss.map((l) => l.reason)).toEqual(['“Hire two developers” sets “Mid-weight developers” to both 8 and 9 headcount, so no level was set: say which one you mean.']);
   });
 });
 
