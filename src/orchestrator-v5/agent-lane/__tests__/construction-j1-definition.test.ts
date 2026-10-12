@@ -49,9 +49,17 @@ describe('recorded J1 definitions survive admission and exact-link frame refit',
     if (mutation === 'unit') record.candidate.outcomes.find((n: Json) => n.label === EXISTING).unit = 'hours/month';
     if (mutation === 'sign') link.effect_amount = -1;
     if (mutation === 'untagged') link.definitional = false;
-    const { edge } = edgeFrom(await build(record), EXISTING);
+    const { edge, goal } = edgeFrom(await build(record), EXISTING);
     expect(edge.provenance?.definitional).not.toBe(true);
-    // Ordinary oversized estimates still fail the representability check.
-    if (mutation === 'ratio' || mutation === 'untagged') expect(isPlaceholderLink(edge)).toBe(true);
+    // AIE 6124148847 (the point-only reframe, ACKed): refused as a definition, the link is Olumi's ordinary estimate, and
+    // the user's level binds the goal's frame only to contain it, so the estimate is kept at its own size (never clamped)
+    // while the user's £120,000 level and £150,000 target stay exact.
+    if (mutation === 'ratio' || mutation === 'untagged') {
+      expect(isPlaceholderLink(edge)).toBe(false);
+      expect(edge.provenance).toMatchObject({ magnitude: 'olumi_estimate', natural_effect: { amount: mutation === 'ratio' ? 0.9 : 1, per_source_change: 1 } });
+      expect(edge.provenance).not.toHaveProperty('clamped_from');
+      expect(Math.abs(edge.strength.mean)).toBeLessThanOrEqual(1);
+      expect([goal.observed_state?.raw_value, goal.goal_threshold_raw]).toStrictEqual([120000, 150000]);
+    }
   });
 });
