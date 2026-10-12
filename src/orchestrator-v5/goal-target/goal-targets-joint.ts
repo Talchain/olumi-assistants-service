@@ -166,7 +166,7 @@ export function goalTargetsBlockOf(args: {
     return n?.kind !== 'goal' && os !== undefined && (os.source === 'cee_inference' || os.extractionType === 'inferred');
   }).map((t) => t.constraint_id));
 
-  const records = readOptionResultSources(args.envelope).find((s) => s.length > 0) ?? [];
+  const records = (isRec(args.envelope) ? readOptionResultSources(args.envelope) : []).find((s) => s.length > 0) ?? [];
   const recordOf = new Map<string, Rec>();
   for (const r of records) {
     const id = optionIdOf(r);

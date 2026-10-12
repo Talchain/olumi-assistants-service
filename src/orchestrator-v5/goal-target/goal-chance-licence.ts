@@ -265,7 +265,7 @@ export function goalChanceLicenceOf(
   const held = target.held ?? (changeFrame === undefined ? undefined
     : resolveGoalDirection(graph, goalId)?.direction === 'minimise' ? '<=' : '>=');
   const comparator = held === undefined ? undefined : COMPARATOR[held];
-  if (comparator === undefined || typeof target.unit !== 'string' || target.unit.trim() === '') return null;
+  if (held === undefined || comparator === undefined || typeof target.unit !== 'string' || target.unit.trim() === '') return null;
   // ⭐ Ruling 21 / amendments 7, 10: a relative change needs today's level; on OLUMI's own starting value it is estimate_only.
   const goalState = isRec(goal?.observed_state) ? goal!.observed_state : undefined;
   const base = changeFrame === 'change_rel' && finite(goalState?.raw_value) ? goalState!.raw_value as number : undefined;
