@@ -80,8 +80,10 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
   // ⭐ Condition 6 of a correct chance / r1 item 6 (DL, 12 Oct): a RANGE rests on the same Olumi inputs as a point and says
   // so in the point's own words — the same census (`goalChanceEstimateCounts`) over this Run's options and scored goal, with
   // THIS option's own settings only. A deadline range keeps its own estimate words (`shareOptionEstimateWords`).
+  // ⛔ Re-scope (r2 BLOCKING 4): over EVERY target of the Run's event (the joint's conditions), as the licence counts its points.
+  const otherTargets = (facts.goal_targets?.conditions ?? []).filter((x) => x.role === 'target').map((x) => x.node_id);
   const rangeCounts = Object.keys(facts.goal_chance_range_display ?? {}).length === 0 ? undefined
-    : goalChanceEstimateCounts(graph, facts.goal_chance_licence?.option_ids, facts.goal_chance_licence?.goal_node_id);
+    : goalChanceEstimateCounts(graph, facts.goal_chance_licence?.option_ids, facts.goal_chance_licence?.goal_node_id, otherTargets);
   const rangeInputsOf = (optionId: string): { readonly words: string; readonly links: number } | undefined => {
     const words = rangeCounts === undefined ? undefined
       : olumiEstimateWords({ links: rangeCounts.links, values: rangeCounts.values, settings: rangeCounts.settingsByOption[optionId] ?? 0 });

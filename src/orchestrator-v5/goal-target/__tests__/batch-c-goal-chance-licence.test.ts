@@ -883,3 +883,114 @@ describe('AIE status-quo disposition — AND: the joint and its marginals keep e
     for (const t of l.targets!.per_target) expect(t.pct_by_option).not.toHaveProperty('carry_on');
   });
 });
+
+// ── Re-scope (DL after independent check r2, BLOCKING 4): estimate attribution over EVERY target in the event ────────────
+// The marketing joint rests on every input feeding ANY of its targets. Each target has its own lever: ‘Outreach’ feeds ‘New
+// customers’ (Hire a marketing manager), ‘Ad quality’ feeds ‘Conversion rate’ (AI planning plus advertising). Every input is
+// the user's except the ONE Olumi input under test, on ONE target's path.
+type EstimateKind = 'link' | 'value' | 'setting' | 'target_value';
+const USERS_LEVEL = (raw: number, unit: string): Rec => ({ value: raw / 100, raw_value: raw, cap: 100, unit, source: 'brief_extraction', extractionType: 'explicit' });
+const OLUMIS_LEVEL = (raw: number, unit: string): Rec => ({ value: raw / 100, raw_value: raw, cap: 100, unit, source: 'cee_inference', extractionType: 'inferred' });
+const USERS_LINK = { strength: { mean: 0.3, std: 0.05 }, exists_probability: 1, effect_direction: 'positive', provenance: { source: 'user_specified', magnitude: 'user_stated' } };
+const OLUMIS_LINK = { strength: { mean: 0.3, std: 0.05 }, exists_probability: 1, effect_direction: 'positive', provenance: { source: 'ai_proposed', magnitude: 'olumi_estimate' } };
+const LEVER = { new_customers: { lever: 'outreach', option: 'hire_manager' }, conversion_rate: { lever: 'ad_quality', option: 'ai_plus_ads' } } as const;
+const marketingWithInputs = (estimate?: { readonly target: keyof typeof LEVER; readonly kind: EstimateKind }): Rec => {
+  const g = marketingGraph();
+  const olumi = (target: keyof typeof LEVER, kind: EstimateKind): boolean => estimate?.target === target && estimate.kind === kind;
+  const nodes = g.nodes as Rec[];
+  const conv = nodes.find((n) => n.id === 'conversion_rate')!;
+  conv.observed_state = olumi('conversion_rate', 'target_value') ? OLUMIS_LEVEL(10, '%') : USERS_LEVEL(10, '%');
+  for (const target of ['new_customers', 'conversion_rate'] as const) {
+    const { lever, option } = LEVER[target];
+    nodes.push({ id: lever, kind: 'factor', label: lever === 'outreach' ? 'Outreach' : 'Ad quality',
+      observed_state: olumi(target, 'value') ? OLUMIS_LEVEL(40, 'points') : USERS_LEVEL(40, 'points') });
+    nodes.find((n) => n.id === option)!.interventions = { [lever]: { value: 0.6, raw_value: 60,
+      source: olumi(target, 'setting') ? 'cee_hypothesis' : 'brief_extraction', target_match: { node_id: lever } } };
+    (g.edges as Rec[]).push({ from: option, to: lever, strength: { mean: 1, std: 0 } },
+      { from: lever, to: target, ...(olumi(target, 'link') ? OLUMIS_LINK : USERS_LINK) });
+  }
+  return g;
+};
+const JOINT_FACE = (option: 'hire_manager' | 'ai_plus_ads', inputs?: string): string =>
+  `‘${option === 'hire_manager' ? 'Hire a marketing manager' : 'AI planning plus advertising'}’: about ${option === 'hire_manager' ? 35 : 48}% chance of `
+  + '‘New customers’ being at least 20 customers and ‘Conversion rate’ being above 15% over the first three months after launch, in this model'
+  + `${inputs === undefined ? '' : `, using Olumi's estimates for ${inputs} (see Check estimates)`}.`;
+
+describe('RE-SCOPE 4 — the joint is provisional when an Olumi input feeds ANY target (one census over every target)', () => {
+  it('CONTROL: every input the user\'s → the joint (35%, 48%) is not provisional, and its sentences carry no estimate words', () => {
+    const g = marketingWithInputs();
+    const l = licenceFor(marketingRun(), g)!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48 });
+    expect(l.provisional).toBeUndefined();
+    expect(l).not.toHaveProperty('olumi_estimate_link_count');
+    expect(l).not.toHaveProperty('olumi_estimate_value_count');
+    expect(l).not.toHaveProperty('olumi_estimate_settings_by_option');
+  });
+
+  it('RED on 2ecbae5 (r2 BLOCKING 4, the checker\'s case): Olumi\'s baseline, setting and relationship feeding CONVERSION → the joint says so', () => {
+    const g = marketingWithInputs();
+    (g.nodes as Rec[]).find((n) => n.id === 'ad_quality')!.observed_state = OLUMIS_LEVEL(40, 'points');
+    (g.nodes as Rec[]).find((n) => n.id === 'ai_plus_ads')!.interventions = { ad_quality: { value: 0.6, raw_value: 60, source: 'cee_hypothesis', target_match: { node_id: 'ad_quality' } } };
+    (g.edges as Rec[]).find((e) => e.from === 'ad_quality' && e.to === 'conversion_rate')!.provenance = OLUMIS_LINK.provenance;
+    const constraints = { storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints) };
+    const l = licenceFor(marketingRun(), g)!;
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48 });
+    expect(l.provisional).toBe(true);
+    expect(l).toMatchObject({ olumi_estimate_link_count: 1, olumi_estimate_value_count: 1, olumi_estimate_settings_by_option: { ai_plus_ads: 1 } });
+    const env = withGoalChanceLicence(marketingRun(), g, 'new_customers', () => false, undefined, g, constraints);
+    const faces = goalChanceCellFacesForAgent({ type: 'analysis_result', enrichment: env }, g, true);
+    expect(faces.get('ai_plus_ads')).toBe(JOINT_FACE('ai_plus_ads', '1 starting value, 1 option setting and 1 relationship'));
+    // The other option's result never carries ‘AI planning plus advertising’'s own setting.
+    expect(faces.get('hire_manager')).toBe(JOINT_FACE('hire_manager', '1 starting value and 1 relationship'));
+  });
+
+  it('RED on 2ecbae5 (r2 BLOCKING 4): an option whose goal-alone chance is withheld still has ITS setting said on the quoted joint', () => {
+    const g = marketingWithInputs({ target: 'conversion_rate', kind: 'setting' });
+    const run = marketingRun();
+    delete (run.option_comparison as Rec[]).find((r) => r.option_id === 'ai_plus_ads')!.probability_of_goal;
+    const l = licenceFor(run, g)!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48 });
+    expect(l.provisional).toBe(true);
+    expect(l.olumi_estimate_settings_by_option).toEqual({ ai_plus_ads: 1 });
+  });
+
+  // CENSUS: every target node in the licensed event is covered — for each target, each kind of Olumi input on its path alone.
+  const cases: [keyof typeof LEVER, EstimateKind, Rec][] = [
+    ['new_customers', 'link', { olumi_estimate_link_count: 1 }],
+    ['new_customers', 'value', { olumi_estimate_value_count: 1 }],
+    ['new_customers', 'setting', { olumi_estimate_settings_by_option: { hire_manager: 1 } }],
+    ['conversion_rate', 'link', { olumi_estimate_link_count: 1 }],
+    ['conversion_rate', 'value', { olumi_estimate_value_count: 1 }],
+    ['conversion_rate', 'setting', { olumi_estimate_settings_by_option: { ai_plus_ads: 1 } }],
+  ];
+  it.each(cases)('CENSUS: an Olumi %s-path %s alone makes the joint provisional, counted once', (target, kind, counts) => {
+    const g = marketingWithInputs({ target, kind });
+    const l = licenceFor(marketingRun(), g)!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect(l.provisional).toBe(true);
+    expect({
+      ...(l.olumi_estimate_link_count !== undefined ? { olumi_estimate_link_count: l.olumi_estimate_link_count } : {}),
+      ...(l.olumi_estimate_value_count !== undefined ? { olumi_estimate_value_count: l.olumi_estimate_value_count } : {}),
+      ...(l.olumi_estimate_settings_by_option !== undefined ? { olumi_estimate_settings_by_option: l.olumi_estimate_settings_by_option } : {}),
+    }).toEqual(counts);
+  });
+
+  it('CONTROL: an Olumi level on a TARGET itself is never quoted at all — the joint is withheld for it (unchanged)', () => {
+    const l = licenceFor(marketingRun(), marketingWithInputs({ target: 'conversion_rate', kind: 'target_value' }))!;
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'olumi_base' });
+    expect(l.pct_by_option).toEqual({});
+  });
+
+  it('CENSUS: every target node of the licensed event is one the census covers (the joint\'s conditions, by identity)', () => {
+    const g = marketingWithInputs();
+    const l = licenceFor(marketingRun(), g)!;
+    const targetNodes = l.targets!.conditions.filter((x) => x.role === 'target').map((x) => x.node_id).sort();
+    expect(targetNodes).toEqual(['conversion_rate', 'new_customers']);
+    for (const target of targetNodes) {
+      const kinds = cases.filter(([t]) => t === target).map(([, k]) => k);
+      expect(kinds, target).toEqual(expect.arrayContaining(['link', 'value', 'setting']));
+    }
+  });
+});

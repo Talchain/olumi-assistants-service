@@ -475,8 +475,12 @@ export function goalChanceLicenceOf(
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
   const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
   // Amendment 7 (independent check r1 item 6): every Olumi input on the goal paths — links, starting values, option settings.
-  const estimates = licensed.length === 0 ? { links: 0, values: 0, settingsByOption: {} as Readonly<Record<string, number>> }
-    : goalChanceEstimateCounts(graph, option_ids, goalId);
+  // ⛔ Re-scope (r2 BLOCKING 4): on the paths to EVERY target this Run sent (the joint rests on all of them), never only the
+  // scored goal's — one census (`goalChanceEstimateCounts`) over the union.
+  const otherTargets = otherTargetNodeIds(constraints, goalId);
+  const estimates = licensed.length === 0 && otherTargets.length === 0
+    ? { links: 0, values: 0, settingsByOption: {} as Readonly<Record<string, number>> }
+    : goalChanceEstimateCounts(graph, option_ids, goalId, otherTargets);
   const settingsByOption = Object.fromEntries(Object.entries(estimates.settingsByOption).filter(([id, n]) => licensed.includes(id) && n > 0));
   const estimateLinks = estimates.links;
   // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
@@ -523,6 +527,7 @@ export function goalChanceLicenceOf(
     sqByAssumption, sqReading, timingOrdinary: timing.ordinary,
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
     quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, constraints, option_ids,
+    estimates,
   });
 }
 
@@ -539,6 +544,7 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   readonly sqByAssumption: boolean; readonly quantityFrame: 'level' | 'change' | undefined; readonly olumiInputs: boolean;
   readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean; readonly statusQuoLabel: string | undefined;
   readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
+  readonly estimates: GoalChanceEstimates;
 }): GoalChanceLicence {
   const { goalLabel, changeFrame } = c;
   // A level target's period is said only on an at-period-end basis (ruling 12); otherwise today's words, unchanged.
@@ -615,6 +621,23 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   return withSeveralTargets(out, { ...c, basis, alsoRequired });
 }
 
+/** The one census's counts (`goalChanceEstimateCounts`) over every target of this Run's event; settings unfiltered. */
+type GoalChanceEstimates = ReturnType<typeof goalChanceEstimateCounts>;
+
+/**
+ * ⛔ Re-scope (r2 BLOCKING 4): every OTHER target node this Run sent — a stored row of role target that the Run included —
+ * so the estimate census covers each one's paths. The same rows the joint is built from (`goalTargetsBlockOf`).
+ */
+function otherTargetNodeIds(c: GoalChanceConstraintInputs, goalId: unknown): string[] {
+  const stored = Array.isArray(c.storedConstraints) ? c.storedConstraints.filter(isRec) : [];
+  const sent = Array.isArray(c.sentConstraints) ? c.sentConstraints.filter(isRec) : [];
+  return [...new Set(sent.flatMap((r) => {
+    const row = stored.find((x) => x.constraint_id === r.constraint_id && x.role === GOAL_TARGET_ROLE);
+    const id = row === undefined ? undefined : typeof row.node_id === 'string' ? row.node_id : r.node_id;
+    return typeof id === 'string' && id !== goalId ? [id] : [];
+  }))];
+}
+
 const sentTargetRows = (c: GoalChanceConstraintInputs): boolean => {
   const stored = Array.isArray(c.storedConstraints) ? c.storedConstraints.filter(isRec) : [];
   const sent = Array.isArray(c.sentConstraints) ? c.sentConstraints.filter(isRec) : [];
@@ -648,6 +671,8 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   readonly alsoRequired: readonly string[];
   /** The goal's own status-quo reading, and the Run's ordinary timing: each other target is read on its OWN facts. */
   readonly goal: Rec | undefined; readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean;
+  /** Re-scope (r2 BLOCKING 4): the one census over EVERY target's paths, and whether the goal's own base is Olumi's. */
+  readonly estimates: GoalChanceEstimates; readonly estimateOnly: boolean;
 }): GoalChanceLicence {
   // ⭐ AIE status-quo disposition (12 Oct) item 4: a joint and its marginals keep each condition's OWN reference — the
   // primary goal's unchanged reference never attests a secondary target. Each target condition is read on its own checked
@@ -734,8 +759,19 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     ? { withheld_reason_by_option: { [sqId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords(movedNames) } } } : {};
   if (block.joint.status === 'licensed') {
     const quoted = block.joint.pct_by_option;
+    // ⛔ Re-scope (r2 BLOCKING 4): the joint rests on every input feeding ANY of its targets: it is provisional, and says on
+    // what, from the one census over the union of their paths — each quoted option's own Olumi settings only.
+    const { olumi_estimate_link_count: _k, olumi_estimate_value_count: _v, olumi_estimate_settings_by_option: _s, provisional: _p,
+      ...jointKept } = kept;
+    const settings = Object.fromEntries(Object.entries(c.estimates.settingsByOption).filter(([id, n]) => Object.hasOwn(quoted, id) && n > 0));
+    const provisional = c.estimateOnly || kept.provisional === true
+      || c.estimates.links + c.estimates.values + Object.keys(settings).length > 0;
     return {
-      ...kept,
+      ...jointKept,
+      ...(c.estimates.links > 0 ? { olumi_estimate_link_count: c.estimates.links } : {}),
+      ...(c.estimates.values > 0 ? { olumi_estimate_value_count: c.estimates.values } : {}),
+      ...(Object.keys(settings).length > 0 ? { olumi_estimate_settings_by_option: settings } : {}),
+      ...(provisional ? { provisional: true as const } : {}),
       form: 'each',
       pct_by_option: quoted,
       ...(c.option_ids.filter((id) => !Object.hasOwn(quoted, id)).length > 0
