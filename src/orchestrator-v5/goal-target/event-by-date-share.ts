@@ -15,7 +15,12 @@ export interface ExtraShare {
   readonly leadLow: number;
   readonly leadHigh: number;
 }
-export interface ShareParts { readonly team: TeamShare; readonly extra?: ExtraShare }
+/** `extra` is the option's first added part; `furtherExtras` its later starts (E5: "two developers" is two parts, each
+ * with its own lead range and pace). Parts are independent, so their means and variances add. */
+export interface ShareParts { readonly team: TeamShare; readonly extra?: ExtraShare; readonly furtherExtras?: readonly ExtraShare[] }
+export function extrasOf(parts: ShareParts): readonly ExtraShare[] {
+  return parts.extra === undefined ? [] : [parts.extra, ...(parts.furtherExtras ?? [])];
+}
 const clamp = (x: number): number => Math.max(0, Math.min(1, x));
 function bounds(a: number, b: number): void {
   if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) throw new RangeError('Invalid stated range');
@@ -74,23 +79,39 @@ function teamTail(t: TeamShare, threshold: number): number {
  * The integrand is monotone and in [0,1], so the absolute error is <= 1/N
  * for EVERY admissible range, including a lead time straddling D and atoms.
  * N=16384 bounds error by 0.006104 percentage points (<0.05).
+ * Several parts nest one midpoint rule per lead range. The tail stays monotone in every lead, so each level adds at most
+ * 1/N: two ranges at N=4096 bound the error by 0.0488 percentage points (<0.05). A point lead is a shift, not a level.
  */
 export const EXACT_INTEGRATION_STEPS = 16384;
+export const MULTI_PART_STEPS = 4096;
+export const MAX_RANGED_PARTS = 2;
+const isRanged = (x: ExtraShare): boolean => x.leadLow !== x.leadHigh && x.monthlyShare !== 0;
+export function rangedPartCount(extras: readonly ExtraShare[]): number {
+  return extras.filter(isRanged).length;
+}
 export function exactChance(parts: ShareParts, threshold: number): number {
   momentsOfTeam(parts.team);
   if (!Number.isFinite(threshold)) throw new RangeError('Invalid threshold');
-  const x = parts.extra;
-  if (x === undefined) return teamTail(parts.team, threshold);
-  extraShareMoments(x.monthlyShare, x.D, x.leadLow, x.leadHigh);
-  if (x.leadLow === x.leadHigh || x.monthlyShare === 0) {
-    return teamTail(parts.team, threshold - x.monthlyShare * Math.max(0, x.D - x.leadLow));
-  }
+  const extras = extrasOf(parts);
+  for (const x of extras) extraShareMoments(x.monthlyShare, x.D, x.leadLow, x.leadHigh);
+  const ranged = extras.filter(isRanged);
+  if (ranged.length > MAX_RANGED_PARTS) throw new RangeError('Too many lead-time ranges for the exact check');
+  let shifted = threshold;
+  for (const x of extras) if (!isRanged(x)) shifted -= x.monthlyShare * Math.max(0, x.D - x.leadLow);
+  if (ranged.length === 0) return teamTail(parts.team, shifted);
+  const steps = ranged.length === 1 ? EXACT_INTEGRATION_STEPS : MULTI_PART_STEPS;
+  const shifts = ranged.map(x => Float64Array.from({ length: steps }, (_, i) =>
+    x.monthlyShare * Math.max(0, x.D - (x.leadLow + (i + 0.5) * (x.leadHigh - x.leadLow) / steps))));
+  const [first, second] = shifts as [Float64Array, Float64Array | undefined];
   let sum = 0;
-  for (let i = 0; i < EXACT_INTEGRATION_STEPS; i++) {
-    const lead = x.leadLow + (i + 0.5) * (x.leadHigh - x.leadLow) / EXACT_INTEGRATION_STEPS;
-    sum += teamTail(parts.team, threshold - x.monthlyShare * Math.max(0, x.D - lead));
+  for (let i = 0; i < steps; i++) {
+    if (second === undefined) { sum += teamTail(parts.team, shifted - first[i]!); continue; }
+    const t = shifted - first[i]!;
+    let inner = 0;
+    for (let j = 0; j < steps; j++) inner += teamTail(parts.team, t - second[j]!);
+    sum += inner / steps;
   }
-  return sum / EXACT_INTEGRATION_STEPS;
+  return sum / steps;
 }
 
 /** Normal upper tail (A&S 7.1.26 erf approximation, absolute error <1.5e-7). */
@@ -102,12 +123,15 @@ function normalTail(z: number): number {
 export function normalChance(parts: ShareParts, threshold: number): number {
   if (!Number.isFinite(threshold)) throw new RangeError('Invalid threshold');
   const team = momentsOfTeam(parts.team);
-  const extra = parts.extra === undefined ? { mean: 0, sd: 0 } : extraShareMoments(
-    parts.extra.monthlyShare, parts.extra.D, parts.extra.leadLow, parts.extra.leadHigh);
+  let extraMean = 0, extraVariance = 0;
+  for (const x of extrasOf(parts)) {
+    const m = extraShareMoments(x.monthlyShare, x.D, x.leadLow, x.leadHigh);
+    extraMean += m.mean; extraVariance += m.sd ** 2;
+  }
   // ISL draws both the team part and its held +1 coefficient independently.
   // Var(C*T) = Var(T) + Var(C) * E[T²], for E[C]=1 and held sd(C)=0.01.
   const heldCoefficientVariance = 0.01 ** 2 * (team.mean ** 2 + team.sd ** 2);
-  const mean = team.mean + extra.mean, sd = Math.sqrt(team.sd ** 2 + extra.sd ** 2 + heldCoefficientVariance);
+  const mean = team.mean + extraMean, sd = Math.sqrt(team.sd ** 2 + extraVariance + heldCoefficientVariance);
   return sd === 0 ? (mean >= threshold ? 1 : 0) : normalTail((threshold - mean) / sd);
 }
 

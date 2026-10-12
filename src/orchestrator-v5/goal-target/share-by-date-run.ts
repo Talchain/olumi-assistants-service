@@ -2,7 +2,7 @@
 import { draftedTeamPartOf, eventShareCarrierOf, isEventShareForecast, unresolvedEventOptionIds } from './event-by-date-model.js';
 import { goalDeadlineFromRecord, shareByDateGoalOf, soleGoalOf, statedTeamShareOf } from './goal-kind.js';
 import { timeBetween, todayInLondon } from './deadline-date.js';
-import { gate, type ShareGate, type ShareParts } from './event-by-date-share.js';
+import { gate, MAX_RANGED_PARTS, rangedPartCount, type ShareGate, type ShareParts } from './event-by-date-share.js';
 import type { GoalChanceDisplayRounding } from './goal-chance-display.js';
 
 type Rec = Record<string, any>;
@@ -105,11 +105,16 @@ export function sharePartsForOption(graph: unknown, optionId: string): SharePart
     const v = option.interventions[p.from];
     return p.from !== share.team_part_id && (typeof v === 'number' ? v : v?.value) === 1;
   });
-  if (active.length > 1) return null;
   if (active.length === 0) return { team };
-  const c = g.nodes.find((n: Rec) => n.id === active[0]!.from).observed_state.extra_share_by_date;
-  return { team, extra: { monthlyShare: c.monthly_share / 100,
-    D: timeBetween(c.reference_date, share.deadline, 'months'), leadLow: c.lead_low, leadHigh: c.lead_high } };
+  const extras = active.map(p => {
+    const c = g.nodes.find((n: Rec) => n.id === p.from).observed_state.extra_share_by_date;
+    return { monthlyShare: c.monthly_share / 100,
+      D: timeBetween(c.reference_date, share.deadline, 'months'), leadLow: c.lead_low, leadHigh: c.lead_high };
+  });
+  // Each started part keeps its own start; parts are summed, never averaged into one start.
+  if (rangedPartCount(extras) > MAX_RANGED_PARTS) return null;
+  const [extra, ...furtherExtras] = extras;
+  return furtherExtras.length === 0 ? { team, extra } : { team, extra, furtherExtras };
 }
 
 /** Null means unsupported parts, never permission to display a point. */
