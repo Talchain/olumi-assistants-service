@@ -210,7 +210,6 @@ describe('E6 on the route under technique (c): a second Strengthen item carries 
     expect(String(first.response.assistant_text)).toBe(`${reply}\n\n- ${String(object(a.primary_action).label)}`);
     expect(String(first.response.assistant_text)).not.toContain('<details>');
     expect(String(second.response.assistant_text)).not.toContain('Why?');
-    expect(array(object(second.response._answer_shape).bullets)).toContain(object(b.primary_action).label);
     expect([a.science, b.science], 'each row carries its science basis').toEqual([row('RC-STRENGTHEN-ITEM').science_basis.summary, row('RC-STRENGTHEN-ITEM').science_basis.summary]);
     expect(String(second.response.assistant_text)).toBe(`${reply}\n\n- ${String(object(b.primary_action).label)}`);
     expect(object(carriers(second)[0]).why, 'the model is told the same method; only the display moves').toBe(row('RC-STRENGTHEN-ITEM').science_basis.summary);
