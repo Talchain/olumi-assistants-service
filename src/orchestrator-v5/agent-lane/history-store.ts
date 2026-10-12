@@ -74,27 +74,48 @@ const textOf = (item: unknown): string | undefined => {
 };
 
 /**
- * The user's older words as ONE user item (the user's own authority, as `BOARD_EDIT_PREFIX` notes): the first message (the brief) whole, then the NEWEST of the rest that
- * fit in `OLDER_WORDS_MAX_CHARS`, in the order written, with how many are not shown. Olumi's prose, tool items, chip
- * texts and board-edit notes never enter it (the caller passes only what the user typed).
+ * One older message the carrier quotes. `typed`: this process saw the user type it (`recordTyped`). `unknown`: a reseeded
+ * durable row, whose source (typed, chip or template) the row does not record. `opening`: the conversation's first
+ * message, from a reseed whose read reached the start. ⛔ Source belongs to the OCCURRENCE, never to matching bytes.
  */
-export function olderWordsItem(words: readonly string[], maxChars = OLDER_WORDS_MAX_CHARS, firstOriginUnknown = false): unknown | undefined {
+export type OlderEntry = { readonly text: string; readonly source: 'typed' | 'unknown'; readonly opening?: true };
+
+/**
+ * The user's older words as ONE user item (the user's own authority, as `BOARD_EDIT_PREFIX` notes): the first message (the brief) whole, then the NEWEST of the rest that
+ * fit in `OLDER_WORDS_MAX_CHARS`, in the order written, with how many are not shown. Olumi's prose, tool items, and this
+ * process's chip texts and board-edit notes never enter it (the caller passes only what the user typed, and reseeded rows).
+ * ⭐ SYS2 L80 (AIE handback, PL 6116093413): each contiguous run of source-unknown entries sits under RESTORED_FIRST_LABEL;
+ * typed ones stay under OLDER_WORDS_LABEL. A plain string is a typed entry. The first is kept whole only when it is known
+ * to be the first: typed here, or a reseed's `opening`.
+ */
+export function olderWordsItem(words: readonly (string | OlderEntry)[], maxChars = OLDER_WORDS_MAX_CHARS): unknown | undefined {
   if (words.length === 0) return undefined;
-  const [first, ...rest] = words;
-  const kept: string[] = [];
+  const entries = words.map((w): OlderEntry => (typeof w === 'string' ? { text: w, source: 'typed' } : w));
+  const whole = entries[0]!.source === 'typed' || entries[0]!.opening === true ? entries[0] : undefined;
+  const rest = whole === undefined ? entries : entries.slice(1);
+  const kept: OlderEntry[] = [];
   let used = 0;
   for (let k = rest.length - 1; k >= 0; k -= 1) {
     const w = rest[k]!;
-    if (used + w.length > maxChars) break;
+    if (used + w.text.length > maxChars) break;
     kept.unshift(w);
-    used += w.length;
+    used += w.text.length;
   }
-  const hidden = rest.length - kept.length;
-  const quote = (w: string) => `- "${w}"`;
-  const tail = [...(hidden > 0 ? [`[${hidden} earlier message${hidden === 1 ? '' : 's'} not shown]`] : []), ...kept.map(quote)];
-  const lines = firstOriginUnknown
-    ? [RESTORED_FIRST_LABEL, quote(first!), ...(tail.length > 0 ? [OLDER_WORDS_LABEL, ...tail] : [])]
-    : [OLDER_WORDS_LABEL, quote(first!), ...tail];
+  const hidden = rest.slice(0, rest.length - kept.length);
+  const quote = (e: OlderEntry) => ({ line: `- "${e.text}"`, source: e.source });
+  const shown = [
+    ...(whole !== undefined ? [quote(whole)] : []),
+    // Not shown: under the neutral header if any of them is source-unknown, so the count never claims typed authorship.
+    ...(hidden.length > 0 ? [{ line: `[${hidden.length} earlier message${hidden.length === 1 ? '' : 's'} not shown]`,
+      source: hidden.some((h) => h.source === 'unknown') ? 'unknown' as const : 'typed' as const }] : []),
+    ...kept.map(quote),
+  ];
+  const lines: string[] = [];
+  let group: OlderEntry['source'] | undefined;
+  for (const s of shown) {
+    if (s.source !== group) { lines.push(s.source === 'typed' ? OLDER_WORDS_LABEL : RESTORED_FIRST_LABEL); group = s.source; }
+    lines.push(s.line);
+  }
   return { role: 'user', content: [{ type: 'input_text', text: lines.join('\n') }] };
 }
 
@@ -354,16 +375,19 @@ export const DURABLE_SEED_TURNS = 20;
 /** The raw rows a reseed reads so that {@link DURABLE_SEED_TURNS} answer rows survive the drop (claim + sub-turns). */
 export const DURABLE_SEED_ROWS_READ = 100;
 
-export function historyFromDurableTurns(
-  turns: readonly { request_hash?: string | null; user_message?: string | null; assistant_message?: string | null }[],
-): unknown[] {
+type DurableRow = { request_hash?: string | null; user_message?: string | null; assistant_message?: string | null };
+
+/** The Agent's own answer rows with words, oldest first (`readRecent` returns newest first). */
+function durableAnswerRows<T extends DurableRow>(turns: readonly T[]): T[] {
+  // ⛔ Only the Agent's OWN answer rows: an internal sub-turn's row carries the model's tool reason as `user_message` and
+  // a handler's text the user never read (served MRR `3b6369b0`), so seeding from every row told the Agent the user said
+  // words they never said (#75 5910983526, 5911326118).
+  return [...turns].reverse().filter((t) => isAgentAnswerRow(t) && (!!t.user_message?.trim() || !!t.assistant_message?.trim()));
+}
+
+export function historyFromDurableTurns(turns: readonly DurableRow[]): unknown[] {
   const items: unknown[] = [];
-  // `readRecent` returns newest first. ⛔ Only the Agent's OWN answer rows: an internal sub-turn's row carries the
-  // model's tool reason as `user_message` and a handler's text the user never read (served MRR `3b6369b0`), so seeding
-  // from every row told the Agent the user said words they never said (#75 5910983526, 5911326118).
-  const seen = [...turns].reverse()
-    .filter((t) => isAgentAnswerRow(t) && (!!t.user_message?.trim() || !!t.assistant_message?.trim()))
-    .slice(-DURABLE_SEED_TURNS); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
+  const seen = durableAnswerRows(turns).slice(-DURABLE_SEED_TURNS); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
   for (const t of seen) {
     if (typeof t.user_message === 'string' && t.user_message.trim().length > 0) {
       items.push({ role: 'user', content: [{ type: 'input_text', text: t.user_message }] });
@@ -420,12 +444,18 @@ const MAX_TYPED_WORDS = 40;
 export class HistoryStore {
   private readonly items = new Map<string, unknown[]>();
   private readonly typed = new Map<string, string[]>();
-  /** The user's typed words from turns the window has dropped, in the order written (`olderWordsItem`). */
-  private readonly older = new Map<string, string[]>();
-  /** A reseeded session's first message (`briefFromDurableTurns`), not yet dropped by the window: it qualifies for `older` ONCE. */
-  private readonly seededBrief = new Map<string, string>();
-  /** That message once admitted: always `older[0]`, and rendered under RESTORED_FIRST_LABEL, never "the user wrote". */
-  private readonly restoredFirst = new Map<string, string>();
+  /** The older words the window has dropped, in the order written, each with its source (`olderWordsItem`). */
+  private readonly older = new Map<string, OlderEntry[]>();
+  /**
+   * How many user messages at the FRONT of a reseeded history came from durable rows (`seed`). When the window drops
+   * them they are source-unknown references, whatever their bytes: later typing never upgrades them. Lives and is
+   * evicted with its history.
+   */
+  private readonly unknownAhead = new Map<string, number>();
+  /** A reseed whose read reached the conversation's start: the first of its reseeded messages is the opening (kept whole). */
+  private readonly openingAhead = new Set<string>();
+  /** During `seed` only: older words already held from before an eviction, which the re-seed's rows do not add twice. */
+  private carrying: Map<string, number> | undefined;
 
   constructor(
     private readonly maxSessions = DEFAULT_MAX_SESSIONS,
@@ -434,9 +464,7 @@ export class HistoryStore {
 
   get(sessionId: string): unknown[] {
     const items = dropDanglingCalls(this.items.get(sessionId) ?? []);
-    const words = this.older.get(sessionId) ?? [];
-    const restored = this.restoredFirst.get(sessionId);
-    const older = olderWordsItem(words, OLDER_WORDS_MAX_CHARS, restored !== undefined && words[0] === restored);
+    const older = olderWordsItem(this.older.get(sessionId) ?? []);
     return older === undefined ? items : [older, ...items];
   }
 
@@ -446,62 +474,77 @@ export class HistoryStore {
   }
 
   set(sessionId: string, next: readonly unknown[]): void {
+    const carried = this.carrying;
     // Refresh recency: re-inserting moves it to the end of the Map's order.
     this.items.delete(sessionId);
     if (this.items.size >= this.maxSessions) {
       const oldest = this.items.keys().next().value;
-      if (oldest !== undefined) { this.items.delete(oldest); this.seededBrief.delete(oldest); }
+      if (oldest !== undefined) { this.items.delete(oldest); this.unknownAhead.delete(oldest); this.openingAhead.delete(oldest); }
     }
-    // A pending first message lives exactly as long as its history (same recency, same eviction).
-    const pending = this.seededBrief.get(sessionId);
-    if (pending !== undefined) { this.seededBrief.delete(sessionId); this.seededBrief.set(sessionId, pending); }
     // The labelled item is re-made from `older` on every read, never stored as history.
     const items = next.filter((i) => !isOlderWordsItem(i));
     const kept = trimToRecentTurns(items, this.maxTurns);
     const cut = items.length - kept.length;
     if (cut > 0) {
       const dropped = items.slice(0, cut);
-      // Only what the user TYPED (`recordTyped`): a chip's words, a board-edit note or a reseeded row never qualify —
-      // except a reseed's first message (`seed`), admitted ONCE, first, under its own unknown-authorship header.
+      // ⭐ SYS2 L80: a reseeded row's words are kept as a source-unknown reference, by its PLACE among the reseeded
+      // messages (the front `unknownAhead`). Otherwise only what the user TYPED (`recordTyped`) qualifies: this
+      // process's chip words and board-edit notes never do.
       const typed = new Set(this.typed.get(sessionId) ?? []);
+      let unknown = this.unknownAhead.get(sessionId) ?? 0;
+      let opening = this.openingAhead.has(sessionId);
+      let openingEntry: OlderEntry | undefined;
+      const fresh: OlderEntry[] = [];
+      for (const item of dropped.filter(isUserMessage)) {
+        const t = textOf(item);
+        if (unknown > 0) {
+          unknown -= 1;
+          const first = opening;
+          opening = false;
+          if (t === undefined || t.trim() === '') continue;
+          const left = carried?.get(t) ?? 0;
+          if (left > 0) { carried!.set(t, left - 1); continue; }
+          if (first) openingEntry = { text: t, source: 'unknown', opening: true };
+          else fresh.push({ text: t, source: 'unknown' });
+        } else if (t !== undefined && t.trim() !== '' && typed.has(t)) {
+          fresh.push({ text: t, source: 'typed' });
+        }
+      }
+      if (unknown > 0) this.unknownAhead.set(sessionId, unknown); else this.unknownAhead.delete(sessionId);
+      if (!opening) this.openingAhead.delete(sessionId);
       const held = this.older.get(sessionId) ?? [];
-      let restored: string | undefined;
-      const words = dropped.filter(isUserMessage).map(textOf).filter((t): t is string => {
-        if (t === undefined || t.trim() === '') return false;
-        // The first message is claimed BEFORE the typed check (review round 2, BLOCKING): if the user later typed the same
-        // bytes, that later occurrence is theirs, but this one's origin is still not recorded. Dropped is oldest-first, so
-        // the first occurrence of the first message's bytes is the first message itself.
-        if (restored === undefined && pending !== undefined && t === pending && !held.includes(t)) { restored = t; return false; }
-        return typed.has(t);
-      });
-      if (restored !== undefined) { this.seededBrief.delete(sessionId); this.restoredFirst.set(sessionId, restored); }
-      if (words.length > 0 || restored !== undefined) this.older.set(sessionId, [...(restored !== undefined ? [restored] : []), ...held, ...words]);
+      // The opening leads, ahead of words held from before an eviction.
+      if (fresh.length > 0 || openingEntry !== undefined) this.older.set(sessionId, [...(openingEntry !== undefined ? [openingEntry] : []), ...held, ...fresh]);
       this.items.set(sessionId, [...pendingProposalPair(dropped), ...kept]);
     } else {
       this.items.set(sessionId, kept);
     }
     if (this.older.size > this.maxSessions) {
       const oldest = this.older.keys().next().value;
-      if (oldest !== undefined) { this.older.delete(oldest); this.restoredFirst.delete(oldest); }
+      if (oldest !== undefined) this.older.delete(oldest);
     }
   }
 
   /**
    * A cold reseed (restart, redeploy, eviction): the durable answer rows, then whatever is held, exactly as `set`.
-   * ⭐ SYS2 E1: the conversation's first message (`briefFromDurableTurns`) leads the older-words item again, whether
-   * the window drops it now, later, or the seed's 20-row cap already left it out. Its authorship is NOT recorded, so it
-   * is quoted under RESTORED_FIRST_LABEL, never "the user wrote". `rows` are the rows the seed read (no new read).
+   * ⭐ SYS2 E1 + L80: every reseeded message the window drops, now or later, is kept verbatim and in order as a
+   * source-unknown reference, quoted under RESTORED_FIRST_LABEL, never "the user wrote". The answer rows the read holds
+   * past the seed's newest 20 go back in first, so the window drops them too (the 2,400-character bound still applies).
+   * The first is the opening, kept whole, only when the read reached the start (`briefFromDurableTurns`). `rows` are the
+   * rows the seed read (no new read).
    */
-  seed(sessionId: string, durable: readonly unknown[], held: readonly unknown[],
-    rows: readonly { request_hash?: string | null; user_message?: string | null }[] = []): void {
+  seed(sessionId: string, durable: readonly unknown[], held: readonly unknown[], rows: readonly DurableRow[] = []): void {
     const found = briefFromDurableTurns(rows);
-    const brief = found !== undefined && found.trim() !== '' ? found : undefined;
-    // A seed that finds no first message leaves no stale marker behind (`set` keeps a marker only beside its history).
-    if (brief === undefined) this.seededBrief.delete(sessionId); else this.seededBrief.set(sessionId, brief);
-    // Past the seed's cap the first message is not the durable items' first user item (oldest first): put it back first, so
-    // the window drops it into older words. By position, not by text: a later copy of the same words is not the first.
-    const capped = brief !== undefined && textOf(durable.find(isUserMessage)) !== brief;
-    this.set(sessionId, [...(capped ? [{ role: 'user', content: [{ type: 'input_text', text: brief }] }] : []), ...durable, ...held]);
+    if (found !== undefined && found.trim() !== '') this.openingAhead.add(sessionId); else this.openingAhead.delete(sessionId);
+    const answers = durableAnswerRows(rows);
+    const capped = answers.slice(0, Math.max(0, answers.length - DURABLE_SEED_TURNS))
+      .flatMap((t) => (t.user_message?.trim() ? [{ role: 'user', content: [{ type: 'input_text', text: t.user_message }] }] : []));
+    const reseeded = [...capped, ...durable];
+    this.unknownAhead.set(sessionId, reseeded.filter(isUserMessage).length);
+    const carried = new Map<string, number>();
+    for (const e of this.older.get(sessionId) ?? []) carried.set(e.text, (carried.get(e.text) ?? 0) + 1);
+    this.carrying = carried;
+    try { this.set(sessionId, [...reseeded, ...held]); } finally { this.carrying = undefined; }
   }
 
   get size(): number {
