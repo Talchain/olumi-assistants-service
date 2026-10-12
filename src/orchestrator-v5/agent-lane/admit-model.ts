@@ -80,7 +80,8 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
 const MAX_ID = 100;
 
@@ -3658,6 +3659,22 @@ function admitOnce(
   // ⭐ Recovery Batch C, L3: the quote must bind THIS factor's figure in its quantity and typed frame, not merely contain it.
   // ⭐ Recovery Batch B, S4 V2 origin (DL ruling (b)): with no binding quote, a figure the brief itself writes in the
   // factor's frame is still the user's, role unverified (`briefWritesFactorFigure`), never Olumi's estimate.
+  // ⭐ Recovery Batch B, Row5 (DL 12 Oct): a range the brief states for a factor rides L6's carrier (`observed_state.range`).
+  // The user's own range beside their own figure (`briefStatedLevelRange`, `isStatedLevelRange`) first; else, per the DL's
+  // ruling (13:1xZ), a third party's range carried with its attribution (`briefAttributedLevelRange`; source
+  // `brief_extraction`, the quote naming that party), only when it contains the stored figure. A drafted midpoint beside it
+  // stays Olumi's (`levelRangePointBasis`). It changes no compute: the analysis wire copy drops it (`withoutStatedLevelRanges`).
+  const withStatedLevelRange = <T extends Record<string, unknown>>(os: T, f: CandidateModel['factors'][number]): T => {
+    const own = briefStatedLevelRange(f, brief);
+    if (own !== undefined) {
+      const range = { low: own.low, high: own.high, meaning: 'min_max' as const, source: USER_TODAY_SOURCE, source_quote: own.quote };
+      if (isStatedLevelRange(range, os)) return { ...os, range };
+    }
+    const theirs = briefAttributedLevelRange(f, brief);
+    const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+    if (theirs === undefined || typeof figure !== 'number' || !(theirs.low <= figure && figure <= theirs.high)) return os;
+    return { ...os, range: { low: theirs.low, high: theirs.high, meaning: 'min_max' as const, source: 'brief_extraction', source_quote: theirs.quote } };
+  };
   const quotesBrief = (f: CandidateModel['factors'][number]): boolean => {
     const quote = f.baseline_evidence?.quote;
     const value = f.baseline_value;
@@ -3841,14 +3858,14 @@ function admitOnce(
         // A factor the drafter tagged an estimate BUT quoted the brief for is a user CLAIM the receipt gate could not verify
         // (e.g. no first-person owner): it stays visible as the user's unverified claim, never Olumi's estimate.
         ...((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number'
-          ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
-            !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))) }
+          ? { observed_state: withStatedLevelRange(framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
+            !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))), f) }
           : {}),
         // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
         // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
         ...((): Record<string, unknown> => {
           const os = verifiedLevels.has(f) || quotesBrief(f) ? null : estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
-          return os === null ? {} : { observed_state: os };
+          return os === null ? {} : { observed_state: withStatedLevelRange(os, f) };
         })(),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
         // factor with no value today still needs its range, because the value
