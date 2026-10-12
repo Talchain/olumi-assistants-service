@@ -85,6 +85,7 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   confirm_identity: 'none',
   set_option_status: 'none',
   adopt_olumi_option: 'slice_3',
+  replace_draft: 'none', // a whole revised draft, approved as one act; nothing in it is a figure this card edits
 };
 
 export interface LinkStrengthField {

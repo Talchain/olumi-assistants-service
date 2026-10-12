@@ -264,6 +264,10 @@ import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysi
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
+import { goalTargetBasisOf } from '../../goal-target/goal-target-basis.js';
+import { runPreparingDraftReplacement } from './draft-replacement-context.js';
+import { humanMaterialAfterTheDraft, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, writesBesidesTheConstruction } from './draft-replacement.js';
+import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
@@ -2163,6 +2167,8 @@ export function createAgentCapabilities(
      * finding wins, at most 3, verbatim). Absent or throwing ⇒ none; the canonical state is then byte-identical to before.
      */
     readonly readStatedObjections?: (scenarioId: string, requestId: string) => Promise<readonly StatedObjection[]>;
+    /** B restated goal: the scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`), read only to offer or apply a revised draft. */
+    readonly readCommittedTurnLedger?: (scenarioId: string) => Promise<CommittedTurnLedger>;
     /**
      * ⭐ ONE approved batch of option levels — each with the option → factor link it needs — as ONE atomic commit
      * (ChatGPT #70 5847200462): the product's own level writer, reached in-process (`commitOptionLevelsInProcess`).
@@ -3321,6 +3327,194 @@ export function createAgentCapabilities(
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
       observed_state: held.team.observed_state,
       ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
+  };
+
+  /**
+   * ⭐ B RESTATED GOAL (`draft-replacement.ts`; DL ruling (B), PL 6116779075, AIE 0244): the three gates over ONE read, at
+   * the offer and again at the approval. `allowed` = the message turns the offer already bound (none at the offer; the
+   * typed goal's turn at the approval). What was found, in plain words; empty = an unreviewed draft whose only human
+   * material is the brief's own. A record that cannot be read is listed too: unknown authority never permits replacement.
+   */
+  const unreviewedDraftGate = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, allowed: readonly string[],
+  ): Promise<string[]> => {
+    const brief = typeof g.brief_text === 'string' ? g.brief_text.trim() : '';
+    if (brief === '') return ['no saved brief that this draft was built from'];
+    const found = humanMaterialAfterTheDraft(g.raw);
+    try {
+      if (opts.readCommittedTurnLedger === undefined) throw new Error('turn_ledger_unavailable');
+      const ledger = await opts.readCommittedTurnLedger(ctx.scenario_id);
+      found.push(...writesBesidesTheConstruction(ledger, ctx.scenario_id, brief), ...messagesBesidesTheBrief(ledger, brief, allowed, ctx.turn_id));
+    } catch {
+      found.push('a saved history that could not be read');
+    }
+    try {
+      if (opts.readStatedObjections === undefined) throw new Error('stated_objections_reader_unavailable');
+      const objections = await opts.readStatedObjections(ctx.scenario_id, ctx.request_id);
+      if (objections.length > 0) found.push(`${objections.length} objection${objections.length === 1 ? '' : 's'} you recorded`);
+    } catch {
+      found.push('recorded objections that could not be read');
+    }
+    return found;
+  };
+  const DRAFT_GATE_REFUSAL = 'draft_holds_your_work';
+  const draftGateDetail = (found: readonly string[], stage: 'offered' | 'replaced'): string =>
+    `Your model already holds ${found.join('; ')}, so a revised draft was not ${stage}: replacing the draft would discard it, `
+    + 'and nothing was changed. Tell the user that plainly, and that their goal is not yet in the model. Never rebuild part of it.';
+
+  /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
+  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> } | { readonly refused: ToolResult };
+  const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
+  const TARGET_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>': 'above', '>=': 'at least', '<': 'below', '<=': 'at most' };
+
+  /**
+   * Prepare the revised draft with C's own construction from the stored brief and THIS turn's typed goal
+   * (`runPreparingDraftReplacement`: nothing is written), check it keeps every limit the draft holds, and offer it as
+   * ONE card whose words are the candidate's own: what replaces the goal, what is kept, and what is not carried.
+   */
+  const prepareRevisedDraft = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
+  ): Promise<RevisedDraft> => {
+    const notOffered = (refusal: string, detail: string): RevisedDraft => ({ refused: { ok: false, mutated: false, refusal, detail } });
+    const found = await unreviewedDraftGate(ctx, g, []);
+    if (found.length > 0) return notOffered(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'offered'));
+    const typedGoal = (ctx.user_turn_text ?? '').trim();
+    if (callStructured === undefined || ctx.turn_id === undefined || g.graph_identity_hash === '' || typedGoal === '') {
+      return notOffered('revised_draft_unavailable', 'A revised draft cannot be prepared here, so nothing was offered and the model is unchanged. Tell the user plainly that their goal is not yet in the model.');
+    }
+    const sid = ctx.scenario_id;
+    const input = revisedDraftBrief(g.brief_text as string, typedGoal);
+    let out: ToolResult;
+    try {
+      out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
+        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, callStructured)));
+    } catch {
+      out = { ok: false, mutated: false };
+    }
+    const candidate = (out as { prepared_graph?: unknown }).prepared_graph as Record<string, unknown> | undefined;
+    if (out.ok !== true || out.mutated !== false || candidate === undefined || candidate === null || typeof candidate !== 'object') {
+      return notOffered('revised_draft_not_prepared', 'Olumi could not prepare a revised draft, so nothing was offered and the model is unchanged. Tell the user plainly that their goal is not yet in the model.');
+    }
+    const labelIn = (raw: unknown, id: string): string => {
+      const n = ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []).find((x) => x?.id === id);
+      return typeof n?.label === 'string' ? n.label : id;
+    };
+    const limits = limitsKeptBy(g.raw, candidate);
+    const sayRow = (raw: unknown, r: { node_id: string; operator: string; value: number; unit: string }): string =>
+      `\u2018${labelIn(raw, r.node_id)}\u2019 ${TARGET_COMPARATOR_WORDS[r.operator] ?? r.operator} ${targetFigure(r.value, r.unit)}`;
+    if (limits.dropped.length > 0) {
+      return notOffered('revised_draft_dropped_a_limit', `The revised draft did not keep ${limits.dropped.map((r) => sayRow(g.raw, r)).join(' and ')}, `
+        + 'so it was not offered and the model is unchanged. Tell the user plainly; never offer a draft that loses their limit.');
+    }
+    const held = targetsHeldBy(candidate);
+    if (held.length === 0) {
+      return notOffered('revised_draft_has_no_target', 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
+    }
+    const nodesOf = (raw: unknown) => ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []);
+    const basis = goalTargetBasisOf(nodesOf(candidate).find((n) => n?.kind === 'goal'));
+    const period = basis === undefined ? '' : basis.period_kind === 'over_period'
+      ? ` over the first ${basis.period_months} month${basis.period_months === 1 ? '' : 's'}${basis.reference === 'launch' ? ' after launch' : ''}`
+      : ` at month ${basis.period_months}${basis.reference === 'launch' ? ' after launch' : ''}`;
+    const options = nodesOf(candidate).filter((n) => n?.kind === 'option' && typeof n.label === 'string').map((n) => `\u2018${n.label as string}\u2019`);
+    const card = `Replace the early draft with a revised one built from your brief and the goal you just gave: `
+      + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
+      + (limits.kept.length > 0 ? `Kept from your brief: ${limits.kept.map((r) => sayRow(g.raw, r)).join('; ')}. ` : '')
+      + (options.length > 0 ? `Options: ${options.join(', ')}. ` : '')
+      + 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. You have not changed the draft since your brief, so nothing you set is lost.';
+    const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
+    const proposal = createProposal({
+      scenario_id: sid,
+      user_id: ctx.authenticated_user_id,
+      base_graph_identity_hash: g.graph_hash,
+      operations: [{ op: 'replace_draft', path: sid, value: {
+        candidate, candidate_hash: candidateHash, base_identity: g.graph_identity_hash, brief_text: g.brief_text,
+        goal_turn_id: ctx.turn_id, typed_goal: typedGoal,
+        operation_id: constructionOperationId(sid, `replace_draft:${g.graph_identity_hash}:${candidateHash}`),
+      } }],
+      provenance: { authored_by: 'model_proposed', basis: 'A revised draft prepared from the stored brief and the goal the user typed; only its own card replaces the draft.' },
+      validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: card,
+    });
+    proposals.put(proposal);
+    return { proposal, held };
+  };
+
+  /** This target call's answer from the turn's one revised draft: the same card, or why this target is not in it. */
+  const offerRevisedDraft = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
+    target: { value: number; unit: string; comparator: string },
+  ): Promise<ToolResult> => {
+    const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}`;
+    let pending = revisedDrafts.get(key);
+    if (pending === undefined) {
+      pending = prepareRevisedDraft(ctx, g, goal);
+      revisedDrafts.set(key, pending);
+    }
+    const draft = await pending;
+    if ('refused' in draft) return draft.refused;
+    const holds = draft.held.some((t) => t.value === target.value && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
+    return {
+      ok: true, mutated: false,
+      proposal_id: draft.proposal.proposal_id,
+      public_label: draft.proposal.public_label,
+      base_revision: g.graph_hash,
+      revised_draft: { replaces_goal: goal.label, holds_this_target: holds },
+      note: 'Nothing has changed yet. The current draft does not contain the quantity this goal is measured in, so Olumi prepared a revised '
+        + 'draft from the user\u2019s brief and this message, shown on ONE card. Tell the user what the card says, in its words; never the id. '
+        + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
+        + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
+    };
+  };
+
+  /**
+   * Apply the pressed revised-draft card: the same three gates again, then the candidate's exact bytes through
+   * `/graph/register` with compare-and-set on the identity it was prepared against, under an operation id of that base
+   * and those bytes (a retry replays; a conflict writes nothing). Confirmed from state, never from the write's return.
+   */
+  const applyReplaceDraft = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const pid = parent.proposal_id;
+    const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
+      goal_turn_id?: unknown; operation_id?: unknown };
+    const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
+    if (ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
+      || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
+      return notApplied('not_applied', 'This revised draft is replaced only by pressing its own card, so nothing was changed.');
+    }
+    if (before.graph_identity_hash !== v.base_identity) {
+      return notApplied('superseded', 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
+    }
+    const found = await unreviewedDraftGate(ctx, before, [v.goal_turn_id]);
+    if (found.length > 0) return notApplied(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'replaced'));
+    const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+      graph: v.candidate, expected_graph_identity_hash: v.base_identity, operation_id: v.operation_id,
+    });
+    if (reg.status !== 200) {
+      const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+      return code === 'GRAPH_STALE'
+        ? notApplied('superseded', 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
+        : notApplied('not_applied', `The revised draft could not be saved (http ${reg.status}), so nothing was replaced.`);
+    }
+    // ⛔ CONFIRMED FROM STATE: the model now holds the candidate's targets and every limit the draft held.
+    const after = await readGraph(ctx.scenario_id);
+    const heldTargets = targetsHeldBy(after?.raw);
+    const landed = after !== null && limitsKeptBy(before.raw, after.raw).dropped.length === 0
+      && targetsHeldBy(v.candidate).every((t) => heldTargets.some((h) => h.node_id === t.node_id && h.comparator === t.comparator && h.value === t.value && h.unit === t.unit));
+    if (!landed) {
+      return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+        detail: 'The revised draft was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+          + 'offer to check the model again, and never say it was replaced or that it was not.' };
+    }
+    // The receipt as the construction's and the goal level's registrations read it (guests get none: no versions).
+    const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+    const receipts: ReceiptSummary[] = mv !== undefined && mv !== null && typeof mv.version_id === 'string'
+      ? [{ version: Number(mv.version_number), version_id: mv.version_id, mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '',
+        source_turn_id: registrationTurnId(ctx.scenario_id, v.operation_id) }]
+      : [];
+    proposals.markApplied(pid, receipts);
+    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
+      follow_up: 'Your model is now the revised draft, with your goal as its targets and your limits kept. The earlier analysis was of the old draft; run the analysis again.' };
   };
 
   /** Consume the exact held card through the approved batch, then read back through the door's verdict on its committed bytes. */
@@ -4751,6 +4945,17 @@ export function createAgentCapabilities(
             : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this target is for. Ask the user which goal they mean.` };
       }
       const goal = goals[0]!;
+      /**
+       * ⭐ B RESTATED GOAL (DL ruling (B); PL 6116779075; AIE 0244): a target for a quantity the draft does not contain
+       * (`measures` names no entity and is not the goal) cannot land as a row: Paul's marketing L20, "conversion rate of over
+       * 15% and secure 20 new customers", on a draft of "launch % complete". With the goal typed in THIS message, the answer
+       * is ONE revised-draft card when the draft is still unreviewed, else the gates' refusal; nothing changes either way.
+       */
+      const measures = typeof args.measures === 'string' ? args.measures.trim() : '';
+      if (measures !== '' && norm(measures) !== norm(goal.label) && resolveNamed(g, measures, () => true).kind === 'none'
+        && norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_turn_text)) {
+        return offerRevisedDraft(ctx, g, goal, { value, unit, comparator: TARGET_OPERATOR[type] });
+      }
       // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
       // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).
       if (isEventShareForecast(g.raw)) {
@@ -6533,6 +6738,7 @@ export function createAgentCapabilities(
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 

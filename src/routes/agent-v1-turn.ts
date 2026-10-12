@@ -2809,6 +2809,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           if (typeof store.readStatedObjectionFactsFor !== 'function') throw new Error('stated_objections_reader_unavailable');
           return projectStatedObjections(await store.readStatedObjectionFactsFor(sid, STATED_OBJECTION_FACT_ROWS_READ, STATED_OBJECTIONS_CAP));
         },
+        // B restated goal: the committed turn ledger, read only to offer or apply a revised draft (`draft-replacement.ts`).
+        // A store without the read leaves it absent, which the gate treats as unknown: no revised draft is offered.
+        ...(typeof store.readCommittedTurnLedger === 'function'
+          ? { readCommittedTurnLedger: (sid: string) => store.readCommittedTurnLedger!(sid) }
+          : {}),
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid, { validation: 'strict' }) }

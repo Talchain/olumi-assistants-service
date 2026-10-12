@@ -1,0 +1,340 @@
+/**
+ * ⭐ B RESTATED GOAL — PAUL'S MARKETING L20 ON THE SERVED EARLY DRAFT (DL ruling (B); PL 6116779075; AIE 0244).
+ *
+ * The draft is the SERVED one (`fixtures/marketing-020148Z-draft-before-L20.json`: the read before L20 on run 020148Z,
+ * graph and brief verbatim; the construction's commit turn id is the database's own row). It models "product feature
+ * launch" in "% complete" and holds neither conversion nor new customers, so L20's two targets cannot land as rows.
+ *
+ * What runs for real: the capability (`propose_goal_target` → the gates → C's construction in prepare-only mode →
+ * admission → the card → `authorise_change` → `/graph/register` with compare-and-set), the approval chip, the store's
+ * contract parse, and the production Run loader and handler that build the PLoT request. What is scripted: the drafter's
+ * words (`candidate`, written by hand like C's readback spec, so this is TESTED, not WIRE-WITNESSED) and the store
+ * (in memory, with the register route's compare-and-set and operation-id replay rules, and its committed turn ledger).
+ */
+import { readFileSync } from 'node:fs';
+import { describe, expect, it, vi } from 'vitest';
+
+import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { ProposalStore } from '../proposal.js';
+import { approvalChipsFor } from '../approval-chips.js';
+import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { sentDigest } from '../../tools/handlers/run-input-snapshot.js';
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import type { CommittedTurnLedger } from '../../session/store.js';
+
+// The drafter-raw recorder writes its own table; it is a recorder, not logic, so it passes the build straight through.
+vi.mock('../../drafter-raw/index.js', () => ({
+  buildWithDrafterRawRecord: async (_ctx: unknown, _brief: unknown, _op: unknown, call: unknown,
+    build: (drafter: unknown) => Promise<unknown>) => build(call),
+}));
+
+type Rec = Record<string, any>;
+const FX = JSON.parse(readFileSync(new URL('./fixtures/marketing-020148Z-draft-before-L20.json', import.meta.url), 'utf8')) as {
+  scenario_id: string; brief_text: string; graph_hash: string; graph_identity_hash: string; graph: Rec;
+  l1: { turn_id: string; message: string }; l20: { turn_id: string; message: string }; construction_commit_turn_id: string;
+};
+const SID = FX.scenario_id;
+const L20 = FX.l20.message;
+
+/**
+ * The drafter's answer for the brief + L20 (hand-written, C's readback candidate plus L1's own time limit): the goal is
+ * at least 20 new customers over the first three months after launch, conversion above 15% is its second target, and
+ * the brief's £100,000-a-year budget and 25%-of-time limits are kept.
+ */
+const candidate = (): Rec => ({
+  goal: { metric: 'New customers', operator: '>=', target_stated: true, value: 20, unit: 'customers', horizon_months: null, provenance: 'explicit',
+    frame: 'level', quantity_frame: 'level', baseline_known: true, baseline_value: 0, baseline_provenance: 'explicit', scope: null,
+    basis: { reference: 'launch', denominator: null, period_months: 3, period_kind: 'over_period',
+      effect_unit: 'customers, or percentage points of conversion, over the first three months after launch', effects_at_period_end: true,
+      also_required: null, open_question: null } },
+  constraints: [
+    { metric: 'Conversion rate', operator: '>', value: 15, unit: '%', provenance: 'explicit', frame: 'level', role: 'target' },
+    { metric: 'Annual marketing spend', operator: '<=', value: 100000, unit: 'GBP/year', provenance: 'explicit', frame: 'level', role: 'limit' },
+    { metric: 'Founder marketing time', operator: '<=', value: 25, unit: '%', provenance: 'explicit', frame: 'level', role: 'limit' },
+  ],
+  options: [
+    { label: 'Hire a marketing manager', provenance: 'explicit', interventions: [
+      { factor_label: 'Marketing manager hired', value: 1, unit: 'people', provenance: 'explicit' },
+      { factor_label: 'Annual marketing spend', value: 90000, unit: 'GBP/year', provenance: 'ai_proposed' }] },
+    { label: 'AI planning plus advertising', provenance: 'explicit', interventions: [
+      { factor_label: 'Advertising spend', value: 60000, unit: 'GBP/year', provenance: 'ai_proposed' },
+      { factor_label: 'Annual marketing spend', value: 70000, unit: 'GBP/year', provenance: 'ai_proposed' }] },
+  ],
+  factors: [
+    { label: 'Marketing manager hired', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'people', provenance: 'explicit', plausible_max: 3 },
+    { label: 'Advertising spend', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'GBP/year', provenance: 'explicit', plausible_max: 100000 },
+    { label: 'Annual marketing spend', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'GBP/year', provenance: 'explicit', plausible_max: 200000 },
+    { label: 'Founder marketing time', role: 'controllable', baseline_known: false, baseline_value: 10, unit: '%', provenance: 'ai_proposed', plausible_max: 100 },
+    { label: 'Conversion rate', role: 'observable', baseline_known: false, baseline_value: 10, unit: '%', provenance: 'ai_proposed', plausible_max: 100 },
+  ],
+  risks: [], outcomes: [],
+  links: [
+    { from: 'Marketing manager hired', to: 'Conversion rate', direction: 'positive', provenance: 'ai_proposed', effect_amount: 4,
+      effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: null, basis: 'A specialist improves targeting.' },
+    { from: 'Advertising spend', to: 'Conversion rate', direction: 'positive', provenance: 'ai_proposed', effect_amount: 2,
+      effect_per_source_change: 50000, effect_provenance: 'ai_proposed', definitional: null, basis: 'More reach brings warmer leads.' },
+    { from: 'Conversion rate', to: 'New customers', direction: 'positive', provenance: 'ai_proposed', effect_amount: 2,
+      effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: null, basis: 'Each point of conversion adds customers.' },
+    { from: 'Founder marketing time', to: 'Conversion rate', direction: 'positive', provenance: 'ai_proposed', effect_amount: 1,
+      effect_per_source_change: 10, effect_provenance: 'ai_proposed', definitional: null, basis: 'Founder attention sharpens the message.' },
+  ],
+  identities: [], unknowns: [], decision_question: null,
+});
+
+/** The in-memory store: the read route, the register route's compare-and-set and replay rules, and the committed turn ledger. */
+function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledgerFails?: boolean } = {}) {
+  let graph: Rec = structuredClone(opts.graph ?? FX.graph);
+  const commits: { turn_id: string; bytes: string }[] = [];
+  const ledger = {
+    write_turn_ids: [FX.construction_commit_turn_id], user_message_turn_ids: [FX.l1.turn_id],
+    first_user_message: FX.l1.message.trim(), complete: true, ...opts.ledger,
+  } as { write_turn_ids: string[]; user_message_turn_ids: string[]; first_user_message: string | null; complete: boolean };
+  const identity = () => computeGraphIdentityHash(graph as never)!.value;
+  const dispatch: InternalDispatch = async (path, body) => {
+    if (path === `/assist/v1/scenarios/${SID}/graph`) {
+      return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), brief_text: FX.brief_text,
+        graph_identity_hash: computeGraphIdentityHash(graph as never) } };
+    }
+    if (path === `/assist/v1/scenarios/${SID}/graph/register`) {
+      const b = body as { graph: Rec; expected_graph_identity_hash?: unknown; operation_id?: string };
+      const stored = GraphV3.parse(b.graph) as Rec;
+      const bytes = JSON.stringify(stored);
+      const turn = registrationTurnId(SID, b.operation_id);
+      const prior = commits.find((c) => c.turn_id === turn);
+      if (prior !== undefined) {
+        return prior.bytes === bytes ? { status: 200, json: { registered: true, replayed: true } }
+          : { status: 409, json: { details: { code: 'OPERATION_ID_REUSED' } } };
+      }
+      if (b.expected_graph_identity_hash !== identity()) return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
+      graph = stored;
+      commits.push({ turn_id: turn, bytes });
+      ledger.write_turn_ids.push(turn);
+      return { status: 200, json: { registered: true } };
+    }
+    return { status: 404, json: {} };
+  };
+  return {
+    dispatch, commits, ledger,
+    graph: () => graph,
+    bytes: () => JSON.stringify(graph),
+    readCommittedTurnLedger: async (): Promise<CommittedTurnLedger> => {
+      if (opts.ledgerFails) throw new Error('turn_ledger_read_failed');
+      return structuredClone(ledger);
+    },
+    /** A turn's answer row lands (its user message, whatever its origin). */
+    said: (turnId: string) => { ledger.user_message_turn_ids.push(turnId); },
+    /** Another writer moves the model. */
+    move: (mutate: (g: Rec) => void) => { mutate(graph); },
+  };
+}
+
+function lane(s: ReturnType<typeof server>, proposals = new ProposalStore()) {
+  let drafted = 0;
+  const call = (async () => { drafted += 1; return { text: JSON.stringify(candidate()) }; }) as unknown as CallStructuredModel;
+  const caps = createAgentCapabilities(s.dispatch, proposals, call, 'full', undefined, {
+    readCommittedTurnLedger: s.readCommittedTurnLedger,
+    readStatedObjections: async () => [],
+  });
+  return { caps, proposals, drafts: () => drafted };
+}
+
+const l20Turn = { scenario_id: SID, authenticated_user_id: null, request_id: 'req-l20', turn_id: FX.l20.turn_id,
+  user_turn_text: L20, user_text: `${FX.l1.message}\n${L20}` };
+const conversion = { constraint_type: 'at_least', value: 15, unit: '%', measures: 'conversion rate', rationale: L20 };
+const customers = { constraint_type: 'at_least', value: 20, unit: 'customers', measures: 'new customers', rationale: L20 };
+const pressed = (proposalId: string) => ({ scenario_id: SID, authenticated_user_id: null, request_id: 'req-approve',
+  turn_id: 'approve-turn-0001', user_turn_text: '', user_text: `${FX.l1.message}\n${L20}`, typed_approval_of: proposalId });
+
+/** The production Run loader and handler over the stored bytes: the exact PLoT request and its Run-input record. */
+async function runFromStore(bytes: string): Promise<{ payload: Rec; snapshot: Rec }> {
+  const port = {
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: FX.brief_text, revision: 2 })),
+    readMostRecentPendingActions: vi.fn(async () => []),
+  };
+  const snap = await loadScenarioSnapshotForRunAnalysis(SID, 'req-run', port as never);
+  let payload: Rec | undefined;
+  let inputSnapshot: Rec | undefined;
+  const handler = createRunAnalysisHandler({
+    plotClient: { run: vi.fn(), validatePatch: vi.fn() } as never,
+    scenarioReader: async () => snap,
+    probe: async (sent) => { payload = sent.plotPayload as Rec; inputSnapshot = sent.runInputSnapshot as Rec; },
+  });
+  await handler({
+    context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [],
+      session_id: SID, request_id: 'req-run', budgets: { turn_ms: 180000, llm_narrate_ms: 60000 },
+      prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+    payload: makeMessagePayload({ turn_id: 't-run', scenario_id: SID, message: 'Run analysis.', turn_class: 'decide', stage: 'analyse' }),
+    requestId: 'req-run', signal: new AbortController().signal, orientationText: '',
+  } as never);
+  expect(payload, 'the Run handler built a PLoT request').toBeDefined();
+  return { payload: payload!, snapshot: inputSnapshot ?? {} };
+}
+
+describe('the served draft and its record (preconditions, else nothing below proves anything)', () => {
+  it('the draft holds neither quantity; its goal is "% complete"; the construction commit id is derived from the stored brief', () => {
+    const labels = (FX.graph.nodes as Rec[]).map((n) => String(n.label).toLowerCase());
+    expect(labels.some((l) => l.includes('conversion') || l.includes('customer'))).toBe(false);
+    expect((FX.graph.nodes as Rec[]).find((n) => n.kind === 'goal')).toMatchObject({ id: 'product_feature_launch', goal_threshold_unit: '% complete' });
+    // The database's own row for this scenario, against the lane's derivation from the stored brief.
+    expect(registrationTurnId(SID, constructionOperationId(SID, FX.brief_text))).toBe(FX.construction_commit_turn_id);
+    expect(FX.brief_text).toBe(FX.l1.message.trim());
+  });
+});
+
+describe('L20 on the served early draft: ONE revised-draft card, prepared once, nothing written', () => {
+  it('RED: both target calls (and a retried call) return the same card; the drafter ran once; the model is untouched', async () => {
+    const s = server();
+    const { caps, proposals, drafts } = lane(s);
+    const a = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    // One preparation is one construction: its drafter call and its own widening call.
+    const preparation = drafts();
+    expect(preparation).toBe(2);
+    const b = await caps.proposeGoalTarget!(l20Turn, customers as never);
+    const again = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(a.ok, JSON.stringify(a)).toBe(true);
+    expect([b.proposal_id, again.proposal_id]).toEqual([a.proposal_id, a.proposal_id]);
+    expect(drafts(), 'the other target and the retry prepare nothing').toBe(preparation);
+    expect(a.revised_draft).toEqual({ replaces_goal: 'product feature launch', holds_this_target: true });
+    expect(b.revised_draft).toEqual({ replaces_goal: 'product feature launch', holds_this_target: true });
+    expect(s.commits).toHaveLength(0);
+    expect(s.bytes()).toBe(JSON.stringify(FX.graph));
+    // The card is the candidate's own words: both targets, their window, both limits kept, the options, what is not carried.
+    expect(a.public_label).toBe('Replace the early draft with a revised one built from your brief and the goal you just gave: '
+      + '‘New customers’ at least 20 customers and ‘Conversion rate’ above 15% over the first 3 months after launch '
+      + '(the draft modelled ‘product feature launch’). '
+      + 'Kept from your brief: ‘Annual marketing spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
+      + 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
+      + 'Not carried: Olumi’s earlier estimates and links, which are drafted afresh. You have not changed the draft since your brief, so nothing you set is lost.');
+    // ONE chip, the card's own button, and the card rides in its detail.
+    const calls = [a, b, again].map((r) => ({ name: 'propose_goal_target', ok: r.ok, mutated: false, proposal_id: r.proposal_id as string }));
+    const chips = approvalChipsFor(calls, (id) => ({ proposal: proposals.get(id), result: a }));
+    expect(chips[0]).toMatchObject({ label: 'Use the revised draft', message: 'Yes, use the revised draft.', detail: a.public_label });
+  });
+
+  it('a single restated target offers the revised draft too', async () => {
+    const { caps } = lane(server());
+    const r = await caps.proposeGoalTarget!(l20Turn, customers as never);
+    expect(r).toMatchObject({ ok: true, revised_draft: { holds_this_target: true } });
+  });
+});
+
+describe('approve → save → Run → cold reopen, on the same model', () => {
+  it('RED: pressing the card writes the candidate once, both target rows with the strict ">", both limits kept; the Run sends them; reopening sends the same', async () => {
+    const s = server();
+    const { caps } = lane(s);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    await caps.proposeGoalTarget!(l20Turn, customers as never);
+    s.said(FX.l20.turn_id);
+    const hashBefore = computeAnalysisAffectingGraphHash(s.graph() as never);
+    const applied = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(s.commits).toHaveLength(1);
+    // The old analysis was of another model: its hash no longer matches.
+    expect(computeAnalysisAffectingGraphHash(s.graph() as never)).not.toBe(hashBefore);
+    const rows = s.graph().goal_constraints as Rec[];
+    expect(rows.find((r) => r.node_id === 'conversion_rate')).toMatchObject({ operator: '>=', operator_as_stated: '>', value: 15, unit: '%', role: 'goal_target' });
+    expect(rows.find((r) => r.node_id === 'new_customers')).toMatchObject({ operator: '>=', value: 20, unit: 'customers', role: 'goal_target' });
+    expect(rows.find((r) => r.node_id === 'annual_marketing_spend')).toMatchObject({ operator: '<=', value: 100000, unit: 'GBP/year' });
+    expect(rows.find((r) => r.node_id === 'founder_marketing_time')).toMatchObject({ operator: '<=', value: 25, unit: '%' });
+    expect(rows.filter((r) => r.role !== 'goal_target').every((r) => r.role === undefined)).toBe(true);
+    const goal = (s.graph().nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(goal.goal_target_basis).toMatchObject({ reference: 'launch', period_months: 3, period_kind: 'over_period' });
+
+    // Run: the PLoT request carries both targets (strict ">" for conversion) and both limits as explicit rows.
+    const { payload } = await runFromStore(s.bytes());
+    const sent = payload.goal_constraints as Rec[];
+    expect(sent.find((r) => r.node_id === 'conversion_rate')).toMatchObject({ operator: '>', value: 15, value_frame: 'level' });
+    expect(sent.find((r) => r.node_id === 'new_customers')).toMatchObject({ operator: '>=', value: 20, value_frame: 'level' });
+    expect(sent.find((r) => r.node_id === 'annual_marketing_spend')).toMatchObject({ operator: '<=', value: 100000 });
+    expect(sent.find((r) => r.node_id === 'founder_marketing_time')).toMatchObject({ operator: '<=', value: 25 });
+
+    // Cold reopen: the stored bytes through the contract parse again are the same, and so is the Run request.
+    const reopened = JSON.stringify(GraphV3.parse(JSON.parse(s.bytes())));
+    expect(reopened).toBe(s.bytes());
+    expect(sentDigest((await runFromStore(reopened)).payload)).toBe(sentDigest(payload));
+  });
+
+  it('a retried press writes nothing twice: the same process recovers it; a fresh process meets the moved base', async () => {
+    const s = server();
+    const proposals = new ProposalStore();
+    const { caps } = lane(s, proposals);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    s.said(FX.l20.turn_id);
+    const id = offer.proposal_id as string;
+    await caps.authoriseChange(pressed(id), { proposal_id: id } as never);
+    const retried = await caps.authoriseChange(pressed(id), { proposal_id: id } as never);
+    expect(retried).toMatchObject({ ok: true, already_applied: true, mutated: false });
+    const fresh = new ProposalStore();
+    fresh.put(proposals.get(id)!);
+    const elsewhere = await lane(s, fresh).caps.authoriseChange(pressed(id), { proposal_id: id } as never);
+    expect(elsewhere).toMatchObject({ ok: false, mutated: false, refusal: 'superseded' });
+    expect(s.commits).toHaveLength(1);
+  });
+});
+
+describe('the gates refuse, and nothing is drafted or written', () => {
+  const refusedAtOffer = async (s: ReturnType<typeof server>, found: RegExp) => {
+    const { caps, drafts } = lane(s);
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
+    expect(String(r.detail)).toMatch(found);
+    expect(drafts()).toBe(0);
+    expect(s.commits).toHaveLength(0);
+  };
+
+  it('G2: one saved edit since the draft (a UI edit\'s commit row, as on this scenario at 02:18:35Z) refuses', async () => {
+    await refusedAtOffer(server({ ledger: { write_turn_ids: [FX.construction_commit_turn_id, 'd920b614-9d04-413f-a047-dab6bcf807ac'] } }), /1 saved change since the draft/);
+  });
+
+  it('G1: a reviewed Olumi estimate refuses (an adopted figure is the user\'s act, whatever its number)', async () => {
+    const g = structuredClone(FX.graph);
+    const f = (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!;
+    f.observed_state = { ...f.observed_state, source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } };
+    await refusedAtOffer(server({ graph: g }), /your review of the value for ‘Advertising spend’/);
+  });
+
+  it('G3: a message between the brief and this turn refuses, typed or chip alike', async () => {
+    await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }), /1 other message since your brief/);
+  });
+
+  it('unknown authority refuses: a ledger that cannot be read', async () => {
+    await refusedAtOffer(server({ ledgerFails: true }), /a saved history that could not be read/);
+  });
+
+  it('no approval, no write: the Agent\'s own authorise_change (no pressed card) is refused', async () => {
+    const s = server();
+    const { caps } = lane(s);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    const r = await caps.authoriseChange({ ...pressed(offer.proposal_id as string), typed_approval_of: undefined }, { proposal_id: offer.proposal_id } as never);
+    expect(r).toMatchObject({ ok: false, mutated: false });
+    expect(s.commits).toHaveLength(0);
+  });
+
+  it('a conflict writes nothing: another writer renames a node between the card and the press (identity moves, analysis hash does not)', async () => {
+    const s = server();
+    const { caps } = lane(s);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    s.said(FX.l20.turn_id);
+    s.move((g) => { (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!.label = 'Ad spend'; });
+    const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'superseded' });
+    expect(s.commits).toHaveLength(0);
+  });
+
+  it('G3 at the press: a message after L20 and before the press refuses the replacement', async () => {
+    const s = server();
+    const { caps } = lane(s);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    s.said(FX.l20.turn_id);
+    s.said('typed-turn-after-l20');
+    const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
+    expect(s.commits).toHaveLength(0);
+  });
+});

@@ -51,6 +51,7 @@ import {
   StateCommitFailedError,
   type AtomicCommittedModelVersionReceipt,
   type AnswerOffersRead,
+  type CommittedTurnLedger,
   type CommittedTurnRecord,
   type ConditionalAppendOptions,
   type ConditionalSessionAppendOutcome,
@@ -269,6 +270,8 @@ export interface SupabaseSessionStoreOptions {
 
 /** Telemetry hash-prefix length for the 64-hex identity hashes. */
 const GRAPH_CAS_HASH_PREFIX_LENGTH = 16;
+/** Rows the restated-goal ledger reads: an unreviewed draft has a handful; more than this is not one (`complete: false`). */
+const COMMITTED_TURN_LEDGER_ROWS = 200;
 
 function identityHashPrefix(hash: string | null | undefined): string | null {
   return typeof hash === 'string' && hash.length > 0
@@ -2038,6 +2041,39 @@ export class SupabaseSessionStore implements SessionStore {
         .map((pa) => parsePendingAction(pa))
         .filter((pa): pa is NonNullable<typeof pa> => pa !== null && pa.scenario_id === scenarioId),
     };
+  }
+
+  /**
+   * ⭐ B RESTATED GOAL: the scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`). Scoped at the bytes
+   * to the exact scenario; oldest first with a stable tie break; one row past the cap marks the ledger incomplete. Only
+   * the first message's text is returned. A failed or malformed read throws: "unknown", never "nothing written".
+   */
+  async readCommittedTurnLedger(scenarioId: string): Promise<CommittedTurnLedger> {
+    const { data, error } = await this.client
+      .from('v5_conversation_turns')
+      .select('id, turn_id, user_message, model_version_mutation_id, created_at')
+      .eq('scenario_id', scenarioId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(COMMITTED_TURN_LEDGER_ROWS + 1);
+    if (error) throw new SessionReadError(`readCommittedTurnLedger(${scenarioId}) failed: ${errMsg(error)}`, { code: 'turn_ledger_read_failed' });
+    if (!Array.isArray(data)) throw new SessionReadError(`readCommittedTurnLedger(${scenarioId}): PostgREST returned a non-array payload`, { code: 'turn_ledger_read_failed' });
+    const rows = data as Array<Record<string, unknown>>;
+    const writes: string[] = [];
+    const messages: string[] = [];
+    let first: string | null = null;
+    for (const row of rows.slice(0, COMMITTED_TURN_LEDGER_ROWS)) {
+      if (typeof row.turn_id !== 'string' || row.turn_id === '') {
+        throw new SessionReadError(`readCommittedTurnLedger(${scenarioId}): a row has no turn id`, { code: 'turn_ledger_read_failed' });
+      }
+      if (row.model_version_mutation_id != null && !writes.includes(row.turn_id)) writes.push(row.turn_id);
+      const said = typeof row.user_message === 'string' ? row.user_message.trim() : '';
+      if (said !== '' && !messages.includes(row.turn_id)) {
+        messages.push(row.turn_id);
+        if (first === null) first = said;
+      }
+    }
+    return { write_turn_ids: writes, user_message_turn_ids: messages, first_user_message: first, complete: rows.length <= COMMITTED_TURN_LEDGER_ROWS };
   }
 
   async releaseTurnClaim(scenarioId: string, claimTurnId: string, claimHash: string): Promise<void> {
