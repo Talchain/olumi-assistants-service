@@ -5293,6 +5293,7 @@ export function createAgentCapabilities(
           const detail = {
             start_unreadable: `Olumi could not read one start time in "${plan.quote}", so nothing was prepared. Ask for it in months, for example "at least 3 months" or "within 2 months".`,
             first_start_relative: `The first start for ‘${label}’ is said as later than another ("${plan.quote}"), so nothing was prepared. Ask when the first person would start.`,
+            relative_to_range: `"${plan.quote}" for ‘${label}’ is said after a start given as a range, so nothing was prepared. Ask when that person would start, in months.`,
             too_many_starts: `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly.`,
             fewer_starts_than_held: `‘${label}’ already has ${held.length} start times in the model, so nothing was prepared. Ask for a time for each.`,
             least_beyond_latest: `The user said at least ${plan.months} months for ‘${label}’, later than Olumi's latest estimate (${plan.latest} months), so nothing was prepared. Ask the user for the latest time it could take.`,

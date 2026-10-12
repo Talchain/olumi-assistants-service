@@ -152,6 +152,9 @@ describe('Paul\'s sentence → each start, with whose figure it is (AIE S8 rule 
     expect(planStarts(['another a month later'], est, 1)).toEqual({ refusal: 'first_start_relative', quote: 'another a month later' });
     expect(planStarts(['in 2 months', 'in 3 months', 'in 4 months'], est, 1)).toEqual({ refusal: 'too_many_starts' });
     expect(planStarts(['in 2 months'], est, 2)).toEqual({ refusal: 'fewer_starts_than_held' });
+    // PL AMEND 6121889192: a start said relative to a RANGE would be a dependent draw, never an independent part.
+    expect(planStarts(['in 2-3 months', 'another a month later'], est, 1)).toEqual({ refusal: 'relative_to_range', quote: 'another a month later' });
+    expect('parts' in planStarts(['in 2 months', 'another a month later'], est, 1)).toBe(true);
   });
 });
 

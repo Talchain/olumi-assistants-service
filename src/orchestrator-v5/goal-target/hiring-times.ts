@@ -10,7 +10,8 @@
  * - "at least N": soonest N (yours); latest Olumi's, refused when Olumi's latest is below N;
  * - "within N": latest N (yours); soonest min(Olumi's soonest, N) (Olumi's);
  * - "about N" / "in N" / "N or so": N to N (yours); "N–M": N to M (yours);
- * - "another M later": the previous start shifted by M, yours only where both figures are yours.
+ * - "another M later": the previous start shifted by M, yours only where both figures are yours; only after a start
+ *   fixed to one figure (PL AMEND 6121889192: a range would make the two starts dependent, never independent parts).
  * The pace stays Olumi's estimate, split equally across the option's starts.
  */
 import { extraShareMoments } from './event-by-date-share.js';
@@ -110,7 +111,7 @@ export function capacityPartsOf(graph: unknown, optionId: string, goalId: string
 const olumi = (value: number): Figure => ({ value, origin: 'olumi' });
 const yours = (value: number, quote: string): Figure => ({ value, origin: 'user', quote });
 
-export type PlanRefusal = { readonly refusal: 'start_unreadable' | 'first_start_relative' | 'too_many_starts'
+export type PlanRefusal = { readonly refusal: 'start_unreadable' | 'first_start_relative' | 'relative_to_range' | 'too_many_starts'
   | 'fewer_starts_than_held' | 'least_beyond_latest'; readonly quote?: string; readonly months?: number; readonly latest?: number };
 
 /** The option's planned parts from the user's starts and Olumi's estimate; the pace split equally. */
@@ -127,6 +128,10 @@ export function planStarts(quotes: readonly string[], estimate: PlannedOption['o
     if (form.kind === 'after_previous') {
       const prev = parts[i - 1];
       if (prev === undefined) return { refusal: 'first_start_relative', quote };
+      // ⛔ PL AMEND 6121889192: "another M later" binds this start to the one before it. Summed as independent parts, a
+      // range before it would lose that dependency, so only a start fixed to one figure can anchor it (until the AIE rules
+      // on paired draws); the dependent start is then that figure shifted, with no spread of its own to mis-add.
+      if (prev.lead_low.value !== prev.lead_high.value) return { refusal: 'relative_to_range', quote };
       const shift = (f: Figure): Figure => f.origin === 'user' ? yours(f.value + form.months, quote) : olumi(f.value + form.months);
       low = shift(prev.lead_low); high = shift(prev.lead_high);
     } else if (form.kind === 'at_least') {
