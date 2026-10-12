@@ -55,10 +55,10 @@ describe('get_canonical_state shows each option’s stored levels (RCA D1)', () 
     expect(hire?.levels, 'the option carries its stored levels').toBeDefined();
     const byFactor = Object.fromEntries((hire!.levels ?? []).map((l) => [l.factor_id as string, l]));
     // cap 100000: 0.39 is £39,000 — the figure the canvas draws, not the Agent's earlier argument.
-    expect(byFactor.annual_pa_salary).toMatchObject({ factor: 'Annual PA salary', unit: 'GBP/year', set_by: 'user_specified' });
+    expect(byFactor.annual_pa_salary).toMatchObject({ factor: 'Annual PA salary', unit: 'GBP/year', set_by: 'user_set' }); // ONE PROVENANCE AUTHORITY: the authority's word, not the raw stamp
     expect(byFactor.annual_pa_salary!.level as number).toBeCloseTo(39000, 6);
     // no cap, scale_frame 40: 1 is 40 h/wk.
-    expect(byFactor.pa_hours).toMatchObject({ factor: 'PA hours per week', unit: 'h/wk', set_by: 'cee_hypothesis' });
+    expect(byFactor.pa_hours).toMatchObject({ factor: 'PA hours per week', unit: 'h/wk', set_by: 'ai_inferred' });
     expect(byFactor.pa_hours!.level as number).toBeCloseTo(40, 6);
     // no range at all: a 0..1 level is stored as given, so it is shown as given.
     expect(byFactor.delegated_share!.level as number).toBeCloseTo(0.6, 6);

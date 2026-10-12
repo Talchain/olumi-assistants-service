@@ -45,6 +45,7 @@ import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, inputOriginOf, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
+import { valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import {
   BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoMovedWords,
@@ -373,7 +374,10 @@ export function goalChanceLicenceOf(
   if (changeFrame === 'change_rel' && base === undefined) return null;
   // Olumi's disclosed reading of the brief's figure keeps its own words (read once, for both rules below).
   const levelReadingHeld = isRec(goal?.goal_level_reading);
-  const estimateOnly = changeFrame === 'change_rel' && goalState?.source === 'cee_inference' && !levelReadingHeld;
+  // ONE PROVENANCE AUTHORITY: "Olumi's assumed starting value" only where the base is Olumi's (origin `ai`, not accepted) —
+  // never a human-written figure whose role is unverified (AIE 0825 §2: disclosed by the unverified note instead).
+  const goalBase = valueProvenanceOf(goalState);
+  const estimateOnly = changeFrame === 'change_rel' && goalBase.origin === 'ai' && !goalBase.accepted && !goalBase.structural && !levelReadingHeld;
   // ⛔ RE-SCOPE 2 (DL AMEND item 2; AIE R5 item 2): the existing stronger rule is kept, never relabelled. Admission never admits
   // Olumi's own estimate of a goal's current level (`admit-model.ts` `goalLevelIsEstimated`: "Olumi's own estimate of the
   // current level … was not used … that figure would rest on a guess"), so a chance of a LEVEL (or an absolute change of a
@@ -662,7 +666,8 @@ function withBatchCWords(single: GoalChanceLicence, c: {
 /** The one census's counts (`goalChanceEstimateCounts`) over every target of this Run's event; settings unfiltered. */
 type GoalChanceEstimates = GoalChanceEstimateCounts;
 /** Nothing licensed and no event beyond the goal: nothing is said, so nothing is counted (not a census reading). */
-const NO_ESTIMATES: GoalChanceEstimates = { links: 0, values: 0, settingsByOption: {}, unverifiedValues: 0, unverifiedSettingsByOption: {}, unread: false };
+const NO_ESTIMATES: GoalChanceEstimates = { links: 0, values: 0, settingsByOption: {}, unverifiedValues: 0, unverifiedSettingsByOption: {}, unread: false,
+  acceptedValues: 0, unverifiedLinks: 0 };
 
 /**
  * ⛔ RE-SCOPE 2 (R5-2; DL AMEND item 1; AIE R5 handback item 1, its minimal existing-notes wording): an input whose origin is
@@ -673,7 +678,7 @@ export const UNVERIFIED_SOURCES_NOTE = 'This result uses inputs whose sources ha
 
 /** Whether the figures said for `said` options rest on any unverified input (shared values, or those options' own settings). */
 function unverifiedOn(e: GoalChanceEstimates, said: readonly string[]): boolean {
-  return e.unread || e.unverifiedValues > 0 || said.some((id) => (e.unverifiedSettingsByOption[id] ?? 0) > 0);
+  return e.unread || e.unverifiedValues > 0 || e.unverifiedLinks > 0 || said.some((id) => (e.unverifiedSettingsByOption[id] ?? 0) > 0);
 }
 
 /**

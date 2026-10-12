@@ -18,7 +18,7 @@
 import { statusQuoOptionId, type GraphEdgeLike, type StatusQuoNodeLike } from '../structural-facts.js';
 import { detectSameLeverOptions } from '../../../cee/structure/index.js';
 import { linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
-import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
+import { valueAuthorshipOf as valueAuthorshipFromProvenance, type ValueAuthorship as ProvenanceValueAuthorship } from '../../../cee/provenance/provenance-of.js';
 import { placeholderGoalPaths } from '../goal-certainty.js';
 import { decisionSensitivityOf, tippingPointOf, type TippingPoint } from '../decision-sensitivity.js';
 import { readStoredOptionParticipation } from '../../tools/handlers/option-participation.js';
@@ -26,7 +26,7 @@ import { computeResponseHash } from '../../../utils/response-hash.js';
 import { NodeKindV3 } from '../../../schemas/cee-v3.js';
 
 export type GuidanceRequest = 'run_result' | 'narration' | 'turn' | 'method';
-export type ValueAuthorship = 'yours' | 'olumi_estimate' | 'olumi_accepted' | 'unknown';
+export type ValueAuthorship = ProvenanceValueAuthorship;
 
 export interface GoalPathLink {
   readonly link_id: string;
@@ -109,18 +109,13 @@ type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 
-/** Whose figure a factor's value is, by F1's own reader; deferred stamps read the extraction type; absent = unknown. */
+/**
+ * Whose figure a factor's value is — F1's vocabulary of the ONE provenance authority (`cee/provenance/provenance-of.ts`
+ * `provenanceOf`): the person's verified figure (`yours`), Olumi's (`olumi_estimate` / `olumi_accepted`), or `unknown`
+ * (unestablished, a human figure whose role is unverified, or a structural definition). The census reads the same rule.
+ */
 export function valueAuthorshipOf(observed: unknown): ValueAuthorship {
-  const os = rec(observed);
-  if (os === undefined) return 'unknown';
-  if (isAcceptedOlumiEstimate(os)) return 'olumi_accepted';
-  const auth = observedValueAuthorship(os);
-  if (auth !== undefined) return auth.provenance === 'unverified_brief' ? 'unknown' : auth.provenance === 'ai_inferred' ? 'olumi_estimate' : 'yours';
-  // `brief_extraction` / `cee_inference` / `explicit` / `inferred` DEFER to the extraction type (provenance-display.ts).
-  const et = os.extractionType;
-  if (et === 'explicit' || et === 'observed') return 'yours';
-  if (et === 'inferred' || et === 'range') return 'olumi_estimate';
-  return 'unknown';
+  return valueAuthorshipFromProvenance(observed);
 }
 
 function enrichmentOf(block: unknown): unknown {

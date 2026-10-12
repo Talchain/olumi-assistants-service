@@ -37,7 +37,7 @@ import {
   resolveMagnitudeScale,
 } from "../provenance/stated-amounts.js";
 import { readIsBaseline } from "../baseline-identity.js";
-import { classifyValueSource } from "../graph-readiness/obligation-provenance.js";
+import { valueClassOf } from "../graph-readiness/obligation-provenance.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/shared/encoded-intervention-admissibility.js";
 // ⭐ ROADMAP 2.1266 — ONE authority on repair-authored option→factor edges,
@@ -502,7 +502,7 @@ export interface InterventionDetail {
  */
 function isOlumisLevel(factorNode: NodeV3T): boolean {
   if (isUnverifiedUserMaterial(factorNode.observed_state)) return false;
-  const owner = classifyValueSource((factorNode.observed_state as { source?: unknown } | undefined)?.source);
+  const owner = valueClassOf(factorNode.observed_state);
   return owner === "ai_drafted" || owner === "system_repaired";
 }
 

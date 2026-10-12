@@ -936,27 +936,15 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
           // the role is added and the authorship chain still runs to a verdict.
           n.stated_role = 'constraint';
         }
-        if (authored !== undefined) {
-          n.source = authored.source;
-          n.provenance = authored.provenance;
-        } else if (et === 'explicit') {
-          n.source = 'user';
-          n.provenance = 'from_brief';
-        } else if (et === 'inferred') {
-          n.source = 'assumption';
-          n.provenance = 'ai_inferred';
-        } else if (et === 'observed') {
-          n.source = 'system';
-          n.provenance = 'from_brief';
-        } else if (et === 'range') {
-          n.source = 'system';
-          n.provenance = 'ai_inferred';
-        } else {
-          n.source = 'system';
-          n.provenance = 'ai_inferred';
-          if (typeof et === 'string' && et.length > 0) {
-            n._raw_provenance = et; // unrecognised value — preserved for debug
-          }
+        // ⭐ ONE PROVENANCE AUTHORITY (DL 12 Oct): the pair is `provenanceOf`'s, total for any observed_state — the
+        // extraction-type chain that used to follow here is the authority's own (unchanged for the four canonical
+        // values); a recognised stamp decides where no extraction type is held, and an unestablished origin says
+        // `unverified_brief`, never `ai_inferred`.
+        const pair = authored ?? { source: 'system' as const, provenance: 'unverified_brief' as const };
+        n.source = pair.source;
+        n.provenance = pair.provenance;
+        if (typeof et === 'string' && et.length > 0 && et !== 'explicit' && et !== 'inferred' && et !== 'observed' && et !== 'range') {
+          n._raw_provenance = et; // unrecognised value — preserved for debug
         }
       } else {
         // No observed_state — treat as system-derived / ai_inferred.

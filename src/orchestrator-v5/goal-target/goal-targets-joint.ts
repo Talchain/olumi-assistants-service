@@ -22,6 +22,7 @@ import { readOptionResultSources } from '../../orchestrator/context/option-resul
 import { comparatorWords, periodWords, type GoalTargetBasis } from './goal-target-basis.js';
 import { readGoalRecord } from './goal-record.js';
 import { displayedPctAt, displayRoundingFor, wilsonHalfWidthPoints, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
+import { isOlumiEstimateValue } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -217,7 +218,7 @@ export function goalTargetsBlockOf(args: {
   const olumiBase = new Set(targets.filter((t) => {
     const n = nodes.find((x) => x.id === t.node_id);
     const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
-    return n?.kind !== 'goal' && os !== undefined && (os.source === 'cee_inference' || os.extractionType === 'inferred');
+    return n?.kind !== 'goal' && os !== undefined && isOlumiEstimateValue(os);
   }).map((t) => t.constraint_id));
 
   const records = (isRec(args.envelope) ? readOptionResultSources(args.envelope) : []).find((s) => s.length > 0) ?? [];

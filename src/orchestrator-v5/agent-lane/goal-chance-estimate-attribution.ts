@@ -1,8 +1,12 @@
 import { asAnalysed } from '../../orchestrator/context/placeholder-parts.js';
 import { validatedDefinitionForGraph } from '../goal-target/held-user-links.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
-import { factorValueHash, linkValueHash, valueAuthorshipOf, type GoalPathFactor, type GoalPathLink } from './turn-context/guidance-signals.js';
+import { factorValueHash, linkValueHash, type GoalPathFactor, type GoalPathLink } from './turn-context/guidance-signals.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import {
+  inputOriginOf, isEventByDateSwitchCell, isEventByDateSwitchValue, isUnverifiedProvenance, linkProvenanceOf, settingProvenanceOf,
+  type InputOrigin,
+} from '../../cee/provenance/provenance-of.js';
 import { olumiEstimatesFeedingResult } from './olumi-estimates-feeding-result.js';
 
 type Rec = Record<string, unknown>;
@@ -48,37 +52,25 @@ export interface GoalChanceEstimateCounts {
   readonly unverifiedSettingsByOption: Readonly<Record<string, number>>;
   /** R5-2 (internal): the census could not read the event whole — never "zero estimates". */
   readonly unread: boolean;
+  /** ONE PROVENANCE AUTHORITY (internal): starting values that are Olumi's estimates the person ACCEPTED — not counted as
+   *  estimates, said apart (the panel's "you accepted" line reads the same rule). */
+  readonly acceptedValues: number;
+  /** AIE 6121121310 (internal): links whose SIZE has no established origin (an unmarked link that is not structural and
+   *  not a brief link stated with its evidence) — never Olumi's wholesale, never dropped: disclosed like any unverified input. */
+  readonly unverifiedLinks: number;
 }
 
-/** HUMAN by positive attestation: the person's own source stamps (`InterventionV3.source`'s human members, cee-v3.ts; the same
- * membership as `obligation-provenance.ts` `INTERVENTION_SOURCE` → `user_stated`). */
-const HUMAN_SOURCES: ReadonlySet<string> = new Set(['user_specified', 'brief_extraction']);
-/** AI ORIGIN: the recognised AI sources only (DL AMEND / AIE R5 item 1). Mere absence from the human set is NOT AI origin. */
-const AI_SOURCES: ReadonlySet<string> = new Set(['cee_hypothesis', 'domain_knowledge', 'cee_inference']);
-
-export type InputOrigin = 'human' | 'ai' | 'ai_accepted' | 'unverified';
-
 /**
- * A starting value's origin, by the one existing reader (`valueAuthorshipOf`, F1: its extraction type and the user-material
- * receipt are the finer instruments). Where that reader cannot decide only because a stamp DEFERS to an extraction type that is
- * not there, the recognised stamp itself decides (human: `brief_extraction`, `user_specified`; AI: `cee_inference`,
- * `cee_hypothesis`, `domain_knowledge`); unverified user material, an unrecognised or a missing stamp stays UNVERIFIED. An
- * accepted Olumi estimate keeps its origin, apart from its acceptance (`ai_accepted`, read as before).
+ * ⭐⭐ ONE PROVENANCE AUTHORITY (DL 12 Oct): the three-origin rule this census introduced (R5-1/R5-2) now lives in
+ * `cee/provenance/provenance-of.ts` — every reader of the same value, setting or link asks it, so the panel, the receipts,
+ * the compact labels and the readiness ladder agree with this count (`provenance-agreement.test.ts`). Re-exported here.
  */
-export function inputOriginOf(observed: unknown): InputOrigin {
-  const f1 = valueAuthorshipOf(observed);
-  if (f1 === 'yours') return 'human';
-  if (f1 === 'olumi_estimate') return 'ai';
-  if (f1 === 'olumi_accepted') return 'ai_accepted';
-  const os = rec(observed);
-  if (os === undefined || os.user_material_unverified === true || os.extractionType !== undefined) return 'unverified';
-  // The existing source-bound writer of a share-by-date team share (`team-share-write.ts` `teamObservedState`,
-  // `event-by-date-model.ts` `withEventShareDate`): its value is the completion share COMPUTED from the person's own stated
-  // team time, held beside it as `stated_time` ("a team-time answer is held as time"); the `cee_inference` stamp marks the
-  // computation, not an estimate of the time — Olumi's own estimates there (hiring time, pace) are said by the share's words.
-  if (rec(os.stated_time)?.quantity === 'months_to_finish') return 'human';
-  if (typeof os.source !== 'string') return 'unverified';
-  return HUMAN_SOURCES.has(os.source) ? 'human' : AI_SOURCES.has(os.source) ? 'ai' : 'unverified';
+export { inputOriginOf, isEventByDateSwitchCell, isEventByDateSwitchValue, type InputOrigin };
+
+/** An option cell's origin in this census's words (the authority's `settingProvenanceOf`). */
+export function settingOriginOf(cell: unknown, target: unknown): 'human' | 'ai' | 'unverified' | 'structural' {
+  const p = settingProvenanceOf(cell, target);
+  return p.structural ? 'structural' : isUnverifiedProvenance(p) ? 'unverified' : p.origin === 'human' ? 'human' : 'ai';
 }
 
 const cellFigure = (cell: unknown): number | undefined => {
@@ -86,45 +78,8 @@ const cellFigure = (cell: unknown): number | undefined => {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 };
 
-/**
- * ⛔ THE ONE NAMED STRUCTURAL MARKER for a sourceless option cell: THE EVENT-BY-DATE SWITCH. `admitEventByDate`
- * (`event-by-date-model.ts`) writes `{ value: 1 }` on each option's own switch and `{ value: 0 }` on every other — no `source`:
- * the option turning the switch on IS what the switch means. Its marker is the switch node's own
- * `observed_state.extra_share_by_date` (the record `unresolvedEventOptionIds` reads), and only a 0 or a 1 is that definition.
- * Derived 12 Oct at e58b8dbd: the only other sourceless cells are a generic patch and a bare level stored before the source
- * stamp — both unverified.
- */
-export function isEventByDateSwitchCell(cell: unknown, target: unknown): boolean {
-  const v = cellFigure(cell);
-  return (v === 0 || v === 1) && rec(rec(rec(target)?.observed_state)?.extra_share_by_date) !== undefined;
-}
-
-/**
- * The same marker on the switch node's OWN starting value: `admitEventByDate` writes `{ value: 0, source: 'cee_inference',
- * extra_share_by_date }` — "this option is not adding capacity today", the switch's definition, never an estimate of a
- * level (its pace and lead time are said by the share's own estimate words). Only the 0 under that marker is structural.
- */
-export function isEventByDateSwitchValue(node: unknown): boolean {
-  const os = rec(rec(node)?.observed_state);
-  return os !== undefined && os.value === 0 && rec(os.extra_share_by_date) !== undefined;
-}
-
-/**
- * An option cell's origin. HUMAN only on a human stamp that nothing contradicts (`estimate: true` is Olumi's draft-widening
- * level, "never user-authored": a human stamp beside it is contradictory, so UNVERIFIED); AI only on a recognised AI stamp;
- * the event-by-date switch is structural; anything else — missing, unrecognised (a legacy `user`: derived 12 Oct, no production
- * writer stamps it on a cell) — is UNVERIFIED.
- */
-export function settingOriginOf(cell: unknown, target: unknown): 'human' | 'ai' | 'unverified' | 'structural' {
-  const source = rec(cell)?.source;
-  if (typeof source === 'string') {
-    if (HUMAN_SOURCES.has(source)) return rec(cell)?.estimate === true ? 'unverified' : 'human';
-    return AI_SOURCES.has(source) ? 'ai' : 'unverified';
-  }
-  return isEventByDateSwitchCell(cell, target) ? 'structural' : 'unverified';
-}
-
-const NONE: GoalChanceEstimateCounts = { links: 0, values: 0, settingsByOption: {}, unverifiedValues: 0, unverifiedSettingsByOption: {}, unread: false };
+const NONE: GoalChanceEstimateCounts = { links: 0, values: 0, settingsByOption: {}, unverifiedValues: 0, unverifiedSettingsByOption: {}, unread: false,
+  acceptedValues: 0, unverifiedLinks: 0 };
 const UNREAD: GoalChanceEstimateCounts = { ...NONE, unread: true };
 
 export function goalChanceEstimateCounts(graph: unknown, optionIds?: readonly string[], goalId?: unknown,
@@ -188,10 +143,15 @@ export function goalChanceEstimateCounts(graph: unknown, optionIds?: readonly st
     });
   });
   // (c) Every link into the set; an option's own link to a node it sets is that setting (counted once, above).
-  const links: GoalPathLink[] = edges.filter(e => distance.has(e.to as string) && !ownSetting.has(`${e.from as string}->${e.to as string}`)).map(e => ({
+  const inSet = edges.filter(e => distance.has(e.to as string) && !ownSetting.has(`${e.from as string}->${e.to as string}`));
+  const links: GoalPathLink[] = inSet.map(e => ({
     link_id: `${e.from as string}->${e.to as string}`, from_label: labelOf(e.from as string), to_label: labelOf(e.to as string),
     link_sizing: linkSizing(e), option_ids: [], goal_distance: distance.get(e.to as string)! + 1, value_hash: linkValueHash(e) }));
-  const census = olumiEstimatesFeedingResult({ validatedDefinitionForLink: validatedDefinitionForGraph(analysed),
+  const validatedDefinitionForLink = validatedDefinitionForGraph(analysed);
+  // AIE 6121121310: a link whose size has no established origin is disclosed, never dropped (`linkProvenanceOf`).
+  const unverifiedLinks = inSet.filter(e => isUnverifiedProvenance(linkProvenanceOf(e, { fromKind: byId.get(e.from as string)?.kind,
+    validatedDefinition: validatedDefinitionForLink(`${e.from as string}->${e.to as string}`) !== undefined }))).length;
+  const census = olumiEstimatesFeedingResult({ validatedDefinitionForLink,
     goalPathFactors: factors, goalPathLinks: links, optionSettings: settings });
   const valueIds = new Set(valued);
   const settingsByOption: Record<string, number> = {};
@@ -200,7 +160,8 @@ export function goalChanceEstimateCounts(graph: unknown, optionIds?: readonly st
     if (option !== undefined) settingsByOption[option] = (settingsByOption[option] ?? 0) + 1;
   }
   return { links: census.links.length, values: census.values.filter(v => valueIds.has(v.id)).length, settingsByOption,
-    unverifiedValues: factors.filter(f => f.value_authorship === 'unknown').length, unverifiedSettingsByOption, unread: false };
+    unverifiedValues: factors.filter(f => f.value_authorship === 'unknown').length, unverifiedSettingsByOption, unread: false,
+    acceptedValues: factors.filter(f => f.value_authorship === 'olumi_accepted').length, unverifiedLinks };
 }
 
 /** The words the screen says a provisional point rests on: "1 starting value, 2 option settings and 3 relationships". */

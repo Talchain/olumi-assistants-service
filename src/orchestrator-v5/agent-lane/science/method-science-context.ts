@@ -1,4 +1,3 @@
-import { isUnverifiedUserMaterial } from '../../../cee/transforms/provenance-display.js';
 /**
  * THE SCIENCE CONTEXT FOR AN AGENT-LANE METHOD TURN (SCIENCE/DSK, #85 5933229708).
  *
@@ -38,6 +37,7 @@ import type { DecisionStage, DSKProtocol } from '../../../dsk/types.js';
 import { protocolDirectiveLines, literalProtocolSteps } from '../../coaching/typed-intent-directive.js';
 import { loadVerifiedDskBundle } from '../../compose/dsk-bundle-record.js';
 import { isPremortemWorksheetPress } from '../guidance/plan.js';
+import { valueProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 
 /**
  * The served run state of a model that was never run, typed against the contract's own kinds (`ANALYSIS_RUN_STATE_KINDS`,
@@ -437,8 +437,11 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
         observed_state?: { source?: unknown; extractionType?: unknown; value?: unknown; reviewed_by_user?: unknown };
       } | undefined;
       const os = node?.observed_state;
-      return !isUnverifiedUserMaterial(os) && os?.source === 'cee_inference' && os.extractionType === undefined && node?.extractionType === undefined
-        && os.reviewed_by_user === undefined && typeof os.value === 'number' && Number.isFinite(os.value);
+      // ONE PROVENANCE AUTHORITY: only a lever value whose origin is NOT established grounds stories here (an absent-type
+      // `cee_inference` is Olumi's estimate under the one rule, named as such everywhere; a human figure whose role is
+      // unverified is never "unknown authorship"); finite and unaccepted, as before.
+      return valueProvenanceOf(os).origin === 'unknown' && os?.reviewed_by_user === undefined
+        && typeof os?.value === 'number' && Number.isFinite(os.value);
     }).sort((a, b) => a.goal_distance - b.goal_distance || byCodepoint(a.factor_id, b.factor_id))
       .map(f => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: null,
         lever_option_labels: ownLevers.get(f.factor_id)! }));

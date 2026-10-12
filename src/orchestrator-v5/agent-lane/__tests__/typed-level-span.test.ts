@@ -114,19 +114,22 @@ describe('typed current-level sentence authority', () => {
     expect(valueAuthorshipOf(n.observed_state)).toBe('olumi_estimate');
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
   });
-  it('a legacy absent-type numeric origin remains unknown with no validator verdict', () => {
+  // ⭐ ONE PROVENANCE AUTHORITY (DL 12 Oct, the census's three-state rule): with NO extraction type the recognised stamp decides —
+  // absent-type cee_inference is Olumi's, absent-type brief_extraction the brief's. ⚠ This reverses S7's pinned F1 'unknown'
+  // (AIE #94 6094306696) — flagged to the DL/AIE with its one-row switch (provenance-of.ts AI_VALUE_STAMP / HUMAN_VALUE_STAMP).
+  it('a legacy absent-type numeric origin reads as Olumi\'s by its stamp (the one rule), with no validator verdict', () => {
     const os = framedObservedState({ ...model().factors[0]!, provenance: 'ai_proposed' });
     expect(os.source).toBe('cee_inference');
     expect(os.extractionType).toBeUndefined();
     expect(os.user_material_unverified).toBeUndefined();
-    expect(valueAuthorshipOf(os)).toBe('unknown');
+    expect(valueAuthorshipOf(os)).toBe('olumi_estimate');
     expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('ai_inferred');
   });
   it('the trusted human formatter preserves its absent-type carrier without a validator verdict', () => {
     const os = framedObservedState(model().factors[0]!);
     expect(os).toStrictEqual({ value: 0.46, raw_value: 920, cap: 2000, declared_scale: 'unit_interval', unit: 'appointments/month', source: 'brief_extraction' });
-    expect(valueAuthorshipOf(os)).toBe('unknown');
-    expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('ai_inferred');
+    expect(valueAuthorshipOf(os)).toBe('yours');
+    expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('from_brief');
   });
   it('the definitional today level gains neither an AI nor an explicit extraction marker', () => {
     const os = framedObservedState({ ...model().factors[0]!, provenance: 'ai_proposed', baseline_value: TODAY_LEVEL, unit: TODAY_UNIT }, false);
@@ -134,7 +137,8 @@ describe('typed current-level sentence authority', () => {
     expect(os.extractionType).toBeUndefined();
     expect(os.user_material_unverified).toBeUndefined();
     expect(valueAuthorshipOf(os)).toBe('unknown');
-    expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('ai_inferred');
+    // An unestablished origin is never said as Olumi's: the figure's label is "not confirmed", not "AI inferred".
+    expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('unverified_brief');
   });
   it('withdrawal preserves unverified claims and leaves legacy withdrawn numeric origins unknown', () => {
     const m = model(); m.factors[0]!.baseline_evidence = null;
@@ -147,7 +151,7 @@ describe('typed current-level sentence authority', () => {
     expect(nodeProvenanceDisplay(kept?.observed_state?.extractionType, kept?.observed_state)).toBe('unverified_brief');
     expect(withdrawn?.observed_state).toMatchObject({ source: 'cee_inference' });
     expect(withdrawn?.observed_state?.extractionType).toBeUndefined();
-    expect(valueAuthorshipOf(withdrawn?.observed_state)).toBe('unknown');
+    expect(valueAuthorshipOf(withdrawn?.observed_state)).toBe('olumi_estimate');
     expect(nodeProvenanceDisplay(withdrawn?.observed_state?.extractionType, withdrawn?.observed_state)).toBe('ai_inferred');
   });
   it('valid receipt carries user credit, display and authorship with no unverified marker', () => {
@@ -469,10 +473,11 @@ describe('RUN8 independently bound current claims', () => {
     expect(verify(m, `${subscribers.quote} ${tail}`)).toBe(false);
   });
   it('an extraction-type-free carrier keeps staging reads; only a verified quantity carries its extraction type', () => {
-    expect(nodeProvenanceDisplay(undefined, { source: 'brief_extraction', value: 0 })).toBe('ai_inferred');
+    // A HELD figure says its own provenance (the one rule); a figure-less carrier keeps the extraction type's display.
+    expect(nodeProvenanceDisplay(undefined, { source: 'brief_extraction', value: 0 })).toBe('from_brief');
     expect(nodeProvenanceDisplay('explicit', { source: 'brief_extraction', extractionType: 'explicit', value: 0 })).toBe('from_brief');
     expect(nodeProvenanceDisplay(undefined, { source: 'brief_extraction' })).toBe('ai_inferred');
-    expect(nodeProvenanceDisplay('inferred', { source: 'brief_extraction', value: 0 })).toBe('ai_inferred');
+    expect(nodeProvenanceDisplay('inferred', { source: 'brief_extraction', value: 0 })).toBe('from_brief');
     expect(nodeProvenanceDisplay(undefined, { source: 'cee_inference', value: 0 })).toBe('ai_inferred');
     expect(nodeProvenanceDisplay(undefined, { source: 'cee_inference', value: 0, user_material_unverified: true })).toBe('unverified_brief');
   });

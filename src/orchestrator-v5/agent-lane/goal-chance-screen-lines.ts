@@ -199,7 +199,8 @@ export function goalChanceNotesForAgent(result: unknown, graph: unknown, current
   const ranges = rangeCensusOf(facts, graph);
   const rangeIds = Object.keys(facts.goal_chance_range_display ?? {});
   if (ranges !== undefined && !out.includes(UNVERIFIED_SOURCES_NOTE)
-    && (ranges.unread || ranges.unverifiedValues > 0 || rangeIds.some((id) => (ranges.unverifiedSettingsByOption[id] ?? 0) > 0))) {
+    && (ranges.unread || ranges.unverifiedValues > 0 || ranges.unverifiedLinks > 0
+      || rangeIds.some((id) => (ranges.unverifiedSettingsByOption[id] ?? 0) > 0))) {
     out.push(UNVERIFIED_SOURCES_NOTE);
   }
   return out;

@@ -1,6 +1,6 @@
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 /** Literal, per-end unit readings for an unsized link (RT-6 U1–U4). No graph writes. */
-import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
+import { earnsAuthorshipCredit, valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
@@ -39,7 +39,7 @@ function usersLevelOf(node: Rec): number | undefined {
   const os = isRec(node.observed_state) ? node.observed_state : undefined;
   const level = os === undefined ? undefined : os.raw_value ?? os.value;
   return os !== undefined && typeof level === 'number' && Number.isFinite(level)
-    && earnsAuthorshipCredit(classifyValueSource(os.source)) ? level : undefined;
+    && earnsAuthorshipCredit(valueClassOf(os)) ? level : undefined;
 }
 
 /**

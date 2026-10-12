@@ -80,6 +80,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
+import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { quoteBindsFactorFigure, verifiedFactorLevel, verifiedOptionSetting } from './verified-option-setting.js';
 
 const MAX_ID = 100;
@@ -3471,7 +3472,8 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
       const original = option?.interventions?.find(iv => canonicalLabel(iv.factor_label) === canonicalLabel(factor.description ?? factor.label));
       const value = original?.value ?? setting.raw_value ?? setting.value;
       const unit = original?.unit ?? setting.unit ?? factor.observed_state?.unit ?? '';
-      const author = setting.source === 'brief_extraction' ? 'Your stated setting' : 'Drafted option setting';
+      // ONE PROVENANCE AUTHORITY: "Your stated setting" only for the person's own setting (`provenanceOf`).
+      const author = settingProvenanceOf(setting, factor).origin === 'human' ? 'Your stated setting' : 'Drafted option setting';
       const detail = `${author}: ${factor.description ?? factor.label} = ${value}${unit ? ` ${unit}` : ''}. Kept for review; the deadline forecast uses this option's added-capacity estimate.`;
       loss.push({ field_path: `nodes[${n.id}].event_forecast_not_modelled`, before: { factor, setting, original },
         after: { description: detail }, severity: 'warn', reason: detail } as RepairEntry);
@@ -4656,8 +4658,7 @@ function admitOnce(
     const edge = linkResult.edges.find(e => e.from === link.from && e.to === link.to);
     const ends = labelUnits.has(link.from) || labelUnits.has(link.to)
       ? { source: nodeOf.get(link.from)?.label ?? '', target: nodeOf.get(link.to)?.label ?? '' } : undefined;
-    if (edge?.provenance?.magnitude === 'user_stated'
-      && edge.provenance.natural_effect !== undefined
+    if (edge !== undefined && hasUserStatedSize(edge) && edge.provenance?.natural_effect !== undefined
       && (statedEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends)
         || statedSwitchEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends))) edge.provenance.source_quote = sentence;
   }

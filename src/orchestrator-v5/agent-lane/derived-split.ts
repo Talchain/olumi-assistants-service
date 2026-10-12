@@ -15,6 +15,7 @@
  * PURE: it reads a message and the totals the caller found; it persists nothing. The `derived_from` stamp that records
  * the derivation on the model waits for Canonical's carrier on the one intervention form (#70 5859537590).
  */
+import { isPersonsOwnValue } from '../../cee/provenance/provenance-of.js';
 
 /** A total the model already holds, with who stated it. Only a `user` total can be the base of the user's split. */
 export interface StatedTotal {
@@ -114,7 +115,8 @@ export function statedTotalsOf(rawGraph: unknown): StatedTotal[] {
   }
   for (const n of nodes) {
     const os = n?.observed_state as { source?: unknown; raw_value?: unknown; unit?: unknown } | undefined;
-    if (n?.kind !== 'factor' || typeof n.id !== 'string' || (os?.source !== 'brief_extraction' && os?.source !== 'user_specified')) continue;
+    // ONE PROVENANCE AUTHORITY: the person's own figure (`isPersonsOwnValue`), never Olumi's or an unverified one.
+    if (n?.kind !== 'factor' || typeof n.id !== 'string' || os === undefined || !isPersonsOwnValue(os)) continue;
     if (typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value)) continue;
     out.push({ node_id: n.id, label: typeof n.label === 'string' ? n.label : n.id, value: os.raw_value,
       ...(typeof os.unit === 'string' ? { unit: os.unit } : {}), by: 'user' });

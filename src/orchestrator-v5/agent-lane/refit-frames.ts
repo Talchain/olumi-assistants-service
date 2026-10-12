@@ -24,6 +24,7 @@
  * PURE: the input graph is never mutated.
  */
 import { clearPlaceholderMarker } from '../../cee/magnitude/link-sizing.js';
+import { hasUserStatedSize } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, any>;
 
@@ -107,7 +108,7 @@ function spreadWouldMove(n: Rec, Fold: number, F: number): boolean {
 }
 
 const key = (e: Rec): string => `${e.from}→${e.to}`;
-const userStated = (e: Rec): boolean => e.provenance?.magnitude === 'user_stated';
+const userStated = (e: Rec): boolean => hasUserStatedSize(e);
 /**
  * ⭐ R3 #75 5923914386 FINDING 1 (DL 5923941128): the whole holds its parts. A DEFINITIONAL link (±1 in one unit, typed by
  * admission's `definitionalLink`) is exact by definition, like a user's size, so a frame that cuts it is refit the same

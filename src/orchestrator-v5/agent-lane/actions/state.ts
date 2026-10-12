@@ -38,16 +38,15 @@ import { scopeIssueBlocks } from '../goal-scope.js';
 import { goalLevelAskOf } from '../current-level-answer.js';
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from '../olumi-estimates-feeding-result.js';
 import { validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
-import { InterventionV3 } from '../../../schemas/cee-v3.js';
+import { settingAuthorshipOf } from '../../../cee/provenance/provenance-of.js';
 import { readOptionResultSources } from '../../../orchestrator/context/option-result-source.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
-const settingProvenance = InterventionV3.pick({ value: true, source: true });
 type OptionSetting = NonNullable<Parameters<typeof olumiEstimatesFeedingResult>[0]['optionSettings']>[number];
 
 /** Distinct option settings from this read, restricted to the bound Run's options and goal-path factors. */
-function optionSettingsOf(read: ActionRead, goalPathFactors: readonly GoalPathFactor[]): OptionSetting[] {
+export function optionSettingsOf(read: ActionRead, goalPathFactors: readonly GoalPathFactor[]): OptionSetting[] {
   const result = rec(read.analysisResult);
   const enrichment = rec(result?.enrichment) ?? rec(rec(result?.data)?.enrichment) ?? {};
   // Current-first, like the shared result reader: a legacy copy must not widen a current option set.
@@ -68,11 +67,17 @@ function optionSettingsOf(read: ActionRead, goalPathFactors: readonly GoalPathFa
     for (const [factorId, intervention] of Object.entries(rec(option.interventions) ?? rec(rec(option.data)?.interventions) ?? {})) {
       const factor = factors.get(factorId);
       if (factor === undefined) continue;
-      const setting = settingProvenance.safeParse(intervention);
-      if (!setting.success) continue;
-      // Approved Olumi levels retain cee_hypothesis; this read has no distinct acceptance marker.
-      settings.push({ id: `${option.id}:${factorId}`, label: `${factor.label} under ${optionLabel}`,
-        authorship: setting.data.source === 'cee_hypothesis' ? 'olumi_estimate' : 'user' });
+      // A cell with a figure is an input, whatever its stamp (the census's rule): an unrecognised or missing stamp is no
+      // longer dropped here while the census counts it.
+      const figure = typeof intervention === 'number' ? intervention : rec(intervention)?.value;
+      if (typeof figure !== 'number' || !Number.isFinite(figure)) continue;
+      // ⭐ ONE PROVENANCE AUTHORITY (DL AMEND, 12 Oct): whose the setting is, by `provenanceOf` — never the old two-way
+      // polarity (anything not `cee_hypothesis` was "the user's"). A structural switch cell is not an input; an
+      // unestablished one is `unknown` (never counted as Olumi's, never the person's). Approved Olumi levels retain
+      // `cee_hypothesis`: a cell has no distinct acceptance marker.
+      const authorship = settingAuthorshipOf(intervention, (nodes as unknown[]).map(rec).find(n => n?.id === factorId));
+      if (authorship === 'structural') continue;
+      settings.push({ id: `${option.id}:${factorId}`, label: `${factor.label} under ${optionLabel}`, authorship });
     }
   }
   return settings;
