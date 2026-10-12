@@ -809,10 +809,12 @@ export function framedObservedState(f: {
   // `estimatedObservedState` and `withdrawUnstatedBaselineStamps` (#2076). "Today is 100 % of today" is a definition,
   // not evidence for a user's measured level; construction attribution requires the verified receipt.
   // Construction always passes a receipt verdict. The two typed human doors use this
-  // formatter after verifying the figure themselves; preserve their trusted carrier shape.
+  // formatter after verifying the figure themselves (`figureTheUserWrote`), so they WRITE the attestation (DL 12 Oct): a
+  // type-less `brief_extraction` is the person's by its stamp alone (`stampOnly`) and the chance discloses it as unverified;
+  // the verified figure carries `explicit`, so its chance carries no such note.
   const base = verifiedCurrentLevel === undefined ? {
     ...(f.unit ? { unit: f.unit } : {}),
-    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' }
+    ...(f.provenance === 'explicit' ? { source: 'brief_extraction', extractionType: 'explicit' }
       : f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {} : { source: 'cee_inference' }),
   } : {
     ...(f.unit ? { unit: f.unit } : {}),

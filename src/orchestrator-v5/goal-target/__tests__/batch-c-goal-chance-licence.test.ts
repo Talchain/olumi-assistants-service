@@ -6,11 +6,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, nearestFiveGoalChancesForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence } from '../goal-chance-licence.js';
+import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { conditionsRefusedBasis, CONDITIONS_NOT_KEPT, targetChanceWords } from '../goal-target-basis.js';
-import { goalLevelIsOlumisEstimate, withholdForOlumiGoalLevel, withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
+import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
 import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../../agent-lane/goal-chance-estimate-egress.js';

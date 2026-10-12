@@ -1,5 +1,5 @@
 {
-  "source_sha": "e58b8dbdb66a222fa780cd6e5d8dfc3e3e8f5a35",
+  "source_sha": "41b7f181a6a14bffcdaca02a9fdcec6927763dd8",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -258,6 +258,7 @@
       "src/cee/validation/classifier.ts": 2,
       "src/cee/validation/v3-validator.ts": 13,
       "src/orchestrator-v5/admission/target-testability.ts": 1,
+      "src/orchestrator-v5/agent-lane/actions/state.ts": 1,
       "src/orchestrator-v5/agent-lane/conditional-input-basis.ts": 2,
       "src/orchestrator-v5/agent-lane/goal-chance-estimate-egress.ts": 6,
       "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts": 1,
@@ -297,7 +298,7 @@
       "src/orchestrator-v5/tools/handlers/analysis-ready-core.ts": 2,
       "src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts": 6,
       "src/orchestrator-v5/tools/handlers/run-analysis-participation-guard.ts": 2,
-      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 35,
+      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 36,
       "src/orchestrator-v5/tools/handlers/run-input-residual.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-input-snapshot.ts": 3,
       "src/orchestrator-v5/tools/registry.ts": 1,
@@ -818,7 +819,7 @@
     "goal_horizon": 52,
     "goal_horizon_months": 43,
     "goal_level_reading": 19,
-    "goal_node_id": 285,
+    "goal_node_id": 287,
     "goal_period": 3,
     "goal_scope": 48,
     "goal_sense_reading": 15,
@@ -841,7 +842,7 @@
     "threshold_source": 37,
     "unit_reading": 79
   },
-  "total_references": 2448,
+  "total_references": 2450,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

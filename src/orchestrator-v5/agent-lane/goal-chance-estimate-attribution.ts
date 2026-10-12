@@ -7,7 +7,7 @@ import {
   inputOriginOf, isEventByDateSwitchCell, isEventByDateSwitchValue, isUnverifiedProvenance, linkProvenanceOf, settingProvenanceOf,
   type InputOrigin,
 } from '../../cee/provenance/provenance-of.js';
-import { olumiEstimatesFeedingResult } from './olumi-estimates-feeding-result.js';
+import { olumiEstimatesFeedingResult, type OlumiEstimates } from './olumi-estimates-feeding-result.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -58,6 +58,9 @@ export interface GoalChanceEstimateCounts {
   /** AIE 6121121310 (internal): links whose SIZE has no established origin (an unmarked link that is not structural and
    *  not a brief link stated with its evidence) — never Olumi's wholesale, never dropped: disclosed like any unverified input. */
   readonly unverifiedLinks: number;
+  /** ONE PROVENANCE AUTHORITY (internal): links whose size is Olumi's estimate the person ACCEPTED (`olumi_accepted`) —
+   *  acceptance is not authorship: still Olumi's, so the result resting on them is provisional (DL 12 Oct, BLOCKING 3). */
+  readonly acceptedLinks: number;
 }
 
 /**
@@ -70,7 +73,8 @@ export { inputOriginOf, isEventByDateSwitchCell, isEventByDateSwitchValue, type 
 /** An option cell's origin in this census's words (the authority's `settingProvenanceOf`). */
 export function settingOriginOf(cell: unknown, target: unknown): 'human' | 'ai' | 'unverified' | 'structural' {
   const p = settingProvenanceOf(cell, target);
-  return p.structural ? 'structural' : isUnverifiedProvenance(p) ? 'unverified' : p.origin === 'human' ? 'human' : 'ai';
+  // A cell that is the person's by its stamp alone (`stampOnly`) is disclosed as unverified: labelled, never withheld.
+  return p.structural ? 'structural' : isUnverifiedProvenance(p) || p.stampOnly === true ? 'unverified' : p.origin === 'human' ? 'human' : 'ai';
 }
 
 const cellFigure = (cell: unknown): number | undefined => {
@@ -79,15 +83,27 @@ const cellFigure = (cell: unknown): number | undefined => {
 };
 
 const NONE: GoalChanceEstimateCounts = { links: 0, values: 0, settingsByOption: {}, unverifiedValues: 0, unverifiedSettingsByOption: {}, unread: false,
-  acceptedValues: 0, unverifiedLinks: 0 };
+  acceptedValues: 0, unverifiedLinks: 0, acceptedLinks: 0 };
 const UNREAD: GoalChanceEstimateCounts = { ...NONE, unread: true };
 
 export function goalChanceEstimateCounts(graph: unknown, optionIds?: readonly string[], goalId?: unknown,
   eventNodeIds: readonly string[] = [],
   /** A MARGINAL measures one condition alone: its event is that condition, without the scored goal (DL AMEND item 3). */
   opts: { readonly scoredInEvent?: boolean } = {}): GoalChanceEstimateCounts {
+  return goalChanceEstimateCensus(graph, optionIds, goalId, eventNodeIds, opts).counts;
+}
+
+/**
+ * ⭐ ONE CENSUS FOR THE FACE AND THE PANEL (DL 12 Oct, BLOCKING 4): the counts the chance face says AND the Check-estimates
+ * panel's own items (`estimates`, the feeder's result over the SAME inputs), so the panel can never list fewer figures than
+ * the face names. `estimates` is null when the census cannot read the event (`unread`).
+ */
+export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly string[], goalId?: unknown,
+  eventNodeIds: readonly string[] = [],
+  opts: { readonly scoredInEvent?: boolean } = {}): { readonly counts: GoalChanceEstimateCounts; readonly estimates: OlumiEstimates | null } {
+  const UNREAD_CENSUS = { counts: UNREAD, estimates: null };
   const stored = rec(graph);
-  if (stored === undefined || !Array.isArray(stored.nodes)) return UNREAD;
+  if (stored === undefined || !Array.isArray(stored.nodes)) return UNREAD_CENSUS;
   const omitted = new Set(stored.nodes.map(rec).filter(n => n?.kind === 'option'
     && optionIds !== undefined && !optionIds.includes(String(n.id))).map(n => n!.id));
   const analysed = asAnalysed({ ...stored, nodes: stored.nodes.filter(n => !omitted.has(rec(n)?.id)),
@@ -100,9 +116,9 @@ export function goalChanceEstimateCounts(graph: unknown, optionIds?: readonly st
   const goals = nodes.filter(n => n.kind === 'goal');
   const scored = (typeof goalId === 'string' ? goals.find(n => n.id === goalId) : undefined) ?? goals[0];
   // R5-2: a node of the event this view does not hold (unresolved, or left out of the analysed view) is never read as "none".
-  if (scored === undefined || eventNodeIds.some(id => !byId.has(id))) return UNREAD;
+  if (scored === undefined || eventNodeIds.some(id => !byId.has(id))) return UNREAD_CENSUS;
   const event = [...new Set([...(opts.scoredInEvent === false ? [] : [scored.id as string]), ...eventNodeIds])];
-  if (event.length === 0) return UNREAD;
+  if (event.length === 0) return UNREAD_CENSUS;
   // Everything upstream of the event, by any path (reverse breadth-first; the distance orders RC4's examples only).
   const distance = new Map<string, number>(event.map(id => [id, 0]));
   const into = new Map<string, string[]>();
@@ -139,7 +155,9 @@ export function goalChanceEstimateCounts(graph: unknown, optionIds?: readonly st
       if (whose !== 'human' && whose !== 'ai') return [];
       const id = `${o.id as string}:${nodeId}`;
       optionOf.set(id, o.id as string);
-      return [{ id, label: labelOf(nodeId), authorship: whose === 'ai' ? 'olumi_estimate' as const : 'user' as const }];
+      // The panel's own words for a setting ("<factor> under <option>"); the face counts it, the panel lists it.
+      const optionLabel = typeof o.label === 'string' && o.label !== '' ? o.label : o.id as string;
+      return [{ id, label: `${labelOf(nodeId)} under ${optionLabel}`, authorship: whose === 'ai' ? 'olumi_estimate' as const : 'user' as const }];
     });
   });
   // (c) Every link into the set; an option's own link to a node it sets is that setting (counted once, above).
@@ -159,9 +177,11 @@ export function goalChanceEstimateCounts(graph: unknown, optionIds?: readonly st
     const option = valueIds.has(v.id) ? undefined : optionOf.get(v.id);
     if (option !== undefined) settingsByOption[option] = (settingsByOption[option] ?? 0) + 1;
   }
-  return { links: census.links.length, values: census.values.filter(v => valueIds.has(v.id)).length, settingsByOption,
-    unverifiedValues: factors.filter(f => f.value_authorship === 'unknown').length, unverifiedSettingsByOption, unread: false,
-    acceptedValues: factors.filter(f => f.value_authorship === 'olumi_accepted').length, unverifiedLinks };
+  const counts: GoalChanceEstimateCounts = { links: census.links.length, values: census.values.filter(v => valueIds.has(v.id)).length,
+    settingsByOption, unverifiedValues: factors.filter(f => f.value_authorship === 'unknown').length, unverifiedSettingsByOption,
+    unread: false, acceptedValues: factors.filter(f => f.value_authorship === 'olumi_accepted').length, unverifiedLinks,
+    acceptedLinks: links.filter(l => l.link_sizing === 'olumi_accepted').length };
+  return { counts, estimates: census };
 }
 
 /** The words the screen says a provisional point rests on: "1 starting value, 2 option settings and 3 relationships". */

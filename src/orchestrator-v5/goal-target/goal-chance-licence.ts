@@ -32,20 +32,21 @@ export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js
  *    ORDER COUNTS AS A SUPERLATIVE (d5 6005640764): only the two `highest` forms license an order by goal chance.
  */
 import {
-  GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+  GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
-import { withholdStatusQuoIntervals } from '../../orchestrator/context/constraint-feasibility.js';
+import { withholdOptionGoalFigures, withholdStatusQuoIntervals } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
-import { goalChanceTargetCause, goalLevelIsOlumisEstimate } from './goal-chance-gate.js';
+import { readGoalRecord } from './goal-record.js';
+import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
-import { valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
+import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import {
   BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoMovedWords,
@@ -374,7 +375,7 @@ export function goalChanceLicenceOf(
   const base = changeFrame === 'change_rel' && finite(goalState?.raw_value) ? goalState!.raw_value as number : undefined;
   if (changeFrame === 'change_rel' && base === undefined) return null;
   // Olumi's disclosed reading of the brief's figure keeps its own words (read once, for both rules below).
-  const levelReadingHeld = isRec(goal?.goal_level_reading);
+  const levelReadingHeld = levelReadingHeldOn(goal);
   // ONE PROVENANCE AUTHORITY: "Olumi's assumed starting value" only where the base is Olumi's (origin `ai`, not accepted) —
   // never a human-written figure whose role is unverified (AIE 0825 §2: disclosed by the unverified note instead).
   const goalBase = valueProvenanceOf(goalState);
@@ -386,7 +387,7 @@ export function goalChanceLicenceOf(
   // never licenses that refused result. Not a new human-only rule (AIE item 2): a goal level whose source is UNVERIFIED is
   // disclosed by the unverified note like any other input; an accepted estimate and Olumi's disclosed reading of the brief's
   // figure keep their own words; a relative change keeps `estimate_only`.
-  // ONE predicate with the Run's refusal words (`goal-chance-gate.ts` `withholdForOlumiGoalLevel`: why, and the next step).
+  // ONE predicate with the Run's refusal words (`withholdForOlumiGoalLevel`, below: why, and the next step).
   if (goalLevelIsOlumisEstimate(graph, goalId)) return null;
   const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
   // The Run's own option records, current-first: the first carrier that has any is the comparison.
@@ -562,7 +563,9 @@ export function goalChanceLicenceOf(
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
     sqByAssumption, sqReading, timingOrdinary: timing.ordinary,
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
-    quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, unverifiedInputs,
+    // Acceptance is not authorship (DL 12 Oct, BLOCKING 3): an accepted Olumi value or link is still Olumi's — provisional.
+    quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length
+      + estimates.acceptedValues + estimates.acceptedLinks > 0, unverifiedInputs,
     constraints, option_ids,
     estimates, jointEstimates,
   });
@@ -675,7 +678,7 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
 type GoalChanceEstimates = GoalChanceEstimateCounts;
 /** Nothing licensed and no event beyond the goal: nothing is said, so nothing is counted (not a census reading). */
 const NO_ESTIMATES: GoalChanceEstimates = { links: 0, values: 0, settingsByOption: {}, unverifiedValues: 0, unverifiedSettingsByOption: {}, unread: false,
-  acceptedValues: 0, unverifiedLinks: 0 };
+  acceptedValues: 0, unverifiedLinks: 0, acceptedLinks: 0 };
 
 /**
  * ⛔ RE-SCOPE 2 (R5-2; DL AMEND item 1; AIE R5 handback item 1, its minimal existing-notes wording): an input whose origin is
@@ -876,7 +879,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
       withheld_option_ids: _singleWithheld, ...jointKept } = kept;
     const settings = Object.fromEntries(Object.entries(je.settingsByOption).filter(([id, n]) => Object.hasOwn(quoted, id) && n > 0));
     const provisional = c.estimateOnly || kept.provisional === true || jointUnverified
-      || je.links + je.values + Object.keys(settings).length > 0;
+      || je.links + je.values + Object.keys(settings).length + je.acceptedValues + je.acceptedLinks > 0;
     return {
       ...jointKept,
       ...(je.links > 0 ? { olumi_estimate_link_count: je.links } : {}),
@@ -1385,4 +1388,57 @@ function batchCPartsOf(r: Rec, optionIds: readonly string[], withheld: readonly 
     ...(r.provisional === true ? { provisional: true as const } : {}),
     ...(targets !== undefined ? { targets } : {}),
   };
+}
+
+/** Olumi's disclosed reading of the brief's figure is held on the goal (it keeps its own words). The ONE read of it here. */
+function levelReadingHeldOn(goal: Rec | undefined): boolean {
+  return isRec(goal?.goal_level_reading);
+}
+
+/**
+ * ⛔ AMEND item 2 (kept; DL 12 Oct "KEEP (a)"): the scored goal's own level is Olumi's estimate (origin ai, never accepted),
+ * so no chance of a LEVEL (or an absolute change of one) is shown — admission never admits Olumi's own estimate of a goal's
+ * current level (`admit-model.ts` `goalLevelIsEstimated`). Olumi's disclosed reading of the brief's figure keeps its own
+ * words; a relative change keeps `estimate_only`. ONE predicate: the licence refuses on it, and the Run says why with the
+ * next step ({@link withholdForOlumiGoalLevel}), so the two can never disagree.
+ */
+export function goalLevelIsOlumisEstimate(graph: unknown, goalId: unknown): boolean {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  if (goal === undefined || levelReadingHeldOn(goal)) return false;
+  // The stated target through the ONE goal record (S5): `raw` is held exactly when a target is stated.
+  const target = typeof goalId === 'string' ? readGoalRecord(graph, goalId)?.target : undefined;
+  if (target?.raw === undefined || target.frame === 'change_rel') return false;
+  const os = isRec(goal.observed_state) ? goal.observed_state : undefined;
+  const holds = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v);
+  return os !== undefined && (holds(os.value) || holds(os.raw_value)) && inputOriginOf(os) === 'ai';
+}
+
+/** The refusal's words: why, and the next step (DL 12 Oct: "confirm or give today's level"). AIE text check. */
+export function olumiGoalLevelWords(label: string): { readonly message: string; readonly say: string } {
+  const say = `To see it, confirm Olumi’s estimate of today’s ‘${label}’, or tell me what it is today.`;
+  return { message: `Not shown. Today’s ‘${label}’ in this model is Olumi’s estimate, not a figure you gave, so no chance of `
+    + `reaching your target is shown. ${say}`, say };
+}
+
+/**
+ * The Run says why the licence refused ({@link goalLevelIsOlumisEstimate}) and what to do next, through the ONE goal-figure
+ * seam — the outcome and the ordering stay; never a figure on a guessed starting level.
+ */
+export function withholdForOlumiGoalLevel<E>(envelope: E, graph: unknown, goalId: unknown): E {
+  if (!isRec(envelope) || !goalLevelIsOlumisEstimate(graph, goalId)) return envelope;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const label = typeof goal?.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'your goal';
+  const scored = [...new Set(readOptionResultSources(envelope).flat().flatMap((r) => {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    return id === undefined ? [] : [id];
+  }))];
+  if (scored.length === 0) return envelope;
+  const words = olumiGoalLevelWords(label);
+  // `detail.reason` is CEE-local (as `target_reading_open`); the UI renders `message` for this code.
+  return withholdOptionGoalFigures(envelope, new Set(scored), {
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: words.message, say: words.say,
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: 'goal_level_olumi_estimate' },
+  }, { keepOutcome: true, keepOrdering: true });
 }

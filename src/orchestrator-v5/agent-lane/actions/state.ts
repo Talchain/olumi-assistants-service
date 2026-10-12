@@ -37,7 +37,8 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { scopeIssueBlocks } from '../goal-scope.js';
 import { goalLevelAskOf } from '../current-level-answer.js';
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from '../olumi-estimates-feeding-result.js';
-import { validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
+import { goalChanceEstimateCensus } from '../goal-chance-estimate-attribution.js';
+import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
 import { settingAuthorshipOf } from '../../../cee/provenance/provenance-of.js';
 import { readOptionResultSources } from '../../../orchestrator/context/option-result-source.js';
 
@@ -81,6 +82,23 @@ export function optionSettingsOf(read: ActionRead, goalPathFactors: readonly Goa
     }
   }
   return settings;
+}
+
+/**
+ * ⭐ ONE CENSUS FOR THE FACE AND THE PANEL (DL 12 Oct; last check BLOCKING 4): Check estimates lists exactly the figures the
+ * chance face counts — the SAME census function (`goalChanceEstimateCensus`) over the SAME inputs: this Run's scored options
+ * and its scored goal (the licence's own, else the census's first goal). Equal by construction, never a second walk that
+ * could drop a setting on the goal itself.
+ */
+export function checkEstimatesOf(read: ActionRead): OlumiEstimates | null {
+  const licence = goalChanceLicenceForAgent(read.analysisResult);
+  const result = rec(read.analysisResult);
+  const enrichment = rec(result?.enrichment) ?? rec(rec(result?.data)?.enrichment) ?? {};
+  const runOptionIds = readOptionResultSources(enrichment).map(rows => rows
+    .map(row => typeof row.option_id === 'string' ? row.option_id : row.id)
+    .filter((id): id is string => typeof id === 'string' && id !== '')).find(ids => ids.length > 0);
+  // The face's own inputs where there is a face (the licence's options and scored goal); else this Run's option rows.
+  return goalChanceEstimateCensus(read.graph, licence?.option_ids ?? runOptionIds, licence?.goal_node_id).estimates;
 }
 
 /** The persisted state the bar is a function of. The same fields at the turn's end and on the reload GET. */
@@ -239,13 +257,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       readable: true,
       identityReading,
       canonicalStage: canonicalStageOf(signals['run.kind'], read.graph),
-      olumiEstimates: runKey === null || !guidanceModelReadable(read.graph) ? null : olumiEstimatesFeedingResult({
-        validatedDefinitionForLink: validatedDefinitionForGraph(read.graph),
-        goalPathFactors: signals['model.goal_path_factors'],
-        goalPathLinks: signals['model.goal_path_links'],
-        optionSettings: optionSettingsOf(read, signals['model.goal_path_factors']),
-        driverIds: [],
-      }),
+      olumiEstimates: runKey === null || !guidanceModelReadable(read.graph) ? null : checkEstimatesOf(read),
       estimateCandidates: signals['model.goal_path_factors'].flatMap(f => {
         if (f.value_authorship !== 'olumi_estimate' && f.value_authorship !== 'olumi_accepted') return [];
         const node = nodes.find(n => n?.id === f.factor_id);

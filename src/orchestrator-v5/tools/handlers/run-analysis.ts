@@ -213,8 +213,8 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
-import { withholdForOlumiGoalLevel, withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
-import { sentGoalThresholdOf, withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
+import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../../goal-target/goal-chance-licence.js';
 import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';

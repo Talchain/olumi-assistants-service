@@ -30,8 +30,11 @@ import * as capabilities from '../../../orchestrator-v5/agent-lane/runtime/agent
 import * as actionState from '../../../orchestrator-v5/agent-lane/actions/state.js';
 
 type Rec = Record<string, any>;
-type Klass = 'human' | 'human_unverified' | 'ai' | 'ai_accepted' | 'unknown' | 'structural' | 'placeholder';
-const ALL: readonly Klass[] = ['human', 'human_unverified', 'ai', 'ai_accepted', 'unknown', 'structural', 'placeholder'];
+// `human_stamp_only` (DL 12 Oct, LABEL-ONLY): the person's by its stamp alone (a type-less `brief_extraction`). The gates and
+// the wording surfaces read it as the person's, as staging does (nothing newly withheld); the chance's census and F1 disclose
+// it as unverified. Each surface below names which of those two it gives.
+type Klass = 'human' | 'human_unverified' | 'human_stamp_only' | 'ai' | 'ai_accepted' | 'unknown' | 'structural' | 'placeholder';
+const ALL: readonly Klass[] = ['human', 'human_unverified', 'human_stamp_only', 'ai', 'ai_accepted', 'unknown', 'structural', 'placeholder'];
 
 // The authority itself, where it exists (absent on 591cc1a0).
 const AUTHORITY = fileURLToPath(new URL('../provenance-of.ts', import.meta.url));
@@ -49,6 +52,7 @@ function classOf(p: Rec): Klass {
   if (p.origin === 'ai') return p.accepted ? 'ai_accepted' : 'ai';
   // Origin human, role unverified (DL 12 Oct; AIE 0825 §2): never Olumi's, never the person's verified figure.
   if (p.origin === 'human' && p.role === 'unverified') return 'human_unverified';
+  if (p.origin === 'human' && p.stampOnly === true) return 'human_stamp_only';
   return p.origin as Klass;
 }
 
@@ -90,7 +94,7 @@ function valueGraph(os: Rec): Rec {
 }
 
 const fromDisplay = (d: unknown): readonly Klass[] =>
-  d === 'from_brief' || d === 'user_set' ? ['human'] : d === 'ai_inferred' ? ['ai', 'ai_accepted', 'structural']
+  d === 'user_set' ? ['human'] : d === 'from_brief' ? ['human', 'human_stamp_only'] : d === 'ai_inferred' ? ['ai', 'ai_accepted', 'structural']
     : d === 'unverified_brief' ? ['unknown', 'human_unverified'] : ALL;
 
 function valueSurfaces(os: Rec): Record<string, readonly Klass[]> {
@@ -98,19 +102,21 @@ function valueSurfaces(os: Rec): Record<string, readonly Klass[]> {
   const out: Record<string, readonly Klass[]> = {};
   // The census.
   const c = goalChanceEstimateCounts(graph, ['o1'], 'g') as Rec;
-  out.census = c.values === 1 ? ['ai'] : c.acceptedValues === 1 ? ['ai_accepted'] : c.unverifiedValues === 1 ? ['unknown', 'human_unverified']
+  out.census = c.values === 1 ? ['ai'] : c.acceptedValues === 1 ? ['ai_accepted'] : c.unverifiedValues === 1 ? ['unknown', 'human_unverified', 'human_stamp_only']
     : c.acceptedValues === undefined ? ['human', 'structural', 'ai_accepted'] : ['human', 'structural'];
   // The Check-estimates panel: its data (F1) and its line.
   const f1 = valueAuthorshipOf(os);
-  out.panelData = f1 === 'yours' ? ['human'] : f1 === 'olumi_estimate' ? ['ai'] : f1 === 'olumi_accepted' ? ['ai_accepted'] : ['unknown', 'structural', 'human_unverified'];
+  out.panelData = f1 === 'yours' ? ['human'] : f1 === 'olumi_estimate' ? ['ai'] : f1 === 'olumi_accepted' ? ['ai_accepted']
+    : ['unknown', 'structural', 'human_unverified', 'human_stamp_only'];
   const lines = sayOlumiEstimates(olumiEstimatesFeedingResult({
     goalPathFactors: [{ factor_id: 'f', label: 'Price', value_authorship: f1, goal_distance: 1, value_hash: '' }], goalPathLinks: [],
   })).join(' ');
-  out.panelLine = /Olumi supplied 1 /.test(lines) ? ['ai'] : /1 you accepted/.test(lines) ? ['ai_accepted'] : ['human', 'human_unverified', 'unknown', 'structural'];
+  out.panelLine = /Olumi supplied 1 /.test(lines) ? ['ai'] : /1 you accepted/.test(lines) ? ['ai_accepted']
+    : ['human', 'human_unverified', 'human_stamp_only', 'unknown', 'structural'];
   // The receipt owner.
   if (has('receipt (heldFigureOwner)', (capabilities as Rec).heldFigureOwner)) {
     const owner = (capabilities as Rec).heldFigureOwner(graph.nodes[1]);
-    out.receipt = owner === 'yours' || owner === 'brief' ? ['human'] : owner === 'olumi' ? ['ai', 'structural']
+    out.receipt = owner === 'yours' ? ['human'] : owner === 'brief' ? ['human', 'human_stamp_only'] : owner === 'olumi' ? ['ai', 'structural']
       : owner === 'olumi_accepted' ? ['ai_accepted'] : owner === 'unverified_brief' ? ['unknown', 'human_unverified'] : ALL;
   }
   // The compact-context label.
@@ -123,11 +129,11 @@ function valueSurfaces(os: Rec): Record<string, readonly Klass[]> {
   // The conditional-input basis (the factor's value awaits the person; the option leaves it).
   const basis = conditionalInputBasis({ graph, analysedOptionIds: ['o1'],
     admission: { semantic_signals: { material_parameters_awaiting_user_node_ids: ['f'] } } });
-  out.conditionalBasis = basis === null ? ['human', 'structural'] : /Olumi’s estimates for "Price"/.test(basis) ? ['ai', 'ai_accepted']
+  out.conditionalBasis = basis === null ? ['human', 'human_stamp_only', 'structural'] : /Olumi’s estimates for "Price"/.test(basis) ? ['ai', 'ai_accepted']
     : /"Price": Not confirmed from your brief/.test(basis) ? ['human_unverified'] : /"Price": source unrecorded/.test(basis) ? ['unknown'] : ALL;
   // The readiness ladder.
   const ladder = structureProvenance(graph.nodes[1]);
-  out.ladder = ladder === 'user_stated' || ladder === 'user_ratified' ? ['human', 'ai_accepted']
+  out.ladder = ladder === 'user_stated' || ladder === 'user_ratified' ? ['human', 'human_stamp_only', 'ai_accepted']
     : ladder === 'ai_drafted' || ladder === 'system_repaired' ? ['ai', 'structural'] : ['unknown', 'human_unverified'];
   // The wire's node label (`transformNodeToV3`'s call).
   out.wireLabel = fromDisplay(nodeProvenanceDisplay(os.extractionType, os));
@@ -187,21 +193,22 @@ function settingSurfaces(cell: unknown, marker: boolean): Record<string, readonl
   const graph = settingGraph(cell, marker);
   const out: Record<string, readonly Klass[]> = {};
   const c = goalChanceEstimateCounts(graph, ['o1'], 'g') as Rec;
-  out.census = (c.settingsByOption.o1 ?? 0) === 1 ? ['ai'] : (c.unverifiedSettingsByOption.o1 ?? 0) === 1 ? ['unknown'] : ['human', 'structural'];
+  out.census = (c.settingsByOption.o1 ?? 0) === 1 ? ['ai'] : (c.unverifiedSettingsByOption.o1 ?? 0) === 1 ? ['unknown', 'human_stamp_only'] : ['human', 'structural'];
   const ladder = structureProvenanceOfEffect(graph, 'o1', 'f');
-  out.ladder = ladder === 'user_stated' ? ['human'] : ladder === 'ai_drafted' ? ['ai', 'structural'] : ladder === 'unattributed' ? ['unknown'] : ALL;
+  out.ladder = ladder === 'user_stated' ? ['human', 'human_stamp_only'] : ladder === 'ai_drafted' ? ['ai', 'structural'] : ladder === 'unattributed' ? ['unknown'] : ALL;
   if (has('panel option settings (optionSettingsOf)', (actionState as Rec).optionSettingsOf)) {
     const settings = (actionState as Rec).optionSettingsOf({ scenarioId: 's', graph, analysisResult: { enrichment: { option_comparison: [{ option_id: 'o1' }] } } },
       [{ factor_id: 'f', label: 'Price', value_authorship: 'yours', goal_distance: 1, value_hash: '' }]) as Rec[];
     const mine = settings.find((s) => s.id === 'o1:f');
-    out.panel = mine === undefined ? ['structural', 'unknown'] : mine.authorship === 'olumi_estimate' ? ['ai'] : mine.authorship === 'user' ? ['human']
+    // (The legacy panel walk, kept for this spec; the served panel is the chance's census, above.)
+    out.panel = mine === undefined ? ['structural', 'unknown'] : mine.authorship === 'olumi_estimate' ? ['ai'] : mine.authorship === 'user' ? ['human', 'human_stamp_only']
       : mine.authorship === 'unknown' ? ['unknown'] : ALL;
     const lines = sayOlumiEstimates(olumiEstimatesFeedingResult({ goalPathFactors: [], goalPathLinks: [], optionSettings: settings as never })).join(' ');
-    out.panelLine = /Olumi supplied 1 /.test(lines) ? ['ai'] : ['human', 'unknown', 'structural'];
+    out.panelLine = /Olumi supplied 1 /.test(lines) ? ['ai'] : ['human', 'human_stamp_only', 'unknown', 'structural'];
   }
   if (has('receipt (optionLevelSourceWords)', (capabilities as Rec).optionLevelSourceWords)) {
     const words = (capabilities as Rec).optionLevelSourceWords(cell, graph.nodes[1]);
-    out.receipt = words === "Olumi's suggested estimate" ? ['ai'] : words === 'set by you' || words === 'from your original brief' ? ['human']
+    out.receipt = words === "Olumi's suggested estimate" ? ['ai'] : words === 'set by you' ? ['human'] : words === 'from your original brief' ? ['human', 'human_stamp_only']
       : words === 'source not recorded' ? ['unknown', 'structural'] : ALL;
   }
   return out;

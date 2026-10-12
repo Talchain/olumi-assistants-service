@@ -734,6 +734,16 @@ export interface Provenance {
   /** The figure's ROLE: `verified` for the person's figure; `unverified` for a human-written figure whose role is not
    *  verified (`user_material_unverified`; AIE 0825 §2); `n/a` for Olumi's and for an unestablished origin. */
   readonly role: Role;
+  /**
+   * `human` only: the person's BY ITS STAMP ALONE — a type-less `brief_extraction`, which no writer attested against the
+   * person's words (the last check's BLOCKING 1–2: the level-target path, single-entry option levels, the legacy prose
+   * extractor and the V2/V3 draft transforms write it for figures nobody said). ⛔ LABEL, NEVER WITHHOLD (DL 12 Oct; Paul's
+   * test, 12 Oct): every gate keeps staging's reading (the person's), so no chance staging shows is newly withheld; the
+   * goal-chance census ({@link inputOriginOf}, `settingOriginOf`) discloses it as unverified, so a chance resting on it is
+   * shown provisional with its note. A figure is attested with `extractionType: 'explicit'` (the typed door; admission's
+   * receipt), which never carries this flag. Present only when true.
+   */
+  readonly stampOnly?: true;
 }
 
 export type Role = 'verified' | 'unverified' | 'n/a';
@@ -774,7 +784,10 @@ const EXTRACTION_DISPLAY: Readonly<Record<'explicit' | 'observed' | 'inferred' |
   inferred: { source: 'assumption', provenance: 'ai_inferred' },
   range: { source: 'system', provenance: 'ai_inferred' },
 };
-/** HUMAN by a stamp, where no extraction type decides: the brief's own stamps and the person's setting stamp. */
+/**
+ * HUMAN by a stamp, where no extraction type decides. ⚠ `brief_extraction` here is the person's BY ITS STAMP ALONE
+ * (`stampOnly`, below): every gate reads it as staging does; the goal-chance census discloses it as unverified.
+ */
 const HUMAN_VALUE_STAMP: Readonly<Record<string, ValueAuthorshipDisplay>> = {
   brief_extraction: EXTRACTION_DISPLAY.explicit,
   explicit: EXTRACTION_DISPLAY.explicit,
@@ -831,7 +844,9 @@ function readValue(observed: unknown): ValueReading | undefined {
   // beside it as `stated_time`; the `cee_inference` stamp marks the computation, not an estimate of the time.
   if (rec(os.stated_time)?.quantity === 'months_to_finish') return { provenance: P('human'), display: HUMAN_VALUE_STAMP.user_specified! };
   const src = typeof os.source === 'string' ? os.source : undefined;
-  if (src !== undefined && Object.prototype.hasOwnProperty.call(HUMAN_VALUE_STAMP, src)) return { provenance: P('human'), display: HUMAN_VALUE_STAMP[src]! };
+  if (src !== undefined && Object.prototype.hasOwnProperty.call(HUMAN_VALUE_STAMP, src)) {
+    return { provenance: P('human', src === 'brief_extraction' ? { stampOnly: true } : {}), display: HUMAN_VALUE_STAMP[src]! };
+  }
   if (src !== undefined && Object.prototype.hasOwnProperty.call(AI_VALUE_STAMP, src)) return { provenance: P('ai'), display: AI_VALUE_STAMP[src]! };
   return { provenance: P('unknown'), display: UNKNOWN_DISPLAY };
 }
@@ -868,7 +883,8 @@ export type ValueAuthorship = 'yours' | 'olumi_estimate' | 'olumi_accepted' | 'u
 
 export function valueAuthorshipOf(observed: unknown): ValueAuthorship {
   const p = valueProvenanceOf(observed);
-  if (verifiedHuman(p)) return 'yours';
+  // A figure that is the person's by its stamp alone is never said to be theirs here (F1 said `unknown` on staging too).
+  if (verifiedHuman(p)) return p.stampOnly === true ? 'unknown' : 'yours';
   if (p.origin === 'ai' && !p.structural) return p.accepted ? 'olumi_accepted' : 'olumi_estimate';
   return 'unknown';
 }
@@ -878,7 +894,8 @@ export type InputOrigin = 'human' | 'ai' | 'ai_accepted' | 'unverified';
 
 export function inputOriginOf(observed: unknown): InputOrigin {
   const p = valueProvenanceOf(observed);
-  return verifiedHuman(p) ? 'human' : p.origin === 'ai' ? (p.accepted ? 'ai_accepted' : 'ai') : 'unverified';
+  // A figure that is the person's by its stamp alone is disclosed as unverified here — the chance is labelled, never withheld.
+  return verifiedHuman(p) && p.stampOnly !== true ? 'human' : p.origin === 'ai' ? (p.accepted ? 'ai_accepted' : 'ai') : 'unverified';
 }
 
 /** Whose figure the model holds, in the receipts' owners (`write-outcome.ts` `NotSavedValue.still.owner`). */
@@ -896,6 +913,12 @@ export function heldFigureOwnerOf(observed: unknown): HeldFigureOwner | undefine
 
 /** HUMAN by positive attestation: the person's own setting stamps (`InterventionV3.source`'s human members). */
 const HUMAN_SETTING_STAMPS: ReadonlySet<string> = new Set(['user_specified', 'brief_extraction']);
+/**
+ * ⚠ A `brief_extraction` cell without `extractionType: 'explicit'` beside it is the person's BY ITS STAMP ALONE
+ * (`stampOnly`): the stamp is written by unverified doors too (single-entry option levels, `admit-model.ts`; the legacy prose
+ * extractor). Every gate reads it as staging does; the goal-chance census discloses it as unverified (LABEL, NEVER WITHHOLD).
+ */
+const STAMP_ONLY_BRIEF_CELL = (cell: unknown): boolean => rec(cell)?.source === 'brief_extraction' && rec(cell)?.extractionType !== 'explicit';
 /** AI ORIGIN: the recognised AI sources only. Mere absence from the human set is NOT AI origin. */
 const AI_SETTING_STAMPS: ReadonlySet<string> = new Set(['cee_hypothesis', 'domain_knowledge', 'cee_inference']);
 
@@ -934,7 +957,9 @@ export function isEventByDateSwitchValue(node: unknown): boolean {
 export function settingProvenanceOf(cell: unknown, target?: unknown): Provenance {
   const source = rec(cell)?.source;
   if (typeof source === 'string') {
-    if (HUMAN_SETTING_STAMPS.has(source)) return rec(cell)?.estimate === true ? P('unknown') : P('human');
+    if (HUMAN_SETTING_STAMPS.has(source)) {
+      return rec(cell)?.estimate === true ? P('unknown') : P('human', STAMP_ONLY_BRIEF_CELL(cell) ? { stampOnly: true } : {});
+    }
     return AI_SETTING_STAMPS.has(source) ? P('ai') : P('unknown');
   }
   return isEventByDateSwitchCell(cell, target) ? P('ai', { structural: true }) : P('unknown');
