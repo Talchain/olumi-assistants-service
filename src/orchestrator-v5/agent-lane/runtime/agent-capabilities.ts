@@ -4,6 +4,8 @@ import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { bindTeamTimeQuote, teamTimeCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
+import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
+  planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
 /**
@@ -162,6 +164,14 @@ const NOT_A_FACTOR_NOTE =
   'These were named but are not factors (for example a risk), so no starting value can be set on them and they are ' +
   'NOT in this proposal. Tell the user plainly, before they approve, that each was left out and why; describe its ' +
   'effect through the factors it acts on instead. Never present the starting point as complete while any is listed here.';
+
+/**
+ * E5: the hiring-times op. Its member of the operation union is the EBD builder's one-writer edit to `proposal.ts` (DL,
+ * 12 Oct), landing with `record.ts`'s exhaustive entry; until then the literal is cast here, never a second union.
+ */
+const SET_HIRING_TIMES = 'set_hiring_times' as string as StructuredProposal['operations'][number]['op'];
+/** E5: the applied hiring-times card's follow-up (DL ACK of SYS1-E5-STRINGS §3 pending). */
+const HIRING_TIMES_APPLIED = "These hiring assumptions are saved, with your inputs and Olumi's estimates distinguished. Run the analysis so it uses them; do not state a chance before it returns.";
 
 /** The approval-facing disclosure of what was left out (empty when nothing was). */
 function leftOutClause(notAFactor: readonly { label: string; kind: string }[]): string {
@@ -1486,9 +1496,12 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       ...(str(e.origin) ? { origin: e.origin } : {}),
     };
   });
+  // ⭐ E5: each option's start times and pace as the model holds them, with whose each figure is (`hiring-times.ts`).
+  const hiringTimes = goals.length === 1 && isEventShareForecast(g.raw) ? hiringTimesSummaryOf(g.raw, goals[0]!.id) : [];
   return {
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
+    ...(hiringTimes.length === 0 ? {} : { hiring_times: { use: HIRING_TIMES_USE, options: hiringTimes } }),
     links,
     ...(leftOut.length === 0 ? {} : { left_out_of_run: leftOut }),
     readiness: readinessViewOf(g.raw),
@@ -3342,6 +3355,52 @@ export function createAgentCapabilities(
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
       observed_state: held.team.observed_state,
       ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
+  };
+
+  /**
+   * ⭐ E5: the pressed hiring-times card. It stands while its own fields do (`hiringTimesStillApply`: the parts it was
+   * offered against, unchanged, under the same deadline); the postimage is built from THIS read and registered whole with
+   * compare-and-set on both of this read's hashes, under an operation id of that base and this card (a retry replays; a
+   * conflict writes nothing). Set only when the stored model holds every planned start, figure and link strength.
+   */
+  const applyHiringTimes = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const pid = parent.proposal_id, a = parent.operations[0]!.value as ApprovedHiringTimes;
+    const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
+    if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'These hiring timings are set only by pressing their own card, so nothing was changed.');
+    if (hiringTimesHeld(before.raw, a)) {
+      proposals.markApplied(pid, []);
+      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: HIRING_TIMES_APPLIED };
+    }
+    if (!hiringTimesStillApply(a, before.raw)) {
+      return notApplied('superseded', 'The hiring timings in the model changed after this card was offered, so nothing was set. Offer it again only if it still applies.');
+    }
+    const postimage = withHiringTimes(before.raw, a) as Record<string, unknown>;
+    const operationId = constructionOperationId(ctx.scenario_id, `hiring_times:${before.graph_identity_hash}:${pid}`);
+    const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+      graph: { ...postimage },
+      expected_graph_hash: before.graph_hash, expected_graph_identity_hash: before.graph_identity_hash, operation_id: operationId,
+    });
+    const code = reg.status === 200 ? '' : String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+    if (/STALE/.test(code)) {
+      return notApplied('superseded', 'The model changed just before the hiring timings were written, so nothing was set. Offer it again only if it still applies.');
+    }
+    // ⛔ CONFIRMED FROM STATE — also after an ambiguous failure, which does NOT prove no save (AIE 6122431786 §4): every option
+    // holds exactly its planned starts, figures and recomputed link strengths, or the outcome is unknown, never "not set".
+    const after = await readGraph(ctx.scenario_id);
+    if (after === null || !hiringTimesHeld(after.raw, a)) {
+      return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+        detail: 'The hiring timings were sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+          + 'offer to check the model again, and never say they were set or that they were not.' };
+    }
+    const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+    const receipts: ReceiptSummary[] = mv !== undefined && mv !== null && typeof mv.version_id === 'string'
+      ? [{ version: Number(mv.version_number), version_id: mv.version_id, mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '',
+        source_turn_id: registrationTurnId(ctx.scenario_id, operationId) }]
+      : [];
+    proposals.markApplied(pid, receipts);
+    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts, follow_up: HIRING_TIMES_APPLIED };
   };
 
   /**
@@ -5203,6 +5262,76 @@ export function createAgentCapabilities(
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined);
     },
 
+    /**
+     * ⭐ E5 (Paul's manual test, 12 Oct): the hiring timings the user states, per option, on ONE card. Each start is the
+     * user's quote, from this message or an earlier one (E2's source-bound path), in a sentence naming that option; the months
+     * are read from the quote (`hiring-times.ts`), never from the model's arguments, and every figure keeps its role and
+     * origin. r2 (DL CUT): one refusal for every form Olumi cannot model as quoted. Nothing is written here.
+     */
+    async proposeHiringTimes(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const texts = { now: ctx.user_turn_text, conversation: ctx.user_text };
+      const refuse = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
+      const unusable = (): ToolResult => refuse('hiring_timings_unusable', 'Olumi could not use these hiring timings as quoted, so nothing was prepared. '
+        + 'Re-read the user\'s own words and quote each start exactly, in the order they happen; if Olumi still cannot use them, say so plainly.');
+      const asked = Array.isArray(args?.options) ? args.options : [];
+      if (asked.length === 0) return unusable();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
+      const reference = todayInLondon((opts.now ?? (() => new Date()))());
+      if (part === null || deadline === undefined || reference >= deadline) {
+        return refuse('deadline_not_held', 'The deadline must be confirmed before these timings can be applied. Keep the supplied timings and prepare them once the deadline is confirmed.');
+      }
+      const goalId = String(part.goal.id), planned: PlannedOption[] = [];
+      for (const o of asked) {
+        const id = typeof o?.option_id === 'string' ? o.option_id : '';
+        const option = g.nodes.find(n => n.id === id && n.kind === 'option');
+        if (option === undefined) return refuse('unknown_option', `"${id}" is not an option in this model. Nothing was prepared.`);
+        const label = String(option.label);
+        if (planned.some(p => p.option_id === id)) return unusable();
+        const held = capacityPartsOf(g.raw, id, goalId), estimate = olumiEstimateOf(held);
+        if (held.length === 0 || estimate === null) return refuse('adds_no_people', `‘${label}’ adds no people in this model, so it has no start time. Nothing was prepared.`);
+        const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
+        const heldQuotes = heldStatementsOf(held);
+        for (const quote of quotes) {
+          if (heldQuotes.includes(quote)) continue;
+          const stated = quoteStatedFor(texts, quote, label);
+          if (stated === 'not_stated') return refuse('hiring_time_not_stated', `"${quote}" is not in the user's messages, so nothing was prepared. Copy the hiring time exactly from the user's own message and call again; do not ask the user to retype it.`);
+          if (stated === 'not_for_option') return refuse('hiring_time_not_for_option', `"${quote}" is not said about ‘${label}’ in the user's message, so nothing was prepared. Ask which option that time is for.`);
+        }
+        const plan = planStarts(quotes, estimate, held.length);
+        if (!('parts' in plan)) {
+          if (plan.refusal === 'too_many_starts') return refuse('too_many_starts', `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly.`);
+          if (plan.refusal === 'fewer_starts_than_held') {
+            return refuse('fewer_starts_than_held', heldQuotes.length === held.length
+              ? `This card replaces all ${held.length} hiring timings for ‘${label}’ together, so nothing was prepared. Retain the unchanged timings and their sources and prepare the complete card for the requested change. If a held timing cannot be verified, ask only about that missing input.`
+              : `This card replaces all ${held.length} hiring timings for ‘${label}’ together, and Olumi cannot yet keep a timing it estimated while another changes, so nothing was prepared. Say so plainly.`);
+          }
+          if (plan.refusal === 'relative_to_range') return refuse('relative_to_range', `"${plan.quote}" for ‘${label}’ ties this start to an earlier one given as a range, which Olumi cannot model yet, so nothing was prepared. Say so plainly; the user's timings stay in the conversation.`);
+          return unusable();
+        }
+        planned.push({ option_id: id, label, part_ids: held.map(n => String(n.id)), expected: held.map(n => n.observed_state.extra_share_by_date),
+          olumi_estimate: estimate, parts: plan.parts, quotes });
+      }
+      const a: ApprovedHiringTimes = { goal_id: goalId, deadline, reference_date: reference, options: planned };
+      if (hiringTimesHeld(g.raw, a)) return refuse('already_held', 'Those hiring times are already in the model. Nothing was changed.');
+      // The postimage must hold exactly what the card says before it is offered, never only after the press.
+      if (!hiringTimesHeld(withHiringTimes(g.raw, a), a)) return unusable();
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_HIRING_TIMES, path: goalId, value: a }],
+        provenance: { authored_by: 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: hiringTimesCard(a, part.deliverable) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === SET_HIRING_TIMES)) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+        note: 'Nothing has changed yet. The hiring times are ready for review on ONE card. Tell the user what the card says, in its words; never the ids. '
+          + 'Call authorise_change only for the approval bound to this card; a typed ‘yes’ alone is not that approval.' };
+    },
+
     async proposeModelChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
@@ -6785,6 +6914,7 @@ export function createAgentCapabilities(
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === SET_HIRING_TIMES) return applyHiringTimes(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
