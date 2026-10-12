@@ -7,17 +7,20 @@
  *  (b) no stated target is dropped silently: each is shown, or withheld with its own reason;
  *  (c) a target recorded as a success condition is never ALSO listed as an excluded extra condition.
  *
- * Assertions bind by IDENTITY (constraint ids, node ids, labels, reason codes, placeholder keys), never by prose: the words
- * are placeholders (`JOINT_WITHHOLD_WORDS`) until the AIE's drop in. The served base is run 4's marketing Run turn
+ * Assertions bind by IDENTITY (constraint ids, node ids, labels, reason codes), and the words are the AIE's (copy banked as
+ * `fixtures/aie-joint-withhold-copy-20261012.json`, sha256 685ee884…): every expected sentence is built HERE from that copy
+ * by key and slot, never from the source's own table. The served base is run 4's marketing Run turn
  * (`fixtures/batch-f-run4-marketing-run-turn.json`: CEE a770ce49, scenario 35ecad67), plus constructed rows for each reason.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { goalChanceLicenceOf, withGoalChanceLicence } from '../goal-chance-licence.js';
 import { goalChanceWithheldReasonsForAgent } from '../goal-chance-range-agent.js';
 import {
-  goalTargetsBlockOf, JOINT_WITHHOLD_WORDS, jointWithheldLine, readGoalTargetsBlock, TARGET_NO_LEVEL_TODAY,
+  goalTargetsBlockOf, JOINT_WITHHOLD_WORDS, jointWithheldLine, nextStepWords, readGoalTargetsBlock, retainedConditionsLine,
+  targetWithheldLine, TARGET_NO_LEVEL_TODAY,
   type GoalTargetsBlock, type JointWithholdReason,
 } from '../goal-targets-joint.js';
 import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
@@ -29,7 +32,11 @@ const RUN4 = JSON.parse(readFileSync(new URL('./fixtures/batch-f-run4-marketing-
   limit_verdicts: { per_limit: Rec[]; joint: Rec };
 };
 const RERUN_TEXT = /Run the analysis again/i;
-const RERUN_KEY = '⟦AIE:next.rerun_analysis⟧';
+const COPY_RAW = readFileSync(new URL('./fixtures/aie-joint-withhold-copy-20261012.json', import.meta.url));
+const COPY = JSON.parse(COPY_RAW.toString('utf8')) as { words: Record<string, string>; known_reason_words: Record<string, string> };
+/** The AIE's sentence for a key, each `{slot}` filled. */
+const say = (key: string, slots: Record<string, string> = {}): string => COPY.words[key]!.replace(/\{([a-z]+)\}/g, (_, s: string) => slots[s]!);
+const RERUN_WORDS = say('next.rerun_analysis');
 const PRECISION = { n_informative: 10000, standard_error: 0.005 };
 
 // ── Run 4, served: the two limits, their ids and labels, and CEE's per-limit causes (verbatim from the fixture) ─────────
@@ -102,8 +109,11 @@ describe('(a) W1 — run 4 with both targets recorded: the joint says the engine
       [FOUNDER, 'Founder time on campaign', 'limit', 'limit_rests_on_olumi_guess'],
     ]);
     expect(joint.line).not.toMatch(RERUN_TEXT);
-    expect(joint.line).not.toContain(RERUN_KEY);
-    expect(joint.line.startsWith('⟦AIE:joint.limit_unscored⟧')).toBe(true);
+    // Each condition by name with its reason in ORDINARY words (the codes stay in `causes`), then the ONE next step.
+    expect(joint.line).toBe(`${say('joint.limit_unscored', { conditions: '‘New customers in first 3 months’ ('
+      + `${COPY.known_reason_words.target_no_level_today}), ‘Annual campaign spend’ (${COPY.known_reason_words.parts_identity_unmodelled}) `
+      + `and ‘Founder time on campaign’ (${COPY.known_reason_words.limit_rests_on_olumi_guess})` })} ${say('next.give_option_levels', { quantity: '‘Founder time on campaign’' })}`);
+    for (const code of [TARGET_NO_LEVEL_TODAY, 'parts_identity_unmodelled', 'limit_rests_on_olumi_guess']) expect(joint.line).not.toContain(code);
   });
 
   it('ONE next step per cause, only where a writer would change it; the joint\'s is the first established one', () => {
@@ -117,7 +127,7 @@ describe('(a) W1 — run 4 with both targets recorded: the joint says the engine
       { code: 'give_option_levels', node_id: 'founder_time_on_campaign', label: 'Founder time on campaign' },
     ]);
     expect(joint.next_step).toEqual({ code: 'give_option_levels', node_id: 'founder_time_on_campaign', label: 'Founder time on campaign' });
-    expect(joint.line).toContain('⟦AIE:next.give_option_levels⟧ quantity: ‘Founder time on campaign’');
+    expect(joint.line).toContain(say('next.give_option_levels', { quantity: '‘Founder time on campaign’' }));
   });
 
   it('NEGATIVE: PLoT names a condition CEE has no verdict for → PLoT\'s own reason, verbatim, and no step promised', () => {
@@ -157,7 +167,8 @@ describe('(a) W1 — run 4 with both targets recorded: the joint says the engine
       { storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints), sentRun: { graph: g }, limitVerdicts: verdicts() });
     const result = { type: 'analysis_result', enrichment: env };
     const notes = goalChanceNotesForAgent(result, g, true);
-    expect(notes[0]!.startsWith('⟦AIE:joint.limit_unscored⟧')).toBe(true);
+    expect(notes[0]).toBe((licenceOn(revisedDraft())!.targets!.joint as Rec).line);
+    expect(notes[0]!.startsWith(COPY.words['joint.limit_unscored']!.split('{')[0]!)).toBe(true);
     expect(notes.some((n) => RERUN_TEXT.test(n))).toBe(false);
     // The option's own withheld reason is the joint's, by code.
     expect(goalChanceWithheldReasonsForAgent(result, 'hire_marketing_manager').map((r) => r.code)).toEqual(['goal_joint_not_shown']);
@@ -174,7 +185,8 @@ describe('(b) W2 — no target is dropped silently: each stated target is shown,
     // Said where every reader already reads (the licence's notes), first among them.
     expect(l.notes![0]).toBe(l.targets!.withheld_targets![0]!.line);
     expect(l.notes![0]).toContain('‘New customers in first 3 months’');
-    expect(l.notes![0]).toContain(`reason: ${TARGET_NO_LEVEL_TODAY}`);
+    expect(l.notes![0]).toBe(say('target.withheld', { target: '‘New customers in first 3 months’', reason: COPY.known_reason_words.target_no_level_today }));
+    expect(l.notes![0]).not.toContain(TARGET_NO_LEVEL_TODAY);
   });
 
   it('every stated target id appears exactly once across per_target and withheld_targets, whatever the cause', () => {
@@ -212,7 +224,7 @@ describe('(c) W4 — a recorded target is never ALSO listed as an excluded extra
     const l = licenceOn(revisedDraft())!;
     expect((l.notes ?? []).some((n) => n.includes('It does not include'))).toBe(false);
     // The condition is still said, byte for byte (never dropped, never changed), claimed neither in nor out.
-    expect(l.notes).toContain('⟦AIE:conditions.retained_unbound⟧ conditions: secure 20 new customers within the first 3 months');
+    expect(l.notes).toContain(say('conditions.retained_unbound', { conditions: 'secure 20 new customers within the first 3 months' }));
   });
 
   it('CONTROL: with ONE target (no target row sent), a retained condition is still said as outside the chance (amendment 4)', () => {
@@ -222,7 +234,7 @@ describe('(c) W4 — a recorded target is never ALSO listed as an excluded extra
     expect(l.targets).toBeUndefined();
     // Relative to the ONE target there is no other target it could restate: amendment 4's exclusion stands, byte for byte.
     expect((l.notes ?? []).find((n) => n.includes('It does not include'))).toContain('secure 20 new customers within the first 3 months');
-    expect((l.notes ?? []).some((n) => n.includes('⟦AIE:conditions.retained_unbound⟧'))).toBe(false);
+    expect((l.notes ?? []).some((n) => n.startsWith(COPY.words['conditions.retained_unbound']!.split('{')[0]!))).toBe(false);
   });
 });
 
@@ -267,7 +279,7 @@ describe('constructed rows — each reason, by code', () => {
     for (const j of [p, n, none]) {
       expect(j.next_step).toEqual({ code: 'none_established' });
       expect(String(j.line)).not.toMatch(RERUN_TEXT);
-      expect(String(j.line)).not.toContain(RERUN_KEY);
+      expect(String(j.line)).not.toContain(RERUN_WORDS);
     }
   });
 
@@ -276,7 +288,8 @@ describe('constructed rows — each reason, by code', () => {
     const sent = (wireGoalConstraints(g.goal_constraints) as Rec[]).filter((r) => r.constraint_id !== 'r:c');
     const b = blockOf(records({ probability_of_joint_goal: 0.3, probability_of_joint_goal_precision: PRECISION }), g, {}, sent);
     expect(b.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved', next_step: { code: 'rerun_analysis' } });
-    expect((b.joint as Rec).line).toContain(RERUN_KEY);
+    expect((b.joint as Rec).line).toContain(RERUN_WORDS);
+    expect(b.withheld_targets![0]!.line).toBe(`${say('target.withheld', { target: '‘New customers’', reason: 'this analysis did not use every stated target as specified' })} ${RERUN_WORDS}`);
     expect(b.withheld_targets!.map((t) => [t.constraint_id, t.reason, t.next_step.code])).toEqual([['r:c', 'figure_not_preserved', 'rerun_analysis']]);
   });
 
@@ -288,24 +301,24 @@ describe('constructed rows — each reason, by code', () => {
   });
 });
 
-describe('the words: placeholders only, by key; "run again" only for a stale or mismatched Run', () => {
+describe('the words: the AIE\'s, byte for byte, by key; "run again" only where a fresh Run tests the saved targets', () => {
   const reasons: JointWithholdReason[] = ['not_returned', 'precision_missing', 'strict_not_preserved', 'condition_not_named', 'olumi_base',
     'no_option', 'target_not_supported', 'figure_not_preserved', 'limit_unscored'];
-  it('no reason\'s line says "Run the analysis again"; the re-run placeholder rides only the two mismatched-Run reasons', () => {
+  it('IDENTITY: the copy is the AIE\'s as banked (sha256 685ee884…); the table carries each key\'s sentence exactly', () => {
+    expect(createHash('sha256').update(COPY_RAW).digest('hex')).toBe('685ee88435866f25a6376386fdf88123e95cf862b94a167902f70f0984d10f18');
+    expect(Object.keys(JOINT_WITHHOLD_WORDS)).toEqual(Object.keys(COPY.words));
+    for (const [key, row] of Object.entries(JOINT_WITHHOLD_WORDS)) expect([key, row.words]).toEqual([key, COPY.words[key]]);
+  });
+  it('no reason\'s line says "Run the analysis again" unless its ONE step is the re-run', () => {
     for (const r of reasons) {
-      const rerun = r === 'strict_not_preserved' || r === 'figure_not_preserved';
-      const line = jointWithheldLine(2, r, ['X'], [], rerun ? { next: { code: 'rerun_analysis' } } : {});
-      expect([r, RERUN_TEXT.test(line)]).toEqual([r, false]);
-      expect([r, line.includes(RERUN_KEY)]).toEqual([r, rerun]);
+      expect([r, RERUN_TEXT.test(jointWithheldLine(2, r, ['X'], []))]).toEqual([r, false]);
+      expect([r, jointWithheldLine(2, r, ['X'], [], { next: { code: 'rerun_analysis' } }).endsWith(` ${RERUN_WORDS}`)]).toEqual([r, true]);
     }
   });
-  it('every placeholder key used is ONE row of the table, each with a one-line meaning', () => {
-    for (const [key, row] of Object.entries(JOINT_WITHHOLD_WORDS)) {
-      expect([key, row.meaning.trim() !== '' && !/[\r\n]/.test(row.meaning)]).toEqual([key, true]);
-    }
-    const used = JSON.stringify(licenceOn(revisedDraft())).match(/⟦AIE:([a-z._]+)⟧/g) ?? [];
-    expect(used.length).toBeGreaterThan(0);
-    for (const u of used) expect(Object.keys(JOINT_WITHHOLD_WORDS)).toContain(u.slice('⟦AIE:'.length, -1));
+  it('no marker and no slot brace reaches any stored line', () => {
+    const text = JSON.stringify(licenceOn(revisedDraft()));
+    expect(text).not.toContain('⟦AIE');
+    expect(text).not.toMatch(/\{(?:conditions|target|reason|quantity|from|to)\}/);
   });
 });
 
@@ -346,5 +359,92 @@ describe('the Agent\'s per-option line beside a LICENSED joint never says "run a
     const reasons = goalChanceWithheldReasonsForAgent(result, 'o2');
     expect(reasons.map((r) => r.code)).toEqual(['goal_joint_not_shown']);
     expect(reasons[0]!.message).not.toMatch(RERUN_TEXT);
+  });
+});
+
+// ── The AIE's binding guards, one row per bound reason (copy sha 685ee884…) ────────────────────────────────────────────────
+describe('binding: each reason in ordinary words, never its code; each step only where it is established', () => {
+  const EXISTING: Record<string, string> = {
+    strict_not_preserved: 'the comparison the analysis used is not the one you stated',
+    figure_not_preserved: 'this analysis did not use every stated target as specified',
+    olumi_base: 'it rests on Olumi’s own assumed starting value for a target, which you haven’t given',
+  };
+  const NEUTRAL = 'the returned result could not be used for this target';
+  it.each([...Object.entries(COPY.known_reason_words), ...Object.entries(EXISTING)])('%s → its own ordinary words, never the code', (code, words) => {
+    const line = targetWithheldLine('Conversion rate', code, { code: 'none_established' });
+    expect(line).toBe(say('target.withheld', { target: '‘Conversion rate’', reason: words }));
+    expect(line).not.toContain(code);
+  });
+  it.each(['CONSTRAINT_NOT_CONVERTIBLE', 'parts_links_placeholder', 'some_new_engine_code'])('an unlisted code (%s) → the neutral words; the code stays in the data', (code) => {
+    const line = targetWithheldLine('Conversion rate', code, { code: 'none_established' });
+    expect(line).toBe(say('target.withheld', { target: '‘Conversion rate’', reason: NEUTRAL }));
+    expect(line).not.toContain(code);
+    const joint = blockOf({ ...records(), joint_withheld: { reason: 'limit_unscored', constraint_ids: ['r:t'] } }, twoTargets(),
+      { limitVerdicts: [{ constraint_id: 'r:t', state: 'unscored', reason: code }] }).joint as Rec;
+    expect(String(joint.line)).not.toContain(code);
+    expect((joint.causes as Rec[])[0]).toMatchObject({ constraint_id: 'r:t', reason: code });
+  });
+  it.each([
+    ['give_goal_current_level', { code: 'give_goal_current_level', node_id: 'g', label: 'Conversion rate' }, say('next.give_goal_current_level', { quantity: '‘Conversion rate’' })],
+    ['give_starting_value', { code: 'give_starting_value', node_id: 'c', label: 'New customers' }, say('next.give_starting_value', { quantity: '‘New customers’' })],
+    ['give_option_levels', { code: 'give_option_levels', node_id: 'p', label: 'Advertising spend' }, say('next.give_option_levels', { quantity: '‘Advertising spend’' })],
+    ['size_link', { code: 'size_link', node_id: 't', label: 'Annual spend', from: { node_id: 'p', label: 'Advertising spend' } }, say('next.size_link', { from: '‘Advertising spend’', to: '‘Annual spend’' })],
+    ['rerun_analysis', { code: 'rerun_analysis' }, RERUN_WORDS],
+    ['none_established', { code: 'none_established' }, ''],
+    ['a step whose quantity cannot be named (no label)', { code: 'give_starting_value', node_id: 'c' }, ''],
+    ['a link to size whose source cannot be named (no from)', { code: 'size_link', node_id: 't', label: 'Annual spend' }, ''],
+  ] as const)('next step %s → the AIE\'s sentence, or nothing', (_name, ref, words) => {
+    expect(nextStepWords(ref as never)).toBe(words);
+  });
+  it('the retained conditions are said byte for byte inside the AIE\'s sentence', () => {
+    expect(retainedConditionsLine(['code quality maintained', 'no weekend releases']))
+      .toBe(say('conditions.retained_unbound', { conditions: 'code quality maintained; no weekend releases' }));
+    expect(retainedConditionsLine([])).toBeUndefined();
+  });
+});
+
+describe('re-run only where a fresh request tests the saved targets (binding guard 5)', () => {
+  it('ESTABLISHED: the current sender sends every stored target as stated (strict comparator and figure), so a fresh Run tests them', () => {
+    const rows = [
+      { constraint_id: 'a', node_id: 'g', operator: '>=', operator_as_stated: '>', value: 15, unit: '%', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'b', node_id: 'c', operator: '<=', operator_as_stated: '<', value: 20, unit: 'customers', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'c', node_id: 'c', operator: '>=', value: 7.25, unit: 'customers', value_frame: 'level', role: 'goal_target' },
+    ];
+    expect((wireGoalConstraints(rows) as Rec[]).map((r) => [r.constraint_id, r.operator, r.value])).toEqual([['a', '>', 15], ['b', '<', 20], ['c', '>=', 7.25]]);
+  });
+  it('so a Run whose request lost a target\'s strictness (an older request) offers the re-run, in the AIE\'s words, and only it', () => {
+    const g = twoTargets();
+    (g.goal_constraints as Rec[])[1] = { ...(g.goal_constraints as Rec[])[1], operator_as_stated: '>' };
+    const old = (g.goal_constraints as Rec[]).map(({ operator_as_stated: _s, role: _r, ...rest }) => rest);
+    const b = blockOf(records({ probability_of_joint_goal: 0.3, probability_of_joint_goal_precision: PRECISION }), g, {}, old);
+    expect(b.joint).toMatchObject({ status: 'withheld', reason: 'strict_not_preserved', next_step: { code: 'rerun_analysis' } });
+    expect(String((b.joint as Rec).line).endsWith(` ${RERUN_WORDS}`)).toBe(true);
+    expect(b.withheld_targets!.map((t) => [t.constraint_id, t.reason, t.next_step.code])).toEqual([['r:c', 'strict_not_preserved', 'rerun_analysis']]);
+  });
+});
+
+describe('never a silent slice at 600 characters (binding guard 8)', () => {
+  const long = (n: number): string => `Condition ${'x'.repeat(n)}`;
+  it('a list too long with its reasons: the step is left out whole (kept in next_step), never cut; names stay whole', () => {
+    const causes = [0, 1, 2].map((i) => ({ constraint_id: `c${i}`, node_id: `n${i}`, label: long(120), role: 'limit' as const,
+      reason: 'limit_rests_on_olumi_guess', next_step: { code: 'give_option_levels' as const, node_id: `n${i}`, label: long(120) } }));
+    const line = jointWithheldLine(3, 'limit_unscored', [], [], { causes, next: causes[0]!.next_step });
+    expect(line.length).toBeLessThanOrEqual(600);
+    expect(line).not.toContain('…');
+    expect(line).toBe(say('joint.limit_unscored', { conditions: `‘${long(120)}’, ‘${long(120)}’ and ‘${long(120)}’` }));
+  });
+  it('CONTROL: a short list keeps its reasons and its step, exactly', () => {
+    const causes = [{ constraint_id: 'c0', node_id: 'n0', label: 'Budget', role: 'limit' as const, reason: 'limit_rests_on_olumi_guess',
+      next_step: { code: 'give_option_levels' as const, node_id: 'n0', label: 'Budget' } }];
+    expect(jointWithheldLine(2, 'limit_unscored', [], [], { causes, next: causes[0]!.next_step }))
+      .toBe(`${say('joint.limit_unscored', { conditions: `‘Budget’ (${COPY.known_reason_words.limit_rests_on_olumi_guess})` })} ${say('next.give_option_levels', { quantity: '‘Budget’' })}`);
+  });
+  it('a target line too long with its step: the step is left out whole, never cut', () => {
+    const label = long(490);
+    const why = say('target.withheld', { target: `‘${label}’`, reason: COPY.known_reason_words.not_returned });
+    const step = say('next.give_starting_value', { quantity: '‘Short’' });
+    expect([why.length <= 600, `${why} ${step}`.length > 600]).toEqual([true, true]);
+    const line = targetWithheldLine(label, 'not_returned', { code: 'give_starting_value', node_id: 'n', label: 'Short' });
+    expect(line).toBe(why);
   });
 });

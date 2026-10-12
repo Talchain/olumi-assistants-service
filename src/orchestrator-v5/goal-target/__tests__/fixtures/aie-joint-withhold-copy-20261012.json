@@ -1,0 +1,35 @@
+{
+  "source_read": "e9289e8e:src/orchestrator-v5/goal-target/goal-targets-joint.ts",
+  "words": {
+    "joint.limit_unscored": "The chance of meeting these conditions together is not shown because this analysis could not check: {conditions}.",
+    "joint.not_returned": "The chance of meeting these conditions together is not shown because this analysis returned no joint estimate and no usable explanation.",
+    "joint.precision_missing": "The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is.",
+    "joint.no_option": "The chance of meeting these conditions together is not shown because no option has a usable joint result.",
+    "target.withheld": "Chance not shown for {target}: {reason}.",
+    "conditions.retained_unbound": "Other conditions remain recorded from your brief: {conditions}; their relation to this result has not been established.",
+    "next.give_goal_current_level": "Give the current value of {quantity}.",
+    "next.give_starting_value": "Give a starting value for {quantity}.",
+    "next.give_option_levels": "Set the value or range for {quantity} in each option.",
+    "next.size_link": "Estimate how much {from} affects {to}.",
+    "next.rerun_analysis": "Run the analysis again to use the saved targets."
+  },
+  "known_reason_words": {
+    "target_no_level_today": "this analysis has no starting value for the quantity",
+    "parts_identity_unmodelled": "the model does not yet represent how its component values add up",
+    "limit_rests_on_olumi_guess": "at least one required input is an unconfirmed estimate from Olumi",
+    "limit_unscored": "this analysis could not evaluate the condition",
+    "not_returned": "this analysis returned no usable estimate for this target",
+    "target_not_supported": "this analysis cannot represent the target as stated"
+  },
+  "binding_guards": [
+    "Bind conditions to the actual names plus their established ordinary-word reasons. Bind target to its actual stated target/label. Preserve the reason code separately in data; do not render raw enum codes.",
+    "Use existing ordinary explanations for other real reason codes. If none exists, say 'the returned result could not be used for this target' and retain the exact code/cause in data; do not invent a cause or user action.",
+    "Render one selected next-step sentence only when its existing predicate identifies a supported writer and a useful input. none_established adds nothing. No promise that one answer necessarily unlocks the full joint.",
+    "give_goal_current_level asks for a genuine current value only where that is the actual supported input. For a launch-forecast starting-rate selection use019's scoped ask and actual supported source/card route; do not relabel a future assumption as current observation.",
+    "rerun_analysis is true only where a fresh request is established to test the saved targets. A stale Run is a supported case; a current systematic mismatch is not automatically repaired by repeating it. Retain019's system-repair limitation.",
+    "Do not invent new units/fields absent from WithholdNextStepRef. Existing cards/source show the quantity units and reference. Do not substitute a size_link action for confirming a cost identity.",
+    "Do not use text matching to say a retained condition is included/excluded or dedupe it. Retained-unbound wording claims neither.",
+    "e928's capLine600 can truncate a long reason/action list. Do not assert verbatim retention after silently slicing bound conditions or promise an action that was cut off. Keep full per-condition state in the existing source/detail carrier; if current carriers cannot do so, retain the limit explicitly. This is not a request to hold the ordinary marketing cases for a new reader.",
+    "Target-only headline and structural zero rulings were already delivered in6130197656: new named computation/strict comparators/window/precision, hard limits visibly retained, no full-success PASS. New cumulative count begins0 at its window, not customer stock or human measurement. Current e928 joint still includes its same conditions; copy is not implementation of a narrowed conjunction."
+  ]
+}

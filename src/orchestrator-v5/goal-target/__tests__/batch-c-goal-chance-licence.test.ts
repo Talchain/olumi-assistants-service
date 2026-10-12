@@ -289,9 +289,9 @@ describe('marketing — the same-draw joint is the headline, each target below (
     const l = licenceFor(marketingRun({ probability_of_joint_goal_precision: undefined }))!;
     expect(l.pct_by_option).toEqual({});
     expect(l.withheld_option_ids).toEqual(['hire_manager', 'ai_plus_ads']);
-    // Batch F: a figure without its precision is not cured by running again — no step is promised (words pending AIE).
+    // Batch F: a figure without its precision is not cured by running again — no step is promised (the AIE's words).
     expect(l.targets!.joint).toEqual({ status: 'withheld', reason: 'precision_missing',
-      line: '⟦AIE:joint.precision_missing⟧', next_step: { code: 'none_established' },
+      line: 'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is.', next_step: { code: 'none_established' },
       frechet_line: 'Meeting both is no more likely than the lower of the two chances.' });
     // 0.6 × 0.42 = 0.252 and 0.7 × 0.55 = 0.385 must never appear as a figure anywhere in the record.
     expect(JSON.stringify(l)).not.toMatch(/"(?:hire_manager|ai_plus_ads)":(?:25|39)\b/);
@@ -338,7 +338,7 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
     const forAgent = goalChanceLicenceForAgent(result)!;
     expect(forAgent.targets?.joint.status).toBe('withheld');
     expect(goalChanceNotesForAgent(result, g, true)).toEqual([
-      '⟦AIE:joint.precision_missing⟧', // Batch F: words pending AIE; no "run again" (precision missing is not a stale Run)
+      'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is.', // Batch F: the AIE's words; no "run again" (precision missing is not a stale Run)
       'Meeting both is no more likely than the lower of the two chances.',
       'On its own, the chance of ‘New customers’ being at least 20 customers over the first three months after launch, in this model: ‘Hire a marketing manager’ about 60%; ‘AI planning plus advertising’ about 70%.',
       'On its own, the chance of ‘Conversion rate’ being above 15% over the first three months after launch, in this model: ‘Hire a marketing manager’ about 42%; ‘AI planning plus advertising’ about 55%.',
@@ -350,8 +350,8 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
     ]);
     const cells = projectCanonicalAnalysisCells(result as never, g);
     expect(cells.map((c) => [c.option_id, c.cell.kind, (c.cell as Rec).why])).toEqual([
-      ['hire_manager', 'withheld', '⟦AIE:joint.precision_missing⟧ Meeting both is no more likely than the lower of the two chances.'], // Batch F: words pending AIE
-      ['ai_plus_ads', 'withheld', '⟦AIE:joint.precision_missing⟧ Meeting both is no more likely than the lower of the two chances.'],
+      ['hire_manager', 'withheld', 'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is. Meeting both is no more likely than the lower of the two chances.'], // Batch F: words pending AIE
+      ['ai_plus_ads', 'withheld', 'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is. Meeting both is no more likely than the lower of the two chances.'],
     ]);
   });
 
@@ -530,7 +530,7 @@ describe('AIE clause 3: a target the joint cannot support is kept, named and ref
     const l = licenceFor(marketingRun(), g)!;
     expect(l.targets!.joint.status).toBe('licensed');
     // Batch F (c): said byte for byte beside several targets, claimed neither in nor out (nothing binds it to a target by identity).
-    expect(l.notes).toContain('⟦AIE:conditions.retained_unbound⟧ conditions: repeat purchases from 30% of them within six months');
+    expect(l.notes).toContain('Other conditions remain recorded from your brief: repeat purchases from 30% of them within six months; their relation to this result has not been established.');
     expect((l.notes ?? []).some((n) => n.includes('It does not include'))).toBe(false);
     expect(l.chance_words).not.toContain('repeat purchases');
   });
@@ -544,7 +544,7 @@ describe('AIE clause 3: a target the joint cannot support is kept, named and ref
     const l = licenceFor(marketingRun(), g)!;
     expect(l.targets!.joint.status).toBe('licensed');
     // Batch F (c): still said, byte for byte — never matched away, never claimed excluded.
-    expect(l.notes).toContain(`⟦AIE:conditions.retained_unbound⟧ conditions: ${condition}`);
+    expect(l.notes).toContain(`Other conditions remain recorded from your brief: ${condition}; their relation to this result has not been established.`);
     expect((l.notes ?? []).some((n) => n.includes('It does not include'))).toBe(false);
   });
 
@@ -704,7 +704,7 @@ describe('independent check r1 — item 4: a stated ">" not sent strictly withho
     // Batch F: a mismatched Run (the stated comparator was not sent) — the one cause whose next step IS to run it again.
     expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'strict_not_preserved', next_step: { code: 'rerun_analysis' },
       line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
-        + 'the comparison the analysis used is not the one you stated. ⟦AIE:next.rerun_analysis⟧' });
+        + 'the comparison the analysis used is not the one you stated. Run the analysis again to use the saved targets.' });
     expect(l.targets!.withheld_targets?.map((t) => [t.constraint_id, t.reason, t.next_step.code]))
       .toEqual([['target:conversion_rate', 'strict_not_preserved', 'rerun_analysis']]);
   });
@@ -852,11 +852,11 @@ describe('RE-SCOPE 2 (R5-2): an input whose source is unverified is disclosed on
 describe('independent check r1 — item 7 (Batch F: no step is promised that would not change it): a withheld joint says truly why', () => {
   it('a joint figure without its precision is not "not calculated": it says what is missing — and never "run again"', () => {
     const l = licenceFor(marketingRun({ probability_of_joint_goal_precision: undefined }))!;
-    expect(l.targets!.joint).toMatchObject({ reason: 'precision_missing', next_step: { code: 'none_established' }, line: '⟦AIE:joint.precision_missing⟧' });
+    expect(l.targets!.joint).toMatchObject({ reason: 'precision_missing', next_step: { code: 'none_established' }, line: 'The chance of meeting these conditions together is not shown because this analysis did not report how precise its joint estimate is.' });
   });
   it('no joint figure and no reason from the engine: "not returned" — and never "run again"', () => {
     const l = licenceFor(marketingRun({ probability_of_joint_goal: undefined, probability_of_joint_goal_precision: undefined }))!;
-    expect(l.targets!.joint).toMatchObject({ reason: 'not_returned', next_step: { code: 'none_established' }, line: '⟦AIE:joint.not_returned⟧' });
+    expect(l.targets!.joint).toMatchObject({ reason: 'not_returned', next_step: { code: 'none_established' }, line: 'The chance of meeting these conditions together is not shown because this analysis returned no joint estimate and no usable explanation.' });
   });
 });
 
@@ -1306,7 +1306,7 @@ describe('RE-SCOPE r1 (DL item 3): a SENT figure that is not the stored one is n
     // Batch F: a mismatched Run (the figure sent is not the stored one) — its next step is to run it again, and only here.
     expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved', next_step: { code: 'rerun_analysis' },
       line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
-        + 'this analysis did not use every stated target as specified. ⟦AIE:next.rerun_analysis⟧' });
+        + 'this analysis did not use every stated target as specified. Run the analysis again to use the saved targets.' });
     expect(l.targets!.withheld_targets?.map((t) => [t.constraint_id, t.reason, t.next_step.code]))
       .toEqual([['target:conversion_rate', 'figure_not_preserved', 'rerun_analysis']]);
     expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
