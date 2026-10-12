@@ -135,6 +135,52 @@ it.each([
   noCandidates(result.graph);
 });
 
+/** Y (a user level) with one outgoing link Y → Z (Z an outcome framed at 1,000): the receiver whose coordinates must move too. */
+function withOutgoing(edgeStd: number, yStd?: number) {
+  const base = admitted({ id: 'y', label: 'Y', kind: 'outcome', scale_frame: 100,
+    observed_state: { value: 0.4, raw_value: 40, source: 'brief_extraction', unit: '£', ...(yStd !== undefined ? { std: yStd } : {}) } });
+  const z = { id: 'z', label: 'Z', kind: 'outcome', scale_frame: 1000, unit: '£' };
+  const yz = { from: 'y', to: 'z', exists_probability: 1, effect_direction: 'positive', strength: { mean: 0.1, std: edgeStd },
+    provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } };
+  const add = (g: Rec): Rec => ({ ...g, nodes: [...g.nodes, structuredClone(z)], edges: [...g.edges, structuredClone(yz)] });
+  return { graph: add(base.graph), legacy: add(base.legacy), loss: base.loss };
+}
+
+// ⭐ AIE 6124148847 (12 Oct): ACK the point-only reframe with conditions. Coordinates change consistently (incoming β and σ ÷k,
+// outgoing ×k, the normalised level and spread ÷k); real bounds stay fixed; and no clamp or σ floor passes as invariant.
+it('AIE 6124148847: widening Y 100 → 500 (k = 5) moves every coordinate consistently and keeps every natural size and spread', () => {
+  const { graph } = withOutgoing(0.06, 0.05);
+  const result = frames.refitFramesForOlumiEstimates(graph);
+  expect(result).toMatchObject({ fitted: ['x→y'], refused: [] });
+  const y = node(result.graph, 'y'), yz = edge(result.graph, 'y→z');
+  expect(frames.frameOf(y)).toBe(500);
+  // The normalised level and its spread ÷5; the user's raw level exact.
+  expect(y.observed_state).toMatchObject({ raw_value: 40, value: expect.closeTo(0.08, 12), std: expect.closeTo(0.01, 12) });
+  // Outgoing β and σ ×5: the same 1 £ of Z per £ of Y, with the same natural spread.
+  expect(yz.strength).toEqual({ mean: expect.closeTo(0.5, 12), std: expect.closeTo(0.3, 12) });
+  expect(naturalSize(result.graph, yz)).toBeCloseTo(naturalSize(graph, edge(graph, 'y→z')), 12);
+  // Incoming: Olumi's 3 per item, unchanged by the move of units.
+  expect(naturalSize(result.graph, edge(result.graph, 'x→y'))).toBeCloseTo(3, 12);
+});
+
+it('AIE 6124148847 NEGATIVE: a move that would let PLoT’s σ floor bind differently (Y → Z σ 0.02 → 0.1 against a 0.05 floor) refuses', () => {
+  const { graph, legacy, loss } = withOutgoing(0.02);
+  const snapshot = JSON.stringify(graph);
+  const result = frames.refitFramesForOlumiEstimates(graph);
+  expect(result.refused).toEqual([{ link: 'x→y', reason: 'spread_would_move' }]);
+  expect(JSON.stringify(frames.clampForPersist(result.graph))).toBe(JSON.stringify(legacy));
+  expect(loss.some(l => l.field_path === 'edges[x::y].set_aside_estimate')).toBe(true);
+  expect(JSON.stringify(graph)).toBe(snapshot);
+});
+
+it('AIE 6124148847 NEGATIVE: a percentage LEVEL keeps its real 0–100 domain — a user 40 % is never widened to 500 (bounded_scale)', () => {
+  const { graph, legacy } = admitted({ id: 'y', label: 'Y', kind: 'outcome', scale_frame: 100, unit: '%',
+    observed_state: { value: 0.4, raw_value: 40, source: 'brief_extraction', unit: '%' } });
+  const result = frames.refitFramesForOlumiEstimates(graph);
+  expect(result.refused).toEqual([{ link: 'x→y', reason: 'bounded_scale' }]);
+  expect(JSON.stringify(frames.clampForPersist(result.graph))).toBe(JSON.stringify(legacy));
+});
+
 it('row (c): bounded percent top refuses and preserves the old placeholder', () => {
   const { graph, legacy, loss } = admitted({ id: 'y', label: 'Y', kind: 'goal', scale_frame: 100, unit: '%' });
   const result = frames.refitFramesForOlumiEstimates(graph);

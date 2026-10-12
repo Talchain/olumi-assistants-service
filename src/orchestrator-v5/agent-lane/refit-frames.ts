@@ -105,6 +105,29 @@ function spreadWouldMove(n: Rec, Fold: number, F: number): boolean {
 }
 
 const key = (e: Rec): string => `${e.from}→${e.to}`;
+
+/**
+ * The spread PLoT samples for a causal edge (`src/normalisation/graph-normaliser.ts` at 6ec01e8): its stated σ, floored at
+ * min(0.05, max(0.001, |mean| / 2)).
+ */
+const sampledEdgeStd = (mean: number, std: number): number => Math.max(std, Math.min(0.05, Math.max(0.001, Math.abs(mean) / 2)));
+/**
+ * ⭐ AIE 6124148847 (12 Oct): a frame move is a change of coordinates only if no edge's SAMPLED spread moves in natural units. A
+ * floor that binds on one side of the move and not the other would change physical uncertainty: that is not an invariant
+ * reframe, so it is refused (the placeholder stays), never passed as the same model. Every edge `reframed` rescales is checked
+ * (incoming β and σ ÷k, outgoing ×k), except the link being fitted, which had no sampled spread before (it was a placeholder).
+ */
+function edgeSpreadWouldMove(g: Rec, id: string, Fold: number, F: number, fitting: string): boolean {
+  const frames = new Map((g.nodes as Rec[]).map((n) => [n.id, frameOf(n)]));
+  return (g.edges as Rec[]).some((e) => {
+    const scale = e.from === id ? F / Fold : e.to === id ? Fold / F : 1;
+    if (scale === 1 || key(e) === fitting || frames.get(e.from === id ? e.to : e.from) === undefined) return false;
+    if (!num(e.strength?.mean) || !num(e.strength?.std) || e.strength.std <= 0) return false;
+    const before = sampledEdgeStd(e.strength.mean, e.strength.std) * scale;
+    const after = sampledEdgeStd(e.strength.mean * scale, e.strength.std * scale);
+    return Math.abs(after - before) > TOL * Math.max(1e-12, before);
+  });
+}
 const userStated = (e: Rec): boolean => e.provenance?.magnitude === 'user_stated';
 /**
  * ⭐ R3 #75 5923914386 FINDING 1 (DL 5923941128): the whole holds its parts. A DEFINITIONAL link (±1 in one unit, typed by
@@ -372,6 +395,9 @@ export function refitFramesForOlumiEstimates(graph: Rec): {
       const F = niceFrameAtLeast(Math.max(...into.map((e) => Math.abs(e.strength.mean))) * Fold);
       reason = widenRefusal(next, target, Fold, F, { goalOwnRows: true });
       if (reason === undefined && !olumiMayReframe(target, next.edges, F)) reason = 'levels_set_on_node';
+      // AIE 6124148847: the moves this point-only reframe newly allows (a node holding a user level) must be invariant in
+      // every sampled edge spread. (Moves of nodes with no user content keep their earlier disposition; see the DL report.)
+      if (reason === undefined && usersLevel(target) && edgeSpreadWouldMove(next, target.id, Fold, F, link)) reason = 'spread_would_move';
       if (reason !== undefined) break;
       next = reframed(next, target.id, F);
       moved.add(target.id);
