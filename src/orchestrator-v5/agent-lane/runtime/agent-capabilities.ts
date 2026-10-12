@@ -274,7 +274,7 @@ import { buildModelFromBrief, constructionOperationId, findConstructionVersion, 
 import { goalTargetBasisOf } from '../../goal-target/goal-target-basis.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
-import { approvedGraphHeld, humanMaterialAfterTheDraft, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, writesBesidesTheConstruction } from './draft-replacement.js';
+import { approvedGraphHeld, carryDraftLimits, humanMaterialAfterTheDraft, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, writesBesidesTheConstruction } from './draft-replacement.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
@@ -3534,10 +3534,12 @@ export function createAgentCapabilities(
     } catch {
       out = { ok: false, mutated: false };
     }
-    const candidate = (out as { prepared_graph?: unknown }).prepared_graph as Record<string, unknown> | undefined;
-    if (out.ok !== true || out.mutated !== false || candidate === undefined || candidate === null || typeof candidate !== 'object') {
+    const prepared = (out as { prepared_graph?: unknown }).prepared_graph as Record<string, unknown> | undefined;
+    if (out.ok !== true || out.mutated !== false || prepared === undefined || prepared === null || typeof prepared !== 'object') {
       return notOffered('revised_draft_not_prepared', 'Olumi could not prepare a revised draft, so nothing was offered and the model is unchanged. Tell the user plainly that their goal is not yet in the model.');
     }
+    // Batch F (DL GO (a)): the draft's limits are carried into the candidate by construction, before the keeper reads it.
+    const candidate = carryDraftLimits(g.raw, prepared) as Record<string, unknown>;
     const labelIn = (raw: unknown, id: string): string => {
       const n = ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []).find((x) => x?.id === id);
       return typeof n?.label === 'string' ? n.label : id;

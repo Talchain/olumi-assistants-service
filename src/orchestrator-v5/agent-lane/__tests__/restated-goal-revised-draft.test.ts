@@ -11,11 +11,12 @@
  * words (`candidate`, written by hand like C's readback spec, so this is TESTED, not WIRE-WITNESSED) and the store
  * (in memory, with the register route's compare-and-set and operation-id replay rules, and its committed turn ledger).
  */
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createAgentCapabilities, draftGateDetail, type InternalDispatch } from '../runtime/agent-capabilities.js';
-import { humanMaterialAfterTheDraft } from '../runtime/draft-replacement.js';
+import { humanMaterialAfterTheDraft, limitsKeptBy, targetsHeldBy } from '../runtime/draft-replacement.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
@@ -91,17 +92,18 @@ const candidate = (): Rec => ({
 /** The in-memory store: the read route, the register route's compare-and-set and replay rules, and the committed turn ledger. */
 function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledgerFails?: boolean; afterCommit?: (g: Rec) => void;
   /** A route that stores something other than the approved candidate, and acknowledges what it stored (AIE B34). */
-  beforeAck?: (stored: Rec) => void } = {}) {
-  let graph: Rec = structuredClone(opts.graph ?? FX.graph);
+  beforeAck?: (stored: Rec) => void } = {}, fx: typeof FX = FX) {
+  const SID = fx.scenario_id;
+  let graph: Rec = structuredClone(opts.graph ?? fx.graph);
   const commits: { turn_id: string; bytes: string }[] = [];
   const ledger = {
-    write_turn_ids: [FX.construction_commit_turn_id], user_message_turn_ids: [FX.l1.turn_id],
-    first_user_message: FX.l1.message.trim(), complete: true, ...opts.ledger,
+    write_turn_ids: [fx.construction_commit_turn_id], user_message_turn_ids: [fx.l1.turn_id],
+    first_user_message: fx.l1.message.trim(), complete: true, ...opts.ledger,
   } as { write_turn_ids: string[]; user_message_turn_ids: string[]; first_user_message: string | null; complete: boolean };
   const identity = () => computeGraphIdentityHash(graph as never)!.value;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path === `/assist/v1/scenarios/${SID}/graph`) {
-      return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), brief_text: FX.brief_text,
+      return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), brief_text: fx.brief_text,
         graph_identity_hash: computeGraphIdentityHash(graph as never) } };
     }
     if (path === `/assist/v1/scenarios/${SID}/graph/register`) {
@@ -516,4 +518,114 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     expect({ operation_id: v.operation_id, candidate: v.candidate }).toEqual({ operation_id: fixture.operation_id, candidate: fixture.candidate });
   });
 
+});
+
+/**
+ * ⭐ BATCH F (DL GO (a), 12 Oct): THE DRAFT'S LIMITS ARE CARRIED BY CONSTRUCTION, ON RUN 4'S REAL DRAFTS. Run 4 (CEE a770ce49,
+ * scenario 35ecad67): turn 2 ("conversion over 15% and 20 new customers within the first 3 months") was refused
+ * `revised_draft_dropped_a_limit` for both targets, because the real drafter re-expressed the brief's limits ("GBP/year" for
+ * "£/year"; "Founder marketing time" for "Founder time on campaign"). The base is the served read body at step 3; the drafter's
+ * answer is its recorded raw text (`cee_drafter_raw_responses` a5ada94b, the retry), byte-exact by the database's sha256.
+ */
+const RUN4 = JSON.parse(readFileSync(new URL('./fixtures/marketing-run4-35ecad67-draft-before-turn2.json', import.meta.url), 'utf8')) as typeof FX & {
+  t2: { turn_id: string; message: string } };
+const RUN4_DRAFTER_BYTES = readFileSync(new URL('./fixtures/marketing-run4-revised-drafter-retry-dea73578.json', import.meta.url), 'utf8').replace(/\n$/, '');
+const run4Draft = (edit: (d: Rec) => void = () => {}) => (): Rec => { const d = JSON.parse(RUN4_DRAFTER_BYTES) as Rec; edit(d); return d; };
+const t2Turn = { scenario_id: RUN4.scenario_id, authenticated_user_id: null, request_id: 'req-t2', turn_id: RUN4.t2.turn_id,
+  user_turn_text: RUN4.t2.message, user_text: `${RUN4.l1.message}\n${RUN4.t2.message}` };
+const t2Conversion = { constraint_type: 'at_least', value: 15, unit: '%', measures: 'conversion rate', rationale: RUN4.t2.message };
+const t2Customers = { constraint_type: 'at_least', value: 20, unit: 'customers', measures: 'new customers', rationale: RUN4.t2.message };
+const baseLimit = (nodeId: string): Rec => (RUN4.graph.goal_constraints as Rec[]).find((r) => r.node_id === nodeId)!;
+const candidateOf = (proposals: ProposalStore, id: string): Rec => (proposals.get(id)!.operations[0]!.value as Rec).candidate as Rec;
+
+describe('Batch F: the revised draft keeps the user\'s limits by construction (run 4, real drafts)', () => {
+  it('preconditions: the drafter bytes are the database\'s; the base holds the two limits; the ledger is the construction\'s', () => {
+    expect(createHash('sha256').update(RUN4_DRAFTER_BYTES, 'utf8').digest('hex')).toBe('dea735780d517ab142f7e1a913c55b1fae6efcf5b990ce8701a6ecbf66854f9b');
+    expect((RUN4.graph.goal_constraints as Rec[]).map((r) => [r.label, r.operator, r.value, r.unit])).toEqual([
+      ['Annual campaign spend', '<=', 100000, '£/year'], ['Founder time on campaign', '<=', 25, '%']]);
+    expect(registrationTurnId(RUN4.scenario_id, constructionOperationId(RUN4.scenario_id, RUN4.brief_text))).toBe(RUN4.construction_commit_turn_id);
+    expect(RUN4.brief_text).toBe(RUN4.l1.message.trim());
+  });
+
+  it('RED→GREEN: both targets get ONE card that keeps both limits as the base\'s own rows, and the card says so', async () => {
+    const s = server({}, RUN4);
+    const proposals = new ProposalStore();
+    const { caps, drafts } = lane(s, proposals, run4Draft());
+    const a = await caps.proposeGoalTarget!(t2Turn as never, t2Conversion as never);
+    const b = await caps.proposeGoalTarget!(t2Turn as never, t2Customers as never);
+    expect(a, JSON.stringify(a)).toMatchObject({ ok: true, mutated: false });
+    expect(b.proposal_id).toBe(a.proposal_id);
+    expect(drafts()).toBe(1);
+    expect(s.commits).toHaveLength(0);
+    expect(String(a.public_label)).toContain('Kept from your brief: ‘Annual campaign spend’ at most £100,000 / year; ‘Founder time on campaign’ at most 25%. ');
+    const c = candidateOf(proposals, a.proposal_id as string);
+    // Both targets recorded; both limits are the base rows, byte for byte.
+    expect(targetsHeldBy(c).map((t) => [t.quantity, t.comparator, t.value])).toEqual(expect.arrayContaining([
+      [expect.stringMatching(/conversion rate/i), expect.stringMatching(/^>/), 15], [expect.stringMatching(/new customers/i), '>=', 20]]));
+    const limits = (c.goal_constraints as Rec[]).filter((r) => r.role !== 'goal_target' && !(c.nodes as Rec[]).some((n) => n.kind === 'goal' && n.id === r.node_id));
+    expect(limits).toEqual([baseLimit('annual_campaign_spend'), baseLimit('founder_time_on_campaign')]);
+    expect(limitsKeptBy(RUN4.graph, c)).toMatchObject({ dropped: [] });
+  });
+
+  it('founder time: ONE concept, the drafter\'s own node under the base\'s id and name; every reference is re-pointed', async () => {
+    const proposals = new ProposalStore();
+    const r = await lane(server({}, RUN4), proposals, run4Draft()).caps.proposeGoalTarget!(t2Turn as never, t2Customers as never);
+    const c = candidateOf(proposals, r.proposal_id as string);
+    // The revised draft's own node as C's construction built it from the recorded drafter answer (its category, scale and
+    // Olumi's fresh 15% estimate: "Not carried: Olumi's earlier estimates…"), named as the user's draft names it. No `ref`.
+    expect((c.nodes as Rec[]).find((n) => n.id === 'founder_time_on_campaign')).toEqual({ id: 'founder_time_on_campaign', kind: 'factor',
+      label: 'Founder time on campaign', provenance: 'ai_inferred', category: 'controllable',
+      observed_state: { value: 0.15, raw_value: 15, unit: '%', source: 'cee_inference', extractionType: 'inferred' }, scale_frame: 100 });
+    // No duplicate concept: the drafter's node and its id are gone from every position.
+    expect((c.nodes as Rec[]).some((n) => /founder marketing time/i.test(String(n.label)))).toBe(false);
+    expect(JSON.stringify(c)).not.toContain('founder_marketing_time');
+    // Its links and option settings now name the base node: the drafter's 3 option links and its 1 effect link.
+    expect((c.edges as Rec[]).filter((e) => e.from === 'founder_time_on_campaign' || e.to === 'founder_time_on_campaign').map((e) => [e.from, e.to]))
+      .toEqual([['hire_marketing_manager', 'founder_time_on_campaign'], ['ai_planning_and_more_ads', 'founder_time_on_campaign'],
+        ['continue_as_now', 'founder_time_on_campaign'], ['founder_time_on_campaign', 'campaign_plan_quality']]);
+    for (const id of ['hire_marketing_manager', 'ai_planning_and_more_ads']) {
+      const setting = ((c.nodes as Rec[]).find((n) => n.id === id)!.interventions as Rec).founder_time_on_campaign as Rec;
+      expect(setting.target_match?.node_id ?? 'founder_time_on_campaign').toBe('founder_time_on_campaign');
+    }
+  });
+
+  it('(ii) annual campaign spend: the candidate\'s own node and identity formula stay; only the base row (£/year) is carried', async () => {
+    const proposals = new ProposalStore();
+    const r = await lane(server({}, RUN4), proposals, run4Draft()).caps.proposeGoalTarget!(t2Turn as never, t2Customers as never);
+    const c = candidateOf(proposals, r.proposal_id as string);
+    const node = (c.nodes as Rec[]).find((n) => n.id === 'annual_campaign_spend')!;
+    expect(node).toMatchObject({ kind: 'outcome', label: 'Annual campaign spend',
+      nonlinear_identity: { operation: 'sum', factor_ids: ['annual_advertising_spend', 'annual_marketing_manager_cost', 'annual_ai_tool_cost'] } });
+    for (const id of (node.nonlinear_identity as Rec).factor_ids as string[]) expect((c.nodes as Rec[]).some((n) => n.id === id), id).toBe(true);
+    expect((c.goal_constraints as Rec[]).filter((x) => x.node_id === 'annual_campaign_spend')).toEqual([baseLimit('annual_campaign_spend')]);
+  });
+
+  it('the press writes the carried draft, and the stored graph still keeps both limits (the press\'s own keeper)', async () => {
+    const s = server({}, RUN4);
+    const proposals = new ProposalStore();
+    const { caps } = lane(s, proposals, run4Draft());
+    const offer = await caps.proposeGoalTarget!(t2Turn as never, t2Conversion as never);
+    s.said(RUN4.t2.turn_id);
+    const id = offer.proposal_id as string;
+    const pressedT2 = { scenario_id: RUN4.scenario_id, authenticated_user_id: null, request_id: 'req-approve', turn_id: 'approve-turn-run4',
+      user_turn_text: '', user_text: `${RUN4.l1.message}\n${RUN4.t2.message}`, typed_approval_of: id };
+    expect(await caps.authoriseChange(pressedT2 as never, { proposal_id: id } as never)).toMatchObject({ ok: true, mutated: true });
+    expect(limitsKeptBy(RUN4.graph, s.graph())).toMatchObject({ dropped: [] });
+  });
+
+  it.each([
+    ['a limit\'s figure changes (founder time 25 → 30)', (d: Rec) => { (d.constraints as Rec[])[2]!.value = 30; }, /‘Founder time on campaign’ at most 25%/],
+    ['a limit\'s comparator changes (≤ → <)', (d: Rec) => { (d.constraints as Rec[])[2]!.operator = '<'; }, /‘Founder time on campaign’ at most 25%/],
+    ['the budget\'s currency changes (GBP → USD: never a conversion)', (d: Rec) => { (d.constraints as Rec[])[1]!.unit = 'USD/year'; }, /‘Annual campaign spend’ at most/],
+    ['two re-worded limits share the figure (no ONE counterpart)', (d: Rec) => {
+      (d.constraints as Rec[]).push({ metric: 'Advertising share of budget', operator: '<=', value: 25, unit: '%', provenance: 'explicit', frame: 'level', role: 'limit' });
+      (d.factors as Rec[]).push({ label: 'Advertising share of budget', role: 'controllable', baseline_known: false, baseline_evidence: null, baseline_value: 20,
+        unit: '%', provenance: 'ai_proposed', plausible_max: 100 }); }, /‘Founder time on campaign’ at most 25%/],
+  ])('NEGATIVE — %s: still refused, nothing drafted twice or written', async (_name, edit, said) => {
+    const s = server({}, RUN4);
+    const r = await lane(s, new ProposalStore(), run4Draft(edit)).caps.proposeGoalTarget!(t2Turn as never, t2Customers as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_dropped_a_limit' });
+    expect(String(r.detail)).toMatch(said);
+    expect(s.commits).toHaveLength(0);
+  });
 });

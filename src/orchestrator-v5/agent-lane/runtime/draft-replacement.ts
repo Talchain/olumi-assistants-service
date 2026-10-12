@@ -30,6 +30,7 @@ import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js';
 import { normaliseGraphForIdentity } from '../../context/graph-identity.js';
+import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -149,6 +150,8 @@ const quantityOf = (raw: unknown, c: Rec): string | null => {
 };
 const numeric = (c: Rec): c is Rec & { value: number } => typeof c.value === 'number' && Number.isFinite(c.value);
 const unitOf = (c: Rec): string => (typeof c.unit === 'string' ? c.unit.trim() : '');
+/** A limit: a row that is not one of the goal's targets, with a figure, an inequality and no deadline. */
+const isLimitRow = (c: Rec): boolean => c.role !== 'goal_target' && numeric(c) && (c.operator === '<=' || c.operator === '>=') && c.deadline_metadata == null;
 
 /**
  * The draft's limits (rows that are not the goal's targets), and whether the candidate keeps each: the SAME quantity (its
@@ -156,7 +159,7 @@ const unitOf = (c: Rec): string => (typeof c.unit === 'string' ? c.unit.trim() :
  * unit and frame. A limit whose quantity cannot be named is dropped (unresolved identity refuses).
  */
 export function limitsKeptBy(base: unknown, candidate: unknown): { kept: HeldRow[]; dropped: HeldRow[] } {
-  const isLimit = (c: Rec) => c.role !== 'goal_target' && numeric(c) && (c.operator === '<=' || c.operator === '>=') && c.deadline_metadata == null;
+  const isLimit = isLimitRow;
   const goalIds = (raw: unknown) => new Set(recs(rec(raw)?.nodes).filter((n) => n.kind === 'goal').map((n) => n.id));
   const baseGoals = goalIds(base);
   const theirs = rowsOf(candidate).filter(isLimit);
@@ -170,6 +173,92 @@ export function limitsKeptBy(base: unknown, candidate: unknown): { kept: HeldRow
     (theirs.some(same) ? kept : dropped).push(row);
   }
   return { kept, dropped };
+}
+
+/**
+ * ⭐ BATCH F (DL GO (a), 12 Oct; run 4 marketing, scenario 35ecad67, CEE a770ce49): THE DRAFT'S LIMITS ARE CARRIED INTO THE
+ * REVISED DRAFT BY CONSTRUCTION. The drafter re-expresses the brief afresh: run 4's limits came back as "GBP/year" for "£/year"
+ * and as "Founder marketing time" for "Founder time on campaign", so the strict keeper (`limitsKeptBy`, AIE 0452 AMEND 2)
+ * called both dropped and the card was never offered. For each base limit, its counterpart is the candidate's limit on the
+ * SAME quantity with the same comparator, figure, frame and unit key (`unitComparisonKey`: £ is GBP, never a conversion), else
+ * the ONE candidate limit with those when the base holds no other limit with them (the quantity's label drifted). The
+ * counterpart's row becomes the base row's own bytes: the limit is the user's (author and provenance kept). The node stays the
+ * revised draft's own, as its card says ("Not carried: Olumi's earlier estimates and links, which are drafted afresh"; the
+ * draft gate guarantees the base node holds no later human material): its category, scale and estimate were derived for THIS
+ * structure (the base node's bytes made the L20 draft's founder time an unreachable controllable factor, and run 4's budget is
+ * an identity formula over the base's own factors). Where the label drifted, that node takes the base's id and name, so ONE
+ * concept remains, and every reference to the old id is re-pointed (links, rows, option settings and their `target_match`,
+ * identity formulas). The comparator compared is the one STATED (`operator_as_stated`). No counterpart, two, an id already
+ * taken, or the old id still named anywhere: nothing is carried for that limit, and the keeper still refuses. Pure: the
+ * candidate is copied, never edited.
+ */
+export function carryDraftLimits(base: unknown, candidate: unknown): unknown {
+  const b = rec(base);
+  if (b === undefined || rec(candidate) === undefined) return candidate;
+  const baseGoals = new Set(recs(b.nodes).filter((n) => n.kind === 'goal').map((n) => n.id));
+  const baseLimits = rowsOf(b).filter((r) => isLimitRow(r) && !baseGoals.has(r.node_id));
+  let out = candidate as Rec;
+  for (const row of baseLimits) out = carryOneLimit(b, out, row, baseLimits) ?? out;
+  return out;
+}
+
+const limitKey = (c: Rec): string => [c.operator_as_stated ?? c.operator, c.value, c.value_frame ?? 'level', unitComparisonKey(unitOf(c)) ?? unitOf(c)].join('\u0000');
+
+function carryOneLimit(base: Rec, cand: Rec, row: Rec, baseLimits: readonly Rec[]): Rec | null {
+  const id = String(row.node_id);
+  const baseNode = recs(base.nodes).find((n) => n.id === id);
+  const quantity = quantityOf(base, row);
+  if (baseNode === undefined || quantity === null) return null;
+  const key = limitKey(row);
+  const sameKey = rowsOf(cand).filter((t) => isLimitRow(t) && limitKey(t) === key);
+  const sameQuantity = sameKey.filter((t) => quantityOf(cand, t) === quantity);
+  const counterpart = sameQuantity.length === 1 ? sameQuantity[0]
+    : sameQuantity.length === 0 && sameKey.length === 1 && baseLimits.filter((r) => limitKey(r) === key).length === 1 ? sameKey[0] : undefined;
+  if (counterpart === undefined) return null;
+  const oldId = String(counterpart.node_id);
+  const g = structuredClone(cand) as Rec;
+  if (oldId !== id && recs(g.nodes).some((n) => n.id === id)) return null;
+  (g.goal_constraints as unknown[])[(cand.goal_constraints as unknown[]).indexOf(counterpart)] = structuredClone(row);
+  const nodes = g.nodes as Rec[];
+  const at = nodes.findIndex((n) => n.id === oldId);
+  if (at < 0) return null;
+  if (quantityOf(cand, counterpart) !== quantity) nodes[at] = { ...nodes[at], label: baseNode.label };
+  if (oldId !== id) {
+    nodes[at] = { ...nodes[at], id };
+    repointNode(g, oldId, id);
+    if (namesAny(g, new Set([oldId]))) return null;
+  }
+  return limitsKeptBy({ nodes: base.nodes, goal_constraints: [row] }, g).dropped.length === 0 ? g : null;
+}
+
+/** Every place a candidate names a node: links, rows, option settings and their `target_match`, identity formulas. */
+function repointNode(g: Rec, from: string, to: string): void {
+  for (const e of recs(g.edges)) { if (e.from === from) e.from = to; if (e.to === from) e.to = to; }
+  for (const r of recs(g.goal_constraints)) if (r.node_id === from) r.node_id = to;
+  for (const n of recs(g.nodes)) {
+    const settings = rec(n.interventions);
+    if (settings !== undefined) {
+      if (Object.prototype.hasOwnProperty.call(settings, from)) {
+        n.interventions = Object.fromEntries(Object.entries(settings).map(([k, v]) => [k === from ? to : k, v]));
+      }
+      for (const v of Object.values(rec(n.interventions) ?? {})) {
+        const match = rec(rec(v)?.target_match);
+        if (match?.node_id === from) match.node_id = to;
+      }
+    }
+    const identity = rec(n.nonlinear_identity);
+    if (identity !== undefined && Array.isArray(identity.factor_ids)) identity.factor_ids = identity.factor_ids.map((x: unknown) => (x === from ? to : x));
+  }
+}
+
+/** True when `value` names any of `ids`, as a string anywhere in it or as a key. */
+function namesAny(value: unknown, ids: ReadonlySet<string>): boolean {
+  if (typeof value === 'string') return ids.has(value);
+  if (Array.isArray(value)) return value.some((v) => namesAny(v, ids));
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value as Rec).some(([k, v]) => ids.has(k) || namesAny(v, ids));
+  }
+  return false;
 }
 
 /** The candidate's targets for the goal: each `goal_target` row and the goal's own row, with the comparator as stated. */

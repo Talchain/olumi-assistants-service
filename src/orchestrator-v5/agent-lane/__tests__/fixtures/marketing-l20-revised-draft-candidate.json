@@ -1,6 +1,6 @@
 {
  "_generated_by": "restated-goal-revised-draft.test.ts row 'the L20 candidate fixture is the one the capability prepares' (proposals.get(offer).operations[0].value); regenerate by that row, never by hand",
- "operation_id": "6a1fdbe9-bee4-423b-8f01-4e483070afcd",
+ "operation_id": "461ad8eb-d973-4caf-8b49-b0efd6d4e654",
  "candidate": {
   "nodes": [
    {
@@ -378,24 +378,29 @@
     "role": "goal_target"
    },
    {
-    "constraint_id": "agent-lane:annual_marketing_spend:<=",
+    "unit": "GBP/year",
+    "label": "Annual marketing spend",
+    "value": 100000,
     "node_id": "annual_marketing_spend",
     "operator": "<=",
-    "value": 100000,
-    "label": "Annual marketing spend",
-    "unit": "GBP/year",
     "provenance": "explicit",
-    "value_frame": "level"
+    "value_frame": "level",
+    "constraint_id": "agent-lane:annual_marketing_spend:<="
    },
    {
-    "constraint_id": "agent-lane:founder_marketing_time:<=",
+    "unit": "%",
+    "label": "Founder marketing time",
+    "value": 25,
     "node_id": "founder_marketing_time",
     "operator": "<=",
-    "value": 25,
-    "label": "Founder marketing time",
-    "unit": "%",
     "provenance": "explicit",
-    "value_frame": "level"
+    "value_frame": "level",
+    "constraint_id": "agent-lane:founder_marketing_time:<=",
+    "provenance_unit_relabelled": {
+     "rule": "agent_lane_limit_pct_of_level_v1",
+     "pre_normalisation_unit": "% of work time",
+     "pre_normalisation_value": 25
+    }
    }
   ]
  }
