@@ -120,3 +120,64 @@ describe('D2: the served capacity status quo, read in its own frame (run 3, norm
     expect(reasonOf(licence(runEnvelope({ p10: 80, p50: 80, p90: 80, mean: 80 }), RECORDED))).toMatchObject({ reason: 'reference_moved' });
   });
 });
+
+/**
+ * D2 FLOAT TOLERANCE (DL 12 Oct, recovery Batch D). The 11 Oct capacity Run (served CEE 50530b5f): carrying on held 0.4 on
+ * every draw, and the engine reported std 5.551115123125783e-17 with mean 0.4000000000000001. That is float residue, not a
+ * spread; read as one, the status quo said "doesn't match … as it stands today". A real spread, however small, still moves.
+ */
+const FLOAT = JSON.parse(readFileSync('tests/fixtures/batch-d/served-capacity-float-std-20261011T233643Z.json', 'utf8')) as {
+  envelope: Rec; graph: Rec; served_licence: Rec & { sent_threshold: SentGoalThreshold } };
+const floatEnvelope = (outcome?: Rec): Rec => {
+  const env = structuredClone(FLOAT.envelope);
+  env.inference_warnings = (env.inference_warnings as Rec[]).filter((w) => w.code !== 'GOAL_CHANCE_LICENSED');
+  const sq = (env.option_comparison as Rec[]).find((o) => o.option_id === SQ)!;
+  // The Run's own row before transport (the transport strips an unearned exact 0), as above.
+  sq.probability_of_goal = 0;
+  if (outcome !== undefined) sq.outcome = { ...(sq.outcome as Rec), ...outcome };
+  return env;
+};
+const floatLicence = (env: Rec) => goalChanceLicenceOf(env, FLOAT.graph, GOAL, earned, FLOAT.served_licence.sent_threshold, FLOAT.graph, {});
+
+describe('D2 float tolerance: float residue in the status-quo row is no spread (11 Oct capacity Run)', () => {
+  it('precondition: the wire row is 0.4 on every draw with a float-residue std, and the Run recorded its normalised field', () => {
+    const sq = (FLOAT.envelope.option_comparison as Rec[]).find((o) => o.option_id === SQ)!;
+    expect(sq.outcome).toMatchObject({ p10: 0.4, p50: 0.4, p90: 0.4, mean: 0.4000000000000001, std: 5.551115123125783e-17 });
+    expect(FLOAT.served_licence.sent_threshold).toEqual({ field: 'goal_threshold', frame: 'delta', value: 0.5 });
+    expect((FLOAT.graph.nodes as Rec[]).find((n) => n.id === GOAL)!.observed_state).toMatchObject({ value: 0.4, raw_value: 80, cap: 200 });
+  });
+
+  it('RED → GREEN: a std of 5.6e-17 is zero spread, so carrying on is "No change, by assumption", never "moved"', () => {
+    const l = floatLicence(floatEnvelope());
+    expect(reasonOf(l)?.reason).not.toBe('reference_moved');
+    expect(l!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
+  });
+
+  it('CONTRAST: a genuinely nonzero std, or deciles genuinely apart, still reads as moved', () => {
+    expect(reasonOf(floatLicence(floatEnvelope({ std: 0.001 })))).toMatchObject({ reason: 'reference_moved' });
+    // A std of 1e-12·|centre|: far above representation error at that centre.
+    expect(reasonOf(floatLicence(floatEnvelope({ std: 1e-12 * 0.4, mean: 0.4, p10: 0.4, p50: 0.4, p90: 0.4 })))).toMatchObject({ reason: 'reference_moved' });
+    expect(reasonOf(floatLicence(floatEnvelope({ p10: 0.39, p90: 0.41 })))).toMatchObject({ reason: 'reference_moved' });
+  });
+
+  it('CONTRAST (no unit floor): a tiny-scale quantity (centre 1e-6) with a real std of 1e-12 moves; at std 0 it is today', () => {
+    const tiny = structuredClone(FLOAT.graph);
+    ((tiny.nodes as Rec[]).find((n) => n.id === GOAL)!.observed_state as Rec).value = 1e-6;
+    const at = (std: number) => goalChanceLicenceOf(floatEnvelope({ std, mean: 1e-6, p10: 1e-6, p50: 1e-6, p90: 1e-6 }), tiny, GOAL, earned,
+      FLOAT.served_licence.sent_threshold, tiny, {});
+    expect(reasonOf(at(1e-12))).toMatchObject({ reason: 'reference_moved' });
+    // The floor discriminator: std 1e-16 at centre 1e-6 is a relative spread of 1e-10, far above representation error,
+    // so it moves; a unit floor (max(1, scale)) would have called it zero.
+    expect(reasonOf(at(1e-16))).toMatchObject({ reason: 'reference_moved' });
+    expect(at(0)!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
+  });
+
+  it('UNIT-RESCALED: the same row in raw units (×200, read against raw_value 80) gives the same verdicts', () => {
+    const raw = { value: 100, field: 'goal_threshold_raw', frame: 'delta' } as const;
+    const scaled = (outcome: Rec) => goalChanceLicenceOf(floatEnvelope(outcome), FLOAT.graph, GOAL, earned, raw, FLOAT.graph, {});
+    const sq = (FLOAT.envelope.option_comparison as Rec[]).find((o) => o.option_id === SQ)!.outcome as Record<string, number>;
+    const x200 = Object.fromEntries(['p10', 'p50', 'p90', 'mean', 'std'].map((k) => [k, sq[k]! * 200]));
+    expect(scaled(x200)!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
+    expect(reasonOf(scaled({ ...x200, std: 1e-12 * 80 }))).toMatchObject({ reason: 'reference_moved' });
+  });
+});
