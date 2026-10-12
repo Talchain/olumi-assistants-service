@@ -196,7 +196,7 @@ describe('marketing L20 through the real route: the target door offers ONE revis
   it.each(SHAPES)('%s → ONE card holding both targets; the second target call is the same approval, nothing written yet', async (_name, conversion, customers) => {
     const w = world();
     const turn = await route(w);
-    const body = await turn({ turn_id: FX.l20.turn_id, message: L20 }, l20Script(conversion, customers));
+    const body = await turn({ turn_id: randomUUID(), message: L20 }, l20Script(conversion, customers));
     const calls = (body._agent.tool_calls as Rec[]).filter(c => c.name === 'propose_goal_target');
     expect(calls.map(c => c.refusal ?? null), JSON.stringify(calls)).not.toContain('unreadable_derivation');
     const offered = calls.filter(c => c.ok === true);
@@ -214,7 +214,7 @@ describe('marketing L20 through the real route: the target door offers ONE revis
   it('NEGATIVE (a real derivation keeps its checks): {base: 15, multiplier: 2} for 15% is refused derivation_mismatch, nothing offered', async () => {
     const w = world();
     const turn = await route(w);
-    const body = await turn({ turn_id: FX.l20.turn_id, message: L20 },
+    const body = await turn({ turn_id: randomUUID(), message: L20 },
       [call('propose_goal_target', { ...CONVERSION, derived_from: { base: 15, multiplier: 2 } }), say('Could not prepare it.')]);
     expect((body._agent.tool_calls as Rec[]).filter(c => c.name === 'propose_goal_target').map(c => c.refusal)).toEqual(['derivation_mismatch']);
     expect(w.registers).toHaveLength(0);
@@ -225,8 +225,10 @@ describe('marketing L20 → press → the revised draft (DL question 3: do the n
   it('the press writes the revised draft once; what its goal and target nodes and their incoming links carry is recorded', async () => {
     const w = world();
     const turn = await route(w);
-    const offer = await turn({ turn_id: FX.l20.turn_id, message: L20 }, l20Script({ derived_from: {} }, { derived_from: {} }));
-    w.said(FX.l20.turn_id);
+    // Each row its own L20 turn: the route keeps ONE revised draft per turn and base, so a shared id would reuse a card.
+    const l20 = randomUUID();
+    const offer = await turn({ turn_id: l20, message: L20 }, l20Script({ derived_from: {} }, { derived_from: {} }));
+    w.said(l20);
     const proposal = (offer._agent.tool_calls as Rec[]).find(c => c.name === 'propose_goal_target' && c.ok === true)!;
     const yes = (offer.suggested_actions as Rec[]).find(c => c.id === approvalChipIdFor(String(proposal.proposal_id)))!;
     const pressed = await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: offer._agent.session_id });
