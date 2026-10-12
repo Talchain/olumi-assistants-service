@@ -841,8 +841,11 @@ function readValue(observed: unknown): ValueReading | undefined {
   if (et !== undefined) return { provenance: P('unknown'), display: UNKNOWN_DISPLAY };
   // The existing source-bound writer of a share-by-date team share (`team-share-write.ts` `teamObservedState`,
   // `event-by-date-model.ts` `withEventShareDate`): its value is COMPUTED from the person's own stated team time, held
-  // beside it as `stated_time`; the `cee_inference` stamp marks the computation, not an estimate of the time.
-  if (rec(os.stated_time)?.quantity === 'months_to_finish') return { provenance: P('human'), display: HUMAN_VALUE_STAMP.user_specified! };
+  // beside it as `stated_time`. An Olumi-assumed range makes the computed level Olumi's estimate, not the person's figure.
+  const statedTime = rec(os.stated_time);
+  if (statedTime?.quantity === 'months_to_finish') return statedTime.range_origin === 'olumi_estimate'
+    ? { provenance: P('ai'), display: OLUMI_DISPLAY }
+    : { provenance: P('human'), display: HUMAN_VALUE_STAMP.user_specified! };
   const src = typeof os.source === 'string' ? os.source : undefined;
   if (src !== undefined && Object.prototype.hasOwnProperty.call(HUMAN_VALUE_STAMP, src)) {
     return { provenance: P('human', src === 'brief_extraction' ? { stampOnly: true } : {}), display: HUMAN_VALUE_STAMP[src]! };
