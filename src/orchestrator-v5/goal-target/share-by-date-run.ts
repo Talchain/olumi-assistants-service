@@ -48,7 +48,8 @@ function capacityInputFailure(extra: Rec): string | null {
   }
   if (typeof extra.monthly_share !== 'number' || !Number.isFinite(extra.monthly_share)
     || extra.monthly_share < 0 || extra.monthly_share > 100) {
-    return "Not shown. Olumi's estimate of the new team's pace is not usable. State a pace from 0% to 100% of the work a month.";
+    // AIE 6122738619's meaning (DL, 12 Oct): the hires' ADDITIONAL progress, never "the new team's pace" (the whole team).
+    return "Not shown. Olumi's estimate of the additional progress from the hires is not usable. State it from 0% to 100% of the work per month.";
   }
   return null;
 }

@@ -208,6 +208,10 @@ describe('written into the model: the second start is its own part; every option
     const g = paulsModel(), after = stored(withHiringTimes(g, paulsApproval(g)));
     after.nodes.find((n: Rec) => n.id === 'event_capacity_2_start_2').observed_state.extra_share_by_date.lead_low = -1;
     expect(shareChanceInputFailure(after, DEVS)).toMatch(/hiring-time range is not usable/);
+    // DL 12 Oct (AIE 6122738619's meaning): an unusable pace is said as the hires' additional progress, verbatim.
+    const pace = stored(withHiringTimes(paulsModel(), paulsApproval(paulsModel())));
+    pace.nodes.find((n: Rec) => n.id === 'event_capacity_2_start_2').observed_state.extra_share_by_date.monthly_share = 150;
+    expect(shareChanceInputFailure(pace, DEVS)).toBe("Not shown. Olumi's estimate of the additional progress from the hires is not usable. State it from 0% to 100% of the work per month.");
     expect(sharePartsForOption(after, DEVS)).toBeNull();
     expect(shareGateForOption(after, TECH)).not.toBeNull();
     expect(shareGateForOption(after, CARRY)).not.toBeNull();
