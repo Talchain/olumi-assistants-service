@@ -44,7 +44,7 @@ import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
-import type { SentRunInputs } from './goal-own-constraint-chance.js';
+import { goalOwnConstraintChanceRecords, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
@@ -393,8 +393,11 @@ export function goalChanceLicenceOf(
   // ONE predicate with the Run's refusal words (`withholdForOlumiGoalLevel`, below: why, and the next step).
   if (goalLevelIsOlumisEstimate(graph, goalId)) return null;
   const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
-  // The Run's own option records, current-first: the first carrier that has any is the comparison.
-  const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
+  // The Run's own option records, current-first: the first carrier that has any is the comparison. DL (b1): where PLoT gave
+  // no `probability_of_goal` at threshold 1, the goal's OWN constraint, bound by identity, is the figure (never over a withhold).
+  const engine = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find((s) => s.length > 0) ?? [],
+    constraints.sentRun);
+  const records = engine.records;
   // ⭐ AIE status-quo disposition (12 Oct, #94 6117119450; PL 6117155350) — amendment 1 is PARTIAL by design. Whether
   // carrying on is "no change, by assumption" is decided by the EXISTING checked facts about how this Run reads the goal,
   // never by a summary statistic of the Run's row (`statusQuoReadingOf`): the same-draw reference (paired) → by assumption,
@@ -916,7 +919,7 @@ export function sentGoalThresholdOf(
   const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
   if (goal === undefined || !isRec(envelope)) return undefined;
-  const records = readOptionResultSources(envelope).find(s => s.length > 0) ?? [];
+  const records = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find(s => s.length > 0) ?? [], sentRun).records;
   const candidates: SentGoalThreshold[] = [];
   for (const field of ['goal_threshold_raw', 'goal_threshold'] as const) {
     const value = goal[field];
@@ -1135,13 +1138,15 @@ export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): E {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
-  if (licence === null || !isRec(envelope)) return envelope;
+  // B2 (check BLOCKING 3): a deadline goal's Run that did not test the HELD target withholds every option's chance, with words.
+  const checked = withSentTargetWithheld(envelope, graph, goalId, constraints.sentRun);
+  const licence = goalChanceLicenceOf(checked, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
+  if (licence === null || !isRec(checked)) return checked;
   // Recovery Batch C, amendment 1 (DL contract ruling 3): a status quo the licence records as BY ASSUMPTION carries no
   // precision and no Monte Carlo interval on any surface (its standard error is 0 by construction: never "±0").
-  const shown = licence.status_quo === undefined ? envelope : withholdStatusQuoIntervals(envelope, licence.status_quo.option_id);
+  const shown = licence.status_quo === undefined ? checked : withholdStatusQuoIntervals(checked, licence.status_quo.option_id);
   const warnings = Array.isArray(shown.inference_warnings) ? shown.inference_warnings : [];
-  return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;
+  return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(checked) }] } as E;
 }
 
 /**

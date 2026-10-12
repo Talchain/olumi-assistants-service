@@ -23,9 +23,11 @@
  * malformed there is no block, so the step is whole %. An exact 0/1 still needs the Run to have earned it (the licence).
  * Pure: it returns copies and never edits the Run.
  */
-import { GOAL_FIGURES_WITHHELD_CODES } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_SHARE_APPROXIMATION, GOAL_FIGURES_WITHHELD_CODES, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
 import { WILSON_Z_95 } from './goal-chance-driver.js';
 import { readGoalRecord } from './goal-record.js';
+import { shareByDateGoalForChanceOf } from './share-by-date-run.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -49,19 +51,52 @@ export interface GoalOwnConstraintRead {
   readonly engineRead: ReadonlySet<string>;
 }
 
+/**
+ * ⭐ B2 (independent check BLOCKING 3, CHECK.md on 91405cb2): THE SENT RUN TESTED THE HELD TARGET, OR NOTHING IS READ. A finite
+ * sent threshold is not enough: a sent delta 0.5 for the held ≥ 100% would quote another threshold's probability as the chance
+ * of meeting the goal. The held target in the held frame is what CEE's one Run-frame writer makes of it (`withShareByDateFrame`:
+ * a share-by-date goal holds its target as a level of % done with no observed baseline, so it is sent as `threshold_raw / 100`
+ * in the samples' 'delta' frame). The sent goal must be this goal node, with exactly that threshold, in that frame, and the
+ * operator PLoT derives from the sent direction and strictness must be the goal's held comparator.
+ */
+export function sentRunTestsHeldTarget(sent: SentRunInputs | undefined, graph: unknown, goalId: unknown): boolean {
+  if (sent === undefined || typeof goalId !== 'string' || !isRec(sent.graph) || !Array.isArray(sent.graph.nodes)) return false;
+  const sentGoal = sent.graph.nodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
+  const sentOperator = sent.goal_direction === 'minimise'
+    ? (sent.goal_threshold_strict === true ? '<' : '<=') : (sent.goal_threshold_strict === true ? '>' : '>=');
+  const share = shareByDateGoalForChanceOf(graph), threshold = sentGoal?.goal_threshold;
+  return sentGoal !== undefined && share !== null && share.goal.id === goalId && finite(threshold)
+    && threshold === share.threshold_raw / 100 && sentGoal.goal_threshold_frame === 'delta'
+    && readGoalRecord(graph, goalId)?.target?.comparator === sentOperator;
+}
+
+/** B2 words (pending AIE): a deadline Run that did not test the held target shows no option's chance, and says why. */
+export const SENT_TARGET_NOT_HELD_WORDS = 'Not shown. This run did not test your goal\u2019s own target, so its results are not the chance of meeting it. Run the analysis again.';
+
+/**
+ * At Run time, before the licence: a deadline goal's Run whose sent target is not the held one withholds EVERY option's goal
+ * figures with words (`SENT_TARGET_NOT_HELD_WORDS`), so the cell says why instead of falling silent. Any other goal, or no sent
+ * run, is returned unchanged.
+ */
+export function withSentTargetWithheld<E>(envelope: E, graph: unknown, goalId: unknown, sent: SentRunInputs | undefined): E {
+  if (!isRec(envelope) || sent === undefined || typeof goalId !== 'string' || shareByDateGoalForChanceOf(graph)?.goal.id !== goalId
+    || sentRunTestsHeldTarget(sent, graph, goalId)) return envelope;
+  const ids = new Set((readOptionResultSources(envelope).find((s) => s.length > 0) ?? []).flatMap((r) => {
+    const id = r.option_id ?? r.id; return typeof id === 'string' ? [id] : [];
+  }));
+  return withholdOptionGoalFigures(envelope, ids, { code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning',
+    option_ids: [...ids], message: SENT_TARGET_NOT_HELD_WORDS }, { keepOutcome: true, keepOrdering: true });
+}
+
 export function goalOwnConstraintChanceRecords(
   envelope: unknown, graph: unknown, goalId: unknown, records: readonly Rec[], sent: SentRunInputs | undefined,
 ): GoalOwnConstraintRead {
   const none: GoalOwnConstraintRead = { records, engineRead: new Set() };
   if (!isRec(envelope) || typeof goalId !== 'string' || sent === undefined || !isRec(sent.graph) || !Array.isArray(sent.graph.nodes)) return none;
-  // The sent run: PLoT synthesises the goal's own constraint from these, and from nothing else (`run.ts`, autoConstraint).
+  // The sent run: PLoT synthesises the goal's own constraint from these, and from nothing else (`run.ts`, autoConstraint). It must
+  // have tested the HELD target: this node, its own threshold in the samples' frame, the held comparator (`sentRunTestsHeldTarget`).
   const sentNodes = sent.graph.nodes.filter(isRec);
-  const sentGoal = sentNodes.find((n) => n.id === goalId && n.kind === 'goal');
-  const sentOperator = sent.goal_direction === 'minimise'
-    ? (sent.goal_threshold_strict === true ? '<' : '<=') : (sent.goal_threshold_strict === true ? '>' : '>=');
-  // The goal's own held comparator through the one record (S5): the constraint must score the comparison the goal holds.
-  const held = readGoalRecord(graph, goalId)?.target?.comparator;
-  if (sentGoal === undefined || !finite(sentGoal.goal_threshold) || sentGoal.goal_threshold_frame !== 'delta' || held !== sentOperator) return none;
+  if (!sentRunTestsHeldTarget(sent, graph, goalId)) return none;
   const sentOptions = new Set(sentNodes.filter((n) => n.kind === 'option').map((n) => n.id));
   const warnings = (Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : []).filter(isRec);
   const withheld = (id: string): boolean => warnings.some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
