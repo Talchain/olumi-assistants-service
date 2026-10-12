@@ -303,7 +303,7 @@ describe('R11 — an in-band pick is review, not authorship', () => {
     expect(licensed(result.mutatedGraph)).toBe(false);
   });
 
-  it('RED (R7 finding 3, through the approval door): Price → Revenue projected user-drawn prior is reviewed at its stored mean, never credited', async () => {
+  it('RED (R7 finding 3 × D1, through the approval door): the user\'s same-band words SIZE the drawn Price → Revenue placeholder as theirs, never keep its 0.5', async () => {
     let persisted = graphWith({ strength: { mean: 0.5, std: 0.125 },
       provenance: { source: 'user_specified', mean_projected: true } as Edge['provenance'] });
     persisted.nodes.find(n => n.id === TO)!.label = 'Revenue';
@@ -332,21 +332,20 @@ describe('R11 — an in-band pick is review, not authorship', () => {
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     const proposal = proposals.get(String(proposed.proposal_id))!;
     expect(proposal.scenario_id).toBe(SCENARIO_ID);
+    // D1 (DL ruling 12 Oct, recovery Batch D; the class closed for the single-link door): a placeholder has no current band,
+    // so the band the user named sizes it at the band's midpoint, as theirs (was: a review keeping μ=0.5 / σ=0.125 unsized).
+    // Science 393023 LICENCE ruling 3 still holds: the projected 0.5 is nobody's, so it is never what gets stamped.
     expect(proposal.operations).toEqual([expect.objectContaining({ op: 'update_edge', path: `${FROM}::${TO}`,
-      value: expect.objectContaining({ magnitude: 0.5, intent: 'confirm_current', band: 'strong' }) })]);
-    // Science 393023 LICENCE ruling 3, re-derived:
-    // Price → Revenue source=user_specified + mean_projected was rejected (carrier lost); now it records review only,
-    // with μ=0.5 / σ=0.125 held and no promotion to the user's own strength.
+      value: expect.objectContaining({ magnitude: 0.55, intent: 'set', band: 'strong' }) })]);
     const approved = await caps.authoriseChange(context, { proposal_id: proposal.proposal_id });
     expect(approved.ok, JSON.stringify(approved)).toBe(true);
-    expect(events).toEqual([expect.objectContaining({ from: FROM, to: TO, magnitude: 0.5, intent: 'confirm_current' })]);
-    expect(edgeOf(persisted).strength).toStrictEqual(before.strength);
-    expectReviewed(persisted, 'strong');
-    const { reviewed_by_user: _review, ...kept } = provenanceOf(persisted);
-    expect(kept).toStrictEqual(before.provenance);
-    expect(linkSizing(edgeOf(persisted))).toBe('placeholder');
-    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edgeOf(persisted)))).toBe(false);
-    expect(String(approved.follow_up)).not.toMatch(/your (?:own )?estimate|you set/i);
+    expect(events).toEqual([expect.objectContaining({ from: FROM, to: TO, magnitude: 0.55, intent: 'set' })]);
+    expect(before.strength).toStrictEqual({ mean: 0.5, std: 0.125 });
+    expect((edgeOf(persisted).strength as { mean: number }).mean).toBe(0.55);
+    expect(provenanceOf(persisted)).not.toHaveProperty('mean_projected');
+    expect(linkSizing(edgeOf(persisted))).toBe('user');
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edgeOf(persisted)))).toBe(true);
+    expect(String(approved.follow_up)).not.toMatch(/Olumi[’']s (?:first )?estimate/);
   });
 
   it('Batch A: reviewing a non-user projected placeholder keeps its magnitude and carrier', async () => {

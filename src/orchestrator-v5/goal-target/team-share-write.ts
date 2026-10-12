@@ -120,6 +120,20 @@ function sentencesHolding(text: string, quote: string): string {
     return text.slice(start === undefined ? 0 : start + 1, end === undefined ? text.length : end + 1);
   }).join(' ');
 }
+/**
+ * B2 (independent check BLOCKING 2, CHECK.md on 91405cb2): the clause(s) that ENCLOSE each place `quote` stands in `text`.
+ * The quote's figure is read again over them with the same clause reader, so a duration is the team's time only if it is
+ * so in the user's own statement, never because the selected words stop just after its subject ("recruitment takes
+ * 7 months" quoted as "7 months"). Conservative by construction: a clause holding two durations reads at most one.
+ */
+function enclosingClauses(text: string, quote: string): string[] {
+  const bounds = [...text.matchAll(CLAUSE_BOUNDARY)].map(m => [m.index!, m.index! + m[0].length] as const);
+  return quoteSpansIn(text, quote).map(at => {
+    const start = Math.max(0, ...bounds.filter(([, e]) => e <= at).map(([, e]) => e));
+    const end = Math.min(text.length, ...bounds.filter(([b]) => b >= at + quote.length).map(([b]) => b));
+    return text.slice(start, end);
+  });
+}
 export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonly conversation?: string | null },
   args: { readonly quote?: unknown; readonly low_months?: unknown; readonly high_months?: unknown } | undefined):
   { readonly kind: 'bound'; readonly time: BoundTeamTime; readonly quote: string } | { readonly kind: 'refused'; readonly detail: string } {
@@ -134,7 +148,9 @@ export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonl
   const low = Number(args?.low_months), high = Number(args?.high_months);
   const stated = Number.isFinite(low) && Number.isFinite(high)
     ? teamTimesInQuote(quote).find(r => teamTimeArgumentsMatch(quote, { low_months: low, high_months: high }, r)) : undefined;
-  if (stated === undefined) {
+  const inStatement = stated !== undefined && enclosingClauses(source, quote)
+    .some(c => teamTimesInQuote(c).some(r => r.low_months === stated.low_months && r.high_months === stated.high_months));
+  if (stated === undefined || !inStatement) {
     return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
   }
   if (stated.low_months !== stated.high_months) return { kind: 'bound', time: stated, quote: quoted };

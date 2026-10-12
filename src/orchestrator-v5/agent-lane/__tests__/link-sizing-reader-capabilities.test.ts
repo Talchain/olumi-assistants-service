@@ -64,7 +64,9 @@ function world(initial = priceRevenue(), setProvenance?: Record<string, unknown>
 describe('R7 plural link ownership words', () => {
   // Science 393023 LICENCE ruling 3, re-derived: source user_specified + mean_projected means the user drew
   // Price→Revenue but did not size it. "already strong, as the user set it" → a kept 0.5 review proposal.
-  it.each([undefined, STRONG_WORDS])('R7 RED: projected Price→Revenue strong is a review, with from_words %s', async (fromWords) => {
+  // D1 (DL 12 Oct, Batch D): Olumi's band stays a review here only because the adoption writer cannot size a drawn link;
+  // the user's own words naming the band size it as theirs (next test).
+  it.each([undefined])('R7 RED: projected Price→Revenue strong is a review, with from_words %s', async (fromWords) => {
     const w = world();
     expect(linkSizing(w.edge())).toBe('placeholder');
     expect(w.edge()).not.toHaveProperty('defaulted');
@@ -87,6 +89,37 @@ describe('R7 plural link ownership words', () => {
     expect(text).toContain('approving records only your review');
     expect(text).not.toMatch(/as strong|Olumi[’']s (?:first )?estimate|as your own/);
     expect(w.sent).toEqual([]);
+  });
+
+  it('RED (D1): the user naming the band of the projected Price→Revenue sizes it as theirs, at the band\'s midpoint, never kept at 0.5', async () => {
+    const w = world();
+    expect(linkSizing(w.edge())).toBe('placeholder');
+    const p = await w.caps.proposeLinkStrengths!(ctx(STRONG_WORDS), proposalArgs('strong', STRONG_WORDS));
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(String(p.public_label)).toBe('Record this link strength: "Price" \u2192 "Revenue" as strong, your estimate');
+    expect(w.store.get(String(p.proposal_id))!.operations).toEqual([expect.objectContaining({ path: 'price::revenue',
+      value: expect.objectContaining({ magnitude: 0.55, intent: 'set', author: 'user_stated', expected: expect.objectContaining({ mean: 0.5 }) }) })]);
+    expect(p.links).toEqual([expect.objectContaining({ from: 'Price', to: 'Revenue', was: { sizing: 'placeholder' },
+      becomes: { band: 'strong' }, whose: 'yours', keeps_current_strength: false })]);
+    const out = await w.caps.authoriseChange(ctx(STRONG_WORDS), { proposal_id: String(p.proposal_id) });
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true });
+    expect(w.edge().strength.mean).toBe(0.55);
+    expect(linkSizing(w.edge())).toBe('user');
+    expect(String(out.follow_up)).toContain('as strong, your estimate');
+  });
+
+  it('RED (D1, single-link door): the user naming the band of the projected Price→Revenue sizes it as theirs at the midpoint', async () => {
+    const w = world();
+    const p = await w.caps.proposeLinkStrength!(ctx(STRONG_WORDS), { ...labels, strength: 'strong', rationale: 'D1 single door' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(w.store.get(String(p.proposal_id))!.operations).toEqual([expect.objectContaining({ op: 'update_edge', path: 'price::revenue',
+      value: expect.objectContaining({ magnitude: 0.55, intent: 'set', band: 'strong' }) })]);
+    expect(p).toMatchObject({ link: { keeps_current_strength: false } });
+    expect(String(p.public_label)).toContain('as your own estimate');
+    const out = await w.caps.authoriseChange(ctx(STRONG_WORDS), { proposal_id: String(p.proposal_id) });
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true });
+    expect(w.edge().strength.mean).toBe(0.55);
+    expect(linkSizing(w.edge())).toBe('user');
   });
 
   // Science 393023 LICENCE ruling 3, re-derived: the same unsized identity proposed weak is not a user-owned
@@ -139,19 +172,19 @@ describe('R7 plural link ownership words', () => {
     }
   });
 
-  it('Batch A: a hypothesis placeholder’s same-band proposal offers review and stays unsized', async () => {
+  it('RED (D1, amending Batch A ruling 1): a hypothesis placeholder’s same-band proposal SIZES it as Olumi’s first estimate', async () => {
     const initial = priceRevenue();
     initial.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };
     const w = world(initial);
     const p = await w.caps.proposeLinkStrengths!(ctx('Please suggest a strength.'), proposalArgs('strong'));
     expect(p.ok, JSON.stringify(p)).toBe(true);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(p.links).toEqual([expect.objectContaining({ was: { sizing: 'placeholder' },
-      whose: 'review only; nobody has sized this link', keeps_current_strength: true,
-      sizing_after_approval: 'placeholder' })]);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
+    // D1 (DL 12 Oct, Batch D): a placeholder has no current band, so Olumi's "strong" is never "kept as it is".
+    expect(p.links).toEqual([expect.objectContaining({ was: { sizing: 'placeholder' }, becomes: { band: 'strong' },
+      whose: 'Olumi’s first estimate for a link nobody had sized', keeps_current_strength: false,
+      sizing_after_approval: 'olumi_accepted' })]);
+    expect(w.store.get(String(p.proposal_id))!.operations[0]).toMatchObject({ value: { magnitude: 0.55, intent: 'set', author: 'model_proposed' } });
     expect(composeProposalReply('propose_link_strengths', { ...proposalArgs('strong'), whole_request: true }, p,
-      'Please suggest a strength.')).toContain('These links aren’t sized in the model yet');
+      'Please suggest a strength.')).not.toContain('These links aren’t sized in the model yet');
   });
 
   // Science 393023 LICENCE ruling 3, re-derived: an unmarked .6 with no projection/size tag has no recorded author.
@@ -176,12 +209,12 @@ describe('R7 plural link ownership words', () => {
 describe('R7 approval readback follows the stored sizing class', () => {
   // Science 393023 LICENCE ruling 3, re-derived: B1 confirm keeps Price→Revenue at 0.5 and records review without
   // clearing mean_projected. A reviewed placeholder was rejected by the must-be-sized gate → successful review.
-  it.each(['singular', 'plural-user', 'plural-model'] as const)('R7 RED: %s confirms the stored projected mean as review', async (kind) => {
+  // D1 (DL 12 Oct, Batch D): 'plural-user' and 'singular' left this row: the user naming the band, in either door, now sizes
+  // the link as theirs (the D1 tests). Olumi's band in the set door still reviews it: the adoption writer cannot size it.
+  it('R7 RED: plural-model confirms the stored projected mean as review', async () => {
     const w = world();
-    const c = ctx(kind === 'plural-model' ? 'Please suggest a strength.' : STRONG_WORDS);
-    const p = kind === 'singular'
-      ? await w.caps.proposeLinkStrength!(c, { ...labels, strength: 'strong', rationale: 'B1 review' })
-      : await w.caps.proposeLinkStrengths!(c, proposalArgs('strong', kind === 'plural-user' ? STRONG_WORDS : undefined));
+    const c = ctx('Please suggest a strength.');
+    const p = await w.caps.proposeLinkStrengths!(c, proposalArgs('strong'));
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const out = await w.caps.authoriseChange(c, { proposal_id: String(p.proposal_id) });
     expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true });

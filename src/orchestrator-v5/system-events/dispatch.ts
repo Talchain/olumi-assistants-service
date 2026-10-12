@@ -3551,8 +3551,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames.map(f => ({ factorId: f.factor_id, cap: f.cap })) } : {}),
     ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { linkStrengths: input.link_strengths.map(l => ({
       from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band,
-      // L4 (c): Olumi's band on a placeholder already at it is a REVIEW (`confirm_current`), never an adoption — the adoption
-      // authority is for a `set` only (`adopted_estimate_not_a_set`).
+      // L4 (c): a `confirm_current` is a REVIEW, never an adoption — the adoption authority is for a `set` only
+      // (`adopted_estimate_not_a_set`). D1 (DL 12 Oct, Batch D): Olumi's band on a placeholder now arrives as a `set` at the
+      // band's midpoint (a placeholder has no current band), so it is adopted here as Olumi's estimate, never its default.
       adopted: l.author === 'model_proposed' && l.intent === 'set',
       // DEFECT 1: Olumi's band kept on its own link is a review, which holds the figure (`ApprovedLinkStrength.review`).
       ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) } : {}),

@@ -238,14 +238,24 @@ export function isUserTodayObservedState(os: unknown): boolean {
  *     user wrote, or there is no range.
  */
 export function isStatedLevelRange(range: unknown, os: Readonly<Record<string, unknown>>): boolean {
+  if (!isUserStatedRange(range)) return false;
+  const r = StoredInterventionRange.parse(range);
+  const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+  return typeof figure === 'number' && Number.isFinite(figure) && r.low <= figure && figure <= r.high;
+}
+
+/**
+ * The author half of {@link isStatedLevelRange}: a stored range the user stated, attested and quoted, asked of the one
+ * provenance authority (C), never a brief's type-less stamp. Recovery Batch E (run 4 hiring step 13): a factor holding one
+ * is never reported as a range Olumi chose (`ranges_added_for_analysis`).
+ */
+export function isUserStatedRange(range: unknown): boolean {
   const parsed = StoredInterventionRange.safeParse(range);
   if (!parsed.success) return false;
   const r = parsed.data;
-  // The user's own, attested range, asked of the one provenance authority (C): never a brief's type-less stamp.
   const author = provenanceOf({ value: r });
-  if (r.meaning !== 'min_max' || author.origin !== 'human' || author.role !== 'verified' || author.stampOnly === true || typeof r.source_quote !== 'string' || r.source_quote.trim() === '' || r.source_quote.length > USER_TODAY_QUOTE_MAX) return false;
-  const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
-  return typeof figure === 'number' && Number.isFinite(figure) && r.low <= figure && figure <= r.high;
+  return r.meaning === 'min_max' && author.origin === 'human' && author.role === 'verified' && author.stampOnly !== true
+    && typeof r.source_quote === 'string' && r.source_quote.trim() !== '' && r.source_quote.length <= USER_TODAY_QUOTE_MAX;
 }
 
 /**

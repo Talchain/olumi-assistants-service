@@ -2,6 +2,7 @@
  * Fractions throughout. Independent team time/pace and lead time; no sampling.
  */
 import { goalChanceDisplayClass, type GoalChanceDisplayRounding } from './goal-chance-display.js';
+
 export interface Moments { readonly mean: number; readonly sd: number }
 export interface TeamShare {
   readonly quantity: 'months_to_finish' | 'share_per_month';
@@ -61,6 +62,36 @@ export function extraShareMoments(m: number, D: number, a: number, b: number): M
   const mean = m * (hi * hi - lo * lo) / (2 * (b - a));
   const second = m * m * (hi ** 3 - lo ** 3) / (3 * (b - a));
   return { mean, sd: Math.sqrt(Math.max(0, second - mean * mean)) };
+}
+
+/**
+ * ⭐ E-TAIL (b) (DL option 1; AIE 6130197656 §2 ACK, 12 Oct): A HIRE'S LINK CARRIES AT MOST THE WHOLE DELIVERABLE, ON OLUMI'S
+ * OWN PACE ONLY. Run 4's drafter put "Hire two developers" at 35 % of the launch a month: 35 % × 3 months is 1.05, a link the
+ * writer's own base check refuses (|β| ≤ 1), so the user's deadline could never be saved. For a finite positive raw mean
+ * above 1 and a raw spread ≥ 0: f = 1 / raw mean, the entered mean is 1 and the entered spread f × raw spread (the
+ * coefficient of variation kept). Below the limit both are unchanged. NEVER applied to a pace a person supplied or accepted
+ * (`hirePaceIsOlumisOwn`): that link stays raw, and the date is refused as before. The ONE sizing of a hire's link: its writer
+ * (`withEventShareDate`) and its reader (`shareByDateGoalOf`) call this with the same answer. `extraShareMoments` stays the
+ * uncapped law the reference calculations use. The raw moments are returned so the carrier can keep them.
+ */
+export function extraShareLinkMoments(m: number, D: number, a: number, b: number, olumisOwnPace: boolean): Moments & { readonly raw?: Moments } {
+  const raw = extraShareMoments(m, D, a, b);
+  if (!olumisOwnPace || !(Number.isFinite(raw.mean) && raw.mean > 1 && Number.isFinite(raw.sd) && raw.sd >= 0)) return raw;
+  const f = 1 / raw.mean;
+  return { mean: 1, sd: f * raw.sd, raw };
+}
+
+/**
+ * The hire's pace is Olumi's own: the drafted carrier construction writes from Olumi's added-capacity pace (no figure set
+ * and no statement from a person's card). The pace's authorship rides on the carrier, not on the switch's own 0 (which the
+ * provenance authority reads as structural): a pace a person stated, or accepted on the hiring-times card (every figure is
+ * stored with its role and the person's review, beside their statement), is never Olumi's own.
+ */
+export function hirePaceIsOlumisOwn(node: unknown): boolean {
+  const c = (node as { observed_state?: { extra_share_by_date?: unknown } } | null | undefined)?.observed_state?.extra_share_by_date;
+  if (c === undefined || c === null || typeof c !== 'object' || Array.isArray(c)) return false;
+  const carrier = c as Record<string, unknown>;
+  return carrier.figures === undefined && carrier.statement === undefined;
 }
 
 export function momentsOfTeam(t: TeamShare): Moments {

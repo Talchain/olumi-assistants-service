@@ -248,6 +248,11 @@ const NUMBER_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
 const months = (n: number): string => `${n <= 12 ? NUMBER_WORDS[n] : String(n)} ${n === 1 ? 'month' : 'months'}`;
 const monthNumber = (n: number): string => `month ${n <= 12 ? NUMBER_WORDS[n] : String(n)}`;
 
+/** "month three" / "month three after launch": the point by which a change target is read (D3, AIE #94 6128697025). */
+export function periodEndWords(basis: Pick<GoalTargetBasis, 'reference' | 'period_months'>): string {
+  return `${monthNumber(basis.period_months)}${basis.reference === 'launch' ? ' after launch' : ''}`;
+}
+
 /** "at three months" / "three months after launch" / "over the first three months after launch" (rulings 18–22, amendment 5). */
 export function periodWords(basis: Pick<GoalTargetBasis, 'reference' | 'period_months' | 'period_kind'>): string {
   const n = months(basis.period_months);

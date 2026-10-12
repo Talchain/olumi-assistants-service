@@ -1,0 +1,623 @@
+{
+ "_provenance": {
+  "source": "live/runs/2026-10-12T172858Z/deadline (DL score run 4; CEE a770ce49)",
+  "graph": "reads/01-14-before-approve.json body.graph (sha256 of the read file 99dfdd750d67cfe75ff6a5057dd7929b49c6c81d08ff0fdf01a1ec973ee5c40f); it hashes to the card precondition b932fdf3b4660078",
+  "pending_actions": "v5_conversation_turns turn 3b2ffd23-f7d0-443c-a98b-beee0e370c25 pending_actions (read-only SQL, 12 Oct); faithful by the server-computed digest = the served proposal_fields digest",
+  "request": "turns/14.json request_body (turn 7 sent the same chip and envelope)",
+  "served": "turns/07.json and turns/14.json reply: \"Those values could not be applied to this change, so nothing was applied. …\"; Render 18:03:40.257Z refusal_reason deadline_scope_mismatch"
+ },
+ "scenario_id": "cdca7c76-4ade-4a00-a6af-0c331271c333",
+ "graph": {
+  "edges": [
+   {
+    "to": "event_goal",
+    "from": "event_team",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "definitional": true,
+     "share_by_date": {
+      "role": "team",
+      "goal_id": "event_goal",
+      "team_id": "event_team",
+      "option_ids": [
+       "event_option_1",
+       "event_option_2",
+       "event_option_3",
+       "event_option_4"
+      ],
+      "deliverable": "next feature launch",
+      "capacity_option_ids": [
+       "event_option_1",
+       "event_option_2",
+       "event_option_4"
+      ],
+      "unresolved_option_ids": []
+     },
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "% of next feature launch",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "% of next feature launch"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_option_1",
+    "from": "event_decision",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_goal",
+    "from": "event_capacity_1",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_option_2",
+    "from": "event_decision",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_goal",
+    "from": "event_capacity_2",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_option_3",
+    "from": "event_decision",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_option_4",
+    "from": "event_decision",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_goal",
+    "from": "event_capacity_4",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_1",
+    "from": "event_option_1",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_2",
+    "from": "event_option_1",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_4",
+    "from": "event_option_1",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_1",
+    "from": "event_option_2",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_2",
+    "from": "event_option_2",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_4",
+    "from": "event_option_2",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_1",
+    "from": "event_option_3",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_2",
+    "from": "event_option_3",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_4",
+    "from": "event_option_3",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_1",
+    "from": "event_option_4",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_2",
+    "from": "event_option_4",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_capacity_4",
+    "from": "event_option_4",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_context_7",
+    "from": "event_option_1",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_context_7",
+    "from": "event_option_2",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_context_7",
+    "from": "event_option_4",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "event_context_7",
+    "from": "event_option_3",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   }
+  ],
+  "nodes": [
+   {
+    "id": "event_goal",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Share of next feature launch done by the deadline",
+    "provenance": "ai_inferred",
+    "goal_direction": ">=",
+    "goal_threshold": 1,
+    "threshold_source": "definitional",
+    "goal_threshold_cap": 100,
+    "goal_threshold_raw": 100,
+    "goal_threshold_unit": "% of next feature launch",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "metric_scale"
+   },
+   {
+    "id": "event_team",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Share today's team finishes by the deadline",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 100,
+    "unit_reading": {
+     "unit": "% of next feature launch",
+     "source": "olumi_reading",
+     "source_quote": "next feature launch"
+    }
+   },
+   {
+    "id": "event_decision",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "Feature launch",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "event_option_1",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Hire a Tech lead",
+    "provenance": "from_brief",
+    "description": "Hire a Tech lead\nDrafted option setting: Added delivery capacity = 20 % of deliverable per month. Kept for review; the deadline forecast uses this option's added-capacity estimate.",
+    "interventions": {
+     "event_capacity_1": {
+      "value": 1
+     },
+     "event_capacity_2": {
+      "value": 0
+     },
+     "event_capacity_4": {
+      "value": 0
+     }
+    }
+   },
+   {
+    "id": "event_capacity_1",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Hire a Tech lead adds capacity",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "value": 0,
+     "source": "cee_inference",
+     "extra_share_by_date": {
+      "unit": "% of next feature launch per month",
+      "lead_low": 2,
+      "lead_high": 4,
+      "monthly_share": 20
+     }
+    }
+   },
+   {
+    "id": "event_option_2",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Hire two developers",
+    "provenance": "from_brief",
+    "description": "Hire two developers\nDrafted option setting: Added delivery capacity = 35 % of deliverable per month. Kept for review; the deadline forecast uses this option's added-capacity estimate.",
+    "interventions": {
+     "event_capacity_1": {
+      "value": 0
+     },
+     "event_capacity_2": {
+      "value": 1
+     },
+     "event_capacity_4": {
+      "value": 0
+     }
+    }
+   },
+   {
+    "id": "event_capacity_2",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Hire two developers adds capacity",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "value": 0,
+     "source": "cee_inference",
+     "extra_share_by_date": {
+      "unit": "% of next feature launch per month",
+      "lead_low": 2,
+      "lead_high": 4,
+      "monthly_share": 35
+     }
+    }
+   },
+   {
+    "id": "event_option_3",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Continue as now",
+    "provenance": "ai_inferred",
+    "is_baseline": true,
+    "interventions": {
+     "event_capacity_1": {
+      "value": 0
+     },
+     "event_capacity_2": {
+      "value": 0
+     },
+     "event_capacity_4": {
+      "value": 0
+     }
+    }
+   },
+   {
+    "id": "event_option_4",
+    "ref": "O4",
+    "kind": "option",
+    "label": "Hire one developer",
+    "provenance": "ai_inferred",
+    "description": "Hire one developer\nDrafted option setting: Added delivery capacity = 18 % of deliverable per month. Kept for review; the deadline forecast uses this option's added-capacity estimate.",
+    "proposed_by": "olumi",
+    "interventions": {
+     "event_capacity_1": {
+      "value": 0
+     },
+     "event_capacity_2": {
+      "value": 0
+     },
+     "event_capacity_4": {
+      "value": 1
+     }
+    }
+   },
+   {
+    "id": "event_capacity_4",
+    "ref": "F4",
+    "kind": "factor",
+    "label": "Hire one developer adds capacity",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "value": 0,
+     "source": "cee_inference",
+     "extra_share_by_date": {
+      "unit": "% of next feature launch per month",
+      "lead_low": 2,
+      "lead_high": 4,
+      "monthly_share": 18
+     }
+    }
+   },
+   {
+    "id": "event_context_7",
+    "ref": "F5",
+    "kind": "factor",
+    "label": "Added delivery capacity",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 100,
+     "unit": "% of deliverable per month",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred"
+    },
+    "analysis_participation": "retained_excluded"
+   }
+  ],
+  "ref_high_water": {
+   "D": 1,
+   "F": 5,
+   "G": 1,
+   "O": 4
+  }
+ },
+ "brief_text": "We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.",
+ "issuing_turn": {
+  "turn_id": "3b2ffd23-f7d0-443c-a98b-beee0e370c25",
+  "user_message": "We have a launch deadline in 6 months. At our current rate of development, we are likely to miss that deadline by over a month. We need to bring in additional development capacity or technical leadership to help accelerate the team's progress. We're not sure which to do. What information do I need to make this decision effectively?",
+  "assistant_message": "You need to distinguish a shortage of coding capacity from a technical or coordination bottleneck.\n\n- Current team: a likely completion-time range; “over a month late” gives only a lower bound.\n- Each hiring option: realistic start dates, ramp-up time, and additional delivery capacity.\n- Trade-offs: hiring costs, available budget, and evidence about what currently slows delivery.\n\nThe model’s hiring timings and added-capacity figures are Olumi estimates, not validated evidence.\n\nThe proposed change is “Is your deadline 12 April 2027 (6 months from 12 October 2026)?”\n\nIs your deadline 12 April 2027 (6 months from 12 October 2026)?\n\nThe held change \"Is your deadline 12 April 2027 (6 months from 12 October 2026)?\" was replaced by the newer card for the same change; nothing in the model changed."
+ },
+ "pending_actions": [
+  {
+   "id": "1bfe4eec-c919-46db-b8b6-68a4ba81e645",
+   "action": {
+    "kind": "apply_proposed_change",
+    "inline_patch": {
+     "agent_proposal": {
+      "user_id": null,
+      "operations": [
+       {
+        "op": "set_goal_deadline",
+        "path": "event_goal",
+        "value": {
+         "words": "a launch deadline in 6 months",
+         "deadline": "2027-04-12",
+         "reference": "2026-10-12",
+         "stated_months": 6,
+         "expected_deadline": null
+        }
+       }
+      ],
+      "provenance": {
+       "basis": "We have a launch deadline in 6 months. At our current rate of development, we are likely to miss that deadline by over a month.",
+       "authored_by": "user_stated"
+      },
+      "validation": {
+       "admitted": true,
+       "refusals": [],
+       "loss_count": 0
+      },
+      "proposal_id": "prop_b9ca206131b318f52cb6df4d85f9b4e9",
+      "scenario_id": "cdca7c76-4ade-4a00-a6af-0c331271c333",
+      "public_label": "Is your deadline 12 April 2027 (6 months from 12 October 2026)?",
+      "base_graph_identity_hash": "b932fdf3b4660078"
+     },
+     "approve_detail": "Is your deadline 12 April 2027 (6 months from 12 October 2026)?",
+     "offered_on_this_row": true
+    },
+    "proposal_ref": "agent-approve-proposal:prop_b9ca206131b318f52cb6df4d85f9b4e9",
+    "public_label": "Yes",
+    "public_message": "Yes, that is my deadline."
+   },
+   "chip_id": "agent-approve-proposal:prop_b9ca206131b318f52cb6df4d85f9b4e9",
+   "scenario_id": "cdca7c76-4ade-4a00-a6af-0c331271c333",
+   "preconditions": {
+    "graph_hash": "b932fdf3b4660078"
+   },
+   "emitted_at_iso": "2026-10-12T17:58:07.988Z",
+   "expires_at_iso": "2026-10-13T17:58:07.989Z",
+   "expires_at_turn_count": 24
+  }
+ ],
+ "served_proposal_fields": {
+  "proposal_id": "prop_b9ca206131b318f52cb6df4d85f9b4e9",
+  "revision": "1bfe4eec-c919-46db-b8b6-68a4ba81e645",
+  "digest": "9a107e4eed0e0e07cb6eca0dd787269b",
+  "approve_action": {
+   "id": "agent-approve-proposal:prop_b9ca206131b318f52cb6df4d85f9b4e9",
+   "label": "Yes",
+   "message": "Yes, that is my deadline.",
+   "detail": "Is your deadline 12 April 2027 (6 months from 12 October 2026)?"
+  },
+  "decline_action": {
+   "id": "agent-decline-proposal:prop_b9ca206131b318f52cb6df4d85f9b4e9",
+   "label": "Not now",
+   "message": "Not now."
+  },
+  "issued_turn_id": "3b2ffd23-f7d0-443c-a98b-beee0e370c25",
+  "fields": [],
+  "missing": []
+ },
+ "request": {
+  "kind": "message",
+  "turn_id": "80c1a7dd-e352-438a-b598-3a5ac39c6631",
+  "scenario_id": "cdca7c76-4ade-4a00-a6af-0c331271c333",
+  "stage": "frame",
+  "turn_class": "frame",
+  "message": "Yes, that is my deadline.",
+  "source": "chip",
+  "chip": {
+   "id": "agent-approve-proposal:prop_b9ca206131b318f52cb6df4d85f9b4e9"
+  },
+  "proposal_edits": {
+   "proposal_id": "prop_b9ca206131b318f52cb6df4d85f9b4e9",
+   "revision": "1bfe4eec-c919-46db-b8b6-68a4ba81e645",
+   "digest": "9a107e4eed0e0e07cb6eca0dd787269b",
+   "graph_hash": "b932fdf3b4660078",
+   "fields": []
+  }
+ },
+ "served_reply": "Those values could not be applied to this change, so nothing was applied. Nothing in the model changed; the change is still waiting for you.",
+ "request_turn7": {
+  "kind": "message",
+  "turn_id": "5eac9a54-4d0a-42de-b6ab-6ac044a0c524",
+  "scenario_id": "cdca7c76-4ade-4a00-a6af-0c331271c333",
+  "stage": "frame",
+  "turn_class": "frame",
+  "message": "Yes, that is my deadline.",
+  "source": "chip",
+  "chip": {
+   "id": "agent-approve-proposal:prop_b9ca206131b318f52cb6df4d85f9b4e9"
+  },
+  "proposal_edits": {
+   "proposal_id": "prop_b9ca206131b318f52cb6df4d85f9b4e9",
+   "revision": "1bfe4eec-c919-46db-b8b6-68a4ba81e645",
+   "digest": "9a107e4eed0e0e07cb6eca0dd787269b",
+   "graph_hash": "b932fdf3b4660078",
+   "fields": []
+  }
+ },
+ "served_reply_turn7": "Those values could not be applied to this change, so nothing was applied. Nothing in the model changed; the change is still waiting for you."
+}

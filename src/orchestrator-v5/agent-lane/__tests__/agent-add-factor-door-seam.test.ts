@@ -781,6 +781,48 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect((reloaded.nodes.find((x) => x.id === node.id)!['observed_state'] as Record<string, unknown>)['range']).toEqual(os['range']);
   }, 180_000);
 
+  /**
+   * ⭐ RECOVERY BATCH E (DL, 12 Oct; score run 4 hiring step 13, B5/U5 BLOCKING): approving the factor that holds Paul's own
+   * 20–30 % range said "Capacity used for non-development tasks (0 to 100). Those ranges are not yours." while the read
+   * after (02-13) held his range {20, 30, user_override, his sentence}. A factor holding a range the user stated is never in
+   * `ranges_added_for_analysis`. CONTRAST: the same approval with no range keeps Olumi's range note, word for word.
+   */
+  it('(r‴) RED (run 4 hiring step 13): approving the factor that holds his 20–30 % range never says the range is not his', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    const t1 = await propose(rangedArgs(), HIRING_MSG);
+    const approve = approveChipOf(t1)!;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const os = graphNow().nodes.find((x) => x.label === 'Non-development time')!['observed_state'] as Record<string, unknown>;
+    expect(os['range'], 'his range is what the model holds').toEqual({ low: 20, high: 30, meaning: 'min_max', source: USER_SOURCE, source_quote: RANGE_MSG });
+    expect(t2.assistant_text, t2.assistant_text).toContain('Its value today is 25 %');
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/Non-development time \(0 to \d+\)|not yours/);
+  }, 180_000);
+
+  it('(r‴) CONTRAST: the same approval with no range keeps Olumi\'s own range note', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    const t1 = await propose(capacityArgs('productivity'), HIRING_MSG);
+    const approve = approveChipOf(t1)!;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    expect(t2.assistant_text, t2.assistant_text).toContain('Non-development time (0 to 100). Those ranges are not yours. Tell me the right ones and I will replace them.');
+  }, 180_000);
+
+  /**
+   * ⭐ RECOVERY BATCH E (DL ruling, 12 Oct; the win-share class): the Agent's own words never state a share of runs on the wire.
+   * The real Agent route's final exit (`withoutRunShareTextAtEgress`) removes the sentence and ships the rest byte for byte.
+   * Mutation: drop the route's call and the sentence ships (RED).
+   */
+  it('(s) Batch E: the Agent\'s reply never states a share of runs; the rest of its reply ships', async () => {
+    const { RUN_SHARE_CENSUS } = await import('../../compose/run-share-text.js');
+    graphOf.set(SCENARIO, hiringGraph());
+    script = [() => say('Two options were each supported by under 1% of runs. Tell me your deadline when you have it.')];
+    const t = await turn({ message: 'What should I look at next?' });
+    expect(t.assistant_text, t.assistant_text).toContain('Tell me your deadline when you have it.');
+    expect(t.assistant_text, t.assistant_text).not.toMatch(RUN_SHARE_CENSUS);
+  }, 120_000);
+
   it('(r′) Paul is shown his range on the card, in his words, beside the figure he chose', async () => {
     graphOf.set(SCENARIO, hiringGraph());
     await sayRangeFirst();

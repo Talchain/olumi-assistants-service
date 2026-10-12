@@ -190,6 +190,31 @@ describe('E2 — the team\'s time, bound by quote, from any of the user\'s messa
     // No quote: THIS message, as before.
     expect(bindTeamTimeQuote({ now: '6–10 months' }, { low_months: 6, high_months: 10 })).toMatchObject({ kind: 'bound', time: { low_months: 6, high_months: 10 } });
   });
+  // B2, independent check BLOCKING 2 (CHECK.md, 91405cb2): the quote's figure must be the team's time in the statement that
+  // ENCLOSES it in the user's message, never only in the substring the Agent selected.
+  it('B2 RED→GREEN (the checker\'s repro): "7 months" whose subject is recruitment is never the team\'s forecast', () => {
+    const now = 'The team will finish in 9 months; recruitment takes 7 months';
+    expect(bindTeamTimeQuote({ now }, { quote: '7 months', low_months: 7, high_months: 7 })).toMatchObject({ kind: 'refused' });
+    expect(bindTeamTimeQuote({ now: '', conversation: now }, { quote: '7 months', low_months: 7, high_months: 7 })).toMatchObject({ kind: 'refused' });
+    // CONTRAST, same message: the team's own figure binds, with its words.
+    expect(bindTeamTimeQuote({ now }, { quote: '9 months', low_months: 9, high_months: 9 }))
+      .toMatchObject({ kind: 'bound', quote: '9 months', time: { forecast_months: 9, forecast_words: '9 months', range_origin: 'olumi_estimate' } });
+  });
+  it.each([
+    ['Hiring will take 7 months.', '7 months', 7],
+    ['7 months for recruitment, I reckon', '7 months', 7],
+    ['The deadline is in 7 months', '7 months', 7],
+    ['They are 2 months behind', '2 months', 2],
+    ['Notice periods are 3 months; the team say 8 months', '3 months', 3],
+  ])('B2 class: "%s" quoted as "%s" is another quantity\'s, so it is refused', (now, quote, p) => {
+    expect(bindTeamTimeQuote({ now }, { quote, low_months: p, high_months: p })).toMatchObject({ kind: 'refused' });
+  });
+  it('B2 class CONTRAST: the team\'s figure in the same message as another quantity still binds', () => {
+    expect(bindTeamTimeQuote({ now: 'Notice periods are 3 months; the team say 8 months' }, { quote: '8 months', low_months: 8, high_months: 8 }))
+      .toMatchObject({ kind: 'bound', time: { forecast_months: 8 } });
+    expect(bindTeamTimeQuote({ now: PAUL_TEAM }, { quote: '7 months', low_months: 7, high_months: 7 }))
+      .toMatchObject({ kind: 'bound', time: { forecast_months: 7, range_rule: 'low_confidence' } });
+  });
   // AIE 6125204695 (b1), verbatim: the question and explanation, kept apart through the card writer; the human qualifier appended.
   it('the card (AIE 6125204695): Olumi\'s provisional model from the user\'s forecast and an assumed range, the bell-curve note, the qualifier', () => {
     const g = dated(), part = draftedTeamPartOf(g)!;
