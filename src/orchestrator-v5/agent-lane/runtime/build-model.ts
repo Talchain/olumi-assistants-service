@@ -2213,6 +2213,9 @@ export async function buildModelFromBrief(
     }
     const declaredAccumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
     const accumulated = inTimeClass ? admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges) : declaredAccumulated;
+    // ⭐ Recovery Batch C (adjudication (c), served c85817f2): the goal's OWN target row no longer refuses the fit
+    // (`goalOwnRows`, as F4's retirement passes it): it holds the raw figure, and the widen rescales the goal's threshold,
+    // level and spread with every link it touches, so the user's size fits and nothing moves in natural units.
     const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
@@ -2221,7 +2224,7 @@ export async function buildModelFromBrief(
       ...(admitted.goal_constraints.length > 0
         ? { goal_constraints: admitted.goal_constraints }
         : {}),
-    } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
+    } as Record<string, any>, { goalOwnRows: true }).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
     const olumiFit = refitFramesForOlumiEstimates(statedFitGraph);
     const prePersistGraph = olumiFit.graph as typeof statedFitGraph;
     // Retire every obsolete disclosure for fitted endpoint identities at their one source of truth.
