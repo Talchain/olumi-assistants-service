@@ -155,6 +155,7 @@ import {
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
 import { carryStatedLevelSpread, carrySwitchLevelSpread, statedLevelNodeIds, switchLevelNodeIds } from './stated-level-spread.js';
+import { withoutStatedLevelRanges } from '../../routing/add-factor-transaction.js';
 import { carryUnconfirmedGoalProduct } from './unconfirmed-goal-product.js';
 import {
   AnalysisNotReadyError,
@@ -1193,7 +1194,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     const plotPayload: Record<string, unknown> = {
-      graph: toOutboundGraph(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph)),
+      // Recovery Batch B (L6): a stated level range changes no compute; the wire copy drops it (`withoutStatedLevelRanges`).
+      graph: toOutboundGraph(withoutStatedLevelRanges(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph))),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
