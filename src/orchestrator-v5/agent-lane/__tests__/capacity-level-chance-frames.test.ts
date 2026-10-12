@@ -10,6 +10,8 @@
  *  · GOAL_FIGURES_MISSING_CURRENT_LEVEL — the drafter typed the goal's level 80 as "inferred", and admission withheld it as
  *    "Olumi's own estimate" although the brief defines the goal as the existing 80 tickets plus the additional
  *    specialists' capacity (none added today).
+ *    ⛔ RE-SCOPED OUT OF C (DL after independent check r2, BLOCKING 1): the defined-by-parts credit trusted drafted flags and
+ *    credited 80 even beside "90 = 80 + 10 outsourced". It is removed; this level stays withheld, with its true reason.
  *
  * The fixture is the SERVED drafter response (`cee_drafter_raw_responses` row 470fa988, sha256 pinned below) and the graph
  * the served build stored from it. Expectations are written by hand in NATURAL units, never read back from the code.
@@ -31,7 +33,6 @@ import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { assessRouteAdmission } from '../../../cee/graph-readiness/canonical-readiness.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { retireNormalisingGoalFrame, rederiveGoalInLinks } from '../normalising-goal-frame.js';
-import { admitGoalLevelDefinedByParts } from '../admit-model.js';
 
 type Rec = Record<string, any>;
 
@@ -39,6 +40,10 @@ const FX = JSON.parse(readFileSync(new URL('./fixtures/capacity-c85817f2-constru
   source: Rec; brief: string; raw_text: string; stored_graph: Rec;
 };
 const SCENARIO = 'cd3d9c25-0000-4000-8000-0000000c8581';
+/** The honest reason a level the drafter typed as its own inference is not used (admission's level limb, unchanged). */
+const WITHHELD_LEVEL = 'Olumi\'s own estimate of the current level of "Weekly support capacity" (80) was not used, so no chance of reaching 100 '
+  + 'is shown: that figure would rest on a guess, not on anything you said. Tell me the current level of "Weekly support capacity" '
+  + 'and the chance of reaching it can be shown.';
 const GOAL = 'weekly_support_capacity';
 const OUTCOME = 'additional_specialist_capacity';
 const USER_LINK = ['additional_specialists', OUTCOME] as const;
@@ -164,18 +169,29 @@ describe('construction from the served draft: the user\'s size fits, the brief\'
     expect(graph.goal_constraints).toEqual([expect.objectContaining({ node_id: GOAL, operator: '>=', value: 100, unit: 'tickets per week' })]);
   });
 
-  it('RED (baseline): the goal holds the brief\'s 80 tickets per week as the user\'s current level', async () => {
+  // ⛔ Batch C RE-SCOPE (DL after independent check r2, BLOCKING 1): the defined-by-parts goal-level credit is REMOVED from C.
+  // It trusted drafted definition flags and checked only one part's figure: with "90 = the existing 80 + 10 outsourced" it
+  // still credited 80 "as your brief defines it". The frame refit stays (it passed); the capacity goal's level is NOT the
+  // user's, so its chance is withheld for that true reason, with its next step.
+  it('WITHHOLD (baseline): the drafter\'s "inferred" 80 is not the user\'s — no current level is held, and the reason says so', async () => {
     const { graph, result } = await construct();
-    const os = node(graph, GOAL).observed_state;
-    expect(os).toMatchObject({ raw_value: 80, source: 'brief_extraction', unit: 'tickets per week' });
-    expect(os.baseline * frameHere(node(graph, GOAL))!).toBeCloseTo(80, 9);
-    expect(os.value).toBe(os.baseline);
-    expect(JSON.stringify(result.not_represented ?? [])).not.toContain('Olumi\'s own estimate of the current level');
-    expect(result.not_represented).toContain('“Weekly support capacity” is 80 tickets per week today, as your brief defines it: '
-      + 'your 80 for “Existing team capacity”, with nothing yet from “Additional specialist capacity”.');
+    expect(node(graph, GOAL).observed_state).toBeUndefined();
+    expect(result.not_represented).toContain(WITHHELD_LEVEL);
+    expect(JSON.stringify(result.not_represented ?? [])).not.toContain('as your brief defines it');
   });
 
-  it('RED (Run request): PLoT is sent the user\'s 20 per specialist unclamped, the 80 baseline and the 100 target, in raw units', async () => {
+  it('RED on 2ecbae5 (independent check r2 BLOCKING 1): "90 = the existing 80 + 10 outsourced" never credits 80 as the user\'s level', async () => {
+    const brief = FX.brief.replace('Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.',
+      'Total weekly support capacity is 90 tickets per week today: the existing 80 tickets per week plus 10 tickets per week outsourced, plus the additional specialist capacity.');
+    expect(brief).not.toBe(FX.brief);
+    const { graph, result } = await construct(FX.raw_text, brief); // the unchanged served draft
+    expect(node(graph, GOAL).observed_state).toBeUndefined();
+    expect(JSON.stringify(graph)).not.toContain('"raw_value":80,"cap":500');
+    expect(result.not_represented).toContain(WITHHELD_LEVEL);
+    expect(JSON.stringify(result.not_represented ?? [])).not.toContain('as your brief defines it');
+  });
+
+  it('RED (Run request): PLoT is sent the user\'s 20 per specialist unclamped and the 100 target, in raw units — and NO baseline (re-scope)', async () => {
     const { graph } = await construct();
     const sent = await runRequest(graph);
     const wire = sent.graph as Rec;
@@ -184,7 +200,8 @@ describe('construction from the served draft: the user\'s size fits, the brief\'
     expect(Math.abs(edge(wire, ...USER_LINK).strength.mean)).toBeLessThanOrEqual(1);
     const goal = node(wire, GOAL);
     const F = frameHere(goal)!;
-    expect(goal.observed_state.baseline * F).toBeCloseTo(80, 9);
+    // Batch C re-scope: the level is not the user's, so none is sent (never a guessed 80).
+    expect(goal.observed_state).toBeUndefined();
     expect(goal.goal_threshold * F).toBeCloseTo(100, 9);
   });
 });
@@ -383,7 +400,8 @@ describe('a target added after construction', () => {
   it('NAMED RESIDUAL (pinned, outside this seam): a no-target build of a non-money goal has no goal frame, so its definitions and level cannot follow a later target', async () => {
     // With no target the goal has no frame (the normalising frame is for a money goal only), so admission sets the two
     // ±1 definitions aside as placeholders and holds no current level (its level limb runs only beside a stated target);
-    // F4 cannot re-derive what was never kept. A construction WITH the target holds both definitions and the 80.
+    // F4 cannot re-derive what was never kept. A construction WITH the target holds both definitions (and, since the Batch C
+    // re-scope, no current level either: the drafter's "inferred" 80 is not the user's).
     const built = (await construct(withoutTarget(), WITHOUT_TARGET_BRIEF)).graph;
     expect(frameHere(node(built, GOAL))).toBe(1);
     const after = addTarget(built);
@@ -393,7 +411,7 @@ describe('a target added after construction', () => {
       expect(edge(withTarget, from, GOAL).provenance.definitional, `${from}→goal with target`).toBe(true);
     }
     expect(node(after, GOAL).observed_state).toBeUndefined();
-    expect(node(withTarget, GOAL).observed_state.raw_value).toBe(80);
+    expect(node(withTarget, GOAL).observed_state).toBeUndefined();
     // Admission also frames the outcome on 300 with no target (125 beside it), and Olumi's ±0.5 placeholder into it is set
     // on whichever frame admission chose (Science F5: "Fixed 0.5 placeholders … prevent general invariance").
     expect(naturalLinks(after).get(`specialist_underperformance→${OUTCOME}`)!.mean).toBeCloseTo(-150, 9);
@@ -479,35 +497,5 @@ describe('negatives: what cannot fit without changing meaning still withholds, w
     const { graph, result } = await construct(variant(edit));
     expect(node(graph, GOAL).observed_state).toBeUndefined();
     expect(JSON.stringify(result.not_represented ?? [])).toContain('current level of \\"Weekly support capacity\\"');
-  });
-});
-
-describe('admitGoalLevelDefinedByParts: whose definition it is', () => {
-  const goal = { metric: 'Weekly support capacity', operator: '>=', value: 100, unit: 'tickets per week', baseline_known: true, baseline_value: 80, baseline_provenance: 'inferred' };
-  const user = (raw: number, cap: number) => ({ value: raw / cap, raw_value: raw, cap, source: 'cee_inference', user_material_unverified: true as const });
-  const nodes = [
-    { id: GOAL, kind: 'goal', label: 'Weekly support capacity', goal_threshold_raw: 100, goal_threshold_cap: 125, goal_threshold: 0.8 },
-    { id: 'existing_team_capacity', kind: 'factor', label: 'Existing team capacity', observed_state: user(80, 300) },
-    { id: 'additional_specialists', kind: 'factor', label: 'Additional specialists', observed_state: user(0, 10) },
-    { id: OUTCOME, kind: 'outcome', label: 'Additional specialist capacity', scale_frame: 125 },
-  ];
-  const def = (from: string, source: string) => ({ from, to: GOAL, strength: { mean: 0.5, std: 0.25 }, exists_probability: 1, effect_direction: 'positive',
-    provenance: { source, magnitude: 'olumi_estimate', definitional: true } });
-  const loss = [{ field_path: 'nodes[weekly_support_capacity].observed_state.baseline', before: 80, after: null, reason: 'withheld', severity: 'warn' }];
-  const run = (source: string) => admitGoalLevelDefinedByParts({
-    goal: goal as never, nodes: nodes as never, loss: loss as never, writtenAbout: () => true, targetFigureWrittenAgain: () => false,
-    edges: [def('existing_team_capacity', source), def(OUTCOME, source),
-      { from: 'additional_specialists', to: OUTCOME, strength: { mean: 1, std: 0.5 }, exists_probability: 0.8, provenance: { source: 'brief_extraction', magnitude: 'user_stated' } }] as never,
-  });
-
-  it('the brief\'s own definition: the level is the user\'s, on the target\'s cap', () => {
-    const r = run('brief_extraction');
-    expect((r.nodes as unknown as Rec[]).find((n) => n.id === GOAL)!.observed_state).toEqual({ value: 0.64, baseline: 0.64, unit: 'tickets per week', source: 'brief_extraction', raw_value: 80, cap: 125 });
-  });
-
-  it('NEGATIVE: Olumi\'s own minted sum is not the user\'s definition, so nothing is derived from it', () => {
-    const r = run('cee_hypothesis');
-    expect(r.nodes).toBe(nodes);
-    expect(r.loss).toBe(loss);
   });
 });

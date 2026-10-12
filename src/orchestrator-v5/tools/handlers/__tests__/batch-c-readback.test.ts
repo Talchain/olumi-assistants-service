@@ -490,38 +490,31 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
 });
 
 /**
- * AIE status-quo disposition (12 Oct) — ORDINARY ANCHORED capacity on Paul's own capacity level brief: the SERVED drafter
- * response (row 470fa988, the frames spec's fixture) through construction. Its goal is reached through links, holds the
- * brief's 80 tickets per week, is set by no option and has no held month: the same-draw reference, so carrying on is
- * "no change, by assumption" with no interval, and the option keeps its own chance with its uncertainty.
+ * Paul's own capacity level brief: the SERVED drafter response (row 470fa988, the frames spec's fixture) through
+ * construction. ⛔ Batch C RE-SCOPE (DL after independent check r2, BLOCKING 1): the defined-by-parts level credit is out of
+ * C, so the drafter's "inferred" 80 is NOT the user's and the goal holds no current level. Without an anchor the same-draw
+ * reference is not established: no "no change" is claimed of carrying on, and the chance waits for the level, with the
+ * true reason and its next step (a negative kept).
  */
 const SERVED_CAPACITY = JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/capacity-c85817f2-construction.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
 
-describe('readback RESPONSE → LICENCE — the served capacity level brief (80 → at least 100 tickets per week): the ordinary paired contrast', () => {
-  it('CONTRAST (ordinary paired): "Keep current staffing" held at 80 is no change, by assumption — no figure, no interval; the option keeps its own reason', async () => {
+describe('readback RESPONSE → LICENCE — the served capacity level brief (at least 100 tickets per week): withheld for its missing level', () => {
+  it('WITHHOLD (re-scope): no current level is held, so no chance and no "no change" is said — the reason asks for the level', async () => {
     const { bytes, calls } = await constructedBytes(SERVED_CAPACITY.brief, SERVED_CAPACITY.raw_text);
     expect(calls).toBe(1);
-    expect(node(JSON.parse(bytes), 'weekly_support_capacity').observed_state).toMatchObject({ raw_value: 80, source: 'brief_extraction' });
+    expect(node(JSON.parse(bytes), 'weekly_support_capacity').observed_state).toBeUndefined();
     const answer = (request: Rec): Rec[] => [
       answered(idOf(request, 'Keep current staffing'), 0, { mean: 80, std: 0, p10: 80, p50: 80, p90: 80 }),
       answered(idOf(request, 'Add one specialist'), 0.62, { mean: 100, std: 9, p10: 89, p50: 100, p90: 112 }),
     ];
     const { result, view } = await runAndRead(bytes, answer);
-    const licence = goalChanceLicenceForAgent(view)!;
-    expect(licence.status_quo).toEqual({ option_id: 'keep_current_staffing', line: DOING_NOTHING('Weekly support capacity') });
-    // On the served draft the option's own chance waits for its unsized underperformance links (its existing reason and next
-    // step, unchanged here); the status quo's line is still said — the licence is never dropped for it.
-    expect(licence.withheld_option_ids).toEqual(['keep_current_staffing', 'add_one_specialist']);
-    expect((result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')?.option_ids).toEqual(['add_one_specialist']);
-    const rows = Object.fromEntries((result.enrichment.option_comparison as Rec[]).map((r) => [r.option_id, r]));
-    expect(rows.keep_current_staffing).not.toHaveProperty('probability_of_goal_precision');
-    expect(rows.keep_current_staffing.outcome).toEqual({ mean: 80, p50: 80 });
-    // CONTROL: the same Run whose status quo spreads disagrees with that reference — withheld until checked.
-    const spread = (request: Rec): Rec[] => answer(request).map((r) => (r.option_id === 'keep_current_staffing'
-      ? { ...r, outcome: { mean: 82, std: 5, p10: 76, p50: 82, p90: 88 } } : r));
-    const drifted = goalChanceLicenceForAgent((await runAndRead(bytes, spread)).view)!;
-    expect(drifted.status_quo).toBeUndefined();
-    expect(drifted.withheld_reason_by_option?.keep_current_staffing?.reason).toBe('reference_moved');
+    // No chance is licensed for any option, so no status-quo line and no assumption either.
+    expect(goalChanceLicenceForAgent(view)).toBeUndefined();
+    expect(JSON.stringify(result)).not.toMatch(/by assumption|carrying on as now leaves/);
+    const untestable = (result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!;
+    expect(untestable.option_ids).toEqual(['keep_current_staffing', 'add_one_specialist']);
+    expect(untestable.message).toContain('it needs today\'s level of Weekly support capacity');
+    for (const row of result.enrichment.option_comparison as Rec[]) expect(row).not.toHaveProperty('probability_of_goal');
   });
 });
 
