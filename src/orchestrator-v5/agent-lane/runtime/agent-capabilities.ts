@@ -215,7 +215,7 @@ import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 import { preconditionRiskIds } from '../../../graph/inert-risk.js';
-import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, isStatedLevelRange, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_QUOTE_MAX, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
+import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, isStatedLevelRange, levelRangePointBasis, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_QUOTE_MAX, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
@@ -1332,6 +1332,20 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             ...(Object.keys(valueProvenance).length === 0
               ? {}
               : { value_provenance: valueProvenance }),
+            // ⭐ Recovery Batch B, Row5 (DL 12 Oct): the range stated for this level, as stored (`observed_state.range`), with
+            // its author, so the Agent can say "you gave 10–30" or "a supplier's 10–30 (unverified)". The user's own range
+            // sits beside their figure; a third party's is quoted, role unverified. `point` says which figure sits beside it:
+            // the user's own, or Olumi's midpoint of that range (`levelRangePointBasis`), never the user's figure.
+            ...((): Record<string, unknown> => {
+              const r = os.range as { low?: unknown; high?: unknown; source?: unknown; source_quote?: unknown } | undefined;
+              // The author is the range's own `source`: the user's (L6) or a third party's in the brief (Row5); else none.
+              if (r === undefined || !num(r.low) || !num(r.high) || (r.source !== USER_TODAY_SOURCE && r.source !== 'brief_extraction')) return {};
+              const users = r.source === USER_TODAY_SOURCE;
+              const point = levelRangePointBasis(os);
+              return { stated_range: { low: r.low, high: r.high, stated_by: users ? 'user' : 'third_party_unverified',
+                ...(!users && str(r.source_quote) ? { quote: r.source_quote } : {}),
+                ...(point === 'stated_figure' ? { point: 'user_figure' } : point === 'midpoint' ? { point: 'olumi_midpoint' } : {}) } };
+            })(),
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
             ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
             ...(n.kind === 'option' && (n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded')
