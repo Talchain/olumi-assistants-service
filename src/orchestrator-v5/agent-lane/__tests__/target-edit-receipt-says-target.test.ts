@@ -35,12 +35,14 @@ const written = (id: string, value: number, dropRole = false): Rec => {
   return g;
 };
 
-function harness(door: (input: CommitLimitEditInput) => CommitLimitEditResult, after?: Rec) {
+/** `after` is what the model holds once the door has run, read back with hash `afterHash` (the door commits 'h1'). */
+function harness(door: (input: CommitLimitEditInput) => CommitLimitEditResult, after?: Rec, afterHash = 'h1') {
   let graph = seed();
+  let hash = 'h0';
   const d: InternalDispatch = async (path) => (path.endsWith('/graph')
-    ? { status: 200, json: { graph: JSON.parse(JSON.stringify(graph)), graph_hash: 'h0', graph_identity_hash: { value: 'id-h0' } } } : { status: 404, json: {} });
+    ? { status: 200, json: { graph: JSON.parse(JSON.stringify(graph)), graph_hash: hash, graph_identity_hash: { value: `id-${hash}` } } } : { status: 404, json: {} });
   const caps = createAgentCapabilities(d, new ProposalStore(), undefined, 'full', undefined, {
-    commitLimitEdit: async (input: CommitLimitEditInput) => { const r = door(input); if (after !== undefined) graph = after; return r; },
+    commitLimitEdit: async (input: CommitLimitEditInput) => { const r = door(input); if (after !== undefined) { graph = after; hash = afterHash; } return r; },
   });
   const run = async (said: string, args: Rec) => {
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: said, user_turn_text: said };
@@ -58,7 +60,19 @@ describe('what a target row\'s edit says, and when', () => {
   it('committed and the row is still one of the goal\'s targets → the target\'s receipt', async () => {
     const r = await harness(() => committed({ constraint_id: 'gc-conv', value: 20 }), written('gc-conv', 20)).run(...TARGET);
     expect(r).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true,
-      follow_up: 'The target for "Conversion rate" is now above 20%, as you stated it.' }));
+      follow_up: 'The target for ‘Conversion rate’ is now above 20%, using your figure.' }));
+  });
+
+  it('RED: committed and the row held, but the read-back is not this approval\'s committed postimage (another write after it) → not confirmed', async () => {
+    const r = await harness(() => committed({ constraint_id: 'gc-conv', value: 20 }), written('gc-conv', 20), 'h2').run(...TARGET);
+    expect(r).toEqual(expect.objectContaining({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' }));
+  });
+
+  it('RED: committed and the figure held, but the row\'s label moved → not confirmed', async () => {
+    const g = written('gc-conv', 20);
+    (g.goal_constraints as Rec[]).find((c) => c.constraint_id === 'gc-conv')!.label = 'Signup rate';
+    const r = await harness(() => committed({ constraint_id: 'gc-conv', value: 20 }), g).run(...TARGET);
+    expect(r).toEqual(expect.objectContaining({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' }));
   });
 
   it('RED: committed, the figure held, but the row is no longer one of the goal\'s targets → not confirmed, never "set"', async () => {
