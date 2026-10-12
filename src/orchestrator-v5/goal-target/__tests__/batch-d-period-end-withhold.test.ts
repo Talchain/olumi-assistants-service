@@ -51,7 +51,8 @@ describe('D3: the served run-3 hiring Run says why its chances are not shown (ru
     const cells = cellsOf(after);
     for (const id of HIRING) {
       expect(cells[id], id).toMatchObject({ kind: 'withheld', face: 'Chance not shown yet' });
-      expect(String(cells[id]!.why), id).toContain(SENTENCE);
+      // Said as written: the sentence says "isn’t shown" itself, so it is never prefixed "Not shown." (DL 12 Oct).
+      expect(cells[id]!.why, id).toBe(SENTENCE);
     }
     // No promise that a size clears it: the placeholder's "Set it to see…" is not this option's reason any more.
     expect(String(cells.hire_a_tech_lead!.why)).not.toMatch(/Set it to see|sized in the model/);
