@@ -16,6 +16,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { admitCandidateModel, type CandidateModel } from '../../../agent-lane/admit-model.js';
+import { buildModelFromBrief, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
+import type { InternalDispatch } from '../../../agent-lane/runtime/agent-capabilities.js';
+import { readFileSync } from 'node:fs';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
@@ -370,23 +373,87 @@ describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "
 });
 
 /**
- * Capacity, a percentage LEVEL (75% today) raised by 10: the stored goal written by hand in the shape a level goal is
- * stored in (today's level on the goal, the change target, Olumi's reading "level"). ⚠ The admission seam for a level %
- * change is another builder's lease (DL, 12 Oct: capacity frames, `refit-frames.ts`); when it lands, this row's stored
- * goal comes from admission instead. Store → loader → Run → licence → screen below are all real.
+ * Capacity, a percentage LEVEL (75% today) raised by 10 percentage points at three months — now THROUGH CONSTRUCTION (DL,
+ * 12 Oct, after the frames fix 43e4c7e): the drafter's candidate (scripted, 0 LLM calls) → `buildModelFromBrief` (admission
+ * with the brief's own readers, refit, the structural gate) → the registered graph → store → loader → Run → licence → screen.
+ * The brief and candidate are written by hand; every offset is computed from the brief, never typed.
  */
-function capacityBytes(): string {
-  const g = JSON.parse(store(hiringSized())) as Rec;
-  const goal = node(g, 'productivity');
-  delete goal.quantity_frame;
-  Object.assign(goal, {
-    label: 'Development capacity',
-    observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction' },
-    goal_target_basis: { ...goal.goal_target_basis, quantity_frame: 'level', denominator: 'today’s development capacity (75%)',
-      effect_unit: 'percentage points of capacity per added person, at month three' },
-  });
-  for (const e of g.edges as Rec[]) if (e.to === 'productivity' && e.provenance?.natural_effect) e.provenance.natural_effect.amount_unit = 'percentage points';
-  return JSON.stringify(GraphV3.parse(g));
+const CAPACITY_BRIEF = 'We have 0 additional tech leads hired today. '
+  + 'Our development capacity is 75% today: the rest of the team\'s time goes on meetings and support. '
+  + 'We have 0 additional developers hired today. '
+  + 'Should we hire a tech lead, hire two developers, or carry on with the current team? '
+  + 'Hire a tech lead adds 1 tech lead. Hire two developers adds 2 developers. Carry on with the current team adds nobody. '
+  + 'Goal: development capacity at least 10 percentage points higher than today at three months.';
+const quoteIn = (brief: string, q: string): { quote: string; start: number; end: number } => {
+  const start = brief.indexOf(q);
+  if (start < 0 || brief.indexOf(q, start + 1) >= 0) throw new Error(`not exactly once in the brief: ${q}`);
+  return { quote: q, start, end: start + q.length };
+};
+const settingEvidence = (brief: string, sentence: string, option: string, figure: string): Rec => {
+  const e = quoteIn(brief, sentence);
+  const o = quoteIn(brief, option);
+  return { ...e, amount_start: brief.indexOf(figure, e.start), option_quote: option, option_start: o.start, option_end: o.end };
+};
+const capacityDraft = (): Rec => ({
+  goal: { kind: null, deliverable: null, metric: 'Development capacity', operator: '>=', target_stated: true, value: 10, unit: '%', horizon_months: 3,
+    provenance: 'explicit', frame: 'change_abs', quantity_frame: 'level', baseline_known: true, baseline_value: 75, baseline_provenance: 'explicit', scope: null,
+    basis: { reference: 'today', denominator: 'today’s development capacity (75%)', period_months: 3, period_kind: 'at_end',
+      effect_unit: 'percentage points of capacity per added person, at month three', effects_at_period_end: true, also_required: null, open_question: null } },
+  constraints: [],
+  options: [
+    { label: 'Hire a tech lead', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null, interventions: [
+      { factor_label: 'Additional tech leads hired', value: 1, value_kind: 'absolute', unit: 'people', provenance: 'explicit',
+        stated_evidence: settingEvidence(CAPACITY_BRIEF, 'Hire a tech lead adds 1 tech lead.', 'Hire a tech lead', '1') }] },
+    { label: 'Hire two developers', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null, interventions: [
+      { factor_label: 'Additional developers hired', value: 2, value_kind: 'absolute', unit: 'people', provenance: 'explicit',
+        stated_evidence: settingEvidence(CAPACITY_BRIEF, 'Hire two developers adds 2 developers.', 'Hire two developers', '2') }] },
+    { label: 'Carry on with the current team', provenance: 'explicit', changes: [], interventions: [], added_capacity: null, is_status_quo: true },
+  ],
+  factors: [
+    { label: 'Additional tech leads hired', role: 'controllable', baseline_known: true, baseline_evidence: { quote: 'We have 0 additional tech leads hired today.' },
+      baseline_value: 0, unit: 'people', provenance: 'explicit', plausible_max: 5 },
+    { label: 'Additional developers hired', role: 'controllable', baseline_known: true, baseline_evidence: { quote: 'We have 0 additional developers hired today.' },
+      baseline_value: 0, unit: 'people', provenance: 'explicit', plausible_max: 10 },
+  ],
+  risks: [], outcomes: [],
+  links: [
+    { from: 'Additional tech leads hired', to: 'Development capacity', direction: 'positive', provenance: 'ai_proposed', effect_amount: 9,
+      effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: null, basis: 'A ramped-up tech lead adds review and planning capacity.' },
+    { from: 'Additional developers hired', to: 'Development capacity', direction: 'positive', provenance: 'ai_proposed', effect_amount: 4,
+      effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: null, basis: 'Each developer adds capacity once recruited and ramped up.' },
+  ],
+  identities: [], unknowns: [], decision_question: 'Should we hire a tech lead, hire two developers, or carry on with the current team?',
+});
+
+/** The real construction path, one scripted drafter call; the registered graph's stored bytes. */
+async function constructedBytes(brief: string, draft: Rec | string): Promise<{ bytes: string; calls: number }> {
+  let registered: unknown;
+  const dispatch: InternalDispatch = async (path, body) => {
+    if (path.endsWith('/graph/register')) {
+      registered = structuredClone((body as { graph: unknown }).graph);
+      return { status: 200, json: { model_version: { version_number: 1 } } };
+    }
+    return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+  };
+  let calls = 0;
+  const call = (async () => { calls += 1; return { text: typeof draft === 'string' ? draft : JSON.stringify(draft) }; }) as unknown as CallStructuredModel;
+  const result = await buildModelFromBrief(SCENARIO, brief, dispatch, call) as Rec;
+  expect(result.ok, JSON.stringify(result).slice(0, 400)).toBe(true);
+  return { bytes: JSON.stringify(GraphV3.parse(registered)), calls };
+}
+async function capacityBytes(): Promise<string> {
+  const { bytes, calls } = await constructedBytes(CAPACITY_BRIEF, capacityDraft());
+  expect(calls).toBe(1);
+  // What admission stored, by identity: today's 75% as the user's, Olumi's validated reading "level", sizes in points.
+  const g = JSON.parse(bytes) as Rec;
+  const goal = node(g, 'development_capacity');
+  expect(goal.observed_state).toMatchObject({ raw_value: 75, source: 'brief_extraction', unit: '%' });
+  expect(goal.goal_target_basis).toMatchObject({ quantity_frame: 'level', target_frame: 'change_abs', target_raw: 10, reference: 'today', period_months: 3 });
+  expect(goalTargetBasisOf(goal)?.quantity_frame).toBe('level');
+  for (const from of ['additional_tech_leads_hired', 'additional_developers_hired']) {
+    expect(edge(g, from, 'development_capacity').provenance.natural_effect.amount_unit).toBe('percentage points');
+  }
+  return bytes;
 }
 // The status quo stays at today's 75% on every draw; the options' levels vary.
 const capacityAnswer = (request: Rec): Rec[] => [
@@ -397,7 +464,7 @@ const capacityAnswer = (request: Rec): Rec[] => [
 
 describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised by 10 is said in POINTS (75% → 85%, never 82.5%)', () => {
   it('RED: "10 percentage points higher than today", never "10% higher"; the status quo held at 75% is by assumption', async () => {
-    const { result, view, reloaded } = await runAndRead(capacityBytes(), capacityAnswer);
+    const { result, view, reloaded } = await runAndRead(await capacityBytes(), capacityAnswer);
     const licence = goalChanceLicenceForAgent(view)!;
     expect(licence.chance_words).toBe('chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months');
     expect(licence.status_quo).toEqual({ option_id: 'carry_on_with_the_current_team', line: DOING_NOTHING('Development capacity') });
@@ -407,13 +474,54 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
     expect(JSON.stringify([...faces, licence])).not.toMatch(/10% higher/);
   });
 
-  it('CONTROL: a status quo the Run MOVED (its draws end at 78%, not today\'s 75%) is the Run\'s finding — no "no change" is said of it', async () => {
+  it('ADVERSE (AIE status-quo disposition): a status quo the Run MOVED (its draws end at 78%, not today\'s 75%) is withheld until checked — never "no change", never a finding', async () => {
     const moved = (request: Rec): Rec[] => capacityAnswer(request).map((r) => (r.option_id === 'carry_on_with_the_current_team'
       ? { ...r, outcome: { mean: 78, std: 0, p10: 78, p50: 78, p90: 78 } } : r));
-    const { view } = await runAndRead(capacityBytes(), moved);
+    const bytes = await capacityBytes();
+    const { view } = await runAndRead(bytes, moved);
     const licence = goalChanceLicenceForAgent(view)!;
     expect(licence.status_quo).toBeUndefined();
     expect(JSON.stringify(licence)).not.toMatch(/by assumption/);
+    expect(licence.withheld_option_ids).toContain('carry_on_with_the_current_team');
+    expect(licence.withheld_reason_by_option?.carry_on_with_the_current_team).toEqual({ reason: 'reference_moved',
+      line: 'Not shown: this run’s result for carrying on as now doesn’t match ‘Development capacity’ as it stands today in the model, so it needs checking first.' });
+    expect(goalChanceCellFacesForAgent(view, JSON.parse(bytes), true).has('carry_on_with_the_current_team')).toBe(false);
+  });
+});
+
+/**
+ * AIE status-quo disposition (12 Oct) — ORDINARY ANCHORED capacity on Paul's own capacity level brief: the SERVED drafter
+ * response (row 470fa988, the frames spec's fixture) through construction. Its goal is reached through links, holds the
+ * brief's 80 tickets per week, is set by no option and has no held month: the same-draw reference, so carrying on is
+ * "no change, by assumption" with no interval, and the option keeps its own chance with its uncertainty.
+ */
+const SERVED_CAPACITY = JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/capacity-c85817f2-construction.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
+
+describe('readback RESPONSE → LICENCE — the served capacity level brief (80 → at least 100 tickets per week): the ordinary paired contrast', () => {
+  it('CONTRAST (ordinary paired): "Keep current staffing" held at 80 is no change, by assumption — no figure, no interval; the option keeps its own reason', async () => {
+    const { bytes, calls } = await constructedBytes(SERVED_CAPACITY.brief, SERVED_CAPACITY.raw_text);
+    expect(calls).toBe(1);
+    expect(node(JSON.parse(bytes), 'weekly_support_capacity').observed_state).toMatchObject({ raw_value: 80, source: 'brief_extraction' });
+    const answer = (request: Rec): Rec[] => [
+      answered(idOf(request, 'Keep current staffing'), 0, { mean: 80, std: 0, p10: 80, p50: 80, p90: 80 }),
+      answered(idOf(request, 'Add one specialist'), 0.62, { mean: 100, std: 9, p10: 89, p50: 100, p90: 112 }),
+    ];
+    const { result, view } = await runAndRead(bytes, answer);
+    const licence = goalChanceLicenceForAgent(view)!;
+    expect(licence.status_quo).toEqual({ option_id: 'keep_current_staffing', line: DOING_NOTHING('Weekly support capacity') });
+    // On the served draft the option's own chance waits for its unsized underperformance links (its existing reason and next
+    // step, unchanged here); the status quo's line is still said — the licence is never dropped for it.
+    expect(licence.withheld_option_ids).toEqual(['keep_current_staffing', 'add_one_specialist']);
+    expect((result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')?.option_ids).toEqual(['add_one_specialist']);
+    const rows = Object.fromEntries((result.enrichment.option_comparison as Rec[]).map((r) => [r.option_id, r]));
+    expect(rows.keep_current_staffing).not.toHaveProperty('probability_of_goal_precision');
+    expect(rows.keep_current_staffing.outcome).toEqual({ mean: 80, p50: 80 });
+    // CONTROL: the same Run whose status quo spreads disagrees with that reference — withheld until checked.
+    const spread = (request: Rec): Rec[] => answer(request).map((r) => (r.option_id === 'keep_current_staffing'
+      ? { ...r, outcome: { mean: 82, std: 5, p10: 76, p50: 82, p90: 88 } } : r));
+    const drifted = goalChanceLicenceForAgent((await runAndRead(bytes, spread)).view)!;
+    expect(drifted.status_quo).toBeUndefined();
+    expect(drifted.withheld_reason_by_option?.keep_current_staffing?.reason).toBe('reference_moved');
   });
 });
 
