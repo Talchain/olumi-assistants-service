@@ -45,6 +45,8 @@ describe('R3-1: the Why? disclosure ships as text the chat renders, never as HTM
     ['coaching reply with the row\'s action', { interventionActionLabel: 'Give your estimate' }],
     ['Run face', { faceContract: 'run' as const }],
     ['Draft face', { faceContract: 'draft' as const }],
+    ['AI answer (N1)', { keepWhole: 'ai_answer' as const }],
+    ['AI answer with the row\'s action (N1)', { keepWhole: 'ai_answer' as const, interventionActionLabel: 'Give your estimate' }],
   ])('%s: no "<details"/"<summary"; "Why? <science words>" once, as the last paragraph', (_name, extra) => {
     const carried = composeReplyShape({ text: SERVED_TEXT, profile: 'coaching', eligibleIntervention: eligibleInterventionFor(wire())!, ...extra });
     expect(carried.text).not.toContain('<details');

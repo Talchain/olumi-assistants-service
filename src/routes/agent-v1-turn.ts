@@ -5288,8 +5288,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         obligations: withA7AsDetail(obligations, a7Repeat, reply, chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')),
         graph: readbackGraph,
         profile,
+        // AI-first N1: on an ordinary model-written turn the AI's answer is the reply. A Draft build keeps its receipt face and
+        // a Run/Explain its chance face (the horizon marker stays beside a chance).
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
-          : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const } : {}),
+          : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const }
+            : profile === 'coaching' && !runOrExplainTurn && faceContract !== 'draft' ? { keepWhole: 'ai_answer' as const } : {}),
       });
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
       // Written only when the composer shaped the reply or placed owed detail lines: an unshaped, unchanged reply (or a
