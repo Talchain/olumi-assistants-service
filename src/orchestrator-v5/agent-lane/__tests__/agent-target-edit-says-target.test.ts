@@ -186,8 +186,9 @@ describe('B (3) — a later edit of one of the goal\'s targets says "target" and
       { limit_label: 'Conversion rate', operator: '>=', new_value: 20, stated_operator: '>', unit: '%', rationale: 'x' });
     const card = 'Set the target for "Conversion rate" to above 20%';
     expect(out['public_label'], JSON.stringify(out)).toBe(card);
-    expect(String(out['note'])).toBe('Nothing has changed yet. "Conversion rate" holds one of the goal’s targets: tell the user it will set that target to above 20%, '
-      + 'as their own figure — never the id — and call authorise_change with this proposal_id once they agree.');
+    // AIE-B-multi-target-text-AMEND-0836 S6: the card's own button is the consent; a typed yes is not.
+    expect(String(out['note'])).toBe('The target for ‘Conversion rate’ is ready for review: above 20%. Tell the user they can review it and press ‘Set this target’. '
+      + 'Never show the id. Call authorise_change only for the approval bound to this card; a typed ‘yes’ alone is not that approval.');
     const chips = approveChipOf(body);
     expect(chips.map(({ id: _id, ...c }) => c)).toEqual([{ label: 'Set this target', message: 'Yes, set that target.', detail: card }]);
     const writes = graphWrites.get(SCENARIO) ?? 0;
@@ -198,7 +199,7 @@ describe('B (3) — a later edit of one of the goal\'s targets says "target" and
     expect(rowOf(GOAL_ROW)).toEqual(expect.objectContaining({ value: 60000, role: 'goal_target' }));
     expect(rowOf(SPEND_ROW)).toEqual(expect.objectContaining({ value: 20000 }));
     // The writer's receipt, as the reply's first line: the target's words, never "The limit on …".
-    expect(t2.assistant_text.split('\n')[0]).toBe('The target for "Conversion rate" is now above 20%, as you stated it.');
+    expect(t2.assistant_text.split('\n')[0]).toBe('The target for ‘Conversion rate’ is now above 20%, using your figure.');
   }, 120_000);
 
   it('CONTROL, byte-unchanged: a real limit keeps its limit card, note and button', async () => {

@@ -6912,6 +6912,8 @@ export function createAgentCapabilities(
               + 'offer to check the model again, and never say it was changed or that it was not.' };
         }
         // Landed is what the model HOLDS: that very row, at exactly the approved figure, in its own unit.
+        const beforeRow = (Array.isArray(before.raw.goal_constraints) ? before.raw.goal_constraints as Record<string, unknown>[] : [])
+          .find((c) => c !== null && typeof c === 'object' && c['constraint_id'] === v.constraint_id);
         const after = await readGraph(ctx.scenario_id);
         const heldRows = (Array.isArray(after?.raw.goal_constraints) ? after!.raw.goal_constraints as Record<string, unknown>[] : [])
           .filter((c) => c !== null && typeof c === 'object' && c['node_id'] === op.path && c['operator'] === v.operator);
@@ -6919,8 +6921,11 @@ export function createAgentCapabilities(
           && (heldRows[0]!['unit'] ?? null) === v.unit
           && (v.source_quote === undefined || heldRows[0]!['source_quote'] === v.source_quote)
           && (v.stated_operator === undefined || statedOperatorOf(heldRows[0]!) === v.stated_operator)
-          // A target row is landed only if it is still one of the goal's targets (else the joint is withheld for a false reason).
-          && (!isTarget || heldRows[0]!['role'] === 'goal_target');
+          // A target row is landed only if it is still one of the goal's targets (else the joint is withheld for a false reason),
+          // on THIS approval's committed postimage (the read-back is the door's committed graph, not equal figures after another
+          // writer), with its frame and label as they were (AIE 0836 / PL 6120477801: every applicable coordinate).
+          && (!isTarget || (heldRows[0]!['role'] === 'goal_target' && after!.graph_hash === res.graph_hash
+            && ['value_frame', 'label', 'deadline_metadata'].every((k) => isDeepStrictEqual(heldRows[0]![k], beforeRow?.[k]))));
         if (!landed && isTarget) return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid, detail: TARGET_UNCONFIRMED };
         if (!landed) {
           return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
@@ -6938,7 +6943,8 @@ export function createAgentCapabilities(
           return {
             ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
             ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-            follow_up: `The target for "${label}" is now ${direction} ${figure(approvedValue)}, as you stated it.`,
+            // AIE-B-multi-target-text-AMEND-0836 S7 (one): "using your figure" — a comparator kept from the row is not newly stated.
+            follow_up: `The target for ‘${label}’ is now ${direction} ${figure(approvedValue)}, using your figure.`,
           };
         }
         return {
@@ -9893,8 +9899,9 @@ export function createAgentCapabilities(
           public_label: proposal.public_label,
           base_revision: g.graph_hash,
           target: { on: node.label, now, becomes },
-          note: `Nothing has changed yet. "${node.label}" holds one of the goal’s targets: tell the user it will set that target to ${targetBecomes}, `
-            + 'as their own figure — never the id — and call authorise_change with this proposal_id once they agree.'
+          // AIE-B-multi-target-text-AMEND-0836 S6 (6120751692; 6121167535): consent is the card's own button, never a typed yes.
+          note: `The target for ‘${node.label}’ is ready for review: ${targetBecomes}. Tell the user they can review it and press ‘Set this target’. `
+            + 'Never show the id. Call authorise_change only for the approval bound to this card; a typed ‘yes’ alone is not that approval.'
             + (interpretation?.reserve === undefined ? '' : ` ${interpretation.reserve.detail}`),
         };
       }
