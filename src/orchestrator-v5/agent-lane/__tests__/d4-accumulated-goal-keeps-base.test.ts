@@ -1,9 +1,9 @@
 /**
- * D4 (b) (post-F; DL route (i), 12 Oct): a goal worked out by the accumulation carrier keeps TODAY'S level when its target
+ * D4 (b) (post-F; DL route (i′), 12 Oct): a goal worked out by the accumulation carrier keeps TODAY'S level when its target
  * is a change from today ("15% below today's 8"), because ISL reads a change target's base only from the goal node. It was
  * stripped, so `targetTestabilityOf` failed P1 `missing_goal_baseline` and the 6.8 target could never be tested. A LEVEL
- * target needs no base: its strip is unchanged, byte for byte. CEE half only; it ships after ISL's sum branch reconciles
- * today's level against the carrier's S₀ (the P45 product rule), never before.
+ * target needs no base: its strip is unchanged, byte for byte. CEE half only; it ships with ISL's (i′) change origin (an
+ * accumulation-dependent target's change is read from its stated level today), never before.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';

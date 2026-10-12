@@ -272,10 +272,11 @@ export function withAdmittedAccumulations<N extends NodeLike, E extends EdgeLike
       const goal = admission.goalCarriers.get(n.id);
       if (goal === undefined) return n;
       const { observed_state: today, ...derived } = n;
-      // ⭐ D4 (b) (DL route (i), 12 Oct): a target stated as a CHANGE from today is read on today's level, which ISL takes
-      // only from the goal node (`status_quo_level`). That base is kept on the derived goal, exactly as stated; ISL's sum
-      // branch reconciles today's level against the carrier's S₀ (its P45 product rule), never its month-T level. A
-      // LEVEL target needs no base, so it keeps today's strip, byte for byte. ⛔ Ships after that ISL rule, never before.
+      // ⭐ D4 (b) (DL route (i′), 12 Oct): a target stated as a CHANGE from today is read on today's level, which ISL takes
+      // only from the goal node (its known-base path, `observed_state.baseline`). That base is kept on the derived goal,
+      // exactly as stated. The goal is a horizon node, so ISL never reconciles its sum against today (measured, #94
+      // 6133071348). A LEVEL target needs no base, so it keeps today's strip, byte for byte. ⛔ Ships only with ISL's (i′)
+      // change origin (today's level for an accumulation-dependent target), never before.
       const frame = readGoalRecord({ nodes, edges }, n.id)?.target?.frame;
       const keepsBase = today !== undefined && (frame === 'change_rel' || frame === 'change_abs');
       return { ...derived, ...(keepsBase ? { observed_state: today } : {}), nonlinear_identity: { operation: 'sum', factor_ids: [goal.carrierId],
