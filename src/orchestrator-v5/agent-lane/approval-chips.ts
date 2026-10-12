@@ -273,8 +273,9 @@ export function approvalChipsFor(
   // in `detail`, only when the proposer's own result for that id returned the same words; the buttons are [Yes] [Change date].
   if (tool === 'propose_new_limit' || tool === 'propose_limit_change') {
     if (stored?.operations.length === 1 && stored.operations[0]?.op === 'set_limit') {
-      const edit = APPROVE.propose_limit_change!;
-      const value = stored.operations[0].value as { reserve?: NewLimitValue['reserve'] };
+      const value = stored.operations[0].value as { reserve?: NewLimitValue['reserve']; role?: unknown };
+      // B (3): a row that is one of the goal's targets has the target's button, never "Change this limit".
+      const edit = value.role === 'goal_target' ? APPROVE.propose_goal_target! : APPROVE.propose_limit_change!;
       return [{ id: approvalChipIdFor(proposalId), label: edit.label, message: edit.message, detail: stored.public_label }, AMEND_CHIP,
         ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
           message: value.reserve.message, detail: value.reserve.detail }])];

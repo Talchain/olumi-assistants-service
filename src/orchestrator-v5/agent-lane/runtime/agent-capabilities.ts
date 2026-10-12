@@ -6861,12 +6861,18 @@ export function createAgentCapabilities(
         const op = ops[0]!;
         const v = op.value as { operator: '<=' | '>='; raw_value: number; unit: string | null; constraint_id: string; before: number;
           /** A2 follow-up: the comparator the user stated when proposing it, if they stated one (`proposeLimitChange`). */
-          stated_operator?: '<' | '<=' | '>' | '>='; source_quote?: string; reserve?: NewLimitValue['reserve'] };
+          stated_operator?: '<' | '<=' | '>' | '>='; source_quote?: string; reserve?: NewLimitValue['reserve'];
+          /** B (3): the row is one of the goal's targets: the target's words, and the read-back must keep its role. */
+          role?: 'goal_target' };
+        const isTarget = v.role === 'goal_target';
+        // The approved one-target card's own words (`set_goal_target` above) for a target row; a limit's are unchanged.
+        const TARGET_UNCONFIRMED = 'The target was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+          + 'offer to check the model again, and never say it was set or that it was not.';
         const pid = decision.proposal.proposal_id;
         const approval = limitApprovalWords(ctx.typed_approval_words ?? ctx.user_turn_text ?? '');
         const useReserve = v.reserve !== undefined
           && (approval === limitApprovalWords(v.reserve.message) || approval === limitApprovalWords(v.reserve.label));
-        if (v.reserve !== undefined && !['yes', 'yes, change that limit'].includes(approval) && !useReserve) {
+        if (v.reserve !== undefined && !['yes', 'yes, change that limit', ...(v.role === 'goal_target' ? ['yes, set that target'] : [])].includes(approval) && !useReserve) {
           return { ok: false, mutated: false, refusal: 'approval_words_mismatch' };
         }
         const approvedValue = useReserve ? v.reserve!.alternative : v.raw_value;
@@ -6886,7 +6892,13 @@ export function createAgentCapabilities(
           : readUnitParts(v.unit)?.kind === 'percent' ? limitFigure(x, v.unit) : targetFigure(x, v.unit);
         if (res.status === 'stale') {
           return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: pid,
-            detail: 'The model changed just before this limit was written, so nothing was changed. Offer to prepare it again.' };
+            detail: isTarget ? 'The model changed just before this target was written, so nothing was changed. Offer to prepare it again.'
+              : 'The model changed just before this limit was written, so nothing was changed. Offer to prepare it again.' };
+        }
+        if (res.status === 'refused' && isTarget) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            follow_up: `${ADD_CONSTRAINT_USER_GUIDANCE} Nothing on your model changed.`,
+            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Tell the user plainly, in those words, and ask what target they would like instead.` };
         }
         if (res.status === 'refused') {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
@@ -6894,6 +6906,7 @@ export function createAgentCapabilities(
             detail: `The limit was not changed, and nothing on the model changed. Tell the user plainly, and ask what they would like instead.` };
         }
         if (res.status === 'unconfirmed') {
+          if (isTarget) return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid, detail: TARGET_UNCONFIRMED };
           return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
             detail: 'The limit was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
               + 'offer to check the model again, and never say it was changed or that it was not.' };
@@ -6905,7 +6918,10 @@ export function createAgentCapabilities(
         const landed = heldRows.length === 1 && heldRows[0]!['constraint_id'] === v.constraint_id && heldRows[0]!['value'] === approvedValue
           && (heldRows[0]!['unit'] ?? null) === v.unit
           && (v.source_quote === undefined || heldRows[0]!['source_quote'] === v.source_quote)
-          && (v.stated_operator === undefined || statedOperatorOf(heldRows[0]!) === v.stated_operator);
+          && (v.stated_operator === undefined || statedOperatorOf(heldRows[0]!) === v.stated_operator)
+          // A target row is landed only if it is still one of the goal's targets (else the joint is withheld for a false reason).
+          && (!isTarget || heldRows[0]!['role'] === 'goal_target');
+        if (!landed && isTarget) return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid, detail: TARGET_UNCONFIRMED };
         if (!landed) {
           return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
             detail: 'The limit was written, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
@@ -6916,6 +6932,15 @@ export function createAgentCapabilities(
         proposals.markApplied(pid, receipts);
         // A2: said as the model now HOLDS it ("less than 5%" for a strict limit), from the row read back above.
         const words = LIMIT_OPERATOR_WORDS[statedOperatorOf(heldRows[0]!) ?? v.operator];
+        if (isTarget) {
+          const held = statedOperatorOf(heldRows[0]!) ?? v.operator;
+          const direction = DIRECTION_WORDS[held === '<' ? 'below' : held === '>' ? 'above' : held === '<=' ? 'at_most' : 'at_least'];
+          return {
+            ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
+            ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
+            follow_up: `The target for "${label}" is now ${direction} ${figure(approvedValue)}, as you stated it.`,
+          };
+        }
         return {
           ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
@@ -9839,6 +9864,14 @@ export function createAgentCapabilities(
       }
       const now = `${LIMIT_OPERATOR_WORDS[nowOp]} ${figureOf(before)}`;
       const becomes = `${LIMIT_OPERATOR_WORDS[becomesOp]} ${figureOf(value)}`;
+      /**
+       * ⭐ B (3) (DL lease, 12 Oct): CURRENT MODEL STATE lists every `goal_constraints` row under `limits`, so a later edit
+       * of one of the goal's targets (C's `role: 'goal_target'`) arrives here. The limit door writes it and keeps its role
+       * (4c4f0e66); only the words were a limit's ("Change the limit on …"). A target row gets the target's card, note,
+       * button and receipt; a limit is unchanged, byte for byte.
+       */
+      const isTarget = row['role'] === 'goal_target';
+      const targetBecomes = `${DIRECTION_WORDS[becomesOp === '<' ? 'below' : becomesOp === '>' ? 'above' : becomesOp === '<=' ? 'at_most' : 'at_least']} ${figureOf(value)}`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -9846,12 +9879,25 @@ export function createAgentCapabilities(
         operations: [{ op: 'set_limit', path: node.id, value: { ...(interpretation ?? {}),
           operator, raw_value: value, unit, constraint_id: String(row['constraint_id'] ?? ''), before,
           ...(stated !== undefined ? { stated_operator: stated } : {}),
+          ...(isTarget ? { role: 'goal_target' } : {}),
         } }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Change the limit on "${node.label}" from ${now} to ${becomes}`,
+        public_label: isTarget ? `Set the target for "${node.label}" to ${targetBecomes}` : `Change the limit on "${node.label}" from ${now} to ${becomes}`,
       });
       proposals.put(proposal);
+      if (isTarget) {
+        return {
+          ok: true, mutated: false,
+          proposal_id: proposal.proposal_id,
+          public_label: proposal.public_label,
+          base_revision: g.graph_hash,
+          target: { on: node.label, now, becomes },
+          note: `Nothing has changed yet. "${node.label}" holds one of the goal’s targets: tell the user it will set that target to ${targetBecomes}, `
+            + 'as their own figure — never the id — and call authorise_change with this proposal_id once they agree.'
+            + (interpretation?.reserve === undefined ? '' : ` ${interpretation.reserve.detail}`),
+        };
+      }
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
