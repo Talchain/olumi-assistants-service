@@ -3986,6 +3986,144 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
   };
 }
 
+/**
+ * ⭐ B (1) — EVERY TARGET ONE MESSAGE STATES, ON ONE APPROVAL, ALL OR NONE (DL lease, 12 Oct). The goal's targets are
+ * `goal_constraints` rows marked `role: 'goal_target'` (C); the goal's own row is written by `goal_target_edit`'s adapter
+ * (`applyGoalTargetEdit`), every other target row by the limit door's (`applyLimitEdit`, which keeps the row's role since
+ * 4c4f0e66). Here they are threaded over ONE graph and committed by `dispatchAddConstraintEdit` as ONE CAS write: the
+ * proposal's base is checked once, against the persisted model, and any target refused or diverged means NOTHING is
+ * committed. A non-goal row that is not marked as a target is refused: a limit is never edited through this door.
+ */
+export type CommitGoalTargetsInput = {
+  readonly scenario_id: string;
+  /** `authorisationTurnId(proposal_id)`: the idempotency key. */
+  readonly turn_id: string;
+  /** The proposal's base; a mismatch is `stale`, and nothing is written. */
+  readonly base_graph_hash: string;
+  /** In the card's order. The goal's own target (its node is the goal) and the other target rows, each named by node + held operator. */
+  readonly targets: readonly {
+    readonly node_id: string;
+    readonly operator: '<=' | '>=';
+    /** The user's figure, in the row's own unit. */
+    readonly raw_value: number;
+    readonly unit: string;
+    /** The comparator the user stated for this figure, typed, in the row's own direction; absent keeps the row's own. */
+    readonly stated_operator?: LimitEditRequest['stated_operator'];
+  }[];
+};
+export type CommitGoalTargetsResult =
+  | {
+      readonly status: 'committed';
+      readonly graph_hash: string;
+      /** Passed through UNPARSED, as `commitLimitEditInProcess` does. */
+      readonly model_version_receipt: unknown;
+      /** Each target row exactly as the committed model holds it, in the card's order. */
+      readonly rows: readonly { readonly node_id: string; readonly constraint_id: string; readonly operator: string; readonly value: number; readonly unit?: string; readonly role?: string }[];
+    }
+  | { readonly status: 'stale' }
+  /** `index`: the target (in the card's order) that was refused. Nothing was written. */
+  | { readonly status: 'refused'; readonly reason: string; readonly index?: number }
+  /** The commit was attempted and could not be read back: say it could not be confirmed, never "not saved". */
+  | { readonly status: 'unconfirmed' };
+
+type GoalTargetsRow = { node_id?: unknown; operator?: unknown; role?: unknown; constraint_id?: unknown; value?: unknown; unit?: unknown };
+const goalTargetsRowsOf = (g: unknown): GoalTargetsRow[] => {
+  const raw = g !== null && typeof g === 'object' ? (g as { goal_constraints?: unknown }).goal_constraints : undefined;
+  return Array.isArray(raw) ? raw.filter((c): c is GoalTargetsRow => c !== null && typeof c === 'object') : [];
+};
+
+export async function commitGoalTargetsInProcess(input: CommitGoalTargetsInput, requestId: string): Promise<CommitGoalTargetsResult> {
+  const keys = input.targets.map((t) => `${t.node_id}\u0000${t.operator}`);
+  if (input.targets.length === 0) return { status: 'refused', reason: 'no_targets' };
+  if (new Set(keys).size !== keys.length) return { status: 'refused', reason: 'duplicate_target' };
+  const turn = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const };
+  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+    kind: 'agent_goal_targets_edit', base_graph_hash: input.base_graph_hash, targets: input.targets }))
+    .digest('hex').slice(0, 32)}`;
+  let refusedAt: number | undefined;
+  const r = await dispatchAddConstraintEdit(
+    {
+      turn,
+      requestHash,
+      eventKind: 'goal_targets_edit',
+      logFields: { target_count: input.targets.length },
+      committedLogFields: { target_count: input.targets.length },
+      committedMessage: 'V5 goal_targets_edit committed — every target the card holds rewritten through add_constraint in ONE commit, hash recomputed',
+      dispatchPath: 'agent_lane.goal_targets_edit',
+      apply: async (persistedGraph, priorFacts) => {
+        let current: unknown = persistedGraph;
+        let facts: HandlerFact[] = [...priorFacts];
+        const written: HandlerFact[] = [];
+        let first: Extract<GoalTargetEditResult, { kind: 'mutated' }> | undefined;
+        let last: Extract<GoalTargetEditResult, { kind: 'mutated' }> | undefined;
+        for (const [index, t] of input.targets.entries()) {
+          // The proposal's base is checked ONCE, on the persisted model; each later step runs on the graph the one before it made.
+          const base = index === 0 ? input.base_graph_hash
+            : computeAnalysisAffectingGraphHash(current as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) ?? '';
+          const node = (Array.isArray((current as { nodes?: unknown } | null)?.nodes) ? (current as { nodes: { id?: unknown; kind?: unknown }[] }).nodes : [])
+            .filter((n) => n !== null && typeof n === 'object' && n.id === t.node_id);
+          let step: GoalTargetEditResult;
+          if (node.length === 1 && node[0]!.kind === 'goal') {
+            step = await applyGoalTargetEdit({
+              payload: { kind: 'system_event', ...turn } as unknown as SystemEventTurnPayload,
+              event: { kind: 'goal_target_edit', goal_node_id: t.node_id, constraint_type: t.operator === '<=' ? 'at_most' : 'at_least',
+                raw_value: t.raw_value, unit: t.unit, base_graph_hash: base } as Extract<SystemEventTurnPayload['event'], { kind: 'goal_target_edit' }>,
+              requestId, persistedGraph: current, priorFacts: facts,
+            });
+          } else {
+            const held = goalTargetsRowsOf(current).filter((c) => c.node_id === t.node_id && c.operator === t.operator);
+            step = await applyLimitEdit({
+              payload: turn,
+              request: { node_id: t.node_id, operator: t.operator, raw_value: t.raw_value, base_graph_hash: base,
+                ...(t.stated_operator !== undefined ? { stated_operator: t.stated_operator } : {}) },
+              requestId, persistedGraph: current, priorFacts: facts,
+            });
+            // A limit is never edited through the target door (after `applyLimitEdit`, so a stale base still reads as stale).
+            if (step.kind === 'mutated' && (held.length !== 1 || held[0]!.role !== 'goal_target')) step = { kind: 'refused', reason: 'not_a_goal_target' };
+          }
+          if (step.kind !== 'mutated') {
+            if (step.kind === 'refused') refusedAt = index;
+            return step;
+          }
+          first ??= step;
+          last = step;
+          current = step.mutatedGraph;
+          facts = [...facts, ...step.handlerFacts];
+          written.push(...step.handlerFacts);
+        }
+        return { kind: 'mutated', response: last!.response, mutatedGraph: last!.mutatedGraph, handlerFacts: written, graph: last!.graph, baseGraph: first!.baseGraph };
+      },
+      reportRefusalReason: true,
+      fenceRefusalReachesCaller: true,
+    },
+    requestId,
+    Date.now(),
+  );
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
+  if (r.commitSkippedReason === 'refused_no_write') {
+    return { status: 'refused', reason: r.refusal?.reason ?? 'refused', ...(refusedAt !== undefined ? { index: refusedAt } : {}) };
+  }
+  const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
+  if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
+  const rows: { node_id: string; constraint_id: string; operator: string; value: number; unit?: string; role?: string }[] = [];
+  for (const t of input.targets) {
+    const held = goalTargetsRowsOf(r.graph).filter((c) => c.node_id === t.node_id && c.operator === t.operator);
+    const row = held.length === 1 ? held[0]! : undefined;
+    if (row === undefined || typeof row.constraint_id !== 'string' || typeof row.value !== 'number') return { status: 'unconfirmed' };
+    rows.push({ node_id: t.node_id, constraint_id: row.constraint_id, operator: t.operator, value: row.value,
+      ...(typeof row.unit === 'string' ? { unit: row.unit } : {}), ...(typeof row.role === 'string' ? { role: row.role } : {}) });
+  }
+  return {
+    status: 'committed',
+    graph_hash: graphHash,
+    model_version_receipt: (r.response as { model_version_receipt?: unknown }).model_version_receipt,
+    rows,
+  };
+}
+
 /** S-E S4: the same fenced CAS commit and persisted-row read-back as limit edits. */
 export type CommitLimitAddInput = Omit<CommitLimitEditInput, 'operator' | 'stated_operator'> & Omit<LimitAddRequest, 'node_id' | 'raw_value' | 'base_graph_hash'>;
 export async function commitLimitAddInProcess(input: CommitLimitAddInput, requestId: string): Promise<CommitLimitEditResult> {

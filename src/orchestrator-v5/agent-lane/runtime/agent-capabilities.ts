@@ -217,7 +217,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, computeProposalId, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import type { CommitGoalTargetsInput, CommitGoalTargetsResult, CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -2236,6 +2236,11 @@ export function createAgentCapabilities(
      */
     readonly commitLimitAdd?: (input: CommitLimitAddInput) => Promise<CommitLimitEditResult>;
     readonly commitLimitEdit?: (input: CommitLimitEditInput) => Promise<CommitLimitEditResult>;
+    /**
+     * ⭐ B (1): every target one approved card holds (`commitGoalTargetsInProcess`), ONE CAS commit, all or none; fenced like
+     * the limit door. Absent ⇒ unavailable.
+     */
+    readonly commitGoalTargets?: (input: CommitGoalTargetsInput) => Promise<CommitGoalTargetsResult>;
     /**
      * ⭐ MG F1 T6 (#2471): the option-status door, in-process (`commitOptionStatusInProcess`), fenced like the limit door.
      * It returns the WRITER's own typed outcome, the only evidence "applied" may rest on. Absent ⇒ never "applied".
