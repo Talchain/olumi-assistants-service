@@ -250,7 +250,7 @@ export function isStatedLevelRange(range: unknown, os: Readonly<Record<string, u
  */
 export function withoutStatedLevelRanges<G>(graph: G): G {
   if (graph === null || typeof graph !== 'object') return graph;
-  const nodes = (graph as unknown as { nodes?: unknown }).nodes;
+  const nodes = 'nodes' in graph ? graph.nodes : undefined;
   if (!Array.isArray(nodes)) return graph;
   const carries = (n: unknown): boolean => n !== null && typeof n === 'object'
     && (n as { observed_state?: unknown }).observed_state !== null && typeof (n as { observed_state?: unknown }).observed_state === 'object'
