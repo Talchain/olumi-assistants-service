@@ -121,21 +121,77 @@ function sentencesHolding(text: string, quote: string): string {
   }).join(' ');
 }
 /**
- * B2 (independent check BLOCKING 2, CHECK.md on 91405cb2): the clause(s) that ENCLOSE each place `quote` stands in `text`.
- * The quote's figure is read again over them with the same clause reader, so a duration is the team's time only if it is
- * so in the user's own statement, never because the selected words stop just after its subject ("recruitment takes
- * 7 months" quoted as "7 months"). Conservative by construction: a clause holding two durations reads at most one.
+ * ⭐ B2-c (DL, 12 Oct; independent check FAIL on 3c7d1a71: "The team will finish in 9 months; recruitment takes (7 months)"
+ * quoted as "7 months" bound as the team's forecast, and "procurement takes 7 months" passed). E2 refused a duration whose
+ * clause opened with a word from a list of other quantities; no such list is complete, and brackets cut the subject off.
+ * POSITIVE ATTRIBUTION instead: in the user's own statement, a duration is the team's time to finish only when
+ *   · the TEAM is named before it in the same statement (`TEAM_NAME`; a statement ends at a sentence end, ';', ':', or a
+ *     clause opening with "but", "because", "although", "though", "whereas", "while", "except", "unless", "however");
+ *   · every word between the last naming of the team and the duration is from a CLOSED list (`TEAM_GAP_WORDS`: how a time is
+ *     reported or expected, how a delivery is said, and the deliverable's own words), brackets and commas included; another
+ *     duration there only as a delay the figure restates ("a month late (so, 7 months)");
+ *   · every word after it, to the statement's end, is from a closed list too (`TEAM_AFTER_WORDS`: "to finish", "with the
+ *     current team", "in total", "or so", …), so nothing after it makes it another quantity ("7 months to hire").
+ * Anything else is refused and the user is asked: a refusal is never a misattribution.
  */
-function enclosingClauses(text: string, quote: string): string[] {
-  const bounds = [...text.matchAll(CLAUSE_BOUNDARY)].map(m => [m.index!, m.index! + m[0].length] as const);
-  return quoteSpansIn(text, quote).map(at => {
-    const start = Math.max(0, ...bounds.filter(([, e]) => e <= at).map(([, e]) => e));
-    const end = Math.min(text.length, ...bounds.filter(([b]) => b >= at + quote.length).map(([b]) => b));
-    return text.slice(start, end);
-  });
+const TEAM_NAME = /(?<![\p{L}\p{N}])(?:(?:the|our|my)\s+(?:current\s+|existing\s+|whole\s+)?(?:dev(?:elopment)?\s+|engineering\s+|delivery\s+|product\s+)?(?:team|developers|devs|engineers)|we)(?![\p{L}\p{N}])/giu;
+const STATEMENT_END = /[;:!?\n]|(?<!\d)\.|\.(?!\d)|(?<![\p{L}\p{N}])(?:but|because|although|though|whereas|while|except|unless|however)(?![\p{L}\p{N}])/giu;
+const DURATION_IN_TEXT = new RegExp(`(?<![\\p{L}\\p{N}])(?:between[ \\t]{1,4})?${TIME_NUMBER}(?:[ \\t]{0,4}(?:–|—|-|to|and)[ \\t]{0,4}${TIME_NUMBER})?[ \\t]{1,4}(?:months?|weeks?|years?)(?![\\p{L}\\p{N}])`, 'giu');
+const TIME_UNIT = /^(?:months?|weeks?|years?)$/;
+const DELAY_WORD = /^(?:late|early|behind|over|overdue)$/;
+const words = (t: string): string[] => (t.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []).map(w => w.replace(/^'+|'+$/g, ''));
+/** The closed list between the team and its time. Nothing here names another quantity. */
+export const TEAM_GAP_WORDS: ReadonlySet<string> = new Set([
+  'are', 'is', 'am', 'be', 'been', 'being', 'was', 'were', 'will', 'would', 'could', 'should', 'might', 'may', 'can', 'll', 'have', 'has', 'had',
+  'currently', 'now', 'still', 'already', 'also', 'just', 'probably', 'roughly', 'about', 'around', 'approximately', 'maybe', 'perhaps', 'likely',
+  'telling', 'tell', 'tells', 'told', 'say', 'says', 'said', 'saying', 'think', 'thinks', 'thought', 'reckon', 'reckons', 'expect', 'expects',
+  'expected', 'estimate', 'estimates', 'estimated', 'believe', 'believes', 'guess', 'feel', 'feels', 'me', 'us', 'i', 'they', "they're",
+  "they'll", 'it', "it'll", "it's", "it'd", "we're", "we'll", "we'd", 'going', 'to', 'gonna', 'need', 'needs', 'take', 'takes', 'taking',
+  'finish', 'finishing', 'complete', 'completing', 'deliver', 'delivering', 'ship', 'shipping', 'release', 'releasing', 'launch', 'launching',
+  'get', 'done', 'with', 'the', 'a', 'an', 'our', 'their', 'its', 'this', 'that', 'so', 'in', 'within', 'late', 'early', 'behind',
+  'work', 'project', 'feature', 'release', 'product', 'deliverable', 'next', 'current',
+]);
+/** The closed list after the team's time, to the statement's end. */
+export const TEAM_AFTER_WORDS: ReadonlySet<string> = new Set([
+  'to', 'finish', 'complete', 'deliver', 'ship', 'launch', 'release', 'it', 'the', 'with', 'for', 'our', 'current', 'existing', 'team', 'in',
+  'total', 'overall', 'from', 'now', 'today', 'i', 'think', 'reckon', 'guess', 'or', 'so', 'give', 'take', 'roughly', 'work', 'project',
+  'feature', 'product', 'deliverable', 'next', 'all', 'told',
+]);
+/** True when `figure` (start, end in `text`) is the team's time to finish in the user's statement (B2-c, above). */
+function teamOwnsDuration(text: string, start: number, end: number, deliverable: string): boolean {
+  const ends = [...text.matchAll(STATEMENT_END)].map(m => [m.index!, m.index! + m[0].length] as const);
+  const from = Math.max(0, ...ends.filter(([, e]) => e <= start).map(([, e]) => e));
+  const to = Math.min(text.length, ...ends.filter(([b]) => b >= end).map(([b]) => b));
+  const before = text.slice(from, start);
+  const team = [...before.matchAll(TEAM_NAME)].pop();
+  if (team === undefined) return false;
+  const own = new Set(words(deliverable));
+  const gap = words(before.slice(team.index! + team[0].length));
+  for (let i = 0; i < gap.length; i += 1) {
+    const w = gap[i]!;
+    if ((/^\d+(?:\.\d+)?$/.test(w) || Object.hasOwn(TIME_WORDS, w)) && TIME_UNIT.test(gap[i + 1] ?? '')) {
+      // Another duration between the team and its time: only a delay that the figure restates ("a month late").
+      if (!DELAY_WORD.test(gap[i + 2] ?? '')) return false;
+      i += 2;
+      continue;
+    }
+    if (!TEAM_GAP_WORDS.has(w) && !own.has(w)) return false;
+  }
+  return words(text.slice(end, to)).every(w => TEAM_AFTER_WORDS.has(w) || own.has(w));
+}
+/** Every place in `text`, inside a span of `quote`, where a duration reading as `stated` stands. */
+function durationSpansIn(text: string, quote: string, stated: { low_months: number; high_months: number }): (readonly [number, number])[] {
+  const out: (readonly [number, number])[] = [];
+  for (const at of quoteSpansIn(text, quote)) {
+    for (const m of text.slice(at, at + quote.length).matchAll(DURATION_IN_TEXT)) {
+      const r = readTeamTime(m[0]);
+      if (r !== null && r.low_months === stated.low_months && r.high_months === stated.high_months) out.push([at + m.index!, at + m.index! + m[0].length]);
+    }
+  }
+  return out;
 }
 export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonly conversation?: string | null },
-  args: { readonly quote?: unknown; readonly low_months?: unknown; readonly high_months?: unknown } | undefined):
+  args: { readonly quote?: unknown; readonly low_months?: unknown; readonly high_months?: unknown } | undefined, deliverable = ''):
   { readonly kind: 'bound'; readonly time: BoundTeamTime; readonly quote: string } | { readonly kind: 'refused'; readonly detail: string } {
   const now = typeof texts.now === 'string' ? texts.now : '';
   const quoted = typeof args?.quote === 'string' && args.quote.trim() !== '' ? args.quote.trim() : now.trim();
@@ -148,8 +204,12 @@ export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonl
   const low = Number(args?.low_months), high = Number(args?.high_months);
   const stated = Number.isFinite(low) && Number.isFinite(high)
     ? teamTimesInQuote(quote).find(r => teamTimeArgumentsMatch(quote, { low_months: low, high_months: high }, r)) : undefined;
-  const inStatement = stated !== undefined && enclosingClauses(source, quote)
-    .some(c => teamTimesInQuote(c).some(r => r.low_months === stated.low_months && r.high_months === stated.high_months));
+  // B2-c: THIS message is, whole, the base door's duration answer ("6–10 months", "It’ll take 6–10 months"), or the team owns
+  // the figure in the user's own statement (positive attribution) at some place the quote stands.
+  const wholeAnswer = readTeamTime(plainWords(now));
+  const inStatement = stated !== undefined && ((source === plainWords(now) && wholeAnswer !== null
+      && wholeAnswer.low_months === stated.low_months && wholeAnswer.high_months === stated.high_months)
+    || durationSpansIn(source, quote, stated).some(([start, end]) => teamOwnsDuration(source, start, end, plainWords(deliverable))));
   if (stated === undefined || !inStatement) {
     return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
   }
