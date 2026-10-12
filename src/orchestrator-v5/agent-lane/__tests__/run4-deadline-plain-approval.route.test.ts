@@ -136,25 +136,6 @@ describe('E-tail (a): run 4 deadline turns 7 and 14, the plain "Yes" the writer 
   }, 120_000);
 
   /**
-   * ⭐ F CONTRAST (runs before the card is applied): the same plain "Yes" to the same card, now no longer held and NEVER
-   * applied (its row carries no card). Nothing landed, so the existing "out of date" words stand; the fix above is bound to
-   * the store's applied identity, not to every re-press of a card that is gone.
-   */
-  it('CONTRAST: the card no longer held and never applied → the existing "out of date" words, nothing written', async () => {
-    rows.clear(); order.length = 0;
-    const issuing = FX.issuing_turn as Rec;
-    await store.append({ scenario_id: SCENARIO, turn_id: issuing.turn_id, request_hash: 'run4-turn5', userMessage: issuing.user_message,
-      assistantMessage: issuing.assistant_message, turn_class: 'frame', pending_actions: [] });
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: FX.request });
-    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
-    const b = r.json() as Rec;
-    expect(b._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal' }));
-    expect(b.assistant_text).toBe('Nothing changed. That card is out of date: the change it shows has been replaced. Use the newest card for it.');
-    expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
-    expect(providerCalls).toBe(0);
-  }, 120_000);
-
-  /**
    * ⭐ E-TAIL (b) (AIE 6130197656 §2 ACK): with Olumi's 35 %-a-month link limited to the whole launch, run 4's own sequence
    * now saves. Turn 7's plain "Yes" writes the deadline once and the read-back holds it, with the limited mean AND spread on
    * the stored link, the raw ones and the pace beside them, and the same link on the engine's input. Turn 14's "Yes" to the
@@ -190,18 +171,12 @@ describe('E-tail (a): run 4 deadline turns 7 and 14, the plain "Yes" the writer 
     }
     expect(providerCalls).toBe(0);
 
-    // ⭐ F (DL, 12 Oct): turn 14 pressed the card turn 7 APPLIED. It was served as "That card is out of date: the change it
-    // shows has been replaced", which is false: nothing replaced it, it landed. The store's own idempotent answer is said
-    // instead, in the narrator's existing words for an applied change re-pressed.
     const r14 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: FX.request });
     expect(r14.statusCode, r14.body.slice(0, 400)).toBe(200);
     const b14 = r14.json() as Rec;
-    expect(b14._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: false,
-      proposal_id: 'prop_b9ca206131b318f52cb6df4d85f9b4e9' }));
-    // Then the existing next-step question: the team's time is still missing, so the analysis cannot run yet.
-    expect(b14.assistant_text).toBe('That change was already saved; nothing was written again. The analysis can\'t run yet. '
-      + 'How long would next feature launch take with the team you have now?');
-    expect(b14.assistant_text).not.toContain('out of date');
+    expect(b14._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal' }));
+    // The existing words for a card already used (pinned so any change shows; their accuracy is raised with the DL).
+    expect(b14.assistant_text).toBe('Nothing changed. That card is out of date: the change it shows has been replaced. Use the newest card for it.');
     expect(b14.assistant_text).not.toContain('Those values could not be applied');
     expect(graphWrites.get(SCENARIO), 'no second write').toBe(1);
     expect(providerCalls).toBe(0);

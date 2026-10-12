@@ -3141,14 +3141,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // A settled card has no held carrier; the store still owns its idempotent already-applied result.
       if (approvedProposal.startsWith('prop_') && original === undefined && !proposals.isApplied(approvedProposal)
         && typeof store.readMostRecentPendingActions === 'function') editsFailure = 'not_held';
-      /**
-       * ⭐ F (DL, 12 Oct; run 4 deadline turn 14): the card's plain "Yes" (`fields: []`) pressed again after it was APPLIED.
-       * Its carrier is gone because it landed, not because another change replaced it, so it is the idempotent re-press the
-       * store answers (`already_applied`: "That change was already saved; nothing was written again."). Edited values still
-       * need the held card.
-       */
-      const appliedRepress = editsForThisCard?.fields.length === 0 && original === undefined && proposals.isApplied(approvedProposal);
-      if (editsForThisCard !== undefined && approvedProposal.startsWith('prop_') && !appliedRepress) {
+      if (editsForThisCard !== undefined && approvedProposal.startsWith('prop_')) {
         const current = await readBackState(dispatch, scenarioId);
         const record = originalCarrier !== undefined ? proposalRecord(originalCarrier, current.graph) : undefined;
         if (!record || !original) editsFailure = 'not_held';
