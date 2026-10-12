@@ -26,7 +26,6 @@ import { GOAL_CHANCE_LICENSED, goalChanceLicenceOf, withGoalChanceLicence } from
 import { GOAL_CHANCE_RANGE, withShareByDateChanceGate } from '../goal-chance-range.js';
 import { goalChanceRangeDisplayForAgent, goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
-import { goalChanceSideOf } from '../goal-chance-sides.js';
 import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 
 type Rec = Record<string, any>;
@@ -292,19 +291,21 @@ describe('Run frame and licence by identity', () => {
     expect(withheld.note).toContain('licensed points and ranges');
     expect(withheld.note).not.toContain('EVERY option');
   });
-  it('P2-e: equal displayed stated-time endpoints withhold status_quo without a range', () => {
+  // ⭐ DL 12 Oct (b1 follow-up, GO): equal displayed exact-law ends are no longer withheld without words ("so this chance is not
+  // shown"). `gate` returns them as the exact law's own POINT (the law is monotone in T); the licence shows that figure, never
+  // the Run's approximation, and no range is said.
+  it('P2-e: equal displayed stated-time endpoints are the exact law\'s point (25%), never a range and never "not shown"', () => {
     const g = paceGraph(), original = shareRun.shareGateForOption;
-    const spy = vi.spyOn(shareRun, 'shareGateForOption').mockImplementation((graph, id) => id === 'status_quo'
-      ? { form: 'range', low: 0.249, high: 0.251, error_points: 3 } : original(graph, id));
+    const spy = vi.spyOn(shareRun, 'shareGateForOption').mockImplementation((graph, id, ...rest) => id === 'status_quo'
+      ? { form: 'point', error_points: 3, exact_point: 0.25 } : original(graph, id, ...rest));
     try {
       const out = withShareByDateChanceGate(result(), g, 'launch_share');
       const stored = { enrichment: withGoalChanceLicence(out, g, 'launch_share') };
-      expect(out.option_comparison.find((r: Rec) => r.option_id === 'status_quo').probability_of_goal).toBeUndefined();
-      expect(out.inference_warnings.some((w: Rec) => w.code === GOAL_CHANCE_RANGE)).toBe(false);
-      expect(out.inference_warnings.find((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION).message).not.toContain('shown as a range');
+      expect(out.inference_warnings?.some((w: Rec) => w.code === GOAL_CHANCE_RANGE) ?? false).toBe(false);
+      expect(JSON.stringify(out.inference_warnings ?? [])).not.toMatch(/is not shown|shown as a range/);
       expect(goalChanceRangeDisplayForAgent(stored, g)).toBeUndefined();
-      expect(goalChanceSideOf(stored, 'status_quo')).toEqual({ kind: 'withheld' });
-      expect(goalChanceWithheldForAgent(stored, g)?.say).not.toContain('shown as a range');
+      const licence = (stored.enrichment.inference_warnings as Rec[]).find((w) => w.code === GOAL_CHANCE_LICENSED)!;
+      expect(licence.pct_by_option.status_quo).toBe(25);
     } finally { spy.mockRestore(); }
   });
   it('actual PLoT call carries delta 1.0 and the persisted forecast remains unchanged', async () => {

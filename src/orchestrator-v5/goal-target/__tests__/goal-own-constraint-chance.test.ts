@@ -27,7 +27,7 @@ const ENGINE = (): Rec => fixture('ebd-paul-real-engine-response-6ec01e8.json');
 const GRAPH = (): Rec => fixture('ebd-paul-stored-graph-20261012.json');
 const GOAL = 'event_goal';
 const OPTIONS = ['event_option_1', 'event_option_2', 'event_option_3'];
-const withConstraint = (r: Rec, edit: (c: Rec) => Rec): Rec => ({ ...r, constraint_results: r.constraint_results.map(edit) });
+const withConstraint = (r: Rec, edit: (c: Rec) => Rec): Rec => ({ ...r, constraint_results: r.constraint_results.map(edit) }) as Rec;
 
 describe('DL (b1): the goal’s own constraint is the figure where PLoT gives no probability_of_goal at threshold 1', () => {
   it('precondition: the real engine sent no probability_of_goal, and its auto constraint sits on the goal at >= 1', () => {
@@ -45,7 +45,7 @@ describe('DL (b1): the goal’s own constraint is the figure where PLoT gives no
     expect(licence.withheld_option_ids).toBeUndefined();
     const read = goalOwnConstraintChanceRecords(r, g, GOAL, r.option_comparison);
     expect([...read.engineRead].sort()).toEqual(OPTIONS);
-    for (const rec of read.records) {
+    for (const rec of read.records as Rec[]) {
       expect(rec.probability_of_goal).toBe(rec.constraint_probabilities[GOAL_OWN_CONSTRAINT_ID]);
       expect(goalChancePrecisionOf(rec)).toMatchObject({ n_informative: 10000, n_met: Math.round(rec.probability_of_goal * 10000) });
     }
@@ -79,15 +79,15 @@ describe('DL (b1): the goal’s own constraint is the figure where PLoT gives no
 
   it('CONTRAST — one entry of the auto id that does not bind (a second, on another node) vetoes the read', () => {
     const r = ENGINE();
-    const two = { ...r, constraint_results: [...r.constraint_results, { ...r.constraint_results[0], node_id: 'event_team', option_id: 'event_option_2' }] };
+    const two: Rec = { ...r, constraint_results: [...r.constraint_results, { ...r.constraint_results[0], node_id: 'event_team', option_id: 'event_option_2' }] };
     expect(goalOwnConstraintChanceRecords(two, GRAPH(), GOAL, two.option_comparison).engineRead.size).toBe(0);
   });
 
   it('never over a CEE withhold: an option a goal-figures withhold names stays withheld; the others are read', () => {
-    const r = { ...ENGINE(), inference_warnings: [{ code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ['event_option_2'], message: 'x' }] };
+    const r: Rec = { ...ENGINE(), inference_warnings: [{ code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ['event_option_2'], message: 'x' }] };
     const read = goalOwnConstraintChanceRecords(r, GRAPH(), GOAL, r.option_comparison);
     expect([...read.engineRead].sort()).toEqual(['event_option_1', 'event_option_3']);
-    const runWide = { ...ENGINE(), inference_warnings: [{ code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', message: 'x' }] };
+    const runWide: Rec = { ...ENGINE(), inference_warnings: [{ code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', message: 'x' }] };
     expect(goalOwnConstraintChanceRecords(runWide, GRAPH(), GOAL, runWide.option_comparison).engineRead.size).toBe(0);
   });
 
@@ -106,7 +106,7 @@ describe('DL (b1): the goal’s own constraint is the figure where PLoT gives no
     const carried = { ...r, option_comparison: r.option_comparison.map((o: Rec) => ({ ...o, probability_of_goal: 0.5 })) };
     const read = goalOwnConstraintChanceRecords(carried, GRAPH(), GOAL, carried.option_comparison);
     expect(read.engineRead.size).toBe(0);
-    expect(read.records.map((x: Rec) => x.probability_of_goal)).toEqual([0.5, 0.5, 0.5]);
+    expect((read.records as Rec[]).map((x) => x.probability_of_goal)).toEqual([0.5, 0.5, 0.5]);
   });
 });
 
