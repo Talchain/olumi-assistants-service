@@ -736,7 +736,7 @@ describe('independent check r1 — item 6: provisional from EVERY Olumi input (a
 // ── RE-SCOPE 2 (R5-2; DL AMEND, AIE #94 6119326092 item 1): THREE provenance states — HUMAN only by positive attestation, AI
 // ORIGIN only for a recognised AI source, anything else UNVERIFIED: never counted as Olumi's, never read as the person's, and
 // never "zero estimates" — disclosed ONCE beside the result in the AIE's minimal existing-notes wording.
-const UNVERIFIED = 'This result uses inputs whose sources have not been verified.';
+const UNVERIFIED = 'Provisional: this result uses inputs whose sources have not been verified.';
 /** A read-only view of a licence record in assertions. */
 type Loose = Record<string, any>;
 const unverifiedNotes = (l: Rec | null): number => ((l?.notes as string[] | undefined) ?? []).filter((n) => n === UNVERIFIED).length;
@@ -1292,7 +1292,7 @@ describe('RE-SCOPE r1 (DL item 3): a SENT figure that is not the stored one is n
     const l = licenceFor(marketingRun(), g, sent)!;
     expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved',
       line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
-        + 'the figure the analysis used is not the one you stated.' });
+        + 'this analysis did not use every stated target as specified.' });
     expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
     expect(l.pct_by_option).toEqual({});
   });

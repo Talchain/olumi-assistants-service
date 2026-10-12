@@ -686,7 +686,7 @@ const NO_ESTIMATES: GoalChanceEstimates = { links: 0, values: 0, settingsByOptio
  * Said ONCE beside the result; never a count of Olumi's estimates, never "zero estimates". LABEL, DON'T WITHHOLD (DL 12 Oct):
  * the result it stands beside is shown with the provisional label — never withheld for this alone, never unlabelled.
  */
-export const UNVERIFIED_SOURCES_NOTE = 'This result uses inputs whose sources have not been verified.';
+export const UNVERIFIED_SOURCES_NOTE = 'Provisional: this result uses inputs whose sources have not been verified.';
 
 /** Whether the figures said for `said` options rest on any unverified input (shared values, or those options' own settings). */
 function unverifiedOn(e: GoalChanceEstimates, said: readonly string[]): boolean {

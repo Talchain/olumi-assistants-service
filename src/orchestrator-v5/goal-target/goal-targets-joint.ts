@@ -104,7 +104,7 @@ export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupp
   if (reason === 'figure_not_preserved') {
     const own = strictLost.length === 0 ? ''
       : `, and nor is the chance of ${listWords(strictLost)} on ${strictLost.length === 1 ? 'its' : 'their'} own`;
-    return `The chance of meeting ${all} together isn’t shown${own}: the figure the analysis used is not the one you stated.`;
+    return `The chance of meeting ${all} together isn’t shown${own}: this analysis did not use every stated target as specified.`;
   }
   if (reason === 'condition_not_named') return `The chance of meeting ${all} together isn’t shown: one of its conditions can’t be said in your units.`;
   if (reason === 'olumi_base') return `The chance of meeting ${all} together isn’t shown yet: it rests on Olumi’s own assumed starting value for a target, which you haven’t given.`;
