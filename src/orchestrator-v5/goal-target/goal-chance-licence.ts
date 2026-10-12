@@ -36,10 +36,11 @@ import {
   readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures, withholdStatusQuoIntervals } from '../../orchestrator/context/constraint-feasibility.js';
-import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
+import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
+import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
-import { readGoalRecord } from './goal-record.js';
+import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
@@ -50,7 +51,7 @@ import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCo
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import {
-  BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoMovedWords,
+  BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, periodEndWords, statusQuoAssumptionWords, statusQuoMovedWords,
   statusQuoProjectionWords, statusQuoRowWords,
   targetChanceWords, type GoalTargetBasis,
 } from './goal-target-basis.js';
@@ -369,6 +370,7 @@ export function goalChanceLicenceOf(
   if (goal === undefined || !targetSent(graph as Rec, goal, constraints)) return null;
   const basis: GoalTargetBasis | undefined = goal === undefined ? undefined : goalTargetBasisOf(goal);
   // ⛔ Ruling 12 / amendment 2: a change's "at three months" needs its effects stated at that month; never steady state.
+  // D3: where the basis holds they are NOT stated, the Run says why (`withholdForPeriodEndEffects`), never a silent gap.
   if ((changeFrame !== undefined && (basis === undefined || !basis.effects_at_period_end)) || basis?.open_question !== undefined) return null;
   // A change carries its direction in its sign; with no comparator held, the run's own sense is the bound ISL scored.
   const held = target.held ?? (changeFrame === undefined ? undefined
@@ -1433,6 +1435,59 @@ export function goalLevelIsOlumisEstimate(graph: unknown, goalId: unknown): bool
   const os = isRec(goal.observed_state) ? goal.observed_state : undefined;
   const holds = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v);
   return os !== undefined && (holds(os.value) || holds(os.raw_value)) && inputOriginOf(os) === 'ai';
+}
+
+/**
+ * ⭐ D3 (AIE #94 6128697025; DL 12 Oct, recovery Batch D): ruling 12 / amendment 2 withholds a change target's chance when its
+ * validated basis holds that the effects are NOT stated at the period's end (`effects_at_period_end: false`). The licence
+ * returns null, and the Run said nothing: run 3's hiring options showed no figure and no reason. The case read here, from the
+ * same basis the licence reads: a change target, its basis held with no open question, saying the effects are not in place
+ * by then. The protected field is never written and no chance is computed here.
+ */
+export function periodEndEffectsUnstatedOf(graph: unknown, goalId: unknown): { readonly record: GoalRecord; readonly basis: GoalTargetBasis } | undefined {
+  // The goal through the ONE record (S5): a stated target, stated as a change.
+  const record = typeof goalId === 'string' ? readGoalRecord(graph, goalId) : null;
+  const frame = record?.target?.frame;
+  if (record === null || record.target?.raw === undefined || (frame !== 'change_abs' && frame !== 'change_rel')) return undefined;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const basis = goal === undefined ? undefined : goalTargetBasisOf(goal);
+  return basis !== undefined && basis.effects_at_period_end === false && basis.open_question === undefined ? { record, basis } : undefined;
+}
+
+/**
+ * The AIE's sentence, exactly (#94 6128697025). {target} is the stored target as the readiness words say a change
+ * (`sayGoalChange`: "up at least 10% from today"); {period} is the basis' month. No next step: sizing a link does not clear it.
+ */
+export function periodEndEffectsWords(record: GoalRecord, basis: Pick<GoalTargetBasis, 'reference' | 'period_months'>): string {
+  const label = record.label.trim() !== '' && !/[\r\n]/.test(record.label) ? record.label.trim() : undefined;
+  const target = record.target;
+  const change = target?.raw === undefined ? undefined
+    : sayGoalChange(target.frame, target.raw, target.unit, (v, u) => sayFigure(v, u ?? ''), target.comparator);
+  const what = `your target${label === undefined ? '' : ` for ‘${label}’`}${change === undefined ? '' : ` (${change})`}`;
+  return `The chance of reaching ${what} by ${periodEndWords(basis)} isn’t shown: the model has not established how much of these effects would be in place by then.`;
+}
+
+/**
+ * The Run says why ({@link periodEndEffectsUnstatedOf}) for each scored option, through the ONE goal-figure seam; the outcome
+ * and ordering stay. Carrying on as now changes nothing, so its own row is not given this reason.
+ */
+export function withholdForPeriodEndEffects<E>(envelope: E, graph: unknown, goalId: unknown): E {
+  if (!isRec(envelope)) return envelope;
+  const held = periodEndEffectsUnstatedOf(graph, goalId);
+  if (held === undefined) return envelope;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const baseline = new Set(nodes.filter((n) => n.kind === 'option' && n.is_baseline === true).map((n) => n.id));
+  const scored = [...new Set(readOptionResultSources(envelope).flat().flatMap((r) => {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    return id === undefined || baseline.has(id) ? [] : [id];
+  }))];
+  if (scored.length === 0) return envelope;
+  // `detail.reason` is CEE-local (as `target_reading_open`); the UI renders `message` for this code.
+  return withholdOptionGoalFigures(envelope, new Set(scored), {
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: periodEndEffectsWords(held.record, held.basis),
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: 'effects_at_period_end_unstated' },
+  }, { keepOutcome: true, keepOrdering: true });
 }
 
 /** The refusal's words: why, and the next step (DL 12 Oct: "confirm or give today's level"). AIE text check. */
