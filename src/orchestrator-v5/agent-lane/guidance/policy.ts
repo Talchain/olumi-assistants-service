@@ -30,7 +30,7 @@ export const POLICY = {
       "Otherwise by row order: RC-WIDEN, RC-WHAT-CHANGES, RC-STRENGTHEN-ITEM, RC-PREMORTEM."
     ],
     "method_turn_rule": "On a 'method' turn, offer no other method. Offer only that method's own follow-up actions.",
-    "cooldown_default": "A row (or item) with guidance status pressed, dismissed or completed is not offered while its current state_key_hash equals the recorded one. user.explicit_request bypasses this.",
+    "cooldown_default": "A row (or item) with guidance status offered, pressed, dismissed or completed is not offered while its current state_key_hash equals the recorded one: a row is said once per state (E6, DL 12 Oct, Paul's test). user.explicit_request bypasses this.",
     "state_key_persistence": "On disk (coaching_state, CEE #2459 agent_guidance envelope) an entry is {status, state_key_hash, turn_id}. state_key_hash = computeResponseHash(fields) (CEE utils/response-hash.ts; identical to #2459 stateKeyHash): sha256(JSON.stringify(canonical(fields))) first 12 hex, canonical = object keys sorted, ARRAY ORDER KEPT. Never persist raw values (coaching_state is content-free).",
     "cold_reload": "Guidance must round-trip through coaching_state: a pressed or dismissed row stays hidden after a cold reload with an unchanged state_key (#2388 two-load lesson).",
     "cooldown_scope": "Variant rows (RC-WIDEN): pick the first variant that holds, THEN apply cooldown to that pick; a row in cooldown does NOT fall through to its later variants (case A-WIDEN-SAME-KEY-HIDDEN: W1 dismissed, W2 also holds, RC-WIDEN stays hidden). Item rows (RC-STRENGTHEN-ITEM): cooldown is per item, so a cooled item falls through to the next candidate in pick order, and across variants (S1, then S2, S3L, S3V).",

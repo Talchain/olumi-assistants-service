@@ -24,11 +24,15 @@ describe('Context guidance history consumer', () => {
       && next?.slot1?.state_key_hash === prior.state_key_hash, 'the settled row must not be reoffered unchanged').toBe(false);
   });
 
-  it('retains an offered row: offered is not a settled status in the existing policy', () => {
+  it('E6 (DL 12 Oct, Paul\'s test): an offered row is said once: the same state key hides it; CONTRAST: a changed key brings it back', () => {
     const prior = turnGuidanceFor(input())!;
     const row = prior.slot1!;
-    expect(turnGuidanceFor(withHistory({ [entryKey(row.policy_id, row.item)]: {
+    const shown = turnGuidanceFor(withHistory({ [entryKey(row.policy_id, row.item)]: {
       status: 'offered', state_key_hash: row.state_key_hash, turn_id: 'prior-turn',
+    } }));
+    expect(shown?.slot1?.policy_id === row.policy_id && shown?.slot1?.item === row.item, JSON.stringify(shown)).toBe(false);
+    expect(turnGuidanceFor(withHistory({ [entryKey(row.policy_id, row.item)]: {
+      status: 'offered', state_key_hash: 'a-different-state-key', turn_id: 'prior-turn',
     } }))).toEqual(prior);
   });
 
