@@ -3561,8 +3561,13 @@ export function createAgentCapabilities(
     }
     const found = await unreviewedDraftGate(ctx, before, [v.goal_turn_id]);
     if (found.length > 0) return notApplied(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'replaced'));
+    // The WHOLE approved graph (every top-level member the candidate carries: options, goal_constraints and all), CAS-gated
+    // on both of the base's hashes, like the sibling registers (`frame-write-is-cas-gated.test.ts`).
     const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
-      graph: v.candidate, expected_graph_identity_hash: v.base_identity, operation_id: v.operation_id,
+      graph: { ...(v.candidate as Record<string, unknown>) },
+      expected_graph_hash: before.graph_hash,
+      expected_graph_identity_hash: v.base_identity,
+      operation_id: v.operation_id,
     });
     if (reg.status !== 200) {
       const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');

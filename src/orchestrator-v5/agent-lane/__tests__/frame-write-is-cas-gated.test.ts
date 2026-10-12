@@ -272,7 +272,10 @@ describe('every register call in this module asserts a base', () => {
   it('⭐ and there are exactly FOUR of them — a fifth must be judged, not inherited', () => {
     // Bounds the claim above: it cannot pass by finding fewer calls than exist. The compound's value write was the third;
     // it now rides the one port commit (Canonical #70 5849037691), so it is no whole-graph write at all.
-    // JUDGED, the third: B's revised-draft replacement (`applyReplaceDraft`), CAS-gated on both hashes and spread in 857c87f5.
+    // ⭐ JUDGED THIRD (B restated goal, DL ruling (B); AIE 0452): `applyReplaceDraft` registers the revised draft the user
+    // pressed. It sends the WHOLE approved candidate (spread), `expected_graph_hash` AND `expected_graph_identity_hash` of
+    // the base the card was prepared on, and an operation id of that base and those bytes; the read-back must then carry
+    // the identity the registration acknowledged (`restated-goal-revised-draft.test.ts`).
     // JUDGED, the fourth: E5's hiring times (`applyHiringTimes`, DL 12 Oct): the whole postimage of THIS read, spread, with
     // `expected_graph_hash` AND `expected_graph_identity_hash` of that read, after its own field-scoped precondition.
     expect(SRC.split('graph/register`, {').length - 1).toBe(4);
