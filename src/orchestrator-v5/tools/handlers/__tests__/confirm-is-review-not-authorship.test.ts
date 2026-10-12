@@ -171,14 +171,21 @@ function expectReviewed(graph: unknown, band?: string): void {
   else expect(review!.band).toBe(band);
 }
 
-/** Batch A ruling 2: review preserves sizing, authorship, flags and spread byte-for-byte. */
+/**
+ * Everything on the target edge except the review record, (for a band) the std and — L4 — a placeholder's magnitude must
+ * be byte-identical. ⭐ L4 AMENDMENT (DL ruling #85 5929790081 on 52f8cd's trace 5929778726): a review on a PLACEHOLDER
+ * sizes it — `olumi_placeholder` becomes `olumi_estimate` (Olumi's band, now accepted). Authorship stays R11's: `source`,
+ * `reasoning`, `provenance_display` and the `defaulted` flags are kept, and the licence rows below still read NO licence.
+ */
 function expectKeptExactly(before: GraphV3T, after: unknown, opts: { bandStd?: number } = {}): void {
   const b = structuredClone(edgeOf(before));
   const a = structuredClone(edgeOf(after));
   const ap = a.provenance as Record<string, unknown>;
   delete ap.reviewed_by_user;
-  // Batch A ruling 2: compare the original magnitude without normalising away a forbidden relabel.
-  expect(ap.magnitude).toBe((b.provenance as Record<string, unknown> | undefined)?.magnitude);
+  if ((b.provenance as Record<string, unknown> | undefined)?.magnitude === 'olumi_placeholder') {
+    expect(ap.magnitude, 'L4: an approved placeholder is sized — Olumi\u2019s estimate, accepted').toBe('olumi_estimate');
+    ap.magnitude = 'olumi_placeholder';
+  }
   if (opts.bandStd !== undefined) {
     expect((a.strength as { std: number }).std).toBe(opts.bandStd);
     (a.strength as { std: number }).std = (b.strength as { std: number }).std;
@@ -349,20 +356,17 @@ describe('R11 — an in-band pick is review, not authorship', () => {
     expect(String(approved.follow_up)).not.toMatch(/your (?:own )?estimate|you set/i);
   });
 
-  it('Batch A: reviewing a non-user projected placeholder keeps its magnitude and carrier', async () => {
+  it('CONTROL (R7): reviewing a non-user projected placeholder permits only the canonical magnitude/carrier transition', async () => {
     const before = graphWith({ strength: { mean: 0.5, std: 0.125 },
       provenance: { source: 'cee_hypothesis', mean_projected: true } as Edge['provenance'] });
     const result = await canvas(before, eventFor({ band: 'strong' }));
     expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
     if (result.kind !== 'mutated') throw new Error('non-user projection was not reviewed');
     expect(edgeOf(result.mutatedGraph).strength).toStrictEqual(edgeOf(before).strength);
-    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
-    expect(provenanceOf(result.mutatedGraph)).toMatchObject({ source: 'cee_hypothesis', mean_projected: true });
-    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
-    expect(provenanceOf(result.mutatedGraph)).not.toHaveProperty('magnitude');
+    expect(provenanceOf(result.mutatedGraph)).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    expect(provenanceOf(result.mutatedGraph)).not.toHaveProperty('mean_projected');
     expectReviewed(result.mutatedGraph, 'strong');
-    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
-    expect(linkSizing(edgeOf(result.mutatedGraph))).toBe('placeholder');
+    expect(linkSizing(edgeOf(result.mutatedGraph))).toBe('olumi_accepted');
     expect(earnsAuthorshipCredit(edgeStrengthProvenance(edgeOf(result.mutatedGraph)))).toBe(false);
     expect(isProvenanceOnlyEdgeConfirmation({ before, after: result.mutatedGraph, from: FROM, to: TO, statedBand: 'strong' })).toBe(true);
   });
@@ -512,8 +516,7 @@ describe('R11 — the confirm guard (isProvenanceOnlyEdgeConfirmation)', () => {
     const promoted = reviewed(before);
     provenanceOf(promoted).magnitude = 'olumi_estimate';
     delete provenanceOf(promoted).mean_projected;
-    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
-    expect(guard(before, promoted), 'Batch A: confirmation cannot promote a placeholder').toBe(false);
+    expect(guard(before, promoted), 'CONTROL: exactly the canonical promotion is permitted').toBe(true);
     for (const mutate of [
       (g: GraphV3T) => { g.edges.find(e => e.from === FROM && e.to === TO)!.strength.mean = 0.55; },
       (g: GraphV3T) => { g.edges.find(e => e.from === FROM && e.to === TO)!.strength.std = 0.2; },
