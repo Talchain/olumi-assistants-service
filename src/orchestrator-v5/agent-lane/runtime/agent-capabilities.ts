@@ -2080,6 +2080,21 @@ function laterSaveConflict(error: unknown): boolean {
   return response.status === 409 && ['revision_conflict', 'GRAPH_STALE'].includes(String(response.json?.code ?? response.json?.details?.code));
 }
 
+/**
+ * ⭐ ONE COUNT FOR A MIXED LINK SET, PREVIEW AND RECEIPT ALIKE (Batch A live (b) BLOCKING; AIE text contract #94
+ * 6115788987): strengths sized, changes to links that stay unsized, and reviews are counted apart, never "these 6 link
+ * strengths" when two of the six were reviews. The preview counts the outcome the writer is predicted to store; the
+ * receipt counts the outcome it stored.
+ */
+function mixedLinkSetHeading(strengths: number, unsizedChanges: number, reviews: number): string {
+  const counted = [
+    ...(strengths > 0 ? [`${strengths} ${strengths === 1 ? 'link strength' : 'link strengths'}`] : []),
+    ...(unsizedChanges > 0 ? [`${unsizedChanges} ${unsizedChanges === 1 ? 'change to an unsized link' : 'changes to unsized links'}`] : []),
+    ...(reviews > 0 ? [`${reviews} ${reviews === 1 ? 'review' : 'reviews'}`] : []),
+  ];
+  return counted.length === 1 ? counted[0]! : `${counted.slice(0, -1).join(', ')} and ${counted.at(-1)!}`;
+}
+
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
   proposals: ProposalStore,
@@ -3537,35 +3552,27 @@ export function createAgentCapabilities(
      * unsized, and reviews are counted apart, each from the link as STORED; reviewed links that are still unsized say so,
      * with their own values unchanged (never the model's: other links were sized), then A's next step once.
      */
-    const sizedCount = sent.filter((l) => storedSizing(l) !== 'placeholder').length;
-    const changedUnsized = sent.filter((l) => l.intent === 'set' && storedSizing(l) === 'placeholder');
-    const reviewedUnsized = sent.filter((l) => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder');
-    const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
-    const mixedHeading = [
-      ...(sizedCount > 0 ? [`${sizedCount} ${plural(sizedCount, 'link strength', 'link strengths')}`] : []),
-      ...(changedUnsized.length > 0 ? [`${plural(changedUnsized.length, 'the change', 'the changes')} to ${changedUnsized.length} ${plural(changedUnsized.length, 'link', 'links')}`] : []),
-      ...(reviewedUnsized.length > 0 ? [`${plural(reviewedUnsized.length, 'your review', 'your reviews')} of ${reviewedUnsized.length} ${plural(reviewedUnsized.length, 'link', 'links')}`] : []),
-    ];
-    const listed = (ls: readonly { from: string; to: string }[]): string => {
-      const named = ls.map((l) => `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)}`);
-      return named.length === 1 ? named[0]! : `${named.slice(0, -1).join(', ')} and ${named.at(-1)!}`;
-    };
-    const mixed = !reviewsOnly && !placeholderChangesOnly && changedUnsized.length + reviewedUnsized.length > 0;
-    const unsizedDisclosure = !mixed ? ''
-      : (reviewedUnsized.length > 0 ? ` ${plural(reviewedUnsized.length, 'Your review', 'Your reviews')} of ${listed(reviewedUnsized)} ${plural(reviewedUnsized.length, 'is', 'are')} recorded.`
-        + ` ${plural(reviewedUnsized.length, 'It is', 'They are')} not sized yet, so ${plural(reviewedUnsized.length, 'its value is', 'their values are')} unchanged.` : '')
+    const reviewedUnsizedAt = (l: (typeof sent)[number]): boolean => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder';
+    const changedUnsized = sent.filter((l) => l.intent === 'set' && storedSizing(l) === 'placeholder').length;
+    const reviewedUnsized = sent.filter(reviewedUnsizedAt);
+    const mixed = !reviewsOnly && !placeholderChangesOnly && changedUnsized + reviewedUnsized.length > 0;
+    // AIE text contract (#94 6115788987): each review-only link by its labels, "unchanged" scoped to that link, and the
+    // supported next action once. Its review is said in its own sentence, so the list keeps the links that changed.
+    const mixedTail = !mixed ? ''
+      : reviewedUnsized.map((l) => ` ${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)}: Review recorded; this link is still unsized. Its values are unchanged.`).join('')
         + ' Give a figure, or ask Olumi to estimate it.';
+    const accepts = (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
+      + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : '');
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
-      follow_up: `Recorded ${reviewsOnly ? (sent.length === 1 ? 'your review of this link' : `your reviews of these ${sent.length} links`)
+      follow_up: mixed
+        ? `Recorded ${mixedLinkSetHeading(sent.length - changedUnsized - reviewedUnsized.length, changedUnsized, reviewedUnsized.length)}. `
+          + `${parts.filter((_, i) => !reviewedUnsizedAt(sent[i]!)).join('; ')}.${accepts}${mixedTail}`
+        : `Recorded ${reviewsOnly ? (sent.length === 1 ? 'your review of this link' : `your reviews of these ${sent.length} links`)
         : placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
-        : mixed ? `${mixedHeading.slice(0, -1).join(', ')} and ${mixedHeading.at(-1)!}`
-        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
-        + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
-        + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : '')
-        + unsizedDisclosure,
+        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.${accepts}`,
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
   };
@@ -4568,6 +4575,9 @@ export function createAgentCapabilities(
         public_label: `${reviewOnlyLinks.length === shown.length
           ? `Review ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
           : unsizedChanges.length === shown.length ? `Change ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+          // A mixed set is counted as the receipt will count it (`mixedLinkSetHeading`), never as N link strengths.
+          : unsizedChanges.length + reviewOnlyLinks.length > 0
+            ? `Record ${mixedLinkSetHeading(shown.length - unsizedChanges.length - reviewOnlyLinks.length, unsizedChanges.length, reviewOnlyLinks.length)}`
           : `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}`}: `
           + shown.map((x) => reviewKeepsPlaceholder(x)
             ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet (kept as it is)`
