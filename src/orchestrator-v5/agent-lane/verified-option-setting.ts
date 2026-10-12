@@ -679,6 +679,32 @@ export function briefAttributedLevelRange(factor: Factor, brief: string | undefi
   return undefined;
 }
 
+/**
+ * ⭐ Recovery Batch B (DL 12 Oct 13:3xZ): the GOAL's stated current level, through V2's verification, positive
+ * attestation only and no new parser. Admission wrote it as `brief_extraction` with no extractionType and no user-text
+ * check, so C reads Paul's typed figure as unverified. Verified when BOTH hold:
+ *   - ORIGIN: a direct sentence of the brief names the goal and writes this figure in the goal's typed frame, not as an
+ *     aim or bound (`sentencesWritingFigure`, the origin rule's reader): "Total weekly support capacity is defined as the
+ *     existing 80 tickets per week …";
+ *   - ROLE: the same figure, in the goal's typed unit, is V2's VERIFIED current level of a factor of this model
+ *     (`verifiedFactorLevel`): "Our existing team resolves 80 tickets per week."
+ * Anything else stays exactly as written before. The typed-unit equality is defence in depth: V2's neighbour rule
+ * already withholds a factor whose figure the goal's sentence writes as another quantity.
+ */
+export function verifiedGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
+  try {
+    const goal = model.goal; const value = goal.baseline_value;
+    if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+    const unit = readUnitParts(goal.unit);
+    if (unit === null) return false;
+    if (sentencesWritingFigure({ label: goal.metric, baseline_value: value, unit: goal.unit } as Factor, brief).length === 0) return false;
+    return model.factors.some(f => f.baseline_value === value && JSON.stringify(readUnitParts(f.unit)) === JSON.stringify(unit)
+      && verifiedFactorLevel(model, f, brief));
+  } catch {
+    return false;
+  }
+}
+
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
 export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   try {
