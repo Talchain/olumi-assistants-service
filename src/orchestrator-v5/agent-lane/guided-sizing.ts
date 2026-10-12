@@ -231,6 +231,8 @@ export function guidedSizingForRun(result: unknown, graph: unknown, wordsOnly = 
 }
 
 const PRESS_PREFIX = 'agent-size-link:';
+/** The existing size ask in the user's voice (this press's words); the relabelled S1 strengthen press reuses it (R3-3). */
+export const linkSizeQuestion = (fromLabel: string, toLabel: string): string => `How strongly does ‘${fromLabel}’ affect ‘${toLabel}’?`;
 const NONCONVERTING_REASON = " Olumi has it as a band, which can't be turned into your goal's units.";
 /** DGAI 0.81.0's strict ActionSchema accepts no parameters. The hook alone carries inspector data. */
 export function guidedSizingWireAction(action: SuggestedAction): SuggestedAction {
@@ -282,7 +284,7 @@ export function guidedSizingActions(sizing: GuidedSizingDraft | undefined, graph
     if (l.nonconverting === true && unit === undefined) return [];
     const label = l.nonconverting === true
       ? `How much does ‘${l.from_label}’ change ‘${l.to_label}’, in ${unit}?${NONCONVERTING_REASON}`
-      : `How strongly does ‘${l.from_label}’ affect ‘${l.to_label}’?`;
+      : linkSizeQuestion(l.from_label, l.to_label);
     const pressId = `${PRESS_PREFIX}${encodeURIComponent(l.from)}:${encodeURIComponent(l.to)}`;
     // The existing chip discriminator records the directed pair in every completed press's request hash.
     // Resolve against the same unique held edge above; a matching display label cannot close another edge.

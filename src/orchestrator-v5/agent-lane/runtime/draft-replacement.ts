@@ -37,6 +37,8 @@ const recs = (v: unknown): Rec[] => (Array.isArray(v) ? v.map(rec).filter((x): x
 const named = (n: Rec | undefined, fallback: string): string => (typeof n?.label === 'string' && n.label.trim() !== '' ? `‘${n.label.trim()}’` : fallback);
 
 /** The stamps the construction itself writes (`admit-model.ts`, `stated-by-user.ts`): Olumi's, or the brief's own words. */
+// DRAFT-TIME membership, not authorship (DL ruling (i), 12 Oct): these sets ask whether a figure entered WITH the draft;
+// provenanceOf answers whose, so they stay here, as the listed draft-time read at the link gate below does.
 const DRAFT_VALUE_SOURCES = new Set(['brief_extraction', 'cee_inference', 'inferred', 'cee_repair']);
 const DRAFT_LINK_SOURCES = new Set(['brief_extraction', 'cee_hypothesis', 'domain_knowledge']);
 const DRAFT_LEVEL_SOURCES = new Set(['brief_extraction', 'cee_hypothesis']);

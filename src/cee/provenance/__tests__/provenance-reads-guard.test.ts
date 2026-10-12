@@ -16,6 +16,8 @@
  *                        tool parameter's `source`, a goal threshold's `threshold_source`);
  *   · ladder-class     — compares the authority's own ladder answer (`user_stated` / `user_ratified`), not a stamp;
  *   · hard-limit       — `runtime/build-model.ts`, which this batch may never touch (listed for the DL to rule on).
+ *   · draft-time       — asks WHEN a figure entered (in the draft, or after it), not WHOSE it is; the authority answers
+ *                        whose (DL ruling (i), 12 Oct, Batch B × C merge).
  * Shrink-only: a count may only fall, and when it does the entry is lowered in the same change.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -23,7 +25,7 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-type Category = 'writer' | 'writer-readback' | 'pipeline' | 'different-field' | 'ladder-class' | 'hard-limit' | 'authorship, deferred';
+type Category = 'writer' | 'writer-readback' | 'pipeline' | 'different-field' | 'ladder-class' | 'hard-limit' | 'draft-time' | 'authorship, deferred';
 interface Entry {
   readonly categories: Partial<Record<Category, number>>;
   /** What the remaining reads feed. 'neither' = not what the person/Agent is told and no licence/withhold/refuse/label. */
@@ -66,6 +68,8 @@ const RATCHET: Readonly<Record<string, Entry>> = {
     note: '1726: a unit reading; the rest verify a committed write carries its own writer’s stamp' },
   'src/orchestrator-v5/agent-lane/runtime/build-model.ts': { categories: { 'hard-limit': 2, 'different-field': 1 }, feeds: 'decision',
     note: "HARD LIMIT (never touched by this batch): 1621/2375 read magnitude 'user_stated' (a narrower question than linkProvenanceOf: always its human); 2195 a unit reading" },
+  'src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts': { categories: { 'draft-time': 1 }, feeds: 'decision',
+    note: "101 (DL ruling (i), 12 Oct): asks whether a size was set AFTER the draft; provenanceOf answers whose, and routing it would refuse lossless revised drafts (parity rows pin it: provenance-routing-parity.test.ts)" },
   'src/orchestrator-v5/agent-lane/runtime/widen-draft.ts': { categories: { 'writer-readback': 1 }, feeds: 'neither', note: 'verifies the widen writer’s own estimate stamp' },
   'src/orchestrator-v5/agent-lane/stated-by-user.ts': { categories: { writer: 1 }, feeds: 'neither', note: 'withdraws brief stamps the brief does not support' },
   'src/orchestrator-v5/goal-target/goal-chance-driver.ts': { categories: { 'different-field': 1 }, feeds: 'neither', note: "ISL spread_source" },
@@ -139,6 +143,7 @@ describe('ONE PROVENANCE AUTHORITY — no reader outside the authority interpret
 
   it('only the hard-limit file may feed a decision, and only through its hard-limit reads', () => {
     const feeding = Object.entries(RATCHET).filter(([, e]) => e.feeds !== 'neither').map(([f]) => f);
-    expect(feeding).toEqual(['src/orchestrator-v5/agent-lane/runtime/build-model.ts']);
+    // DL ruling (i), 12 Oct: draft-replacement's ONE draft-time read (when, not whose) gates G1's refusal; named, not a pattern.
+    expect(feeding).toEqual(['src/orchestrator-v5/agent-lane/runtime/build-model.ts', 'src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts']);
   });
 });

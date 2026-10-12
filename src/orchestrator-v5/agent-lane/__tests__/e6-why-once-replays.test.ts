@@ -18,6 +18,7 @@ import marketing from './fixtures/marketing-17c98e69.json';
 import { eligibleInterventionFor, selectTurnGuidanceShown } from '../turn-context/guidance-wire.js';
 import { guidanceHistoryOf, guidanceOnAnswer, thinDraftShownWire, type AnswerGuidance } from '../turn-context/guidance-history.js';
 import { composeReplyShape } from '../reply/compose-reply.js';
+import { INTERVENTION_WHY_LABEL } from '../reply/eligible-intervention-reply.js';
 import { entryKey } from '../guidance/select.js';
 import { thinDraftOffer } from '../method-turn/widen-turn.js';
 
@@ -25,7 +26,6 @@ type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[
 type Kind = 'construction' | 'turn' | 'run' | 'edit' | 'press_strengthen' | string;
 type Reply = { turn: number; graph: Graph; policy?: string; variant?: string; item?: string; key?: string; why: number; action: boolean };
 const STRENGTHEN = 'RC-STRENGTHEN-ITEM';
-const WHY = '<summary>Why?</summary>';
 const REPLY = 'Here is what the model shows so far.';
 
 /** One reply per turn, as the route builds it: select on the readback, compose the Why? and action, record the answer. */
@@ -47,7 +47,8 @@ function replay(turns: readonly { kind: Kind; graph: Graph }[], history: AnswerG
         interventionActionLabel: row?.primary_action.label, interventionWhySaid: shown.whySaid }).text;
       if (row?.policy_id === STRENGTHEN) held = row.item;
       reply = { ...reply, policy: row?.policy_id, variant: row?.variant, item: row?.item, key: row?.state_key_hash,
-        why: text.split(WHY).length - 1, action: row !== undefined && text.includes(row.primary_action.label) };
+        // R3-1 (staging 9bac9729): the Why? is a plain final paragraph, the label and this intervention's own words, byte for byte.
+        why: intervention === undefined ? 0 : text.split(`${INTERVENTION_WHY_LABEL} ${intervention.why}`).length - 1, action: row !== undefined && text.includes(row.primary_action.label) };
       answer = guidanceOnAnswer(shown.wire, state);
     }
     if (answer !== undefined) history.unshift(answer);
