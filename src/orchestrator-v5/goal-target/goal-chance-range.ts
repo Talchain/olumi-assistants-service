@@ -210,6 +210,8 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
   }
   if (withheld.size === 0) return inputScopedEnvelope;
   // EBD E2 (AIE 6122738619): a range Olumi assumed from the user's single forecast is attributed as that, never as their figures.
+  // E5 combine: hiring times may now be the user's (E5 r2), so they are "the modelled hiring times", never all Olumi's; the hires'
+  // figure is ADDITIONAL progress, never a "pace" (AIE 6122738619: the same meaning as the option label).
   const assumed = olumiAssumedTeamRange(graph);
   let out = inputScopedEnvelope;
   for (const shownAsRange of [false, true]) for (const usesAddedCapacity of [false, true]) {
@@ -219,8 +221,8 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
       code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ids,
       message: 'Not shown as a single figure. The approximation of '
         + (assumed !== null
-          ? `${olumiAssumedRangeAttribution(assumed)}${usesAddedCapacity ? " together with Olumi's hiring-time range and pace estimate" : ''}`
-          : usesAddedCapacity ? "your team's time together with Olumi's hiring-time range and pace estimate"
+          ? `${olumiAssumedRangeAttribution(assumed)}${usesAddedCapacity ? " together with the modelled hiring times and Olumi’s estimate of the additional progress from the hires" : ''}`
+          : usesAddedCapacity ? "your team's time together with the modelled hiring times and Olumi’s estimate of the additional progress from the hires"
           : "your team's stated time or pace range")
         + ' does not support one figure here, '
         + (shownAsRange ? 'so this chance is shown as a range.' : 'so this chance is not shown.'),

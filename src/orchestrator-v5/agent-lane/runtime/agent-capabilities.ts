@@ -165,11 +165,8 @@ const NOT_A_FACTOR_NOTE =
   'NOT in this proposal. Tell the user plainly, before they approve, that each was left out and why; describe its ' +
   'effect through the factors it acts on instead. Never present the starting point as complete while any is listed here.';
 
-/**
- * E5: the hiring-times op. Its member of the operation union is the EBD builder's one-writer edit to `proposal.ts` (DL,
- * 12 Oct), landing with `record.ts`'s exhaustive entry; until then the literal is cast here, never a second union.
- */
-const SET_HIRING_TIMES = 'set_hiring_times' as string as StructuredProposal['operations'][number]['op'];
+/** E5: the hiring-times op (its union member and `record.ts` entry are EBD's one-writer edits to `proposal.ts`; DL, 12 Oct). */
+const SET_HIRING_TIMES: StructuredProposal['operations'][number]['op'] = 'set_hiring_times';
 /** E5: the applied hiring-times card's follow-up (DL ACK of SYS1-E5-STRINGS §3 pending). */
 const HIRING_TIMES_APPLIED = "These hiring assumptions are saved, with your inputs and Olumi's estimates distinguished. Run the analysis so it uses them; do not state a chance before it returns.";
 
@@ -6415,9 +6412,10 @@ export function createAgentCapabilities(
         current_graph_identity_hash: before.graph_hash,
         typed_approval_of: ctx.typed_approval_of,
         // EBD: a team-time card is stale only when what it read changed (hiring times landing never stale it).
-        // TODO(EBD×E5 combine, DL): `|| (op set_hiring_times && hiringTimesStillApply(value, before.raw))` from SYS1's
-        // goal-target/hiring-times.ts; skipped row "E5 combine" in ebd-input-loop.test.ts goes live with it.
-        scoped_precondition_holds: (p) => teamTimeReadHolds(p, before.raw),
+        // E5: likewise a hiring-times card, while its own parts, carriers and deadline stand (the team time landing never stales it).
+        scoped_precondition_holds: (p) => teamTimeReadHolds(p, before.raw)
+          || (p.operations.length === 1 && p.operations[0]!.op === SET_HIRING_TIMES
+            && hiringTimesStillApply(p.operations[0]!.value as ApprovedHiringTimes, before.raw)),
       });
       if (decision.status === 'already_applied') {
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so

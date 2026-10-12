@@ -339,7 +339,8 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
       expect(l.chance, l.chance).not.toMatch(/your 3\.5|most likely|which Olumi widened/);
     }
     for (const id of ['event_option_1', 'event_option_2']) {
-      expect(lines.find(l => l.option_id === id)!.chance).toContain("Olumi's estimates of hiring time (2–4 months)");
+      // E5 combine: the AIE 6122738619 words (the hires' additional progress), after the team's attribution.
+      expect(lines.find(l => l.option_id === id)!.chance).toContain("Olumi’s estimates of hiring time (2–4 months) and of the additional progress from the hires");
     }
     expect(providerCalls.filter(c => c !== 'agent' && c !== 'drafter' && c !== 'widening' && c !== 'brief_spans')).toEqual([]);
   });

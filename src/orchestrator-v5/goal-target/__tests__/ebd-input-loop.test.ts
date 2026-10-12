@@ -18,10 +18,12 @@ import { readStatedDeadline } from '../deadline-date.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { buildModelFromBrief, constructionOperationId, type CallStructuredModel } from '../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { applyTeamShareEdit, bindTeamTimeQuote, teamTimeCard, teamTimesInQuote, widenedTeamTime, type ApprovedTeamTime } from '../team-share-write.js';
-import { shareChanceRunBlock } from '../share-by-date-run.js';
+import { shareChanceRunBlock, sharePartsForOption } from '../share-by-date-run.js';
 import { withShareByDateChanceGate } from '../goal-chance-range.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import type { SessionTurnWrite } from '../../session/store.js';
@@ -245,10 +247,19 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
       if (out.kind !== 'committed') return { status: 'unconfirmed' };
       return { status: 'committed', graph_hash: out.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
     };
-    const dispatch: InternalDispatch = async path => {
+    const dispatch: InternalDispatch = async (path, body) => {
       if (path.endsWith('/versions')) return { status: 200, json: { versions: [] } };
+      if (path.endsWith('/graph/register')) {
+        // E5's door (SYS1): the register route's compare-and-set on both hashes, then its identity-preserving ingress.
+        const b = body as Rec, now = graph();
+        if (b.expected_graph_hash !== computeAnalysisAffectingGraphHash(now as never)
+          || b.expected_graph_identity_hash !== computeGraphIdentityHash(now as never)!.value) return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
+        json = JSON.stringify(assignEntityRefs(projectGraphForPersistence(GraphStateIngressSchema.parse(b.graph) as never), { nodes: [], edges: [] }).graph);
+        return { status: 200, json: { registered: true, model_version: { version_number: 3, version_id: 'v-ebd-e5', mutation_id: 'm-ebd-e5' } } };
+      }
       if (!path.endsWith('/graph')) throw new Error(`Unexpected dispatch ${path}`);
-      return { status: 200, json: { graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never), brief_text: BRIEF } };
+      return { status: 200, json: { graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never),
+        graph_identity_hash: computeGraphIdentityHash(graph() as never), brief_text: BRIEF } };
     };
     const proposals = new ProposalStore();
     return { graph, rows, proposals, replace: (g: Rec) => { json = JSON.stringify(g); },
@@ -308,9 +319,31 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     const a: ApprovedTeamTime = { goal_id: part.goal.id, team_id: part.team.id, deadline: '2027-04-12', reference_date: '2026-10-12', low_months: 6, high_months: 9 };
     expect(applyTeamShareEdit(hiringTimesLand(g), a, computeAnalysisAffectingGraphHash(g as never)!)).toEqual({ kind: 'refused', reason: 'stale_graph' });
   });
-  it.skip('E5 combine (DL, at the rebase): a hiring-times card offered before the team time lands still applies via hiringTimesStillApply', () => {
-    // Goes live when SYS1's goal-target/hiring-times.ts is combined and wired into `scoped_precondition_holds`.
-    expect('hiringTimesStillApply wired').toBe('TODO');
+  // E5 combine (DL, 12 Oct): SYS1's hiring-times card is field-scoped the same way (`hiringTimesStillApply`).
+  const PAUL_HIRING = "I would think, but I'm not sure, that a tech lead would take at least 3 months to get in the door. With two developers, we might be able to get one in within 2 months and then another a month or so later, as an estimate to use.";
+  const HIRING_ARGS = { options: [
+    { option_id: 'event_option_1', starts: [{ quote: 'at least 3 months' }] },
+    { option_id: 'event_option_2', starts: [{ quote: 'within 2 months' }, { quote: 'another a month or so later' }] },
+  ] };
+  it('E5 combine: hiring-times card offered → team time lands → hiring card pressed = APPLIED, and both are held', async () => {
+    const w = world();
+    const hiring = await w.caps.proposeHiringTimes!(ctx(PAUL_HIRING) as never, HIRING_ARGS as never) as Rec;
+    expect(hiring.ok).toBe(true);
+    const team = await w.caps.proposeTeamTime!(ctx(PAUL_TEAM) as never, { quote, low_months: 7, high_months: 7 }) as Rec;
+    expect(await approve(w, team.proposal_id)).toMatchObject({ ok: true, applied: true });
+    expect(computeAnalysisAffectingGraphHash(w.graph() as never)).not.toBe(hiring.base_revision);
+    expect(await approve(w, hiring.proposal_id)).toMatchObject({ ok: true, applied: true, mutated: true });
+    expect(draftedTeamPartOf(w.graph())!.team.observed_state.stated_time).toMatchObject({ low: 3.5, high: 10.5, forecast: 7 });
+    const devs = sharePartsForOption(w.graph(), 'event_option_2')!;
+    expect([devs.extra, ...(devs.furtherExtras ?? [])]).toHaveLength(2);
+  });
+  it('CONTROL (E5 combine): a hiring-times card whose own carriers changed is still refused as superseded, nothing written', async () => {
+    const w = world();
+    const hiring = await w.caps.proposeHiringTimes!(ctx(PAUL_HIRING) as never, HIRING_ARGS as never) as Rec;
+    expect(hiring.ok).toBe(true);
+    const changed = hiringTimesLand(w.graph()); w.replace(changed);
+    expect(await approve(w, hiring.proposal_id)).toMatchObject({ ok: false, refusal: 'superseded' });
+    expect(w.graph()).toEqual(changed);
   });
 });
 
@@ -353,7 +386,7 @@ describe('E2 — a range line never calls Olumi\'s range "yours" (AIE 6122738619
     expect(widenedTeamTime(6, 'low_confidence')).toEqual({ low_months: 3, high_months: 9 });
     const ws = said(gated(teamAt({ low_months: 3, high_months: 9, forecast_months: 6, range_origin: 'olumi_estimate', range_rule: 'low_confidence' })));
     expect(ws).toContain("Not shown as a single figure. The approximation of your 6-month forecast and Olumi’s assumed 3–9-month range does not support one figure here, so this chance is shown as a range.");
-    expect(ws).toContain("Not shown as a single figure. The approximation of your 6-month forecast and Olumi’s assumed 3–9-month range together with Olumi's hiring-time range and pace estimate does not support one figure here, so this chance is not shown.");
+    expect(ws).toContain("Not shown as a single figure. The approximation of your 6-month forecast and Olumi’s assumed 3–9-month range together with the modelled hiring times and Olumi’s estimate of the additional progress from the hires does not support one figure here, so this chance is not shown.");
     expect(ws).toContain('Each chance runs from the slow end of the range to the fast end. You gave 6 months; Olumi’s provisional model range is 3–9 months.');
     for (const m of ws) expect(m).not.toMatch(/your time estimate|stated time or pace range|your 3–9/);
   });
