@@ -137,3 +137,60 @@ describe('a confirmed-as-is Olumi value is never said as the user\'s figure (AIQ
     expect(r.note).toMatch(ASSUMPTION_WORDS);
   });
 });
+
+/**
+ * ⛔ DL RULING (12 Oct, X8: what the user stated is the user's). Only a REVISION the user wrote was credited to them: a
+ * figure they typed for a factor with NO value yet was stored as Olumi's starting assumption (`model_proposed`, stamped
+ * `user_assumption`) and the card offered it to them as "Adopt 1 starting assumption". That is a false attribution. A
+ * first value the user wrote is now recorded as theirs, and the card says so.
+ */
+describe('a FIRST value the user typed for a factor with no value yet is theirs, stored and said', () => {
+  type P = R & { public_label: string };
+  const unvalued = (...ids: string[]) => {
+    const g = JSON.parse(JSON.stringify(paulGraph)) as { nodes: { id: string; observed_state?: unknown }[] };
+    for (const id of ids) delete g.nodes.find((n) => n.id === id)!.observed_state;
+    const d: InternalDispatch = async (path) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: g, graph_hash: 'h0' } };
+      throw new Error(`unexpected dispatch ${path}`);
+    };
+    const store = new ProposalStore();
+    return { caps: createAgentCapabilities(d, store), store };
+  };
+  const FIRST_CHURN = { factor_label: 'Monthly churn', value: 3.7, unit: 'percent per month', basis: 'the figure the user gave' };
+  const FIRST_SUBS = { factor_label: 'Pro subscribers', value: 300, unit: 'subscribers', basis: 'a round starting estimate' };
+
+  it('RED: the user wrote 3.7% for unvalued churn → user_stated, your_figure, the card RECORDS their figure, never "starting assumption"', async () => {
+    const { caps, store } = unvalued('monthly_churn');
+    const r = await caps.proposeAssumptions(ctxSaying(SERVED), { assumptions: [FIRST_CHURN] }) as P;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.assumptions).toEqual([expect.not.objectContaining({ replaces: expect.anything() })]);
+    expect(authorOf(store, r.proposal_id, 'monthly_churn')).toBe('user_stated');
+    expect(store.get(r.proposal_id)?.provenance.authored_by).toBe('user_stated');
+    expect(r.assumptions).toEqual([expect.objectContaining({ factor: 'Monthly churn', your_figure: true })]);
+    expect(r.public_label.startsWith('Record 1 figure you gave: Monthly churn = ')).toBe(true);
+    expect(r.public_label).not.toMatch(/starting assumption/i);
+    expect(r.note).not.toMatch(ASSUMPTION_WORDS);
+  });
+
+  it('CONTRAST: the user did NOT write the figure → Olumi\'s first estimate, offered as a starting assumption (unchanged)', async () => {
+    const { caps, store } = unvalued('monthly_churn');
+    const r = await caps.proposeAssumptions(ctxSaying('Please estimate churn for me.'), { assumptions: [FIRST_CHURN] }) as P;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(authorOf(store, r.proposal_id, 'monthly_churn')).toBe('model_proposed');
+    expect(store.get(r.proposal_id)?.provenance.authored_by).toBe('model_proposed');
+    expect(r.assumptions[0]).not.toHaveProperty('your_figure');
+    expect(r.public_label.startsWith('Adopt 1 starting assumption: Monthly churn = ')).toBe(true);
+    expect(r.note).toMatch(ASSUMPTION_WORDS);
+  });
+
+  it('MIXED: the user\'s first churn beside Olumi\'s first subscriber estimate → each by who wrote it, and the card names both acts', async () => {
+    const { caps, store } = unvalued('monthly_churn', 'pro_subscribers');
+    const r = await caps.proposeAssumptions(ctxSaying(SERVED), { assumptions: [FIRST_CHURN, FIRST_SUBS] }) as P;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(authorOf(store, r.proposal_id, 'monthly_churn')).toBe('user_stated');
+    expect(authorOf(store, r.proposal_id, 'pro_subscribers')).toBe('model_proposed');
+    expect(store.get(r.proposal_id)?.provenance.authored_by).toBe('model_proposed');
+    expect(r.public_label.startsWith('Record 1 figure you gave and adopt 1 starting assumption: ')).toBe(true);
+    expect(r.note).toMatch(ASSUMPTION_WORDS);
+  });
+});
