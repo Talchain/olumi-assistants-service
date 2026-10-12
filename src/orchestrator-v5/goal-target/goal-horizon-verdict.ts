@@ -72,6 +72,10 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
     const stated = goalTargetBasisOf(goal);
     return stated !== undefined && stated.effects_at_period_end && stated.open_question === undefined ? 'basis_at_h' : 'no_horizon';
   }
+  // ⭐ EBD (Paul's hiring test, 12 Oct): a share-by-date forecast is computed AT its deadline (`withEventShareDate`
+  // materialises the team's share and every added capacity by that date); the month count its deadline card also holds names
+  // the same date. Without this, every option's chance was withheld as "only today's numbers" (DL GO, 12 Oct).
+  if (goalKindOf(graph) === 'share_by_date') return 'computed_at_h';
   if (accumulationTestedAtGoalHorizon(graph, envelope)) return 'computed_at_h';
   if (horizonSteadyAttested(graph)) return 'steady_attested';
   // ⛔ Amendment 2: never assume steady state for an urgent hire. Without an at-horizon basis the chance is withheld.
