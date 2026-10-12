@@ -458,7 +458,11 @@ describe('R2 committed carrier read failure and bounded newest-offer identity', 
   it('newest originally offered carrier wins, carried-only rows skipped, no older reads', async () => {
     const p = proposalOf(offered)
     const carryOnly = proposalPendingAction(p, chip, { scenario_id: SCENARIO, emitted_at_iso: offered.emitted_at_iso }, false)
-    table = [answerRow(carryOnly, 'newest-carried'), answerRow(offered, 'newest-offer'), answerRow(offered, 'older-offer')]
+    // One instant for the three rows: `answerRow` stamps `new Date()` per row, and on a slow runner (#2966 CI, 12 Oct) distinct
+    // milliseconds let the reload's issued-turn reader (`issuedTurnIdsForProposalRecords`, which skips tied timestamps) read
+    // the newest row a third time. The exact read list below is the held-offer reader's, on a fixed clock.
+    const at = new Date().toISOString()
+    table = [answerRow(carryOnly, 'newest-carried'), answerRow(offered, 'newest-offer'), answerRow(offered, 'older-offer')].map(r => ({ ...r, created_at: at }))
     const body = await heldRead()
     expect(body.held_proposal_offers[0]).toMatchObject({ turn_id: 'newest-offer', proposal_id: p.proposal_id })
     expect(body.held_proposal_offers[0].suggested_actions.map((a: { id: string }) => a.id)).toEqual([chip.id, 'agent-amend-proposal'])
