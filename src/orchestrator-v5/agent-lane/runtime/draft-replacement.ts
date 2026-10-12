@@ -33,6 +33,7 @@ import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js';
+import { normaliseGraphForIdentity } from '../../context/graph-identity.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -180,4 +181,42 @@ export function targetsHeldBy(candidate: unknown): { node_id: string; quantity: 
     .filter((c) => numeric(c) && (c.role === 'goal_target' || goals.has(c.node_id)) && c.deadline_metadata == null
       && (c.value_frame === undefined || c.value_frame === 'level'))
     .map((c) => ({ node_id: String(c.node_id), quantity: quantityOf(candidate, c), comparator: String(c.operator_as_stated ?? c.operator), value: c.value as number, unit: unitOf(c) }));
+}
+
+/**
+ * ⛔ THE STORED GRAPH HOLDS THE WHOLE APPROVED CANDIDATE (AIE B34 6119577581: the read-back matching the registration's
+ * acknowledgement proves only that the acknowledged graph was read back). Through the canonical identity normaliser
+ * (`normaliseGraphForIdentity`), every component the candidate carries — each node, link, option, limit and target, and
+ * each of their fields — is held UNCHANGED in the stored graph, and no node, link or row is added beside them. The register
+ * route may only ADD fields of its own (its stable `ref` on each node: measured on the REAL route for Paul's L20 candidate,
+ * `assist.v1.scenario-graph-register.revised-draft-held.test.ts`). A component omitted or changed BEFORE the
+ * acknowledgement fails here even when the read-back agrees with that acknowledgement.
+ */
+export function approvedGraphHeld(candidate: unknown, stored: unknown): boolean {
+  const a = normaliseGraphForIdentity(candidate as never)?.graph;
+  const b = normaliseGraphForIdentity(stored as never)?.graph;
+  return a !== undefined && b !== undefined && heldUnchanged(a, b);
+}
+
+const entityKey = (x: unknown): string | undefined => {
+  const k = rec(x)?.id ?? rec(x)?.constraint_id;
+  return typeof k === 'string' ? k : undefined;
+};
+/** `a` held in `b`: the same members (by id where every member has one), each field of `a` equal in `b`; `b` may add fields only. */
+function heldUnchanged(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    const keys = a.map(entityKey);
+    if (keys.every((k) => k !== undefined) && new Set(keys).size === keys.length) {
+      const byKey = new Map(b.map((x) => [entityKey(x), x] as const));
+      return a.every((x, i) => byKey.has(keys[i]) && heldUnchanged(x, byKey.get(keys[i])));
+    }
+    return a.every((x, i) => heldUnchanged(x, b[i]));
+  }
+  if (a !== null && typeof a === 'object') {
+    if (b === null || typeof b !== 'object' || Array.isArray(b)) return false;
+    return Object.entries(a as Record<string, unknown>)
+      .every(([k, v]) => Object.prototype.hasOwnProperty.call(b, k) && heldUnchanged(v, (b as Record<string, unknown>)[k]));
+  }
+  return a === b;
 }

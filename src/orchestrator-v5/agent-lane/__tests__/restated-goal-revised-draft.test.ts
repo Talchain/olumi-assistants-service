@@ -88,7 +88,9 @@ const candidate = (): Rec => ({
 });
 
 /** The in-memory store: the read route, the register route's compare-and-set and replay rules, and the committed turn ledger. */
-function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledgerFails?: boolean; afterCommit?: (g: Rec) => void } = {}) {
+function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledgerFails?: boolean; afterCommit?: (g: Rec) => void;
+  /** A route that stores something other than the approved candidate, and acknowledges what it stored (AIE B34). */
+  beforeAck?: (stored: Rec) => void } = {}) {
   let graph: Rec = structuredClone(opts.graph ?? FX.graph);
   const commits: { turn_id: string; bytes: string }[] = [];
   const ledger = {
@@ -104,6 +106,7 @@ function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledg
     if (path === `/assist/v1/scenarios/${SID}/graph/register`) {
       const b = body as { graph: Rec; expected_graph_hash?: unknown; expected_graph_identity_hash?: unknown; operation_id?: string };
       const stored = GraphV3.parse(b.graph) as Rec;
+      opts.beforeAck?.(stored);
       const bytes = JSON.stringify(stored);
       const turn = registrationTurnId(SID, b.operation_id);
       const prior = commits.find((c) => c.turn_id === turn);
@@ -429,4 +432,48 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     const again = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
     expect(again.already_applied).not.toBe(true);
   });
+  /**
+   * ⛔ AIE B34 (6119577581): the acknowledgement names what the route STORED, so a component omitted or changed BEFORE it
+   * is acknowledged and read back unchanged. Each such store is unconfirmed: no replacement receipt, and the same press is
+   * never "already applied". The CONTROL: a route that only ADDS its own field (a node `ref`, as the real route does) confirms.
+   */
+  const preAck: [string, (g: Rec) => void][] = [
+    ['a link omitted', (g) => { g.edges = (g.edges as Rec[]).filter((e) => !(e.from === 'advertising_spend' && e.to === 'conversion_rate')); }],
+    ['a link strength changed', (g) => { const e = (g.edges as Rec[]).find((x) => x.from === 'marketing_manager_hired' && x.to === 'conversion_rate')!; e.strength = { ...(e.strength as Rec), mean: 0.91 }; }],
+    ['an option setting changed', (g) => { const o = (g.nodes as Rec[]).find((n) => n.id === 'hire_a_marketing_manager')!; const iv = o.interventions as Rec; const k = Object.keys(iv)[0]!; iv[k] = typeof iv[k] === 'number' ? (iv[k] as number) + 1 : { ...(iv[k] as Rec), value: Number((iv[k] as Rec).value ?? 0) + 1 }; }],
+    ['an option dropped', (g) => { g.nodes = (g.nodes as Rec[]).filter((n) => n.id !== 'ai_planning_plus_advertising'); g.edges = (g.edges as Rec[]).filter((e) => e.from !== 'ai_planning_plus_advertising' && e.to !== 'ai_planning_plus_advertising'); }],
+    ['a label changed', (g) => { (g.nodes as Rec[]).find((n) => n.id === 'marketing_manager_hired')!.label = 'Marketing manager recruited'; }],
+  ];
+  it.each(preAck)('RED (B34, before the acknowledgement): %s → unconfirmed, no receipt, never "already applied"', async (_what, change) => {
+    const s = server({ beforeAck: change });
+    const proposals = new ProposalStore();
+    const { caps } = lane(s, proposals);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    s.said(FX.l20.turn_id);
+    const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(r).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' });
+    expect(r.follow_up).toBeUndefined();
+    const again = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(again.already_applied).not.toBe(true);
+  });
+
+  it('CONTROL (B34): a route that only adds its own field to each node (a `ref`) confirms the replacement', async () => {
+    const s = server({ beforeAck: (g) => { (g.nodes as Rec[]).forEach((n, i) => { n.ref = `N${i + 1}`; }); } });
+    const { caps } = lane(s);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    s.said(FX.l20.turn_id);
+    const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(r).toMatchObject({ ok: true, mutated: true, applied: true });
+  });
+
+  it('the L20 candidate fixture the real-route spec registers is the one the capability prepares (drift is RED)', async () => {
+    const s = server();
+    const proposals = new ProposalStore();
+    const { caps } = lane(s, proposals);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    const v = proposals.get(offer.proposal_id as string)!.operations[0]!.value as Rec;
+    const fixture = JSON.parse(readFileSync(new URL('./fixtures/marketing-l20-revised-draft-candidate.json', import.meta.url), 'utf8')) as Rec;
+    expect({ operation_id: v.operation_id, candidate: v.candidate }).toEqual({ operation_id: fixture.operation_id, candidate: fixture.candidate });
+  });
+
 });

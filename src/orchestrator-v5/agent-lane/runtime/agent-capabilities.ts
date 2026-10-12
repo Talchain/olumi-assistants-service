@@ -267,7 +267,7 @@ import { buildModelFromBrief, constructionOperationId, findConstructionVersion, 
 import { goalTargetBasisOf } from '../../goal-target/goal-target-basis.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
-import { humanMaterialAfterTheDraft, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, writesBesidesTheConstruction } from './draft-replacement.js';
+import { approvedGraphHeld, humanMaterialAfterTheDraft, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, writesBesidesTheConstruction } from './draft-replacement.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
@@ -3518,7 +3518,9 @@ export function createAgentCapabilities(
     const acknowledged = identityHashOf(reg.json.graph_identity_hash);
     const after = await readGraph(ctx.scenario_id);
     const heldTargets = targetsHeldBy(after?.raw);
+    // …and the acknowledged graph IS the approved candidate, whole (AIE B34): every component it carries held unchanged.
     const landed = after !== null && acknowledged !== '' && after.graph_identity_hash === acknowledged
+      && approvedGraphHeld(v.candidate, after.raw)
       && limitsKeptBy(before.raw, after.raw).dropped.length === 0
       && targetsHeldBy(v.candidate).every((t) => heldTargets.some((h) => h.node_id === t.node_id && h.comparator === t.comparator && h.value === t.value && h.unit === t.unit));
     if (!landed) {
