@@ -301,13 +301,20 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(composeInput?.chanceCells?.every(cell => cell.kind === 'none'), 'replay READ owns the cells too').toBe(true);
   });
 
-  it('r11d valid withheld cells with no recorded reason retain the fallback marker', async () => {
+  // Score run 4 U2-1 (DL 12 Oct): one recorded cause the face has no fixed words for is said in the cells' own line, once,
+  // never "Not shown yet; why is under More detail" (re-pinned from "retain the fallback marker").
+  it('r11d valid withheld cells with no recorded reason: their one line is said on the face, once, never the pointer', async () => {
     READ = structuredClone(READ_B1);
     analysisResult = structuredClone(READ.analysis_result);
     canonicalReadOverride = view => ({ ...view, options: view.options.map(row => ({ ...row,
       cell: { ...row.cell, kind: 'withheld' as const, reasons: [{ code: 'reason_not_recorded', message: null }] } })) });
     const b = await turn(run('Your results are ready.'), 'Run it');
-    expect(withholdMarkers(b)).toEqual([WITHHOLD_FALLBACK_MARKER]);
+    const whys = [...new Set((composeInput?.chanceCells ?? []).flatMap(cell => (cell.kind === 'withheld' ? [cell.why] : [])))];
+    expect(whys, 'the control: the cells carry one line').toHaveLength(1);
+    const words = whys[0]!.replace(/^Not shown[.:]\s+/u, '');
+    expect(faceUnits(b).some(unit => unit.includes(words)), 'the cells\' own line is on the face').toBe(true);
+    expect(count(b.assistant_text, words), 'said once').toBe(1);
+    expect(b.assistant_text).not.toContain(WITHHOLD_FALLBACK_MARKER);
     expect(warn.mock.calls.filter((call: unknown[]) => (call[0] as { event?: unknown } | undefined)?.event === 'agent_lane.canonical_analysis_view_unavailable')).toEqual([]);
     await expectStoredAndReplayed(b);
   });

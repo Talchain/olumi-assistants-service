@@ -648,7 +648,24 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   return composed;
 }
 
+/**
+ * Score run 4 U2-1 (DL 12 Oct, R4): a reply that ships whole has no "More detail", so "Not shown yet; why is under More
+ * detail" would point at nothing (capacity 1): it never ships there. The reasons it stood for are in the whole text
+ * already (one reason is said as the line itself; several are said below the pointer, in their own words).
+ */
 function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
+  const composed = composeMarkedReplyShape(input);
+  if (composed.shape !== null || input.faceContract === undefined || input.keepWhole !== undefined
+    || input.profile === 'method_step' || input.profile === 'proposal') return composed;
+  const pointer = (line: string): boolean => line.replace(/^\s*[-•*]\s+/, '').trim() === WITHHOLD_FALLBACK_MARKER;
+  const paras = composed.text.split('\n\n');
+  if (!paras.some(para => para.split('\n').some(pointer))) return composed;
+  const kept = paras.map(para => para.split('\n').filter(line => !pointer(line)).join('\n'))
+    .filter((para, i) => para !== '' || paras[i] === '');
+  return { ...composed, text: kept.join('\n\n') };
+}
+
+function composeMarkedReplyShape(input: ReplyComposeInput): ReplyComposition {
   const faceContract = input.faceContract !== undefined;
   const canMark = input.keepWhole === undefined && input.profile !== 'method_step' && input.profile !== 'proposal';
   const foldedInput = foldQuotes(input.text);
@@ -671,7 +688,32 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
       return [{ ...o, text: sentence ?? written }];
     }) : [];
   const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
-  const chanceMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined : markerForDisclosure(chanceDisclosure);
+  // ⭐ Score run 4 U2-1 (DL 12 Oct, R4): "Not shown yet; why is under More detail" pointed at nothing (capacity 1–3). The
+  // withheld cells' own licensed words (`cell.why`, the canonical view's display-safe line) replace it when the cells record
+  // exactly ONE reason (one cell can record several under one line, so reasons are counted, not lines): the face says that
+  // reason, once. With several, the pointer stays, and each reason the reply does not already carry is said below it.
+  const withheldCells = (input.chanceCells ?? []).filter((cell): cell is Extract<CanonicalAnalysisCell, { kind: 'withheld' }> => cell.kind === 'withheld');
+  // Paul's test (DL 13:0xZ): the change adds no ask. A line that ends on its own question ("… What is quarterly revenue
+  // today?") gives its reason only: its declarative sentences, whole.
+  const reasonOf = (why: unknown): string => (typeof why !== 'string' ? ''
+    : sentencesOf(why.trim()).filter(sentence => !QUESTION_END.test(sentence.trim())).join(' ').trim());
+  const whys = [...new Set(withheldCells.map(cell => reasonOf(cell.why)).filter(why => why !== ''))];
+  const recordedReasons = new Set(withheldCells.flatMap(cell => (Array.isArray(cell.reasons) ? cell.reasons : [])
+    .map(reason => `${reason.code}\u0000${reason.message ?? ''}`)));
+  const typedMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined : markerForDisclosure(chanceDisclosure);
+  // A reason is already said when the reply carries its line, or the words after the view's "Not shown." lead (as a
+  // sentence of its own, capitalised): then THAT span is the reason, said once, never a second copy beside it.
+  const said = (why: string): string | undefined => {
+    const rest = why.replace(/^Not shown[.:]\s+/u, '');
+    for (const words of [why, rest, rest.charAt(0).toUpperCase() + rest.slice(1)]) {
+      const at = foldedInput.indexOf(foldQuotes(words));
+      if (at !== -1) return input.text.slice(at, at + words.length);
+    }
+    return undefined;
+  };
+  const oneReason = typedMarker === WITHHOLD_FALLBACK_MARKER && recordedReasons.size === 1 && whys.length === 1 ? whys[0]! : undefined;
+  const chanceMarker = oneReason === undefined ? typedMarker : said(oneReason) ?? oneReason;
+  const pointedWhys = chanceMarker === WITHHOLD_FALLBACK_MARKER ? whys.filter(why => said(why) === undefined) : [];
   const markerObligations = disclosures.filter(o => o.disclosure?.kind !== 'withhold').filter(o => o.lead === true || (o.disclosure?.kind === 'robustness' && !(o.subjects?.length))
     || (input.obligations ?? []).some(finding => finding.lead === true && finding.role === 'evidence'
       && (o.subjects ?? []).some(subject => finding.subjects?.includes(subject)))).map((o): FaceObligation => ({ ...o, text: markerForDisclosure(o.disclosure!), disclosure: undefined }));
@@ -691,7 +733,7 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
   const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
     ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
-  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonWithholdDetails, ...widenDetail]
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...pointedWhys, ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonWithholdDetails, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
   const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
   const faceHostLines = !faceContract || !canMark ? [] : [
