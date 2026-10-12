@@ -728,7 +728,7 @@ describe('independent check r1 — item 4: a stated ">" not sent strictly withho
       line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
         + 'the comparison the analysis used is not the one you stated.' });
     expect(l.targets!.withheld_targets?.map((t) => [t.constraint_id, t.reason, t.next_step.code]))
-      .toEqual([['target:conversion_rate', 'strict_not_preserved', 'rerun_analysis']]);
+      .toEqual([['target:conversion_rate', 'strict_not_preserved', 'none_established']]);
   });
 });
 
@@ -1339,7 +1339,7 @@ describe('RE-SCOPE r1 (DL item 3): a SENT figure that is not the stored one is n
       line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
         + 'this analysis did not use every stated target as specified.' });
     expect(l.targets!.withheld_targets?.map((t) => [t.constraint_id, t.reason, t.next_step.code]))
-      .toEqual([['target:conversion_rate', 'figure_not_preserved', 'rerun_analysis']]);
+      .toEqual([['target:conversion_rate', 'figure_not_preserved', 'none_established']]);
     expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
     expect(l.pct_by_option).toEqual({});
   });

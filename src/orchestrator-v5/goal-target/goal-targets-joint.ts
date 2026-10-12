@@ -166,7 +166,6 @@ export function nextStepWords(next: WithholdNextStepRef | undefined): string {
 }
 
 const NONE: WithholdNextStepRef = { code: 'none_established' };
-const RERUN: WithholdNextStepRef = { code: 'rerun_analysis' };
 /** A stored line a reader still accepts (`isGoalTargetsBlock`: ≤ 600 characters, one line). */
 const LINE_MAX = 600;
 /**
@@ -538,11 +537,8 @@ export function goalTargetsBlockOf(args: {
   for (const t of targets) {
     if (shownIds.has(t.constraint_id)) continue;
     const who = { constraint_id: t.constraint_id, node_id: t.node_id, label: t.label };
-    // AIE copy, binding guard 5: "run again" only where a fresh request is established to test the saved targets. It is:
-    // the current sender (`wireGoalConstraints`) sends each stored target's stated comparator and figure as stored, so a Run
-    // whose request did not was built before them (stale), and a fresh one tests them (pinned in batch-f-joint-withhold).
-    if (strictLostIds.has(t.constraint_id)) withholdTarget(who, 'strict_not_preserved', RERUN);
-    else if (figureLostIds.has(t.constraint_id)) withholdTarget(who, 'figure_not_preserved', RERUN);
+    if (strictLostIds.has(t.constraint_id)) withholdTarget(who, 'strict_not_preserved', NONE);
+    else if (figureLostIds.has(t.constraint_id)) withholdTarget(who, 'figure_not_preserved', NONE);
     else if (olumiBase.has(t.constraint_id)) withholdTarget(who, 'olumi_base', levelStep(t.node_id));
     else {
       const cause = causeOf({ ...who, role: 'target' }, frameOf(t.constraint_id));
@@ -552,7 +548,7 @@ export function goalTargetsBlockOf(args: {
   for (const u of unsupportedRows) withholdTarget(u, 'target_not_supported', NONE);
   for (const r of unsentTargets) {
     const label = labelOf(r.node_id);
-    if (typeof r.node_id === 'string' && label !== undefined) withholdTarget({ constraint_id: r.constraint_id as string, node_id: r.node_id, label }, 'figure_not_preserved', RERUN);
+    if (typeof r.node_id === 'string' && label !== undefined) withholdTarget({ constraint_id: r.constraint_id as string, node_id: r.node_id, label }, 'figure_not_preserved', NONE);
   }
 
   const n = Math.max(ordered.length + unsupported.length + unsentTargets.length + (unnamed ? 1 : 0), 2);
