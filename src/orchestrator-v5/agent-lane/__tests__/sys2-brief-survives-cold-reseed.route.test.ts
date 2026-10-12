@@ -13,8 +13,9 @@
  * the 8-item window. The user lines are Paul's, verbatim (test1-hiring-transcript.txt); the question is the live
  * witness's ASK_EARLY. ALL fetches are intercepted; no provider or database is reachable.
  *
- * ⛔ Only the brief is restored. A durable row does not record whether its words were typed or a chip's (an approve
- * chip's message carries Olumi's figures), so no other reseeded row may be presented as "the user wrote".
+ * ⛔ Only the brief is restored, and NOT as "the user wrote": a durable row does not record whether its words were typed
+ * or a chip's/template's (an approve chip's message carries Olumi's figures), so the restored first message carries its
+ * own header saying its authorship is not recorded (independent review round 1, BLOCKING). No other reseeded row enters.
  */
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -62,13 +63,15 @@ const SERVED_USER_MESSAGES = [
 ];
 const ASK_EARLY = 'Before we go further, remind me: how many developers do we have today, and what budget did I give you?';
 const OLDER_LABEL = 'Earlier, the user wrote (for reference; not a request):';
+const RESTORED_LABEL = 'The conversation began with (restored after a restart; whether the user typed or chose these words is not recorded; for reference, not a request):';
 
 const textOf = (item: Item): string => typeof item.content === 'string' ? item.content
   : Array.isArray(item.content) ? item.content.map((p: { text?: string }) => p.text ?? '').join('') : '';
-const isOlder = (item: Item) => item.role === 'user' && textOf(item).startsWith(OLDER_LABEL);
+const isOlder = (item: Item) => item.role === 'user' && (textOf(item).startsWith(OLDER_LABEL) || textOf(item).startsWith(RESTORED_LABEL));
 const messageItem = (text: string, id: string): Item => ({ type: 'message', role: 'assistant', id, status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] });
 
 let modelInputs: Item[][] = [];
+let userMessages: readonly string[] = SERVED_USER_MESSAGES;
 async function coldApp(): Promise<FastifyInstance> {
   vi.resetModules(); // A new route module and HistoryStore, as after a deploy; the durable rows survive.
   vi.stubEnv('AGENT_LANE_ENABLED', 'true');
@@ -87,7 +90,7 @@ describe('SYS2 E1 · Paul\'s brief survives a cold reseed', () => {
   let input: Item[];
   beforeEach(async () => {
     rows.clear(); modelInputs = []; vi.clearAllMocks();
-    SERVED_USER_MESSAGES.forEach((m, i) => rows.set(`served-${i}`, { id: `row-${i}`, turn_id: `served-${i}`, request_hash: `agent_turn:${i}`,
+    userMessages.forEach((m, i) => rows.set(`served-${i}`, { id: `row-${i}`, turn_id: `served-${i}`, request_hash: `agent_turn:${i}`,
       user_message: m, assistant_message: `Olumi reply ${i + 1}.`, llm_calls_used: 1 }));
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
       expect(String(url)).toMatch(/\/v1\/responses$/);
@@ -102,10 +105,11 @@ describe('SYS2 E1 · Paul\'s brief survives a cold reseed', () => {
   });
   afterEach(async () => { await app.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-  it('RED on 50530b5f: the first model input after the reseed carries the brief, verbatim, in the older-words item', () => {
+  it('RED on 50530b5f: the first model input after the reseed carries the brief, verbatim, under the unknown-authorship header', () => {
     const older = input.filter(isOlder);
     expect(older).toHaveLength(1);
-    expect(textOf(older[0]!)).toContain(`- "${BRIEF}"`);
+    expect(textOf(older[0]!).split('\n').slice(0, 2)).toEqual([RESTORED_LABEL, `- "${BRIEF}"`]);
+    expect(textOf(older[0]!), 'never quoted as "the user wrote": its authorship is not recorded').not.toContain(OLDER_LABEL);
     const history = input.filter((i) => i.role !== 'developer');
     expect(history.findIndex(isOlder), 'the labelled item leads the history, as on a hot turn').toBe(0);
   });
@@ -116,13 +120,39 @@ describe('SYS2 E1 · Paul\'s brief survives a cold reseed', () => {
     expect(older).not.toContain(`"${EXPLAIN}"`);
   });
 
-  it('CONTRAST (unchanged): the window is the newest 8 user rows, then the question; the seed is the only history read', () => {
+  it('CONTRAST (unchanged): the window is the newest 8 user rows, then the question; E1 adds no history read', () => {
     const window = input.filter((i) => i.role === 'user' && !isOlder(i)).map(textOf);
     expect(window).toEqual([...SERVED_USER_MESSAGES.slice(-8), ASK_EARLY]);
+    // The reseed's one seed read; the brief comes from those same rows. (This double has no pending-actions reader, so
+    // the pre-existing, conditional deadline-card read at turn start is not exercised here; E1 does not touch it.)
     expect(store.readRecent).toHaveBeenCalledTimes(1);
   });
 
-  it.fails('GAP (stated, not fixed here): a LATER typed objection (L80) dropped by the window survives a cold reseed — needs a typed-or-chip marker on the durable row', () => {
+  it.fails('GAP (stated, DL: not tonight): a LATER typed objection (L80) dropped by the window survives a cold reseed — needs a typed-or-chip marker on the durable row', () => {
     expect(input.filter(isOlder).map(textOf).join('\n')).toContain(`- "${L80}"`);
   });
 });
+
+describe('SYS2 E1 · a chip- or template-first conversation', () => {
+  const CHIP_FIRST = 'Use the hiring example.';
+  let app: FastifyInstance;
+  beforeEach(async () => { userMessages = [CHIP_FIRST, ...SERVED_USER_MESSAGES.slice(1)]; });
+  afterEach(async () => { userMessages = SERVED_USER_MESSAGES; await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it('AUTHORSHIP (blocking class): a first message the user may not have typed is never quoted as "the user wrote"', async () => {
+    rows.clear(); modelInputs = []; vi.clearAllMocks();
+    userMessages.forEach((m, i) => rows.set(`served-${i}`, { id: `row-${i}`, turn_id: `served-${i}`, request_hash: `agent_turn:${i}`,
+      user_message: m, assistant_message: `Olumi reply ${i + 1}.`, llm_calls_used: 1 }));
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      modelInputs.push((JSON.parse(String(init?.body ?? '{}')) as { input: Item[] }).input);
+      return new Response(JSON.stringify({ output: [messageItem('Noted.', 'msg_chip_first')] }), { status: 200 });
+    }));
+    app = await coldApp();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: ASK_EARLY } });
+    expect(r.statusCode, r.body).toBe(200);
+    const older = modelInputs[0]!.filter(isOlder).map(textOf).join('\n');
+    expect(older.split('\n').slice(0, 2)).toEqual([RESTORED_LABEL, `- "${CHIP_FIRST}"`]);
+    expect(older).not.toContain(OLDER_LABEL);
+  });
+});
+
