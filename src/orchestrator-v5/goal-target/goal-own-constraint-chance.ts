@@ -70,12 +70,32 @@ export function sentRunTestsHeldTarget(sent: SentRunInputs | undefined, graph: u
     && readGoalRecord(graph, goalId)?.target?.comparator === sentOperator;
 }
 
-/** B2 words (pending AIE): a deadline Run that did not test the held target shows no option's chance, and says why. */
-export const SENT_TARGET_NOT_HELD_WORDS = 'Not shown. This run did not test your goal\u2019s own target, so its results are not the chance of meeting it. Run the analysis again.';
+/** AIE 6129564354 (AMENDED), verbatim: a deadline Run that did not test the target saved in the model shows no option's chance. */
+export const SENT_TARGET_NOT_HELD_WORDS = 'Not shown. This analysis did not test the target saved in your model, so its figures cannot describe your chance of reaching that target.';
+/** AIE 6129564354: appended ONLY where revision evidence proves the saved target changed after that analysis. */
+export const SENT_TARGET_CHANGED_SUFFIX = 'Run the analysis again.';
+/** AIE 6129564354: appended otherwise; the mismatch is Olumi's to resolve, never the user's to re-run. */
+export const SENT_TARGET_MISMATCH_SUFFIX = 'Olumi needs to resolve this analysis mismatch before showing a chance.';
+/**
+ * Revision evidence: the target the analysis was sent with, as it was saved then (the sent goal node's own raw target), is
+ * not the target saved in the model now. Anything else (a frame, comparator or conversion that does not match the same saved
+ * target) is a mismatch of Olumi's.
+ */
+export function savedTargetChangedSince(sent: SentRunInputs | undefined, graph: unknown, goalId: unknown): boolean {
+  if (sent === undefined || typeof goalId !== 'string' || !isRec(sent.graph)) return false;
+  // Both targets through the one goal-record reader (S5 census): the target as sent then, and as saved now.
+  const sentRaw = readGoalRecord(sent.graph, goalId)?.target?.raw;
+  const savedRaw = readGoalRecord(graph, goalId)?.target?.raw;
+  return shareByDateGoalForChanceOf(graph)?.goal.id === goalId && finite(sentRaw) && finite(savedRaw) && sentRaw !== savedRaw;
+}
+/** The withhold's words for this Run: the AIE's sentence, then the one suffix the revision evidence supports. */
+export function sentTargetNotHeldWords(sent: SentRunInputs | undefined, graph: unknown, goalId: unknown): string {
+  return `${SENT_TARGET_NOT_HELD_WORDS} ${savedTargetChangedSince(sent, graph, goalId) ? SENT_TARGET_CHANGED_SUFFIX : SENT_TARGET_MISMATCH_SUFFIX}`;
+}
 
 /**
  * At Run time, before the licence: a deadline goal's Run whose sent target is not the held one withholds EVERY option's goal
- * figures with words (`SENT_TARGET_NOT_HELD_WORDS`), so the cell says why instead of falling silent. Any other goal, or no sent
+ * figures with words (`sentTargetNotHeldWords`), so the cell says why instead of falling silent. Any other goal, or no sent
  * run, is returned unchanged.
  */
 export function withSentTargetWithheld<E>(envelope: E, graph: unknown, goalId: unknown, sent: SentRunInputs | undefined): E {
@@ -85,7 +105,7 @@ export function withSentTargetWithheld<E>(envelope: E, graph: unknown, goalId: u
     const id = r.option_id ?? r.id; return typeof id === 'string' ? [id] : [];
   }));
   return withholdOptionGoalFigures(envelope, ids, { code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning',
-    option_ids: [...ids], message: SENT_TARGET_NOT_HELD_WORDS }, { keepOutcome: true, keepOrdering: true });
+    option_ids: [...ids], message: sentTargetNotHeldWords(sent, graph, goalId) }, { keepOutcome: true, keepOrdering: true });
 }
 
 export function goalOwnConstraintChanceRecords(

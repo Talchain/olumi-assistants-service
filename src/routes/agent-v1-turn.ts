@@ -120,6 +120,7 @@ import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
+import { withoutRunShareTextAtEgress } from '../orchestrator-v5/compose/run-share-text.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -2588,7 +2589,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
-      return withShapeOnlyIfItDerives(gatedReplay);
+      return withShapeOnlyIfItDerives(withoutRunShareTextAtEgress(gatedReplay, { requestId: String(req.id), exitPath: 'agent_lane_v1_replay' }));
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
@@ -3198,11 +3199,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
         // ⭐ S-D: what the user set vs what Olumi held, server-authored from the hold's own record, only once it landed.
         const editsApplied = applied.ok === true && applied.mutated === true ? readUserEdits(applied.user_edits) : undefined;
-        editsRefusedThisTurn = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true;
-        const editedLinks = editsApplied !== undefined && original !== undefined && original.operations.length > 0 && original.operations.every(o => o.op === 'set_link_strength');
         const refusedBinding = editsForThisCard?.fields.length === 0
           && (applied.refusal === 'edits_superseded' || applied.refusal === 'superseded' || applied.refusal === 'unknown_proposal');
-        const followUp = [editedLinks ? '' : guarded.text.trim(), editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
+        /**
+         * ⭐ E-TAIL (a) (run 4 deadline turns 7 and 14; §7.3, receipts are accurate): the card's plain "Yes" arrives with
+         * `fields: []`. When the CAPABILITY refused it (not a binding refusal of the press), no value was edited, so "Those
+         * values could not be applied" was false: the narrator's status and the capability's own reason are said instead,
+         * the reason through the same Agent-direction boundary as every follow-up.
+         */
+        const plainRefusedByCapability = editsForThisCard?.fields.length === 0 && applied.ok !== true && applied.mutated !== true
+          && !refusedBinding && applied.refusal !== 'edits_refused';
+        editsRefusedThisTurn = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true && !plainRefusedByCapability;
+        const ownReason = plainRefusedByCapability && guarded.text.trim() === '' && typeof applied.detail === 'string'
+          ? withoutAgentDirections(applied.detail).text.trim() : '';
+        const editedLinks = editsApplied !== undefined && original !== undefined && original.operations.length > 0 && original.operations.every(o => o.op === 'set_link_strength');
+        const followUp = [editedLinks ? '' : guarded.text.trim(), ownReason, editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
           editsRefusedThisTurn ? refusedBinding ? PLAIN_APPROVAL_SUPERSEDED
             : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
@@ -5297,6 +5308,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(composedReply.measure ?? {}),
       }, 'agent-lane: the reply passed the one composer');
     }
+    // ⭐ Recovery Batch E (DL, 12 Oct; ruling A, Paul's #87): no sentence stating an option's share of runs ships, on any
+    // surface of the body, after every other writer (`run-share-text.ts`); the stored answer row is this same text.
+    wireBody = withoutRunShareTextAtEgress(wireBody, { requestId: String(req.id), exitPath: 'agent_lane_v1_final' });
     // History and the durable answer row below remember the same FINAL SENT text, after every gate.
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
     // Every retained Run output becomes a neutral marker; superseded pairs leave with their reasoning as before.

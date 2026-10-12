@@ -15,6 +15,7 @@
  * bytes). A review of an unsized link remains where the approval cannot size it: a link the user drew but never sized
  * (`source: user_specified` + a projected mean). The receipt contract is pinned on that shape, the two kept links drawn so.
  */
+import { D1_PENDING_FIRST_ESTIMATE } from '../runtime/agent-capabilities.js';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
@@ -133,8 +134,13 @@ describe('served mixed link set: preview and receipt follow the stored outcome',
   });
 
   it('the fixture is the served approval (D1: its two kept links drawn by the user): the same six offered items, the same six writes, the same stored outcome', async () => {
-    const { w, p } = await approveServedSet();
-    expect(itemsOf(String(p.public_label))).toBe(itemsOf(FX.served_offer_label));
+    const { w, p, receipt } = await approveServedSet();
+    // D1 (AIE AMEND, 12 Oct): the served items, with the one amended phrase for Olumi's first estimate on the offer.
+    expect(itemsOf(String(p.public_label))).toBe(itemsOf(FX.served_offer_label)
+      .replaceAll('Olumi\u2019s first estimate for a link nobody had sized', D1_PENDING_FIRST_ESTIMATE));
+    expect(String(p.public_label)).toContain(`as moderate, ${D1_PENDING_FIRST_ESTIMATE}`);
+    // Never after a confirmed write: the approval's receipt does not say the estimate is still to be applied.
+    expect(receipt).not.toContain('not yet been applied');
     const links = (w.sent[0]!.link_strengths as { from: string; to: string; intent: string; magnitude: number }[]);
     expect(links.map((l) => [key(l), l.intent])).toEqual(SIX.map((l) => [key(l), l.kept ? 'confirm_current' : 'set']));
     // Bound by identity: four links now sized as Olumi's estimates, the two reviewed links still nobody's.

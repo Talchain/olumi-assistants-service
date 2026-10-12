@@ -2175,6 +2175,9 @@ function mixedLinkSetHeading(strengths: number, unsizedChanges: number, reviews:
   return counted.length === 1 ? counted[0]! : `${counted.slice(0, -1).join(', ')} and ${counted.at(-1)!}`;
 }
 
+/** D1 (AIE AMEND, 12 Oct), verbatim: the pending offer's words for Olumi's first estimate of a link nobody had sized. */
+export const D1_PENDING_FIRST_ESTIMATE = 'an estimate from Olumi that has not yet been applied';
+
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
   proposals: ProposalStore,
@@ -4959,7 +4962,11 @@ export function createAgentCapabilities(
           + shown.map((x) => reviewKeepsPlaceholder(x)
             ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet (kept as it is)`
             : remainsPlaceholder(x) ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet`
-            : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
+            // ⭐ D1 (AIE AMEND, 12 Oct): on the OFFER, Olumi's first estimate for a link nobody had sized is said as "an estimate
+            // from Olumi that has not yet been applied"; the typed `whose` stays the contract, and no receipt after a confirmed
+            // write says it (the approval's words are the narrator's own).
+            : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x) === 'Olumi\u2019s first estimate for a link nobody had sized'
+              ? D1_PENDING_FIRST_ESTIMATE : whose(x)}`).join('; '),
       });
       proposals.put(proposal);
       const olumis = shown.filter((x) => !x.yours && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted')).length;

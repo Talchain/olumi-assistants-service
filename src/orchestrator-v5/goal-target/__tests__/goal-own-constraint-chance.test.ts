@@ -102,19 +102,39 @@ describe('AIE 6125204695: the goal’s own constraint, bound per option to what 
     const sent = SENT(q => { sentGoal(q).goal_threshold = 0.5; return q; });
     const out = withSentTargetWithheld(ENGINE(), GRAPH(), GOAL, sent) as Rec;
     const words = (out.inference_warnings ?? []).filter((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION);
-    expect(words.map((w: Rec) => [w.message, [...w.option_ids].sort()])).toEqual([[SENT_TARGET_NOT_HELD_WORDS, OPTIONS]]);
-    expect(SENT_TARGET_NOT_HELD_WORDS).toBe('Not shown. This run did not test your goal’s own target, so its results are not the chance of meeting it. Run the analysis again.');
+    // AIE 6129564354 (AMENDED): the same saved target (100) sent at the wrong figure is Olumi's mismatch, never "run again".
+    const MISMATCH = 'Not shown. This analysis did not test the target saved in your model, so its figures cannot describe your chance of reaching that target. '
+      + 'Olumi needs to resolve this analysis mismatch before showing a chance.';
+    expect(words.map((w: Rec) => [w.message, [...w.option_ids].sort()])).toEqual([[MISMATCH, OPTIONS]]);
+    expect(SENT_TARGET_NOT_HELD_WORDS).toBe('Not shown. This analysis did not test the target saved in your model, so its figures cannot describe your chance of reaching that target.');
     const licence = licenceOf(out, sent);
     expect(licence === null || Object.keys(licence.pct_by_option).length === 0).toBe(true);
     // At Run time, through the licence writer the Run handler calls: the words are stored with the Run, and no chance is.
     const stored = withGoalChanceLicence(ENGINE(), GRAPH(), GOAL, undefined, undefined, GRAPH(), { sentRun: sent }) as Rec;
-    const said = (stored.inference_warnings ?? []).filter((w: Rec) => w.message === SENT_TARGET_NOT_HELD_WORDS);
+    const said = (stored.inference_warnings ?? []).filter((w: Rec) => w.message === MISMATCH);
     expect(said.map((w: Rec) => [...w.option_ids].sort())).toEqual([OPTIONS]);
     expect((stored.inference_warnings ?? []).some((w: Rec) => Object.keys(w.pct_by_option ?? {}).length > 0)).toBe(false);
     // CONTRAST: the Run that tested the held target is returned as it came, and quotes 83 / 95 / 42.
     const held = ENGINE();
     expect(withSentTargetWithheld(held, GRAPH(), GOAL, SENT())).toBe(held);
     expect(licenceOf(held)!.pct_by_option).toEqual({ event_option_1: 83, event_option_2: 95, event_option_3: 42 });
+  });
+
+  it('AIE 6129564354: "Run the analysis again." ONLY where the saved target changed after the analysis (revision evidence)', () => {
+    // The analysis was sent with the target saved then (≥ 90 %, sent as 0.9); the model now holds ≥ 100 %.
+    const sent = SENT(q => { sentGoal(q).goal_threshold_raw = 90; sentGoal(q).goal_threshold = 0.9; return q; });
+    const out = withSentTargetWithheld(ENGINE(), GRAPH(), GOAL, sent) as Rec;
+    const words = (out.inference_warnings ?? []).filter((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION).map((w: Rec) => w.message);
+    expect(words).toEqual(['Not shown. This analysis did not test the target saved in your model, so its figures cannot describe your chance of reaching that target. Run the analysis again.']);
+    // CONTRAST: the same saved target sent at another figure, frame or comparator is Olumi's mismatch.
+    for (const edit of [(q: Rec) => { sentGoal(q).goal_threshold = 0.5; return q; }, (q: Rec) => { sentGoal(q).goal_threshold_frame = 'level'; return q; },
+      (q: Rec) => ({ ...q, goal_threshold_strict: true })]) {
+      const said = ((withSentTargetWithheld(ENGINE(), GRAPH(), GOAL, SENT(edit)) as Rec).inference_warnings ?? [])
+        .filter((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION).map((w: Rec) => w.message);
+      expect(said).toHaveLength(1);
+      expect(said[0]).toMatch(/Olumi needs to resolve this analysis mismatch before showing a chance\.$/);
+      expect(said[0]).not.toContain('Run the analysis again');
+    }
   });
 
   it('no sent run (a caller that cannot say what was sent): no read', () => {

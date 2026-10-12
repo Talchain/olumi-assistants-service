@@ -809,6 +809,20 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(t2.assistant_text, t2.assistant_text).toContain('Non-development time (0 to 100). Those ranges are not yours. Tell me the right ones and I will replace them.');
   }, 180_000);
 
+  /**
+   * ⭐ RECOVERY BATCH E (DL ruling, 12 Oct; the win-share class): the Agent's own words never state a share of runs on the wire.
+   * The real Agent route's final exit (`withoutRunShareTextAtEgress`) removes the sentence and ships the rest byte for byte.
+   * Mutation: drop the route's call and the sentence ships (RED).
+   */
+  it('(s) Batch E: the Agent\'s reply never states a share of runs; the rest of its reply ships', async () => {
+    const { RUN_SHARE_CENSUS } = await import('../../compose/run-share-text.js');
+    graphOf.set(SCENARIO, hiringGraph());
+    script = [() => say('Two options were each supported by under 1% of runs. Tell me your deadline when you have it.')];
+    const t = await turn({ message: 'What should I look at next?' });
+    expect(t.assistant_text, t.assistant_text).toContain('Tell me your deadline when you have it.');
+    expect(t.assistant_text, t.assistant_text).not.toMatch(RUN_SHARE_CENSUS);
+  }, 120_000);
+
   it('(r′) Paul is shown his range on the card, in his words, beside the figure he chose', async () => {
     graphOf.set(SCENARIO, hiringGraph());
     await sayRangeFirst();

@@ -44,7 +44,7 @@ import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
-import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
+import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { goalOwnConstraintChanceRecords, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
@@ -288,7 +288,7 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
  * independent check r2, BLOCKING 3: no "no change" from summary statistics — the equal-decile / zero-spread reading is not
  * used here at all). On the same-draw reference every draw IS the reference, so the row disagrees on ANY sign otherwise:
  * a share strictly between 0 and 1; ANY positive std (equal deciles never excuse it: std 3 with p10 = p90 = 75 is a spread);
- * deciles apart; or any recorded centre or decile away from the reference (beyond float representation, 1e-9 relative).
+ * deciles apart; or any recorded centre or decile not exactly the reference in the Run's frame (D2, exact equality).
  * A row that records none of these (no outcome, or its spread already withheld) agrees.
  */
 function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined }): StatusQuoReading {
@@ -299,18 +299,17 @@ function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: bo
   if (typeof p === 'number' && p !== 0 && p !== 1) return 'moved';
   const o = isRec(row.outcome) ? row.outcome : undefined;
   if (o === undefined) return 'assumed';
-  // D2 FLOAT TOLERANCE (DL ruling on PL #94 6129218237, 12 Oct, recovery Batch D): a spread is a spread beyond floating-point
-  // representation error of the row's OWN values, never its rounding. The 11 Oct capacity Run's status quo held 0.4 on every
-  // draw and reported std 5.55e-17 (≈ 0.63·ε·|centre|): residue, not a spread. Pure representation error, no unit floor, so
-  // the verdict is the same in any unit: std ≤ 16·ε·|centre| (the row's mean, else p50, in the same frame); deciles equal only
-  // within 16·ε·max(|p10|, |p90|). Anything larger is real spread and stays "moved" (AIE same-frame equality, 6118336179).
-  const centre = finite(o.mean) ? o.mean : finite(o.p50) ? o.p50 : undefined;
-  if (finite(o.std) && o.std > (centre === undefined ? 0 : 16 * Number.EPSILON * Math.abs(centre))) return 'moved';
-  if (finite(o.p10) && finite(o.p90) && Math.abs(o.p10 - o.p90) > 16 * Number.EPSILON * Math.max(Math.abs(o.p10), Math.abs(o.p90))) return 'moved';
+  // ⭐ D2 EXACT SAME-FRAME EQUALITY (AIE 6129749753 AMEND, PL 6130375396, 12 Oct; the 16ε tolerance is REJECTED): ANY positive
+  // std, ANY deciles apart, and (below) any centre or decile not EXACTLY the reference in the Run's frame, is a reading that
+  // moved. The AIE allows one narrow exception (a tiny std that is the arithmetic residue of a producer shown to give a
+  // constant result); it is not taken here, so the checking reading stays (the 11 Oct row's own mean is one ulp off too).
+  if (finite(o.std) && o.std > 0) return 'moved';
+  if (finite(o.p10) && finite(o.p90) && o.p10 !== o.p90) return 'moved';
   // D2: a reference whose frame is not known is never compared, so the row is neither "moved" nor "no change".
   if (a.reference === 'unknown') return ['p10', 'p50', 'p90', 'mean'].some((k) => finite(o[k])) ? 'unknown' : 'assumed';
   const ref = a.reference;
-  const away = (v: unknown): boolean => finite(v) && ref !== undefined && Math.abs(v - ref) > 1e-9 * Math.max(1, Math.abs(ref));
+  // D2 (PL 6130375396: AIE833 rejected the 1e-9·max(1, |reference|) floor): exact equality in the Run's frame.
+  const away = (v: unknown): boolean => finite(v) && ref !== undefined && v !== ref;
   return ['p10', 'p50', 'p90', 'mean'].some((k) => away(o[k])) ? 'moved' : 'assumed';
 }
 
@@ -599,8 +598,12 @@ export function goalChanceLicenceOf(
   });
   // ⭐ AIE 6125204695 (3): beside a deadline chance on Olumi's range assumed from the user's single forecast, the input time
   // range is said once (the input, never a probability interval), on the licence's own notes.
-  const assumedRange = share !== null && share.goal.id === goalId && licensed.length > 0 ? olumiAssumedTeamRange(graph) : null;
-  return assumedRange === null ? worded : { ...worded, notes: [...(worded.notes ?? []), olumiAssumedRangeLine(assumedRange)] };
+  const onShare = share !== null && share.goal.id === goalId && licensed.length > 0;
+  const assumedRange = onShare ? olumiAssumedTeamRange(graph) : null;
+  // ⭐ E-TAIL (b), AIE 6130197656 §2: a licensed option whose hire link rests on Olumi's limit says so once, verbatim.
+  const notes = [...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
+    ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : [])];
+  return notes.length === 0 ? worded : { ...worded, notes: [...(worded.notes ?? []), ...notes] };
 }
 
 /**
