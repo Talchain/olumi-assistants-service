@@ -447,6 +447,16 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
       expect(String(card.public_label).startsWith(`From your message: ‘${said}’ Do you want to use ${n} months as your forecast`), said).toBe(true);
     }
   });
+  it('Lane 1 confidence: an unmatched Agent quote cannot claim the user described low confidence', async () => {
+    const w = world(), before = JSON.stringify(w.graph());
+    const card = await w.caps.proposeTeamTime!(ctx('Recruitment is slow.') as never,
+      { quote: '7 months, but I have low confidence in this', low_months: 7, high_months: 7 }) as Rec;
+    expect(card.ok).toBe(true);
+    expect.soft(card.public_label).not.toMatch(/confidence/i);
+    expect.soft(card.team_time).toMatchObject({ forecast_months: 7, range_rule: 'default', confirmation: { source: '' } });
+    expect(card.public_label).not.toContain('From your message');
+    expect(JSON.stringify(w.graph())).toBe(before);
+  });
   it('Lane 1 provenance: words the user did not type get NO quote line; a figure the quote does not state is still only the Agent\'s card; malformed arguments are refused', async () => {
     for (const [said, q, n, line] of [['The team say 7 months.', 'the team say 8 months', 8, false], ['The team say 7 months.', 'The team say 7 months', 8, true],
       ['Recruitment is slow.', '7 months', 7, false]] as const) {

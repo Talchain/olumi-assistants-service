@@ -178,7 +178,7 @@ export function quotedTeamTime(texts: { readonly now?: string | null; readonly c
   const source = quoted === '' ? undefined : verbatimSourceLine(texts, quoted);
   const confirmation = { source: source ?? '', quote: quoted };
   return { kind: 'found', confirmation, time: withAssumedTeamRange({ low_months: low, high_months: high }, quoted,
-    source === undefined ? quoted : sentencesHolding(plainWords(source), plainWords(quoted))) };
+    source === undefined ? '' : sentencesHolding(plainWords(source), plainWords(quoted))) };
 }
 /**
  * AI-first Lane 1 (DL 12 Oct, PLAN-AI-FIRST-SUBTRACT): a single time is the user's forecast with Olumi's assumed range by the
