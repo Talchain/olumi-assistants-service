@@ -290,6 +290,37 @@ export function withAdmittedAccumulations<N extends NodeLike, E extends EdgeLike
 }
 
 
+/**
+ * ⭐ D4 (c)(1) (post-F; DL 12 Oct): a goal-net carrier whose monthly change is DERIVED (not a figure a person stated) is the
+ * provisional conversion of a no-change forecast: its end value is today + net × T. The brief's own sentence writing that
+ * value (`findSentence`, bound by the figure's identity) rides the derived rate as its source, `forecast_source`, a CEE-only
+ * passthrough beside the value. It changes no level, source or frame; no sentence, or more than one, adds nothing.
+ */
+export function withForecastSources<N extends NodeLike, E>(
+  graph: { nodes: N[]; edges: E[] }, admission: AccumulationAdmission,
+  findSentence: (goalLabel: string, unit: unknown, figure: number) => string | undefined,
+): { nodes: N[]; edges: E[] } {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n] as const));
+  const quoted = new Map<string, string>();
+  for (const [goalId, held] of admission.goalCarriers) {
+    const carrier = admission.carriers.get(held.carrierId);
+    const goal = byId.get(goalId);
+    if (carrier === undefined || goal === undefined || !carrier.factor_ids[1].endsWith('_net_zero_rate')) continue;
+    const [stock, inflow] = [byId.get(carrier.factor_ids[0]), byId.get(carrier.factor_ids[2])];
+    if (stock === undefined || inflow === undefined || reflectsAHumanAct(valueClassOf(inflow.observed_state))) continue;
+    const [s0, net] = [levelOf(stock), levelOf(inflow)];
+    if (s0 === undefined || net === undefined || typeof goal.label !== 'string') continue;
+    const unit = readGoalRecord({ nodes: graph.nodes, edges: graph.edges }, goalId)?.target?.unit ?? goal.observed_state?.unit ?? stock.observed_state?.unit;
+    const quote = findSentence(goal.label, unit, s0 + net * carrier.horizon_months);
+    if (quote !== undefined) quoted.set(inflow.id, quote);
+  }
+  if (quoted.size === 0) return graph;
+  return { ...graph, nodes: graph.nodes.map((n) => {
+    const quote = quoted.get(n.id);
+    return quote === undefined ? n : { ...n, observed_state: { ...n.observed_state, forecast_source: { quote, origin: 'brief' } } } as N;
+  }) };
+}
+
 /** Science §(aj): structure only. Admission remains the sole carrier writer; this is never a confirmation. */
 export function admitStructuralGoalAccumulation<N extends NodeLike, E extends EdgeLike>(nodes: readonly N[], edges: readonly E[]) {
   const goals = nodes.filter(n => n.kind === 'goal');

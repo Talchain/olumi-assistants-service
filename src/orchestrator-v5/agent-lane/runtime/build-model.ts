@@ -39,7 +39,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { briefForecastSentence, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -64,7 +64,7 @@ import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js'
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
 import { withRateCountProducts } from '../rate-count-product.js';
-import { admitAccumulationIdentities, withAdmittedAccumulations, admitStructuralGoalAccumulation } from '../accumulation-identity.js';
+import { admitAccumulationIdentities, withAdmittedAccumulations, admitStructuralGoalAccumulation, withForecastSources } from '../accumulation-identity.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -2213,7 +2213,9 @@ export async function buildModelFromBrief(
     if (accumulation.loss.length > 0) {
       admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
     }
-    const declaredAccumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
+    // D4 (c)(1): a derived no-change rate carries the brief's own forecast sentence as its source (`forecast_source`).
+    const declaredAccumulated = withForecastSources(withAdmittedAccumulations(goalNodes, admitted.edges, accumulation), accumulation,
+      (label, unit, figure) => briefForecastSentence(label, unit, figure, brief));
     const accumulated = inTimeClass ? admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges) : declaredAccumulated;
     // ⭐ Recovery Batch C (adjudication (c), served c85817f2): the goal's OWN target row no longer refuses the fit
     // (`goalOwnRows`, as F4's retirement passes it): it holds the raw figure, and the widen rescales the goal's threshold,

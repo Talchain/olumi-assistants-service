@@ -3,10 +3,11 @@
  *
  * THE ONLY MODULE THAT INTERPRETS AUTHORSHIP STRINGS: `observed_state.source`, `extractionType`, an option setting's
  * `source`, a link's `provenance.source` / `provenance.magnitude`, and the markers beside them (`user_material_unverified`,
- * `reviewed_by_user`, `stated_time`, `estimate`, `extra_share_by_date`). Every reader whose answer reaches what the person
- * or the Agent is told, or a decision that licenses, withholds, refuses or labels a result, asks {@link provenanceOf} (or a
- * projection of it below) — never the strings. `__tests__/provenance-agreement.test.ts` proves the readers agree for every
- * source variant; `__tests__/provenance-reads-guard.test.ts` is the shrink-only list of the sites still outside.
+ * `reviewed_by_user`, `stated_time`, `estimate`, `extra_share_by_date`, `forecast_source`). Every reader whose answer
+ * reaches what the person or the Agent is told, or a decision that licenses, withholds, refuses or labels a result, asks
+ * {@link provenanceOf} (or a projection of it below) — never the strings. `__tests__/provenance-agreement.test.ts` proves
+ * the readers agree for every source variant; `__tests__/provenance-reads-guard.test.ts` is the shrink-only list of the
+ * sites still outside.
  *
  * THREE ORIGINS, NEVER TWO (DL AMEND; AIE #94 6119326092):
  *   - `human`   — ONLY on positive attestation: a person's stamp (`user*`, `panel_elicited`), the brief's (`explicit` /
@@ -1157,4 +1158,16 @@ export function isUserSizedWithoutOlumiMarks(edge: unknown): boolean {
   if (p === undefined || linkProvenanceOf(edge).origin !== 'human') return false;
   return p.source !== 'cee_hypothesis' && p.mean_projected !== true
     && !(typeof p.magnitude === 'string' && p.magnitude.startsWith('olumi_'));
+}
+
+/**
+ * ⭐ D4 (c)(1) (post-F; DL 12 Oct): the brief's own forecast sentence a derived no-change rate rests on
+ * (`observed_state.forecast_source`, a CEE-only passthrough beside the value, following `extra_share_by_date`). The SOURCE of
+ * Olumi's derived figure, never a human measurement of it: the node's own `source` stays Olumi's and `baseline_evidence`
+ * stays null. Read only here.
+ */
+export function forecastSourceOf(node: unknown): { readonly quote: string; readonly origin: 'brief' } | undefined {
+  const f = rec(rec(rec(node)?.observed_state)?.forecast_source);
+  return f !== undefined && typeof f.quote === 'string' && f.quote.trim() !== '' && f.origin === 'brief'
+    ? { quote: f.quote, origin: 'brief' } : undefined;
 }

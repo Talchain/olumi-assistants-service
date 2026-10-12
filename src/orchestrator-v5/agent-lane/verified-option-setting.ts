@@ -612,6 +612,40 @@ function sentencesWritingFigure(factor: Factor, brief: string | undefined): { te
 }
 
 /**
+ * D4 (c)(1): the figure is EXPECTED, as a point: an expectation word before it ("we expect it to reach 10 weeks"), and no
+ * want/aim/goal word, bound, negation, condition or past report. The shared role reader calls "to reach" an aim whatever
+ * leads it, so it cannot tell an expectation from an aim; this local reading adds the lead and keeps every other refusal.
+ */
+const EXPECTATION = /\b(?:expect(?:s|ed|ing)?|forecasts?|forecast(?:ed|ing)|projects?|projected|predict(?:s|ed|ing)?|anticipat(?:e|es|ed|ing)|will|likely)\b/iu;
+const NOT_EXPECTATION = /\b(?:wants?|wanted|needs?|needed|aim(?:s|ed|ing)?|plan(?:s|ned|ning)?|hop(?:e|es|ed|ing)|intend(?:s|ed|ing)?|like|targets?|goals?|objectives?|should|must|not|never|no|below|under|above|over|least|most|up\s+to|less|more|exceed(?:s|ing)?)\b|n't\b/iu;
+function forecastClause(text: string, index: number): boolean {
+  const lead = text.slice(0, index);
+  const role = occurrenceRoleOf(text, index);
+  return EXPECTATION.test(lead) && !NOT_EXPECTATION.test(lead) && role !== 'conditional' && role !== 'past';
+}
+/**
+ * ⭐ D4 (c)(1) (post-F; DL 12 Oct): the ONE brief sentence that writes a no-change forecast's END value — `figure`, worked out
+ * by the goal-net carrier as today + net × T — in the goal's unit, never as an aim. It names the goal, or follows the sentence
+ * that does ("Our current median delivery cycle is 8 weeks. Without a change, we expect it to reach 10 weeks …"). Bound by
+ * the figure's identity; none, or more than one, binds nothing.
+ */
+export function briefForecastSentence(goalLabel: string, unit: unknown, figure: number, brief: string | undefined): string | undefined {
+  try {
+    if (typeof brief !== 'string' || !Number.isFinite(figure)) return undefined;
+    const named = words(goalLabel).filter(w => !grammar(w));
+    const all = assertions(brief).filter(a => a.text.length <= MAX_ASSERTION && directContext(brief, a));
+    const names = (a: Assertion): boolean => words(a.text).some(w => named.some(n => sameName(n, w)));
+    const same = (m: number): boolean => Math.abs(m - Math.abs(figure)) <= 1e-9 * Math.max(1, Math.abs(figure));
+    const hits = all.filter((a, i) => (names(a) || (i > 0 && names(all[i - 1]!))) && findLinkEffectAmounts(a.text).some(amount => same(amount.magnitude)
+      && forecastClause(plainQuotes(a.text), amount.index)
+      && sameFrame(a.text, { start: amount.index, end: amount.index + amount.matchedText.length }, unit, amount, false, true)));
+    return hits.length === 1 ? hits[0]!.text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * ⭐ Recovery Batch B, Row5 (DL 12 Oct): a RANGE the brief states for a factor, read at construction for L6's carrier
  * (`observed_state.range`). Paul's "Each additional specialist resolves about 20 tickets per week, between 10 and 30." was
  * admitted on 9 of 9 served drafts with the 20 and without the 10–30. A pair is "between X and Y", "X–Y" or "X to Y"; ends
