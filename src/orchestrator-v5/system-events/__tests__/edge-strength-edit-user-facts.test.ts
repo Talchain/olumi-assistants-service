@@ -203,24 +203,23 @@ describe('(2) confirm_current from a band: the whole strength is kept (#2473 CR)
     expect(edge.strength).toStrictEqual({ mean: 0.85, std: OLUMI_STD });
     expect(edge.strength.std).not.toBe(edgeBandStd('very strong'));
     const { reviewed_by_user: review, ...kept } = edge.provenance!;
-    // L4 (DL 5929790081): an approved placeholder is sized (`olumi_estimate`); source and reasoning stay Olumi's.
-    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reasoning: SERVED_REASONING });
+    // Batch A ruling 1: L4 superseded; review keeps every sizing and authorship byte.
+    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reasoning: SERVED_REASONING });
     expect(review).toMatchObject({ intent: 'confirm', band: 'very strong' });
     expect(edge.defaulted).toBe(true);
     expect(edge).not.toHaveProperty('exists_defaulted');
     expect(edge.exists_probability).toBe(0.8);
     expect(edge.effect_direction).toBe('positive');
-    // R3 5942069984: the stored link is Olumi's estimate, accepted — the receipt says so (RC's accept_olumi_estimate).
-    expect(result.kind === 'mutated' && result.response.assistant_text).toBe("You accepted Olumi's estimate for how much Price sensitivity changes Monthly churn.");
+    // Batch A ruling 3: the receipt says the reviewed placeholder is still not sized.
+    expect(result.kind === 'mutated' && result.response.assistant_text).toContain('has not been sized yet');
   });
 
-  it('#2473: the ONLY analysis input that moves is the placeholder’s sizing (L4) — never the std', async () => {
+  it('Batch A: a placeholder confirm changes no analysis input, including sizing and std', async () => {
     const graph = inBand();
     const result = await applyStated(graph, confirm(), 'very strong');
     if (result.kind !== 'mutated') throw new Error(result.reason);
-    const sized = structuredClone(graph) as GraphV3T;
-    for (const e of sized.edges) if (e.from === FROM && e.to === TO) (e.provenance as Record<string, unknown>).magnitude = 'olumi_estimate';
-    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(sized));
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph as GraphV3T));
   });
 
   it('CONTRAST (a confirm of the exact FIGURE — the UI’s "Confirm this estimate", no stated band): std untouched, still admitted', async () => {
@@ -233,15 +232,13 @@ describe('(2) confirm_current from a band: the whole strength is kept (#2473 CR)
     expect(edge).not.toHaveProperty('std_defaulted');
     expect(edge.defaulted).toBe(true);
     const { reviewed_by_user: review, ...kept } = edge.provenance!;
-    // L4 (DL 5929790081): an approved placeholder is sized (`olumi_estimate`); source and reasoning stay Olumi's.
-    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reasoning: SERVED_REASONING });
+    // Batch A ruling 1: L4 superseded; review keeps every sizing and authorship byte.
+    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reasoning: SERVED_REASONING });
     expect(review).toMatchObject({ intent: 'confirm' });
     expect(review).not.toHaveProperty('band');
     if (result.kind !== 'mutated') return;
-    // L4: the ONLY analysis input that moves is the placeholder's sizing (`olumi_estimate`) — never the std.
-    const sized = structuredClone(graph) as GraphV3T;
-    for (const e of sized.edges) if (e.from === edge.from && e.to === edge.to) (e.provenance as Record<string, unknown>).magnitude = 'olumi_estimate';
-    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(sized));
+    // Batch A ruling 2: a confirmation keeps the analysis hash unchanged.
+    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph as GraphV3T));
   });
 
   it('CONTRAST: a stated band the link does NOT sit in is not a band for this write — std untouched', async () => {

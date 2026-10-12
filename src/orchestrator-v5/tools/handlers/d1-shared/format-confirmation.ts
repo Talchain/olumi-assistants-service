@@ -718,7 +718,9 @@ export function formatEdgeStrengthUnchanged(input: {
     strength: { mean: input.mean },
     ...(input.unsized === true ? { sizing: 'placeholder' } : {}),
   }, 'direction');
-  if (band === 'not sized yet') return `${link} has not been sized yet; nothing was changed.`;
+  // Batch A (PL 6114713464): accurate, a review may still be recorded. A′ (AIE #94 6115788987): unchanged is said of THIS
+  // link, never the whole model.
+  if (band === 'not sized yet') return `${link} has not been sized yet. Its values are unchanged. Give a figure, or ask Olumi to estimate it.`;
   if (band === 'no material influence') {
     return `${link} already has no material influence.`;
   }
@@ -741,6 +743,10 @@ export function formatEdgeStrengthConfirmed(input: {
   readonly toLabel: string;
   readonly sizing: LinkSizing | undefined;
 }): string {
+  // Batch A ruling 3: confirming a placeholder says it is still not sized.
+  // Batch A ruling 3 (PL 6114713464): values unchanged is not "nothing changed" — the review itself is recorded.
+  // A′ (AIE #94 6115788987): unchanged is said of THIS link, never the whole model.
+  if (input.sizing === 'placeholder') return `Your review of the link between ${input.fromLabel} and ${input.toLabel} is recorded. It has not been sized yet. Its values are unchanged. Give a figure, or ask Olumi to estimate it.`;
   if (input.sizing === 'olumi_accepted') return acceptedOlumiEstimateSentence(input.fromLabel, input.toLabel);
   const confirmed = `Confirmed the current strength of the link between ${input.fromLabel} and ${input.toLabel}`;
   return input.sizing === 'user' ? `${confirmed} as your judgement.` : `${confirmed}.`;

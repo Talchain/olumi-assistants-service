@@ -2916,8 +2916,8 @@ export class SupabaseSessionStore implements SessionStore {
       abortableAnalysisRead(this.client.from('scenarios')
         .select('id, user_id, brief, analysis_provenance').eq('id', scenarioId).maybeSingle()),
       decisionRecordId === null ? Promise.resolve({ data: null, error: null })
-        : abortableAnalysisRead(this.client.from('decision_records').select('id, scenario_id')
-          .eq('scenario_id', scenarioId).eq('id', decisionRecordId).maybeSingle()),
+        : abortableAnalysisRead(this.client.from('decision_records').select('record_id, scenario_id')
+          .eq('scenario_id', scenarioId).eq('record_id', decisionRecordId).maybeSingle()),
     ]);
     if (scenario.error || decision.error || !scenario.data || scenario.data.id !== scenarioId) {
       throw new SessionReadError('Run recording rows could not be read', { cause: scenario.error ?? decision.error });
@@ -2929,7 +2929,7 @@ export class SupabaseSessionStore implements SessionStore {
     return {
       brief: scenario.data.brief, analysisProvenance: scenario.data.analysis_provenance,
       guest: scenario.data.user_id === null,
-      decisionRecordPresent: decisionRecordId !== null && decision.data?.id === decisionRecordId
+      decisionRecordPresent: decisionRecordId !== null && decision.data?.record_id === decisionRecordId
         && decision.data?.scenario_id === scenarioId,
     };
   }

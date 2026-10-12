@@ -18,7 +18,6 @@ import { claimPermissionsFrom } from '../../agent-lane/first-analysis.js';
 import { readinessViewOf } from '../../agent-lane/readiness-view.js';
 import { postWriteReadinessLine } from '../../../routes/agent-v1-turn.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
-import { sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
 import { olumiGuessedGoalLink, olumiGuessedLink } from '../../../orchestrator/context/placeholder-parts.js';
 
 type Json = Record<string, any>;
@@ -376,12 +375,20 @@ describe('row 3: a size construction credits to the user is no Olumi guess, even
  * ⭐ L4 / DL ruling 5929790081 (i) AT THE GOAL TARGET READER (CODEX CR #2446 5930402198): Olumi's estimate the user
  * ACCEPTED sizes a link for goal figures, so R3's m1 is testable once the user approves Olumi's sizes, with Olumi's origin
  * kept. Controls: unapproved Olumi sizes and a reviewed legacy placeholder still cap it, and the user's own size lifts it.
- * The accepted state is built by the writer's own rule (`sizedByApproval`) plus the review the writer records.
+ * Batch A ruling 6: the accepted fixture starts from genuinely sized estimates plus the review approval records.
  */
 describe('L4 (i): an ACCEPTED Olumi size licenses the goal target; unapproved Olumi sizes still cap it', () => {
   const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-mrr-m1-card-yes-20260930.json', import.meta.url), 'utf8')).graph as Json;
   const review = { intent: 'confirm', at: '2026-10-01T09:25:10.219Z' };
-  const accepted = (g: Json): Json => { const c = structuredClone(g); for (const e of c.edges) if (olumiSized(e) && e.provenance) e.provenance = { ...sizedByApproval(e.provenance, e), reviewed_by_user: review }; return c; };
+  // Batch A ruling 6: start with genuine estimates; approval never sizes a placeholder.
+  const accepted = (g: Json): Json => {
+    const c = structuredClone(g);
+    for (const e of c.edges) if (olumiSized(e) && e.provenance) {
+      const { mean_projected: _projection, ...origin } = e.provenance;
+      e.provenance = { ...origin, magnitude: 'olumi_estimate', reviewed_by_user: review };
+    }
+    return c;
+  };
 
   it('PRECONDITION: m1 rests on Olumi’s unapproved size → not testable (P5)', () => {
     const v = targetTestabilityOf(M1);

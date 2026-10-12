@@ -2080,6 +2080,21 @@ function laterSaveConflict(error: unknown): boolean {
   return response.status === 409 && ['revision_conflict', 'GRAPH_STALE'].includes(String(response.json?.code ?? response.json?.details?.code));
 }
 
+/**
+ * ⭐ ONE COUNT FOR A MIXED LINK SET, PREVIEW AND RECEIPT ALIKE (Batch A live (b) BLOCKING; AIE text contract #94
+ * 6115788987): strengths sized, changes to links that stay unsized, and reviews are counted apart, never "these 6 link
+ * strengths" when two of the six were reviews. The preview counts the outcome the writer is predicted to store; the
+ * receipt counts the outcome it stored.
+ */
+function mixedLinkSetHeading(strengths: number, unsizedChanges: number, reviews: number): string {
+  const counted = [
+    ...(strengths > 0 ? [`${strengths} ${strengths === 1 ? 'link strength' : 'link strengths'}`] : []),
+    ...(unsizedChanges > 0 ? [`${unsizedChanges} ${unsizedChanges === 1 ? 'change to an unsized link' : 'changes to unsized links'}`] : []),
+    ...(reviews > 0 ? [`${reviews} ${reviews === 1 ? 'review' : 'reviews'}`] : []),
+  ];
+  return counted.length === 1 ? counted[0]! : `${counted.slice(0, -1).join(', ')} and ${counted.at(-1)!}`;
+}
+
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
   proposals: ProposalStore,
@@ -3529,17 +3544,33 @@ export function createAgentCapabilities(
     const accepted = sent.filter((l) => storedSizing(l) === 'olumi_accepted').map((l) => acceptedOlumiEstimateSentence(quotedLabel(l.from), quotedLabel(l.to)));
     // Olumi's estimates as STORED (Codex pre-review 3 P1): a model-proposed link the sizer never marked (`unmarked`) is no one's.
     const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate'].includes(storedSizing(l))).length;
-    const reviewsOnly = sent.every((l) => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder');
     const placeholderChangesOnly = sent.every((l) => l.intent === 'set' && storedSizing(l) === 'placeholder');
+    /**
+     * ⭐ A SET IS COUNTED FROM THE STORED OUTCOME, AND EVERY REVIEW-ONLY LINK SAYS SO (Batch A live (b) FAIL, PL 6115623359;
+     * AIE text contract #94 6115788987; A′ check round 1). "Recorded these 6 link strengths" when two of the six were only
+     * reviews of links nobody has sized, and "Recorded your review of this link" with no word that it is still unsized.
+     * Strengths sized, changes to links still unsized, and reviews are counted apart, each from the link as STORED; each
+     * review-only link, in ANY set (one review, all reviews, with changes, with strengths), says it is still unsized with
+     * its own values unchanged (never the model's: other links may have been sized), then the next action once.
+     */
+    const reviewedUnsizedAt = (l: (typeof sent)[number]): boolean => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder';
+    const changedUnsized = sent.filter((l) => l.intent === 'set' && storedSizing(l) === 'placeholder').length;
+    const reviewedUnsized = sent.filter(reviewedUnsizedAt);
+    const counted = reviewedUnsized.length > 0 || (!placeholderChangesOnly && changedUnsized > 0);
+    const listed = parts.filter((_, i) => !reviewedUnsizedAt(sent[i]!));
+    const countedTail = reviewedUnsized.map((l) => ` ${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)}: Review recorded; this link is still unsized. Its values are unchanged.`).join('')
+      + ' Give a figure, or ask Olumi to estimate it.';
+    const accepts = (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
+      + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : '');
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
-      follow_up: `Recorded ${reviewsOnly ? (sent.length === 1 ? 'your review of this link' : `your reviews of these ${sent.length} links`)
-        : placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
-        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
-        + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
-        + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
+      follow_up: counted
+        ? `Recorded ${mixedLinkSetHeading(sent.length - changedUnsized - reviewedUnsized.length, changedUnsized, reviewedUnsized.length)}.`
+          + `${listed.length > 0 ? ` ${listed.join('; ')}.` : ''}${accepts}${countedTail}`
+        : `Recorded ${placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
+        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.${accepts}`,
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
   };
@@ -4440,7 +4471,8 @@ export function createAgentCapabilities(
         // records must remain unsized after review; their card must not promise an estimate that review cannot store.
         const provenance = isPlainRecord(edge.provenance) ? edge.provenance : {};
         const sizedAfterApproval = linkSizing({ ...edge, provenance: sizedByApproval({ ...provenance,
-          reviewed_by_user: { intent: 'confirm' } }, edge) });
+          reviewed_by_user: { intent: 'confirm' } }, edge,
+          currentBand === band ? undefined : (direction === 'negative' ? -1 : 1) * bandMidpoint(band)) });
         /**
          * ⭐ F1 (#87 6006627551; DL lease c6): a band that MOVES a link holding the user's own figure would drop it — for
          * the user's band and Olumi's estimate alike (a brief figure is `brief_extraction` + `user_stated`, so the
@@ -4480,7 +4512,7 @@ export function createAgentCapabilities(
         // ⛔ R3 DEFECT 1 (5936673643, served dcd72dc3; DL GO 1 Oct): approving the band a link ALREADY SITS IN keeps its
         // figure. Matching only the band's midpoint re-set a sized estimate μ 0.6 → 0.55 (σ 0.3 → 0.275, its sizing note
         // dropped) and Paul's placeholders 0.5 → 0.55 on a no-change approval, staling the Run. Kept, it is a REVIEW
-        // (`confirm_current`); on a PLACEHOLDER that review is what sizes it (L4 (c), DL 5929790081: `sizedByApproval`).
+        // (`confirm_current`); a placeholder confirmation is refused by the canonical writer because no estimate exists.
         // An estimate already accepted in that band is "already". Only a band that MOVES the link sets its midpoint.
         const keeps = currentBand === band;
         const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
@@ -4538,9 +4570,11 @@ export function createAgentCapabilities(
         operations: ops,
         provenance: { authored_by: shown.every((x) => x.yours) ? 'user_stated' : 'model_proposed', basis: String(args?.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${reviewOnlyLinks.length === shown.length
-          ? `Review ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
-          : unsizedChanges.length === shown.length ? `Change ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+        public_label: `${unsizedChanges.length === shown.length ? `Change ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+          // Any set holding a review, or a change beside strengths, is counted as the receipt will count it
+          // (`mixedLinkSetHeading`), never as N link strengths.
+          : unsizedChanges.length + reviewOnlyLinks.length > 0
+            ? `Record ${mixedLinkSetHeading(shown.length - unsizedChanges.length - reviewOnlyLinks.length, unsizedChanges.length, reviewOnlyLinks.length)}`
           : `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}`}: `
           + shown.map((x) => reviewKeepsPlaceholder(x)
             ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet (kept as it is)`
@@ -6190,7 +6224,10 @@ export function createAgentCapabilities(
           : typeof fromLabel === 'string' && typeof toLabel === 'string'
             // Quoted: shown through `withoutAgentDirections`, where an unquoted label can drop the sentence (Codex P2).
             ? formatEdgeStrengthConfirmed({ fromLabel: quoteLabelForUser(fromLabel), toLabel: quoteLabelForUser(toLabel), sizing })
-            : 'Recorded your review of this link; its strength stays as it was.';
+            // A′ round 2 (DL): a placeholder has no strength to "stay"; it says the contract, as the labelled receipt does.
+            : sizing === 'placeholder'
+              ? 'Review recorded; this link is still unsized. Its values are unchanged. Give a figure, or ask Olumi to estimate it.'
+              : 'Recorded your review of this link; its strength stays as it was.';
         const whoseNote = sizing === 'user'
           ? 'Recorded as the user’s own estimate.'
           : sizing === 'olumi_accepted'
