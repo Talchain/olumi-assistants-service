@@ -82,10 +82,11 @@ export const SENT_TARGET_MISMATCH_SUFFIX = 'Olumi needs to resolve this analysis
  * target) is a mismatch of Olumi's.
  */
 export function savedTargetChangedSince(sent: SentRunInputs | undefined, graph: unknown, goalId: unknown): boolean {
-  if (sent === undefined || typeof goalId !== 'string' || !isRec(sent.graph) || !Array.isArray(sent.graph.nodes)) return false;
-  const sentRaw = sent.graph.nodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal')?.goal_threshold_raw;
-  const held = shareByDateGoalForChanceOf(graph);
-  return held !== null && held.goal.id === goalId && finite(sentRaw) && finite(held.threshold_raw) && sentRaw !== held.threshold_raw;
+  if (sent === undefined || typeof goalId !== 'string' || !isRec(sent.graph)) return false;
+  // Both targets through the one goal-record reader (S5 census): the target as sent then, and as saved now.
+  const sentRaw = readGoalRecord(sent.graph, goalId)?.target?.raw;
+  const savedRaw = readGoalRecord(graph, goalId)?.target?.raw;
+  return shareByDateGoalForChanceOf(graph)?.goal.id === goalId && finite(sentRaw) && finite(savedRaw) && sentRaw !== savedRaw;
 }
 /** The withhold's words for this Run: the AIE's sentence, then the one suffix the revision evidence supports. */
 export function sentTargetNotHeldWords(sent: SentRunInputs | undefined, graph: unknown, goalId: unknown): string {

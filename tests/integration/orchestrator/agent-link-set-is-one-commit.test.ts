@@ -681,9 +681,9 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     // RED on staging 9bac9729: byte-equal to the served chip ("… (kept as it is)", review only).
     expect(String(p.public_label)).not.toBe(HIRING.served_chip_detail);
     expect(String(p.public_label)).toBe('Record these 3 link strengths: '
-      + '"Tech leads hired" \u2192 "Leadership capacity" as strong, Olumi\u2019s first estimate for a link nobody had sized; '
-      + '"Developers hired" \u2192 "Code quality degradation" as slight, Olumi\u2019s first estimate for a link nobody had sized; '
-      + '"Code quality degradation" \u2192 "productivity" as moderate, Olumi\u2019s first estimate for a link nobody had sized');
+      + '"Tech leads hired" \u2192 "Leadership capacity" as strong, an estimate from Olumi that has not yet been applied; '
+      + '"Developers hired" \u2192 "Code quality degradation" as slight, an estimate from Olumi that has not yet been applied; '
+      + '"Code quality degradation" \u2192 "productivity" as moderate, an estimate from Olumi that has not yet been applied');
     expect((p as unknown as { links: Record<string, unknown>[] }).links[0]).toMatchObject({ from: 'Tech leads hired', to: 'Leadership capacity',
       becomes: { band: 'strong' }, whose: 'Olumi\u2019s first estimate for a link nobody had sized', keeps_current_strength: false,
       sizing_after_approval: 'olumi_accepted' });

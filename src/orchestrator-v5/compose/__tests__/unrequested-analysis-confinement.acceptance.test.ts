@@ -39,6 +39,7 @@
  * over an untyped record — exactly the kind that silently stops matching.
  */
 
+import { RUN_SHARE_CENSUS, withoutRunShareSentences } from '../run-share-text.js';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -225,7 +226,12 @@ describe('a run the user asked for is untouched', () => {
     const block = build(false);
     expect(block.leading_option_id).toBe(capture.leading_option_id);
     expect(block.win_probabilities).toEqual(capture.win_probabilities);
-    expect(block.summary).toBe(capture.summary);
+    // ⭐ Recovery Batch E (DL ruling, the win-share class): a requested Run keeps its summary with only the sentence
+    // stating a share of runs removed, byte for byte otherwise (`withoutRunShareSentences`).
+    expect(block.summary).toBe(withoutRunShareSentences(capture.summary));
+    expect(capture.summary).toMatch(RUN_SHARE_CENSUS);
+    expect(block.summary).not.toMatch(RUN_SHARE_CENSUS);
+    expect(block.summary).not.toBe('');
     expect(block.summary).not.toBe(UNREQUESTED_ANALYSIS_SUMMARY);
     const robustness = block.enrichment?.robustness as Record<string, unknown>;
     expect(robustness.display_verdict).toBe('fragile');
