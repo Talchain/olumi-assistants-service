@@ -3002,6 +3002,7 @@ async function dispatchOptionInterventionEdit(
     requestHash: computeRequestHash(payload) }, {
     targets: [{ optionId: event.option_id, factorId: event.factor_id, modelValue: event.value }],
     base_graph_hash: event.base_graph_hash,
+    canvasEdit: true,
   }, requestId);
 }
 
@@ -3054,6 +3055,13 @@ export async function dispatchOptionLevelsBatch(
     readonly teamTime?: ApprovedTeamTime;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
     readonly fenceRefusalReachesCaller?: boolean;
+    /**
+     * ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (SYS3 L4, #94 6115410093; DL #75 5902916137 (3)). Only the wire's single
+     * `option_intervention_edit` sets this: its level is read on the factor's declared range, as the card showed it
+     * (`figureOnFactorRange`). Served 50530b5f stored the card's "2 people" as a bare 0.4 because #2919's batch rule
+     * (no inferred figure) also reached this one-target form. Approval batches still infer nothing.
+     */
+    readonly canvasEdit?: true;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
@@ -3122,7 +3130,7 @@ export async function dispatchOptionLevelsBatch(
     && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
-    ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: false, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
+    ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: batch.canvasEdit === true, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
       getSessionStore())
     : await executeOptionInterventionBatch({ ...common, inferFactorFigure: false, targets: batch.targets,
       ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}),
