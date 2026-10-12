@@ -1447,7 +1447,8 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
         chanceCells: [{ kind: 'withheld', why: 'Chance not shown yet', face: note, reasons: [{ code, message: note }] }],
         obligations: [{ role: 'withheld_reason', text: note }, { role: 'ask', text: ask }] });
       expect(c.shape!.headline).toBe(marker);
-      expect(c.shape!.bullets).toEqual([ask]);
+      // Score run 2 hidden answers (DL 12 Oct): with no chance on the face, the reply's own words join it before the ask.
+      expect(c.shape!.bullets).toEqual([context, ask]);
       assertDisclosure(c, marker, note);
     });
 

@@ -1,0 +1,187 @@
+{
+ "source": "recovery/score/judge-run2/run2 (score run 2; served UI 52936df0, CEE aadcf897 = R2; compose-reply.ts byte-identical at C a11bc90f)",
+ "cases": {
+  "capacity_1": {
+   "capture": "capacity/turns/01.json",
+   "capture_sha256": "3f0dd5d12ab7b5f2c73458e30d464410bc78b2530928077b7d96ae8b1818ebf6",
+   "user_message": "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.",
+   "assistant_text": "Not shown yet; why is under More detail\n\n• Olumi's estimates: 2, see Check estimates.\n• What is today’s actual **Weekly support capacity**?\n\nI’ve built the comparison around your two staffing options and target.\n\n- Your 80 tickets/week and 20 specialist throughput are recorded from your brief.\n- “Keep current staffing” holds today’s values; “Add one specialist” adds one specialist.\n- The initial pass is provisional only; it uses the stated 10–30 throughput range.\n\nThis run doesn’t yet show each option’s chance of reaching 100 tickets per week.\n\nOlumi can't show each option's chance of reaching your Weekly support capacity target yet: the model doesn't have Weekly support capacity's current level to measure from. The rest of this Run's results still stand.\n\nQuestions this model does not answer yet: What do you expect ‘Additional specialists’ to be? ‘Additional specialists’ is 0 today, so Olumi adds up their effects on ‘Weekly support capacity’ instead of multiplying them: treat the comparison as a rough approximation until you say. The specialist's stated throughput is approximate and ranges from 10 to 30 tickets per week; 20 is used as the provisional central case. 1 more question remains unresolved.",
+   "served_shape": {
+    "headline": "Not shown yet; why is under More detail",
+    "bullets": [
+     "Olumi's estimates: 2, see Check estimates.",
+     "What is today’s actual **Weekly support capacity**?"
+    ],
+    "detail": "I’ve built the comparison around your two staffing options and target.\n\n- Your 80 tickets/week and 20 specialist throughput are recorded from your brief.\n- “Keep current staffing” holds today’s values; “Add one specialist” adds one specialist.\n- The initial pass is provisional only; it uses the stated 10–30 throughput range.\n\nThis run doesn’t yet show each option’s chance of reaching 100 tickets per week.\n\nOlumi can't show each option's chance of reaching your Weekly support capacity target yet: the model doesn't have Weekly support capacity's current level to measure from. The rest of this Run's results still stand.\n\nQuestions this model does not answer yet: What do you expect ‘Additional specialists’ to be? ‘Additional specialists’ is 0 today, so Olumi adds up their effects on ‘Weekly support capacity’ instead of multiplying them: treat the comparison as a rough approximation until you say. The specialist's stated throughput is approximate and ranges from 10 to 30 tickets per week; 20 is used as the provisional central case. 1 more question remains unresolved."
+   },
+   "chance_cells": [
+    {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
+       "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 100 tickets per week), because it needs today's level of Weekly support capacity. What's today's level of Weekly support capacity?"
+      },
+      {
+       "code": "GOAL_FIGURES_MISSING_CURRENT_LEVEL",
+       "message": "Not shown. Weekly support capacity's current level is missing."
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 100 tickets per week), because it needs today's level of Weekly support capacity. What's today's level of Weekly support capacity?"
+    },
+    {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
+       "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 100 tickets per week), because it needs today's level of Weekly support capacity. What's today's level of Weekly support capacity?"
+      },
+      {
+       "code": "GOAL_FIGURES_MISSING_CURRENT_LEVEL",
+       "message": "Not shown. Weekly support capacity's current level is missing."
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 100 tickets per week), because it needs today's level of Weekly support capacity. What's today's level of Weekly support capacity?"
+    }
+   ],
+   "tool_calls": [
+    {
+     "name": "build_model_from_brief",
+     "ok": true,
+     "mutated": true
+    }
+   ],
+   "goal_labels": [
+    "Weekly support capacity"
+   ],
+   "repair": "The harness stored this capture as UTF-8 bytes read as cp1252 (\"â€™\" for \"’\"); restored byte-wise (cp1252, else latin-1 for the five bytes cp1252 leaves undefined), then decoded as UTF-8. The other three cases are exactly as captured.",
+   "text_sha256": "6b5043b2d1486228500d5669da4922e13b6ba52ed79175d4f0d6aaaa485dcbd9"
+  },
+  "capacity_3b": {
+   "capture": "capacity/turns/03.json",
+   "capture_sha256": "847f88a49538ea4d110ef92544f69b8a86c5421f7811595ab23a5d2188980c9a",
+   "user_message": "Explain this result",
+   "assistant_text": "Not shown yet; why is under More detail\n\n• Olumi's estimates: 2, see Check estimates.\n\nThese figures are provisional: every estimate behind them is machine-authored and unconfirmed. A share of runs in which an option fitted your goal better than the others is not the chance of reaching your target.\n\nThis run doesn’t yet show each option’s chance of reaching 100 tickets per week.\n\n- Today’s goal level is missing from the model.\n- Your stated arithmetic is only partly represented.\n- Resolve that mismatch before interpreting target success.\n\nYou already supplied 80 tickets per week for the existing team, so the missing baseline is a modelling gap, not missing information from you. The comparison also uses Olumi-estimated relationships for specialist capacity rather than fully encoding your definition. Its reported high robustness concerns that provisional comparison—not whether either option reaches **Weekly support capacity** of at least 100 tickets per week.\n\n<details>\n<summary>Why?</summary>\n\nDecisions framed with a single alternative ('whether or not') fail more often than ones with real alternatives; generating options before evaluating is a core decision-quality step.\n\n</details>",
+   "served_shape": {
+    "headline": "Not shown yet; why is under More detail",
+    "bullets": [
+     "Olumi's estimates: 2, see Check estimates."
+    ],
+    "detail": "These figures are provisional: every estimate behind them is machine-authored and unconfirmed. A share of runs in which an option fitted your goal better than the others is not the chance of reaching your target.\n\nThis run doesn’t yet show each option’s chance of reaching 100 tickets per week.\n\n- Today’s goal level is missing from the model.\n- Your stated arithmetic is only partly represented.\n- Resolve that mismatch before interpreting target success.\n\nYou already supplied 80 tickets per week for the existing team, so the missing baseline is a modelling gap, not missing information from you. The comparison also uses Olumi-estimated relationships for specialist capacity rather than fully encoding your definition. Its reported high robustness concerns that provisional comparison—not whether either option reaches **Weekly support capacity** of at least 100 tickets per week.\n\n<details>\n<summary>Why?</summary>\n\nDecisions framed with a single alternative ('whether or not') fail more often than ones with real alternatives; generating options before evaluating is a core decision-quality step.\n\n</details>"
+   },
+   "chance_cells": [
+    {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
+       "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 100 tickets per week), because it needs today's level of Weekly support capacity. What's today's level of Weekly support capacity?"
+      },
+      {
+       "code": "GOAL_FIGURES_MISSING_CURRENT_LEVEL",
+       "message": "Not shown. Weekly support capacity's current level is missing."
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 100 tickets per week), because it needs today's level of Weekly support capacity. What's today's level of Weekly support capacity?"
+    },
+    {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
+       "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 100 tickets per week), because it needs today's level of Weekly support capacity. What's today's level of Weekly support capacity?"
+      },
+      {
+       "code": "GOAL_FIGURES_MISSING_CURRENT_LEVEL",
+       "message": "Not shown. Weekly support capacity's current level is missing."
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 100 tickets per week), because it needs today's level of Weekly support capacity. What's today's level of Weekly support capacity?"
+    }
+   ],
+   "tool_calls": [],
+   "goal_labels": [
+    "Weekly support capacity"
+   ],
+   "text_sha256": "bc740b354da06bb3f2d9219cdf626ad14fd7fa8e1c8a36c5a9ea0ea69329ffd2"
+  },
+  "hiring_7b": {
+   "capture": "hiring/turns/07.json",
+   "capture_sha256": "0b32c60d08be2f4603dfea27dc7595645a8a3f591ec5fb51657c94b5790b80f3",
+   "user_message": "Explain this result",
+   "assistant_text": "The chance isn't shown yet: the model doesn't yet say how strongly ‘Leadership coverage’ affects ‘Code quality degradation’, how strongly ‘New mid-weight developers’ affects ‘Code quality degradation’ or how strongly ‘New Tech leads’ affects ‘Leadership coverage’, so any figure would be a guess.\n\n• Not shown: some relationships aren't sized yet\n• Olumi's estimates: 6, see Check estimates.\n\nNothing you entered changed.\n\nThis Run cannot establish a choice or confirm your limits.\n‘Productivity change’ cannot be checked in this model yet: Olumi hasn’t sized the links from its parts to it in this limit’s units.\n‘Total hiring spend’ cannot be checked in this model yet.\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>",
+   "served_shape": {
+    "headline": "The chance isn't shown yet: the model doesn't yet say how strongly ‘Leadership coverage’ affects ‘Code quality degradation’, how strongly ‘New mid-weight developers’ affects ‘Code quality degradation’ or how strongly ‘New Tech leads’ affects ‘Leadership coverage’, so any figure would be a guess.",
+    "bullets": [
+     "Not shown: some relationships aren't sized yet",
+     "Olumi's estimates: 6, see Check estimates."
+    ],
+    "detail": "Nothing you entered changed.\n\nThis Run cannot establish a choice or confirm your limits.\n‘Productivity change’ cannot be checked in this model yet: Olumi hasn’t sized the links from its parts to it in this limit’s units.\n‘Total hiring spend’ cannot be checked in this model yet.\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>"
+   },
+   "chance_cells": [
+    {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+       "message": "This comparison turns on the links from ‘Productivity change’ to ‘Launch completion’, from ‘Code quality degradation’ to ‘Launch completion’ and from ‘New mid-weight developers’ to ‘Code quality degradation’ and 2 more, whose strengths aren't sized in the model yet. To size them, I first need today’s level of ‘Launch completion’. What is it, in %?"
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Not shown. This comparison turns on the links from ‘Productivity change’ to ‘Launch completion’, from ‘Code quality degradation’ to ‘Launch completion’ and from ‘New mid-weight developers’ to ‘Code quality degradation’ and 2 more, whose strengths aren't sized in the model yet. To size them, I first need today’s level of ‘Launch completion’. What is it, in %?"
+    },
+    {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+       "message": "This comparison turns on the links from ‘Productivity change’ to ‘Launch completion’, from ‘Code quality degradation’ to ‘Launch completion’ and from ‘New mid-weight developers’ to ‘Code quality degradation’ and 2 more, whose strengths aren't sized in the model yet. To size them, I first need today’s level of ‘Launch completion’. What is it, in %?"
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Not shown. This comparison turns on the links from ‘Productivity change’ to ‘Launch completion’, from ‘Code quality degradation’ to ‘Launch completion’ and from ‘New mid-weight developers’ to ‘Code quality degradation’ and 2 more, whose strengths aren't sized in the model yet. To size them, I first need today’s level of ‘Launch completion’. What is it, in %?"
+    },
+    {
+     "kind": "none"
+    }
+   ],
+   "tool_calls": [],
+   "goal_labels": [
+    "Launch completion"
+   ],
+   "text_sha256": "b14aa8be564472cdfc7da09564c44c796e90a285073fa1c8de6f5352b2c9b0cf"
+  },
+  "deadline_13": {
+   "capture": "deadline/turns/13.json",
+   "capture_sha256": "e9dea94f46abfed469e89fb89b559ffffc0903092a139077fa0752b0391e281b",
+   "user_message": "The team are currently telling me they're going to be a month late delivering the next feature (so, 7 months), but I have low confidence in this because they keep missing deadlines.",
+   "assistant_text": "Seven months is the team’s forecast, not a firm delivery date—especially given their repeated deadline misses.\n\n• Keep seven months as their central estimate.\n• Use a likely completion-time range to reflect your low confidence.\n• Given their track record, what shorter and longer completion times would you consider likely, in months from now?\n\nThe tool did not recognise the seven-month forecast in your wording, so nothing was recorded. A single estimate would also leave the chance of meeting the deadline withheld.",
+   "served_shape": {
+    "headline": "Seven months is the team’s forecast, not a firm delivery date—especially given their repeated deadline misses.",
+    "bullets": [
+     "Keep seven months as their central estimate.",
+     "Use a likely completion-time range to reflect your low confidence.",
+     "Given their track record, what shorter and longer completion times would you consider likely, in months from now?"
+    ],
+    "detail": "The tool did not recognise the seven-month forecast in your wording, so nothing was recorded. A single estimate would also leave the chance of meeting the deadline withheld."
+   },
+   "chance_cells": [],
+   "tool_calls": [
+    {
+     "name": "propose_team_time",
+     "ok": false,
+     "mutated": false,
+     "refusal": "team_time_not_stated"
+    }
+   ],
+   "goal_labels": [
+    "Share of next feature launch done by 12 April 2027"
+   ],
+   "text_sha256": "784601f5aaf330ed69ba899bf110aab18972d43c9d20aaab1c82c7b9a6a32426"
+  }
+ }
+}
