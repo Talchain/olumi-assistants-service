@@ -27,16 +27,12 @@ describe('MC P0 FD: strength credit follows its mean', () => {
     control();
     expect(edgeStrengthProvenance({ provenance: { ...user().provenance, magnitude: 'olumi_estimate' }, strength: { mean: 0.64, std: 0.2 }, exists_probability: 1 })).toBe('ai_drafted');
   });
-  // ⭐ ONE PROVENANCE AUTHORITY (AIE 6121121310): an UNMARKED link's size is the person's only on its proven meaning — a
-  // brief link stated WITH its evidence (Science d5 #87 6008444863, `isUserStatedLink`) — and then keeps R11's defaulted
-  // rule; without the evidence it is unestablished (`unattributed`), never the person's on the drawing stamp alone.
-  it('unmarked links: the person\'s only with the brief\'s evidence (defaulted rule kept); user magnitude needs natural effect', () => {
+  it('unmarked links keep the source/defaulted rule; user magnitude needs natural effect', () => {
     control();
-    const quoted = { source: 'brief_extraction', source_quote: 'price drives revenue' };
-    expect(edgeStrengthProvenance({ defaulted: true, provenance: quoted })).toBe('ai_drafted');
-    expect(edgeStrengthProvenance({ provenance: quoted })).toBe('user_stated');
-    expect(edgeStrengthProvenance({ defaulted: true, provenance: { source: 'brief_extraction' } })).toBe('unattributed');
-    expect(edgeStrengthProvenance({ provenance: { source: 'brief_extraction' } })).toBe('unattributed');
+    expect(edgeStrengthProvenance({ defaulted: true, provenance: { source: 'brief_extraction' } })).toBe('ai_drafted');
+    expect(edgeStrengthProvenance({ provenance: { source: 'brief_extraction' } })).toBe('user_stated');
+    // ONE PROVENANCE AUTHORITY (AIE 6121121310): an unmarked link with an AI drawing stamp is never Olumi's size wholesale.
+    expect(edgeStrengthProvenance({ provenance: { source: 'cee_hypothesis' } })).toBe('unattributed');
     expect(edgeStrengthProvenance({ defaulted: true, provenance: { source: 'brief_extraction', magnitude: 'user_stated' } })).toBe('ai_drafted');
   });
   it('ALL material link means are yours: exact copy and same code, including the reader', () => {

@@ -227,8 +227,9 @@ const linkVariants: { name: string; edge: Rec; from?: string; expected: Klass }[
   { name: 'UNMARKED cee_hypothesis', edge: { provenance: { source: 'cee_hypothesis' } }, expected: 'unknown' },
   { name: 'UNMARKED domain_knowledge', edge: { provenance: { source: 'domain_knowledge' } }, expected: 'unknown' },
   { name: 'UNMARKED no provenance', edge: {}, expected: 'unknown' },
-  { name: 'UNMARKED legacy user stamp', edge: { provenance: { source: 'user' } }, expected: 'unknown' },
-  { name: 'UNMARKED brief link without its evidence', edge: { provenance: { source: 'brief_extraction' } }, expected: 'unknown' },
+  // R11's existing source meaning (AIE: "their existing validated/source meaning where it is proven"): drawn by the person or the brief.
+  { name: 'UNMARKED legacy user stamp', edge: { provenance: { source: 'user' } }, expected: 'human' },
+  { name: 'UNMARKED brief link without its evidence', edge: { provenance: { source: 'brief_extraction' } }, expected: 'human' },
   { name: 'UNMARKED brief link WITH its evidence', edge: { provenance: { source: 'brief_extraction', source_quote: 'price drives revenue' } }, expected: 'human' },
   { name: 'UNMARKED structural (from an option)', edge: { provenance: { source: 'cee_hypothesis' } }, from: 'o2', expected: 'structural' },
 ];

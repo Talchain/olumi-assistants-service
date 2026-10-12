@@ -618,9 +618,9 @@ export function classifyValueSource(stamp: unknown): StructureProvenance {
  * Strength authorship follows the MEAN (Science FD, 5 Oct 2026). A marked user
  * natural effect earns credit even when spread or existence was projected.
  * An Olumi magnitude never earns credit from the link's structural source.
- * ⛔ UNMARKED links (AIE 6121121310, ONE PROVENANCE AUTHORITY): the size's proven meaning only — a brief link stated WITH
- * its evidence ({@link linkProvenanceOf} `human`) keeps R11's defaulted rule; anything else is `unattributed`, never
- * Olumi's wholesale and never the person's on a bare stamp (R11 read the drawing stamp as the size's author).
+ * ⛔ UNMARKED links (AIE 6121121310, ONE PROVENANCE AUTHORITY): a link the person or their brief drew
+ * ({@link linkProvenanceOf} `human`) keeps R11's rule exactly (`user_stated`, `defaulted` → `ai_drafted`); anything else is
+ * `unattributed` — never Olumi's wholesale (R11 read an AI drawing stamp as Olumi's size).
  */
 export function edgeStrengthProvenance(edge: unknown): StructureProvenance {
   const record = asRecord(edge);
@@ -966,8 +966,11 @@ export interface LinkContext {
 /**
  * A link's SIZE provenance. Sized: by `linkSizing` (the person's size → `human`; Olumi's → `ai`, accepted or not; a
  * placeholder → `ai` with `placeholder`). UNMARKED (AIE 6121121310): never `ai` wholesale and never dropped — the existing
- * proven meaning where there is one (a validated definition, or a link from an option or decision → structural; a
- * brief link stated WITH its evidence → `human`, `isUserStatedLink`), otherwise `unknown`, disclosed.
+ * proven meaning where there is one: a validated definition, or a link from an option or decision → structural; a link
+ * the person or their brief drew (R11's source rule: a stamp the ladder credits as `user_stated` — `brief_extraction`,
+ * `user_specified`, the person's own literals) → `human`, as readiness has always read it; otherwise (no stamp, an AI
+ * drawing stamp, an unrecognised one) `unknown`, disclosed. (`isUserStatedLink`, the licence's "your link" class for
+ * holds, is NARROWER: a brief link only WITH its evidence — always a subset of this `human`.)
  */
 export function linkProvenanceOf(edge: unknown, context: LinkContext = {}): Provenance {
   switch (linkSizing(edge)) {
@@ -980,7 +983,8 @@ export function linkProvenanceOf(edge: unknown, context: LinkContext = {}): Prov
   if (context.validatedDefinition === true || context.fromKind === 'option' || context.fromKind === 'decision') {
     return P('ai', { structural: true });
   }
-  return isUserStatedLink(edge) ? P('human') : P('unknown');
+  const drawnBy = isRec(edge) && isRec(edge.provenance) ? classifyValueSource(edge.provenance.source) : 'unattributed';
+  return drawnBy === 'user_stated' ? P('human') : P('unknown');
 }
 
 /**
