@@ -179,6 +179,11 @@ export interface ReplyComposeInput {
    * carries no chance-status marker (the Run reply and Results already say it), so the user's answer leads.
    */
   readonly notRunOrExplain?: true;
+  /**
+   * Score run 2 hidden answers (DL 12 Oct; PL 6127523574 b4): a write this turn did not apply (the route's typed tool
+   * outcome: a refusal). The reply's own words say what was not recorded, so none of them folds under More detail.
+   */
+  readonly notRecorded?: true;
   /** Exact questions already carried by this reply's pending/suggested typed control. */
   readonly typedControlQuestions?: readonly string[];
   /** Node labels resolve narrator mentions to the typed directed link subjects. */
@@ -212,7 +217,7 @@ export interface ReplyComposition {
   readonly text: string;
   readonly shape: AnswerShape | null;
   readonly outcome: 'already_in_shape' | 'shaped' | 'kept_whole';
-  readonly reason?: KeepWholeReason | 'empty' | 'no_headline' | 'obligation_unlocated' | 'face_over_cap' | 'lead_in_split' | 'invariant_failed';
+  readonly reason?: KeepWholeReason | 'empty' | 'no_headline' | 'obligation_unlocated' | 'face_over_cap' | 'lead_in_split' | 'invariant_failed' | 'not_recorded';
   readonly measure?: ReplyMeasure;
 }
 
@@ -807,6 +812,9 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const whole = { ...initialMeasure, said_once_dropped: [] };
   if (input.keepWhole !== undefined) return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.keepWhole, measure: whole };
   if (input.profile === 'method_step' || input.profile === 'proposal') return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.profile, measure: whole };
+  // Score run 2 (deadline 13): "… so nothing was recorded." folded under More detail behind a full face. A write this turn
+  // did not apply (typed by the route, never read from the words): the reply ships whole, so what was not recorded is seen.
+  if (!faceContract && input.notRecorded === true) return { text, shape: null, outcome: 'kept_whole', reason: 'not_recorded', measure: initialMeasure };
   if (owed.some((o) => o.text.length === 0 || o.text.includes('\n'))) {
     return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated', measure: initialMeasure };
   }
@@ -987,7 +995,25 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
       addExceptionsAfter(chance);
     }
     faceBullets.push(...robustnessPoints);
-    for (const line of [horizon, withhold, widenedRisk, whatChanges, estimates, ask]) {
+    for (const line of [horizon, withhold, widenedRisk, whatChanges]) {
+      if (line !== undefined && line !== headline && faceSet.has(line) && !faceBullets.includes(line)) faceBullets.push(line);
+    }
+    // ⭐ Score run 2 hidden answers (DL 12 Oct; PL 6127523574 b4): with no chance on the face (it is withheld) — or a write
+    // this turn did not apply — the reply's own answer is the face's content, never folded behind the status lines ("Not
+    // shown yet; why is under More detail" with the answer under it: capacity 1 and 3b; hiring 7b's "Nothing you entered
+    // changed."). Added after the optional E/W demotion, so every existing face line stays exactly as it was. Typed detail
+    // lines, other questions (D-12) and a restated withheld cause still fold. Label, never withhold.
+    const answerOnFace = (!horizonBesideChance && (input.chanceCells ?? []).some((cell) => cell.kind === 'withheld'))
+      || input.notRecorded === true;
+    if (answerOnFace) {
+      for (const u of units) {
+        if (faceSet.has(u) || u === chanceLeadIn || u.obligation === 'detail' || u.obligation === 'evidence' || u.obligation === 'withheld_reason'
+          || !eligible(u) || controlAsk(u) || isQuestionUnit(u)) continue;
+        faceSet.add(u);
+        faceBullets.push(u);
+      }
+    }
+    for (const line of [estimates, ask]) {
       if (line !== undefined && line !== headline && faceSet.has(line) && !faceBullets.includes(line)) faceBullets.push(line);
     }
     faceWords = faceWordCount();
