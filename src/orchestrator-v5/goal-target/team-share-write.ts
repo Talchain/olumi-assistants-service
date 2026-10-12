@@ -9,6 +9,7 @@ import { sayDate, timeBetween } from './deadline-date.js';
 import { cappedTeamShareMean, teamShareMoments } from './event-by-date-share.js';
 import { displayedPctAt } from './goal-chance-driver.js';
 import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
+import { confirmationQuoteLine, confirmedSelection, verbatimSourceLine, type QuoteConfirmation } from '../agent-lane/quote-confirmation.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 type Rec = Record<string, any>;
@@ -166,12 +167,8 @@ export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonl
  * Only the user's press on that card records the figure as their forecast (`teamTimeConfirmationCard`); until then it is a
  * proposed interpretation. A bound in the source ("at least 7 months") is never offered as a point: asked instead.
  */
-export interface TeamTimeConfirmation {
-  /** The complete line of the user's message the quote stands in, exactly as typed (qualifiers, negation, bounds kept). */
-  readonly source: string;
-  /** The words the Agent quoted, as given. */
-  readonly quote: string;
-}
+/** The team-time use of the one confirmation mechanism (`agent-lane/quote-confirmation.ts`). */
+export type TeamTimeConfirmation = QuoteConfirmation;
 const BOUNDED_DURATION = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:at least|at most|more than|less than|fewer than|no more than|no less than|`
   + String.raw`under|over|up to|within|minimum(?: of)?|maximum(?: of)?)\s+(?:about\s+|around\s+|roughly\s+)?`
   + `${TIME_NUMBER}(?:\\s*(?:-|to|and)\\s*${TIME_NUMBER})?\\s+(?:months?|weeks?|years?)(?![\\p{L}\\p{N}])`, 'iu');
@@ -180,11 +177,9 @@ export function quotedTeamTime(texts: { readonly now?: string | null; readonly c
   { readonly kind: 'found'; readonly time: BoundTeamTime; readonly confirmation: TeamTimeConfirmation } | { readonly kind: 'refused'; readonly detail: string } {
   const quoted = typeof args?.quote === 'string' ? args.quote.trim() : '';
   const quote = plainWords(quoted);
-  if (quote === '') return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
-  const lines = [texts.conversation, texts.now].flatMap((t) => (typeof t === 'string' ? t.split('\n') : []));
-  // The most recent line of the user's own words that holds the quote, verbatim.
-  const source = [...lines].reverse().find((l) => quoteSpansIn(plainWords(l), quote).length > 0)?.trim();
-  if (source === undefined || source === '') return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
+  // The most recent line of the user's own words that holds the quote, verbatim (anti-fabrication only).
+  const source = quote === '' ? undefined : verbatimSourceLine(texts, quoted);
+  if (source === undefined) return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
   const low = Number(args?.low_months), high = Number(args?.high_months);
   const stated = Number.isFinite(low) && Number.isFinite(high)
     ? teamTimesInQuote(quote).find((r) => teamTimeArgumentsMatch(quote, { low_months: low, high_months: high }, r)) : undefined;
@@ -252,8 +247,7 @@ export function teamObservedState(a: ApprovedTeamTime, unit: string): Rec {
         forecast: a.forecast_months, forecast_origin: a.confirmation !== undefined ? 'user_confirmed' : 'user',
         ...(a.forecast_words !== undefined ? { forecast_words: a.forecast_words } : {}),
         range_origin: 'olumi_estimate', range_rule: a.range_rule } : {}),
-      ...(a.confirmation !== undefined ? { selection: { by: 'user_press', interpretation: 'olumi', source: a.confirmation.source,
-        quote: a.confirmation.quote } } : {}) } };
+      ...(a.confirmation !== undefined ? { selection: confirmedSelection(a.confirmation) } : {}) } };
 }
 /** Single estimates live on the held definition carrier, outside modelled numeric observed_state. */
 export function teamTimeIsHeld(team: Rec, a: ApprovedTeamTime, unit: string, graph: unknown): boolean {
@@ -296,7 +290,7 @@ export function teamTimeSummary(a: ApprovedTeamTime, unit: string, deliverable: 
  * range is the existing full-range card. The question is the edit fact's summary.
  */
 export function teamTimeConfirmationCardParts(a: ApprovedTeamTime, deliverable: string): { readonly quoteLine: string; readonly question: string; readonly disclosure: string } {
-  const quoteLine = `From your message: ‘${a.confirmation?.source ?? ''}’`;
+  const quoteLine = confirmationQuoteLine(a.confirmation ?? { source: '', quote: '' });
   if (a.forecast_months === undefined || a.range_origin !== 'olumi_estimate') {
     const { confirmation: _source, ...range } = a;
     const parts = teamTimeCardParts(range, '', deliverable);
