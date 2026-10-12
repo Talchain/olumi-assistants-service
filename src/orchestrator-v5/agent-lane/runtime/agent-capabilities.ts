@@ -1942,6 +1942,25 @@ type Resolution =
   | { readonly kind: 'other'; readonly node: GraphRead['nodes'][number] }
   | { readonly kind: 'none' };
 
+/**
+ * DL ruling 12 Oct (Paul's test: never a dead end) and AIE 6128697025 (row 10): the canvas step, the canvas edit of the goal to
+ * the targets the user gave, is said ONLY when every target's quantity is already on the canvas. Otherwise this route cannot
+ * add the missing quantities or conditions without replacing the saved work: the AIE's words, verbatim, then what is missing,
+ * named from the actual request. The revised-draft card is not offered in its place: it could not truthfully say the user's
+ * work survives (its edits are not carried, and a guest has no earlier version to go back to).
+ */
+export function draftGateDetail(found: readonly string[], stage: 'offered' | 'replaced',
+  targets: readonly { readonly words: string; readonly onCanvas: boolean }[]): string {
+  if (targets.length > 0 && targets.every((t) => t.onCanvas)) {
+    return `Olumi found ${found.join('; ')}, so a revised draft was not ${stage}: replacing the draft could discard your work, `
+      + 'and nothing was changed. Tell the user that plainly, that their goal is not yet in the model, and give the one step that '
+      + `works today: edit the goal on the canvas to ${targets.map((t) => t.words).join(' and ')}. Never rebuild part of it.`;
+  }
+  const missing = targets.filter((t) => !t.onCanvas).map((t) => t.words);
+  return 'This goal change was not applied. The model needs quantities or conditions it does not yet hold, and this route cannot '
+    + `add them without replacing your saved work.${missing.length > 0 ? ` Missing: ${missing.join(' and ')}.` : ''}`;
+}
+
 function resolveNamed(
   g: Pick<GraphRead, 'nodes'>,
   requested: string,
@@ -3463,15 +3482,6 @@ export function createAgentCapabilities(
   };
   const DRAFT_GATE_REFUSAL = 'draft_holds_your_work';
   const TARGET_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>': 'above', '>=': 'at least', '<': 'below', '<=': 'at most' };
-  /**
-   * DL ruling 12 Oct (Paul's test: never a dead end): the refusal names the one step that exists today, the canvas edit of
-   * the goal to the targets the user gave. The revised-draft card is not offered in its place: it could not truthfully say
-   * the user's work survives (its edits are not carried, and a guest has no earlier version to go back to).
-   */
-  const draftGateDetail = (found: readonly string[], stage: 'offered' | 'replaced', goalWords: string): string =>
-    `Olumi found ${found.join('; ')}, so a revised draft was not ${stage}: replacing the draft could discard your work, `
-    + 'and nothing was changed. Tell the user that plainly, that their goal is not yet in the model, and give the one step that '
-    + `works today: edit the goal on the canvas to ${goalWords}. Never rebuild part of it.`;
   /** The targets in the user's terms: ‘Quantity’ at least 20 (one target, or several joined by "and"). */
   const targetsInWords = (raw: unknown, targets: readonly { node_id: string; comparator: string; value: number; unit: string }[]): string =>
     targets.map((t) => {
@@ -3569,8 +3579,9 @@ export function createAgentCapabilities(
     }
     const draft = await pending;
     if ('refused' in draft) {
-      return draft.found === undefined ? draft.refused : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered',
-        `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`) };
+      return draft.found === undefined ? draft.refused : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered', [{
+        words: `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`,
+        onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
     }
     // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
     const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
@@ -3609,7 +3620,10 @@ export function createAgentCapabilities(
     }
     const found = await unreviewedDraftGate(ctx, before, [v.goal_turn_id]);
     if (found.length > 0) {
-      return notApplied(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'replaced', targetsInWords(v.candidate, targetsHeldBy(v.candidate))));
+      const label = (id: string): string => String((((v.candidate as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? [])
+        .find((n) => n?.id === id)?.label ?? id);
+      return notApplied(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'replaced', targetsHeldBy(v.candidate).map((t) => ({
+        words: targetsInWords(v.candidate, [t]), onCanvas: resolveNamed(before, label(t.node_id), () => true).kind !== 'none' }))));
     }
     // The WHOLE approved graph (every top-level member the candidate carries: options, goal_constraints and all), CAS-gated
     // on both of the base's hashes, like the sibling registers (`frame-write-is-cas-gated.test.ts`).

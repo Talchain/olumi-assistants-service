@@ -48,9 +48,10 @@ const REFUSED = { ok: false, mutated: false, refusal: 'superseded' };
 describe('the write-status line is composed from the tool results', () => {
   // R2 T1 (friction audit row T1): typed "Yes, that is my deadline." met "Not saved: the change could not be made this time —
   // ask me to try again", which was false: the change was waiting for its card, not failed.
-  it('R2 T1: approval_required says the change waits for its card (words FOR AIE ACK), never "try again"', () => {
+  it('R2 T1: approval_required says the change waits for its card (AIE AMENDED 6128697025: the button only), never "try again"', () => {
     const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, true);
-    expect(n.status).toBe('Not saved yet: press the approval button on the card, or type its words.');
+    expect(n.status).toBe('Not saved yet: press the approval button on the card.');
+    expect(n.status).not.toContain('type its words');
     expect(n.status).not.toContain('could not be made this time');
   });
   // Independent check, non-blocking (recovery/bR2/check): typed words bind only when exactly ONE card waits.
