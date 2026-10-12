@@ -214,7 +214,7 @@ import {
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
-import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../../goal-target/goal-chance-licence.js';
+import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForUnsentGoalTarget } from '../../goal-target/goal-chance-licence.js';
 import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -2876,12 +2876,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ISL src/services/robustness_analyzer_v2.py:1053-1055,1090, read at 3cfadcfc:
     // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
+    // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
+    // so a several-targets joint names exactly the conditions ISL counted on each draw.
+    const goalChanceConstraints = { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints };
+    // Post-B (DL 12 Oct; AIE #94 6123937762 item 3): a stated target the Run did not send as specified is refused by the
+    // licence; the Run says so in the AIE's words — never a silent gap. Every earlier withhold keeps its own reason.
+    response = withholdForUnsentGoalTarget(response, graphForAnalysis, snapshot.goal_node_id, goalChanceConstraints);
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance),
-      snapshot.rawPersistedGraph ?? graphForAnalysis,
-      // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
-      // so a several-targets joint names exactly the conditions ISL counted on each draw.
-      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints });
+      snapshot.rawPersistedGraph ?? graphForAnalysis, goalChanceConstraints);
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);
