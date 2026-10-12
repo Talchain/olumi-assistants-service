@@ -468,8 +468,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'propose_goal_target',
     description:
       'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
-      + '"keep churn under 5%"). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
-      + 'authorise_change: show the user what it sets, never the id, before they approve. Give the figure exactly as the user '
+      + '"keep churn under 5%"). For a quantity already in the model, this prepares one target change and returns its id for '
+      + 'authorise_change after the user approves the shown values. If a quantity is absent, Olumi may instead return a '
+      + 'revised-draft card: only the user pressing that card can replace the draft. Never call authorise_change for a '
+      + 'revised-draft replacement, and never show its id. Give the figure exactly as the user '
       + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
       + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
       + 'a figure or direction they did not state is refused. If the user ALSO stated the goal’s level today (for example "we have secured '
@@ -479,9 +481,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'result as value and pass derived_from {base, multiplier} (100000 and 2): the base must be a figure they wrote. '
       + 'When the user did not say at least or at most, give your reading in constraint_type: the card offers it as a '
       + 'decision with the other direction beside it, and the user chooses. '
-      + 'Give measures whenever the user names what the target is a figure OF. When the model does not contain that '
-      + 'quantity yet, Olumi may answer with ONE card offering a revised draft built from their brief and this message; '
-      + 'the user decides on that card. Call this once per target the user stated; never build the model yourself.',
+      + 'Give measures whenever the user names what the target is a figure of. Call this once per target the user stated; '
+      + 'never build the model yourself.',
     parameters: obj({
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },

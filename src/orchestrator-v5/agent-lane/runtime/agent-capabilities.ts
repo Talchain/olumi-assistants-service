@@ -266,6 +266,7 @@ import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf } from '../../goal-target/goal-target-basis.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
+import { canonicalLabel } from '../model-primitives.js';
 import { humanMaterialAfterTheDraft, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, writesBesidesTheConstruction } from './draft-replacement.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
@@ -3420,7 +3421,7 @@ export function createAgentCapabilities(
       + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
       + (limits.kept.length > 0 ? `Kept from your brief: ${limits.kept.map((r) => sayRow(g.raw, r)).join('; ')}. ` : '')
       + (options.length > 0 ? `Options: ${options.join(', ')}. ` : '')
-      + 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. You have not changed the draft since your brief, so nothing you set is lost.';
+      + 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.';
     const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
     const proposal = createProposal({
       scenario_id: sid,
@@ -3442,7 +3443,7 @@ export function createAgentCapabilities(
   /** This target call's answer from the turn's one revised draft: the same card, or why this target is not in it. */
   const offerRevisedDraft = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
-    target: { value: number; unit: string; comparator: string },
+    target: { measures: string; value: number; unit: string; comparator: string },
   ): Promise<ToolResult> => {
     const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}`;
     let pending = revisedDrafts.get(key);
@@ -3452,15 +3453,17 @@ export function createAgentCapabilities(
     }
     const draft = await pending;
     if ('refused' in draft) return draft.refused;
-    const holds = draft.held.some((t) => t.value === target.value && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
+    // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
+    const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
+      && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
     return {
       ok: true, mutated: false,
       proposal_id: draft.proposal.proposal_id,
       public_label: draft.proposal.public_label,
       base_revision: g.graph_hash,
       revised_draft: { replaces_goal: goal.label, holds_this_target: holds },
-      note: 'Nothing has changed yet. The current draft does not contain the quantity this goal is measured in, so Olumi prepared a revised '
-        + 'draft from the user\u2019s brief and this message, shown on ONE card. Tell the user what the card says, in its words; never the id. '
+      note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
+        + 'targets, limits, options and what is redrafted; do not repeat the full card or show its id. '
         + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
         + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
     };
@@ -3496,10 +3499,17 @@ export function createAgentCapabilities(
         ? notApplied('superseded', 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
         : notApplied('not_applied', `The revised draft could not be saved (http ${reg.status}), so nothing was replaced.`);
     }
-    // ⛔ CONFIRMED FROM STATE: the model now holds the candidate's targets and every limit the draft held.
+    /**
+     * ⛔ CONFIRMED FROM STATE, THE WHOLE GRAPH (AIE 0452 AMEND 3): the read-back's canonical identity must be the identity the
+     * registration acknowledged for the bytes it stored from this exact candidate (`graph_identity_hash`, "the server has the
+     * graph, and this token names it"). Any other postimage (another writer's change to a link, a value, an option) is
+     * UNCONFIRMED: no replacement receipt. Then the targets and every limit the draft held, by quantity.
+     */
+    const acknowledged = identityHashOf(reg.json.graph_identity_hash);
     const after = await readGraph(ctx.scenario_id);
     const heldTargets = targetsHeldBy(after?.raw);
-    const landed = after !== null && limitsKeptBy(before.raw, after.raw).dropped.length === 0
+    const landed = after !== null && acknowledged !== '' && after.graph_identity_hash === acknowledged
+      && limitsKeptBy(before.raw, after.raw).dropped.length === 0
       && targetsHeldBy(v.candidate).every((t) => heldTargets.some((h) => h.node_id === t.node_id && h.comparator === t.comparator && h.value === t.value && h.unit === t.unit));
     if (!landed) {
       return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
@@ -4954,7 +4964,7 @@ export function createAgentCapabilities(
       const measures = typeof args.measures === 'string' ? args.measures.trim() : '';
       if (measures !== '' && norm(measures) !== norm(goal.label) && resolveNamed(g, measures, () => true).kind === 'none'
         && norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_turn_text)) {
-        return offerRevisedDraft(ctx, g, goal, { value, unit, comparator: TARGET_OPERATOR[type] });
+        return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type] });
       }
       // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
       // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).
