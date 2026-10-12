@@ -92,6 +92,10 @@ function produced(envelope = producerEnvelope(), graph = READ.graph): Rec {
     screen_lines: goalChanceScreenLinesForAgent(currentResult, graph, true) };
 }
 
+const AMENDMENT_7 = { olumi_estimate_value_count: 1, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true };
+const withoutAmendment7 = (record: Rec): Rec => Object.fromEntries(Object.entries(record).filter(([key]) => !Object.hasOwn(AMENDMENT_7, key)));
+const withoutAmendment7InRecord = (enrichment: Rec): Rec => ({ ...enrichment, inference_warnings: enrichment.inference_warnings
+  .map((warning: Rec) => (warning.code === GOAL_CHANCE_LICENSED ? withoutAmendment7(warning) : warning)) });
 const licenceRecord = (enrichment: Rec): Rec | undefined => enrichment.inference_warnings
   .find((warning: Rec) => warning.code === GOAL_CHANCE_LICENSED);
 const keepCell = (view: Rec): Rec => view.options.find((row: Rec) => row.option_id === KEEP).cell;
@@ -191,11 +195,15 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
 
   it('Starter-point control: byte-identical to staging except Keep’s canonical cell gains its zero-spread reason and why', () => {
     const envelope = producerEnvelope(true);
-    expect(JSON.stringify(goalChanceLicenceOf(envelope, READ.graph, GOAL)))
-      .toBe(JSON.stringify(STAGING_CONTROL.licence));
+    // Batch C: ruling amendment 7 (independent check r1 item 6). Starter's 97% rests on Olumi's own option settings (150
+    // subscribers and £49, both cee_hypothesis) and an Olumi starting value, so the licence now labels it provisional.
+    // Exactly these three fields are added; every other byte stays staging's.
+    const licence = goalChanceLicenceOf(envelope, READ.graph, GOAL) as Rec;
+    expect(Object.fromEntries(Object.keys(AMENDMENT_7).map(key => [key, licence[key]]))).toEqual(AMENDMENT_7);
+    expect(JSON.stringify(withoutAmendment7(licence))).toBe(JSON.stringify(STAGING_CONTROL.licence));
     const output = produced(envelope);
-    expect(JSON.stringify(output.enrichment)).toBe(JSON.stringify(STAGING_CONTROL.enrichment));
-    expect(JSON.stringify(output.public_enrichment)).toBe(JSON.stringify(STAGING_CONTROL.public_enrichment));
+    expect(JSON.stringify(withoutAmendment7InRecord(output.enrichment))).toBe(JSON.stringify(STAGING_CONTROL.enrichment));
+    expect(JSON.stringify(withoutAmendment7InRecord(output.public_enrichment))).toBe(JSON.stringify(STAGING_CONTROL.public_enrichment));
     expect(JSON.stringify(output.agent_facts)).toBe(JSON.stringify(STAGING_CONTROL.agent_facts));
     expect(JSON.stringify(output.screen_lines)).toBe(JSON.stringify(STAGING_CONTROL.screen_lines));
     expect(licenceRecord(output.enrichment)!.withheld_reason_by_option).toEqual({ [KEEP]: keepReason });

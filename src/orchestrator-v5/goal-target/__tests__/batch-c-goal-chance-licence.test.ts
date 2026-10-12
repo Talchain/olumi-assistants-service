@@ -381,7 +381,9 @@ describe('DL contract rulings (12 Oct): precision names follow PLoT\'s wire; nev
     // Batch C: amendment 1 (independent check r1 item 3) — a LEVEL goal's status quo is by assumption too, where the Run held
     // it at today's level (every draw at the goal's stated current level, 0 here): its row loses its precision and spread
     // exactly as above, and the compared options keep theirs.
-    const level = hiringGraph({ quantity_frame: 'level', goal_threshold_frame: 'level', goal_target_basis: undefined,
+    // Batch C: B2 beside amendment 1 (CI 6e3bce10) — no held month here: a held month the Run did not carry keeps B2's
+    // "needs month-by-month changes" instead (its own row in item 3 below).
+    const level = hiringGraph({ quantity_frame: 'level', goal_threshold_frame: 'level', goal_target_basis: undefined, goal_horizon_months: undefined,
       observed_state: { value: 0, baseline: 0, raw_value: 0, cap: 100, unit: '%', source: 'brief_extraction' } });
     const kept = withGoalChanceLicence(run, level, 'productivity', () => false, undefined, level, hiringConstraints(level)) as Rec;
     const keptRows = Object.fromEntries((kept.option_comparison as Rec[]).map((r) => [r.option_id, r]));
@@ -550,6 +552,44 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     const l = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
     expect(l.status_quo).toBeUndefined();
     expect(JSON.stringify(l)).not.toMatch(/by assumption|carrying on as now leaves/);
+  });
+
+  it('RED (CI 6e3bce10): with no other option licensed, the status quo\'s own line still reaches the screen — the licence is never dropped', () => {
+    // Before item 3 this row carried its zero-spread reason; dropping the whole licence left the cell empty.
+    const run = capacityRun();
+    for (const row of (run.option_comparison as Rec[]).slice(0, 2)) delete row.probability_of_goal;
+    const g = capacityGraph();
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
+    expect(l).not.toBeNull();
+    expect(l).toMatchObject({ message: '', pct_by_option: {}, withheld_option_ids: ['lead', 'two', 'carry_on'],
+      status_quo: { option_id: 'carry_on', line: 'Doing nothing: no change to ‘Development capacity’ in this model, by assumption.' } });
+    for (const key of ['leader_option_id', 'similar_option_ids', 'olumi_estimate_link_count', 'provisional', 'withheld_reason_by_option']) {
+      expect(l).not.toHaveProperty(key);
+    }
+    const env = withGoalChanceLicence(run, g, 'capacity', () => false, undefined, g, {});
+    const cells = Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
+    expect(cells.carry_on).toMatchObject({ kind: 'withheld', face: 'No change, by assumption',
+      why: 'Doing nothing: no change to ‘Development capacity’ in this model, by assumption.' });
+    // NEGATIVE: a status-quo figure already withheld upstream (an untested horizon strips every option's) said nothing before,
+    // so no status-quo-only record is added for it (goal-horizon-verdict.route "a stored triple does not unlock…").
+    const stripped = structuredClone(run);
+    delete (stripped.option_comparison as Rec[])[2]!.probability_of_goal;
+    expect(goalChanceLicenceOf(stripped, g, 'capacity', () => false, undefined, g, {})).toBeNull();
+    // CONTROL: a status quo whose draws spread is not by assumption — nothing to say, so no record (as before).
+    (run.option_comparison as Rec[])[2]!.outcome = { mean: 76, std: 3, p10: 72, p50: 76, p90: 80 };
+    expect(goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})).toBeNull();
+  });
+
+  it('B2 beside amendment 1: at a held month the Run did not carry, the status quo keeps "needs month-by-month changes"', () => {
+    const g = capacityGraph({ goal: { goal_horizon_months: 9 } });
+    expect(goalHorizonVerdict(g, capacityRun())).toBe('withhold');
+    const l = goalChanceLicenceOf(capacityRun(), g, 'capacity', () => false, undefined, g, {})!;
+    expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'zero_spread', side: 'falls_short', line: 'Not shown yet: needs month-by-month changes' } });
+    expect(l.status_quo).toBeUndefined();
+    expect(JSON.stringify(l)).not.toMatch(/by assumption/);
+    // CONTROL: the same status quo with no held month is amendment 1's.
+    expect(capacityLicence()!.status_quo?.option_id).toBe('carry_on');
+    expect(capacityLicence()).not.toHaveProperty('withheld_reason_by_option');
   });
 
   it('RED: the level status quo row carries no precision and no Monte Carlo interval; the options keep theirs', () => {

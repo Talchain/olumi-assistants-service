@@ -294,7 +294,13 @@ export function goalChanceLicenceOf(
   // equals the node's: 'change', else 'level'); read once, here.
   const readingFrame = basis?.quantity_frame;
   const changeQuantity = changeFrame !== undefined && readingFrame === 'change';
-  const sqByAssumption = share === null && statusQuoId !== undefined && (changeQuantity || sqUnchanged);
+  // B2 (Science §(ab)(2)) beside amendment 1: where the Run did not carry the goal's held month (verdict 'withhold'), a status
+  // quo whose exact 0/1 is unearned at zero spread keeps its typed reason ("needs month-by-month changes"): "no change" cannot
+  // be said at a month the model does not carry, and that line is the user's next step. Every other status quo: amendment 1.
+  const sqP = sqRow?.probability_of_goal;
+  const sqMonthUncarried = sqRow !== undefined && statusQuoId !== undefined && (sqP === 0 || sqP === 1) && !earned(statusQuoId, sqP)
+    && zeroSpread(sqRow) && goalHorizonVerdict(horizonGraph, envelope) === 'withhold';
+  const sqByAssumption = share === null && statusQuoId !== undefined && (changeQuantity || sqUnchanged) && !sqMonthUncarried;
   const option_ids: string[] = [];
   const licensed: string[] = [];
   const withheld: string[] = [];
@@ -337,7 +343,13 @@ export function goalChanceLicenceOf(
       exactExtremes.add(id);
     } else pct[id] = displayedPctAt(p, step);
   }
-  if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0)) return null;
+  // The status quo's own line is a said row (amendment 1): with nothing else licensed it still reaches the user, as its typed
+  // zero-spread reason did before (never a figure; the licence's message stays empty) — but only where the Run's own status-quo
+  // row still carries its figure. A row whose figure was already withheld upstream (an untested horizon strips every option's)
+  // said nothing before, so no record is added for it (fewer claims, never more).
+  const sqSaid = sqByAssumption && statusQuoId !== undefined && withheld.includes(statusQuoId) && typeof sqP === 'number'
+    && typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label);
+  if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0 && !sqSaid)) return null;
 
   // Only the superlative and every-option forms need every option (d5 6007421281): any withheld option ⇒ `each`.
   // A status quo withheld by assumption counts as withheld here too, exactly as a change target's always has: no superlative
