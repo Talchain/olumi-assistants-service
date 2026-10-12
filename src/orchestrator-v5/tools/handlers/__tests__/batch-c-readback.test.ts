@@ -421,6 +421,22 @@ describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "
         + 'the model has not established how much of these effects would be in place by then.');
   });
 
+  it.each((JSON.parse(readFileSync('tests/fixtures/batch-g/AIE-G-TIMING-PHRASES-20261012.json', 'utf8')) as {
+    cases: { id: string; text: string; expected: string }[] }).cases.map((c) => [c.id, c] as const))(
+    'G corpus (AIE #94 6133027121), through the real Run handler: %s', async (_id, c) => {
+      const g = JSON.parse(store(hiringSized())) as Rec;
+      const goal = (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+      goal.goal_target_basis = { ...(goal.goal_target_basis as Rec), effects_at_period_end: false };
+      const brief = `Should we hire a tech lead or two developers to raise productivity by at least 10% within three months? ${c.text}`;
+      const { result } = await runAndRead(JSON.stringify(g), hiringAnswer, brief);
+      const view = { type: 'analysis_result', enrichment: (JSON.parse(JSON.stringify(result)) as Rec).enrichment };
+      const withheld = (result.enrichment.inference_warnings as Rec[]).some((w) => (w.detail as Rec | undefined)?.reason === 'effects_at_period_end_unstated');
+      const licence = goalChanceLicenceForAgent(view);
+      const verdict = withheld && licence === undefined ? 'CONTRADICTS'
+        : !withheld && licence?.period_end_assumption?.origin === 'olumi' ? 'NOT_A_CONTRADICTION' : 'OTHER';
+      expect(verdict, c.text).toBe(c.expected);
+    });
+
   it('RED (amendment 7, per option): an option whose OWN setting is Olumi\'s says so on its result only — never on another option\'s', async () => {
     const h = hiringSized() as unknown as Rec;
     // ‘Hire two developers’ drafted with Olumi's own level for developers (not the user's 2).

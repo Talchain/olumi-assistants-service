@@ -224,6 +224,28 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
   });
 });
 
+/** The AIE's external timing corpus (#94 6133027121; AIE-G-TIMING-PHRASES-20261012.json, sha256 42b7a8f6…), verbatim. */
+const CORPUS = JSON.parse(readFileSync('tests/fixtures/batch-g/AIE-G-TIMING-PHRASES-20261012.json', 'utf8')) as {
+  cases: { id: string; text: string; expected: 'CONTRADICTS' | 'NOT_A_CONTRADICTION' }[] };
+/** The Run's own verdict on a brief: E's withhold sentence, or the conditional licence with its note; anything else is OTHER. */
+function verdictOf(run: { envelope: Rec; view: Rec }): 'CONTRADICTS' | 'NOT_A_CONTRADICTION' | 'OTHER' {
+  const withheld = (run.envelope.inference_warnings as Rec[]).some((w) => w.detail?.reason === 'effects_at_period_end_unstated' && w.message === WITHHOLD);
+  const licence = goalChanceLicenceForAgent(run.view);
+  if (withheld && licence === undefined) return 'CONTRADICTS';
+  return !withheld && licence?.notes?.includes(NOTE) === true ? 'NOT_A_CONTRADICTION' : 'OTHER';
+}
+
+describe('G: the AIE timing corpus through the served run-4 Run (the brief as persisted, plus the case)', () => {
+  it('the corpus is the AIE\'s ten cases', () => { expect(CORPUS.cases.map((c) => c.id)).toEqual(['GT01', 'GT02', 'GT03', 'GT04', 'GT05', 'GT06', 'GT07', 'GT08', 'GT09', 'GT10']); });
+  it.each(CORPUS.cases.map((c) => [c.id, c] as const))('%s', (_id, c) => {
+    const run = runAsTheHandlerDoes({ brief: `${FX.brief} ${c.text}` });
+    expect(verdictOf(run), c.text).toBe(c.expected);
+    // NOT_A_CONTRADICTION never attests arrival: the assumption stays Olumi's, said in its note, and the basis is never written.
+    if (c.expected === 'NOT_A_CONTRADICTION') expect(goalChanceLicenceForAgent(run.view)!.period_end_assumption?.origin).toBe('olumi');
+    expect(goalOf(FX.graph).goal_target_basis.effects_at_period_end).toBe(false);
+  });
+});
+
 describe('G: the partial/late-effect grammar (bound to the basis\' own period; a start alone never counts)', () => {
   const at3 = { period_months: 3 };
   it.each([
