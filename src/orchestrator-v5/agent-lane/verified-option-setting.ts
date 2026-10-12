@@ -38,14 +38,45 @@ function exactEvidence(brief: string, quote: unknown, sentences: Assertion[]): A
   const located = sentences.filter(a => a.text === q);
   return located.length === 1 ? located[0]! : null;
 }
-/** Refuse enclosing quotes and source headings. No document-name exceptions. */
+/** Refuse source headings. No document-name exceptions. Quotations are read on the bound figure (`insideQuotation`). */
 function directContext(brief: string, a: Assertion): boolean {
-  const context = brief.slice(0, a.end);
-  if (/["“”«»]|(?:^|[\s:(])['‘]|['’](?=$|[\s.!?,;:])/mu.test(context)) return false;
-  return context.split('\n').every(line => {
+  return brief.slice(0, a.end).split('\n').every(line => {
     const s = line.trim();
     return !s.endsWith(':') && !/^\[(?:Page|Paragraph) [0-9]{1,12}\]/u.test(s);
   });
+}
+/**
+ * Recovery Batch B, V1 (DL #94; AIE 6120633627: scope the check to the bound claim, not every earlier quoted label).
+ * A quotation refuses credit only when the credited figure itself lies inside it, so a quoted option label earlier in
+ * the brief ("labelled exactly "Keep current staffing"") no longer blocks every later figure. Regions are read on the
+ * whole normalised brief, so a quotation opened in an earlier sentence still encloses the figure. Fail closed: an
+ * unclosed double quote, or an opening single quote never closed, runs to the end of the brief. A lone closing single
+ * quote is an apostrophe ("our developers' time") and opens nothing.
+ */
+function quotedRegions(text: string): { start: number; end: number }[] {
+  const regions: { start: number; end: number }[] = [];
+  let double: number | null = null; let single: number | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!; const before = text[i - 1]; const after = text[i + 1];
+    if (/["“”«»]/u.test(c)) {
+      if (double === null) double = i; else { regions.push({ start: double, end: i + 1 }); double = null; }
+    } else if (c === '\'' || c === '‘' || c === '’') {
+      const opens = c !== '’' && (before === undefined || /[\s:(“"«]/u.test(before)) && after !== undefined && !/\s/u.test(after);
+      const closes = c !== '‘' && before !== undefined && !/\s/u.test(before) && (after === undefined || /[\s.!?,;:)”"»]/u.test(after));
+      if (single === null && opens) single = i;
+      else if (single !== null && closes) { regions.push({ start: single, end: i + 1 }); single = null; }
+    }
+  }
+  if (double !== null) regions.push({ start: double, end: text.length });
+  if (single !== null) regions.push({ start: single, end: text.length });
+  return regions;
+}
+/** `span` is in the located sentence's own (normalised) text; exactEvidence found that sentence once in the brief. */
+function insideQuotation(brief: string, a: Assertion, span: { start: number; end: number }): boolean {
+  const whole = canonical(brief);
+  const at = whole.indexOf(a.text);
+  if (at < 0 || at !== whole.lastIndexOf(a.text)) return true;
+  return quotedRegions(whole).some(r => r.start < at + span.end && at + span.start < r.end);
 }
 const words = (s: string): string[] => s.toLowerCase().match(/[\p{L}\p{N}]{1,64}/gu) ?? [];
 const sameName = (a: string, b: string): boolean => singular(a) === singular(b);
@@ -233,7 +264,7 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
     && !others.some(label => words(label).some(w => words(factor.label).some(t => sameName(w, t))));
   const span = figureTheUserWroteForSpan(intervention.value, factor.unit, a.text,
     { target: [factor.label], others, ...(!unitNamesFactor ? { strict: true as const, requireNamed: true as const } : {}) });
-  if (span === null) return false;
+  if (span === null || insideQuotation(brief, a, span)) return false;
   const clause = settingClause(a, span.start);
   if (clause === null || !namedOption(model, option, clause.text, intervention.value)
     || !onlySiblingArms(model, option, clause.others, intervention.value)) return false;
@@ -472,6 +503,7 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     const matches = factorLevelSpans(model, factor, a.text);
     if (matches.length !== 1) return false;
     const span = matches[0]!;
+    if (insideQuotation(brief, a, span)) return false;
     if (!ownsFactorLevel(a.text.slice(0, span.start), factor)
       || !currentLevelRole(a.text)) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {
