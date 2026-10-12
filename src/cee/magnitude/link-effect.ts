@@ -229,8 +229,6 @@ export function frameAwarePlaceholder(sign: 1 | -1, baseline: number, domain: Le
 }
 
 export interface LinkStatement {
-  /** Drafter claim; sizeLink independently checks the ratio, units and sign. */
-  readonly definitional?: boolean;
   readonly direction: 'positive' | 'negative';
   readonly effect_amount?: number | null;
   readonly effect_per_source_change?: number | null;
@@ -505,20 +503,6 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   const sizeCheck = check ?? (held !== undefined && domain !== null && withinDomain({ lo: held, hi: held }, domain)
     ? { baseline: held, domain, swing: swing ?? FULL_RANGE_SWING, frame: targetFrame as number }
     : null);
-
-  // A same-unit identity is exact, not an uncertain estimate. Carry its natural size into the existing
-  // exact-link frame refit even when the current frames put |beta| above one. Ordinary estimates still use D8.
-  const sourceUnit = unitOf(source)?.trim().toLowerCase();
-  const targetUnit = unitOf(target)?.trim().toLowerCase();
-  if (link.definitional === true && stated && per !== 0 && Math.abs(amount / per) === 1
-    && sourceUnit !== undefined && sourceUnit !== '' && sourceUnit === targetUnit
-    && beta !== null && Math.sign(beta) === sign) {
-    return {
-      outcome: link.user_stated ? 'user_stated' : 'estimate', mean: beta, std: Math.abs(beta) / 2,
-      magnitude: link.user_stated ? 'user_stated' : 'olumi_estimate', statement, stated_strength: beta,
-      ...natural(beta, per),
-    };
-  }
 
   let problem: LinkSizeProblem | undefined;
   if (stated && beta === null) problem = 'unconvertible';

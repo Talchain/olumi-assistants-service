@@ -139,19 +139,17 @@ describe('R7 plural link ownership words', () => {
     }
   });
 
-  it('Batch A: a hypothesis placeholder’s same-band proposal offers review and stays unsized', async () => {
+  it('CONTROL: a normal hypothesis placeholder keeps its first-estimate proposal and composed words', async () => {
     const initial = priceRevenue();
     initial.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };
     const w = world(initial);
     const p = await w.caps.proposeLinkStrengths!(ctx('Please suggest a strength.'), proposalArgs('strong'));
     expect(p.ok, JSON.stringify(p)).toBe(true);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
     expect(p.links).toEqual([expect.objectContaining({ was: { sizing: 'placeholder' },
-      whose: 'review only; nobody has sized this link', keeps_current_strength: true,
-      sizing_after_approval: 'placeholder' })]);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
+      whose: 'Olumi’s first estimate for a link nobody had sized', keeps_current_strength: true,
+      sizing_after_approval: 'olumi_accepted' })]);
     expect(composeProposalReply('propose_link_strengths', { ...proposalArgs('strong'), whole_request: true }, p,
-      'Please suggest a strength.')).toContain('These links aren’t sized in the model yet');
+      'Please suggest a strength.')).toContain('For links nobody had sized, this offers Olumi’s first estimate');
   });
 
   // Science 393023 LICENCE ruling 3, re-derived: an unmarked .6 with no projection/size tag has no recorded author.

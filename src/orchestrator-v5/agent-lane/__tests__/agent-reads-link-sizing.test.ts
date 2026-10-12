@@ -135,7 +135,6 @@ describe('the composed reply says when it replaces Olumi\'s estimate (served 799
     expect(result.links.map((l) => l.was.sizing)).toEqual(['placeholder', 'placeholder']);
     // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived:
     // a placeholder already held Olumi's estimate → this offers the first estimate for a link nobody had sized.
-    // Batch A ruling 4: newly supplied different means offer first estimates.
     expect(text).toContain('For links nobody had sized, this offers Olumi\u2019s first estimate');
     expect(text).not.toContain('Olumi\u2019s estimates stay marked as Olumi\u2019s');
     expect(text).not.toContain(REPLACES);
@@ -200,27 +199,22 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     return { result, proposal, store, args, userText };
   };
 
-  it('Batch A: unsized prospect → revenue card and note offer review only', async () => {
+  it('RED: unsized prospect → revenue card, whose and Agent note offer a FIRST estimate, never imply a prior size', async () => {
     const { result, proposal } = await prepare();
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(proposal.public_label).toContain(`${pair}, whose strength nobody has set yet (kept as it is)`);
+    expect(proposal.public_label).toContain(`${pair} as strong, ${FIRST}`);
     expect(result.public_label).toBe(proposal.public_label);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
     expect(result.links).toEqual([expect.objectContaining({ from: fromLabel, to: toLabel,
-      was: { sizing: 'placeholder' }, whose: 'review only; nobody has sized this link', keeps_current_strength: true })]);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(result.note).toContain('These links aren’t sized in the model yet');
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(result.note).toContain('only the user’s review and keeps their stored strength');
+      was: { sizing: 'placeholder' }, whose: FIRST, keeps_current_strength: true })]);
+    expect(result.note).toContain('For links nobody had sized, this offers Olumi\u2019s first estimate');
+    expect(result.note).toContain('only the user\u2019s review, never authorship');
     expect(result.note).not.toContain('Every strength here is Olumi\u2019s estimate');
   });
 
-  it('Batch A: live and replay approval details carry the unsized review card verbatim', async () => {
+  it('RED: live and replay approval details carry THIS unsized link’s first-estimate card verbatim', async () => {
     const { result, proposal, store } = await prepare();
     const [chip] = approvalChipsFor([{ name: 'propose_link_strengths', ok: true, mutated: false, proposal_id: proposal.proposal_id }],
       (id) => ({ proposal: store.get(id), result }));
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(chip!.detail).toContain(`${pair}, whose strength nobody has set yet (kept as it is)`);
+    expect(chip!.detail).toContain(`${pair} as strong, ${FIRST}`);
     expect(chip!.detail).toBe(proposal.public_label);
     const pending = proposalPendingAction(proposal, chip!, { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() });
     const restored = new ProposalStore();
@@ -230,15 +224,12 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     expect(linkStrengthCardFor('another-proposal', proposal)).toBeUndefined();
   });
 
-  it('Batch A: composed placeholder reply offers review and keeps the link unsized', async () => {
+  it('RED: composed reply for THIS placeholder offers a first estimate and says kept strength is review', async () => {
     const { result, args, userText } = await prepare();
     const text = composeProposalReply('propose_link_strengths', args, result, userText);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(text).toContain(`${pair}, whose strength nobody has set yet (kept as it is)`);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(text).toContain('These links aren’t sized in the model yet');
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(text).toContain('only your review and keeps their strength as it is');
+    expect(text).toContain(`${pair} as strong, ${FIRST}`);
+    expect(text).toContain('For links nobody had sized, this offers Olumi\u2019s first estimate');
+    expect(text).toContain('only your review, never authorship');
     expect(text).not.toContain('Olumi\u2019s estimates stay marked as Olumi\u2019s');
   });
 
@@ -257,8 +248,7 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     const { result } = await prepare(false, false, true);
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(String(result.note)).not.toContain('already sits in the band the user named');
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(String(result.note)).toContain('These links aren’t sized in the model yet');
+    expect(String(result.note)).toContain('No link here had a size yet');
   });
   it('CONTROL (P53x): the same plural review of the SIZED link keeps "already sits in the band the user named"', async () => {
     const { result } = await prepare(true, false, true);
@@ -275,12 +265,10 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     expect((await prepare(true, true)).result.note).toContain('Olumi\u2019s estimate stays Olumi\u2019s');
   });
 
-  it('Batch A: naming the placeholder’s current band is review with no estimate attribution or user credit', async () => {
+  it('CONTROL: the user naming a placeholder’s existing band is review, with first-estimate attribution and no user credit', async () => {
     const { result, proposal } = await prepare(false, false, true);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(proposal.public_label).toContain(`${pair}, whose strength nobody has set yet (kept as it is)`);
-    // Batch A rulings 1 and 3: unchanged placeholders are review only and remain unsized.
-    expect(result.links).toEqual([expect.objectContaining({ whose: 'review only; nobody has sized this link', keeps_current_strength: true })]);
+    expect(proposal.public_label).toContain(`${pair} as strong, reviewed by you, kept as it is`);
+    expect(result.links).toEqual([expect.objectContaining({ whose: FIRST, keeps_current_strength: true })]);
   });
 
   it('FAIL-CLOSED: first-estimate attribution on a sized link, or existing-estimate attribution on a placeholder, keeps the second call', async () => {

@@ -4413,8 +4413,6 @@ function admitOnce(
       } as RepairEntry);
     }
     const statement = {
-      // A corrected estimate sign cannot prove the drafter's original definition.
-      definitional: l.definitional === true && !signed.resolved,
       direction: l.direction,
       effect_amount: signed.amount,
       effect_per_source_change: signed.per,
