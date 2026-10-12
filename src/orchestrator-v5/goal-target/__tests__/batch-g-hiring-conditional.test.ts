@@ -22,6 +22,7 @@ import { toOutboundGraph } from '../outbound-graph.js';
 import { withShareByDateFrame } from '../share-by-date-run.js';
 import { withoutStatedLevelRanges } from '../../routing/add-factor-transaction.js';
 import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-direction.js';
+import { toTypedRunRows } from '../../runs/typed-run-rows.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
@@ -126,6 +127,20 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     expect([...goalChanceCellFacesForAgent(view, reloaded, true)]).toEqual(Object.entries(FACE));
     // Stale: nothing is said (currentness is the readers' own guard, unchanged).
     expect(goalChanceNotesForAgent(view, reloaded, false)).toEqual([]);
+  });
+
+  it('typed Run rows store each conditional chance as permitted_with_caveat, never an unqualified permission', () => {
+    const enrichment = JSON.parse(JSON.stringify(runAsTheHandlerDoes().envelope)) as Rec;
+    const scenarioId = '3ad403fc-caf8-48e4-bd5b-578e20c1c48a';
+    const rows = toTypedRunRows({ fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+      scenario_id: scenarioId, leading_option_id: null, summary: '', enrichment, computed_at: '2026-10-12T17:32:56.914Z',
+      graph_hash_at_run: FX.graph_hash, run_id: 'd00eeb8ba46db2bb30befde8bc9fe78a80cc20dbbba1e1401189c2159b268946',
+      // A schema-valid sentinel snapshot (as typed-run-rows.test.ts): the served Run's inputs were not captured.
+      input_snapshot: { snapshot_version: 1, sent_digest: 'a'.repeat(64), goal: null, options_not_sent: [], factors: [], constraints: [], links: [],
+        options: (enrichment.option_comparison as Rec[]).map((r) => ({ option_id: r.option_id, settings: [] })) } } }, { scenarioId });
+    expect(rows, JSON.stringify(rows).slice(0, 300)).toHaveProperty('ok');
+    const status = Object.fromEntries((rows as { ok: { options: Rec[] } }).ok.options.map((o) => [o.option_id, o.licence_status]));
+    expect(status).toEqual({ hire_a_tech_lead: 'permitted_with_caveat', hire_two_developers: 'permitted_with_caveat', continue_as_now: 'withheld' });
   });
 
   it('Agent prose: a Run narration owes each option\'s own-target line and the note, said once and never twice', () => {

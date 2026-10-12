@@ -1521,9 +1521,9 @@ export function periodEndConditionalOf(
 ): { readonly record: GoalRecord; readonly basis: GoalTargetBasis; readonly note: string } | undefined {
   const held = periodEndEffectsUnstatedOf(graph, goalId);
   if (held === undefined) return undefined;
-  const timing = ordinaryTimingOf(graph, envelope);
-  if (goalHorizonVerdict(graph, envelope) !== 'no_horizon' || !timing.ordinary || timing.forecast
-    || shareByDateGoalForChanceOf(graph) !== null || isEventShareForecast(graph)) return undefined;
+  // Ordinary timing (`ordinaryTimingOf`): no held month (a held month without an at-period basis is the horizon gate's
+  // 'withhold'), no deadline, no accumulation carrier — so no forecast either; and not a deadline-share event.
+  if (!ordinaryTimingOf(graph, envelope).ordinary || shareByDateGoalForChanceOf(graph) !== null || isEventShareForecast(graph)) return undefined;
   // The comparator the chance is stated with, exactly as the licence reads it (`statedComparatorOf`).
   const target = held.record.target;
   const comparator = statedComparatorOf(target?.comparator, true, graph, goalId);
