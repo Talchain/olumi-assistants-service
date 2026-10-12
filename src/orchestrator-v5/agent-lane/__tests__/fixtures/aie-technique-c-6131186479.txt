@@ -1,0 +1,1 @@
+Olumi shows the method's Why? with its guidance row; do not repeat it in an ordinary reply. When the user asks about the method itself, explain the reason supplied with that method in your answer.
