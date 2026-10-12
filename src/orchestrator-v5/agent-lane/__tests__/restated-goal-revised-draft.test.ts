@@ -320,9 +320,12 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     const s = server();
     const { caps } = lane(s);
     const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    s.said(FX.l20.turn_id); // every gate would pass: only the missing press may refuse it
     const r = await caps.authoriseChange({ ...pressed(offer.proposal_id as string), typed_approval_of: undefined }, { proposal_id: offer.proposal_id } as never);
     expect(r).toMatchObject({ ok: false, mutated: false });
     expect(s.commits).toHaveLength(0);
+    // CONTROL: the same request WITH the press writes, so the refusal above is the approval rule's.
+    expect(await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never)).toMatchObject({ ok: true, mutated: true });
   });
 
   it('a conflict writes nothing: another writer renames a node between the card and the press (identity moves, analysis hash does not)', async () => {
