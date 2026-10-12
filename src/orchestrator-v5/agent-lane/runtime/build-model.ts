@@ -646,6 +646,12 @@ export function retrySchemaPinningGoal(
   const goalSchema = properties['goal'];
   if (goalSchema === undefined) return schema;
   goalSchema['properties'] = {
+    // Recovery Batch C (AIE request check, 12 Oct): an EVENT goal's kind and deliverable are part of the goal, so a pinned
+    // retry keeps them (else the retry could not say "event_by_date" and the event reading was lost); a quantity goal pins
+    // both to null, so no event attestation is ever added to a quantity brief.
+    kind: goal.kind === 'event_by_date' ? { type: 'string', enum: ['event_by_date'] } : { type: 'null' },
+    deliverable: typeof goal.deliverable === 'string' && goal.deliverable.trim() !== ''
+      ? { type: 'string', enum: [goal.deliverable] } : { type: 'null' },
     metric: { type: 'string', enum: [goal.metric] },
     operator: { type: 'string', enum: [goal.operator] },
     // A pinned `null` must stay expressible: `{type:'number', enum:[null]}` is

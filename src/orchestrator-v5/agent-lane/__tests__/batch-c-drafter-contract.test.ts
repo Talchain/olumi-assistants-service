@@ -79,4 +79,19 @@ describe('the Batch C drafter contract', () => {
       + 'clarification, rather than inventing a shared period or claiming the full conjunction.');
     expect(BUILD_INSTRUCTIONS).not.toContain('frame "level", the comparator exactly as written');
   });
+
+  it('RED (AIE request check): a pinned retry keeps an EVENT goal\'s kind and deliverable, and never adds them to a quantity goal', () => {
+    const event = { metric: 'Platform completion', operator: '>=', target_stated: false, value: null, unit: '%', horizon_months: null,
+      provenance: 'explicit', frame: 'level', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
+      kind: 'event_by_date', deliverable: 'new platform' } as unknown as CandidateModel['goal'];
+    const pinned = goalOf(strictForTheDrafter(retrySchemaPinningGoal(event)) as Rec);
+    expect(pinned.properties.kind).toEqual({ type: 'string', enum: ['event_by_date'] });
+    expect(pinned.properties.deliverable).toEqual({ type: 'string', enum: ['new platform'] });
+    expect(pinned.required).toEqual(expect.arrayContaining(['kind', 'deliverable']));
+    const quantity = { ...event, kind: null, deliverable: null, metric: 'MRR', unit: 'GBP/month' } as unknown as CandidateModel['goal'];
+    const q = goalOf(strictForTheDrafter(retrySchemaPinningGoal(quantity)) as Rec).properties;
+    expect(q.kind).toEqual({ type: 'null' });
+    expect(q.deliverable).toEqual({ type: 'null' });
+  });
 });
+
