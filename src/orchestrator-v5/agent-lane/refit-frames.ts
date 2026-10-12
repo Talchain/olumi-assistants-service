@@ -311,10 +311,19 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
   return { graph: g, refits, refused };
 }
 
-/** User levels and ranges bind their frames. A goal's raw target alone does not. */
-function olumiMayReframe(node: Rec, edges: readonly Rec[]): boolean {
-  return !usersLevel(node) && !edges.some((e) => (e.from === node.id || e.to === node.id)
-    && userStated(e) && e.provenance?.natural_effect?.stated_range !== undefined);
+/**
+ * Whether Olumi's own estimate may move `node`'s frame to `F` (DL rule, 12 Oct, AIE PENDING; marketing L20 "Q3"). A RANGE
+ * fixes a frame: one held on the node, or a user-stated link range touching it. A bounded scale's top is refused upstream
+ * (`bounded_scale`). A user's LEVEL binds the frame only to CONTAIN it: a node whose only user content is a level may be
+ * widened while that level stays exact (its raw value is kept; `reframed`) and inside the new frame. A goal's raw target
+ * alone binds nothing.
+ */
+function olumiMayReframe(node: Rec, edges: readonly Rec[], F: number): boolean {
+  if (edges.some((e) => (e.from === node.id || e.to === node.id) && userStated(e) && e.provenance?.natural_effect?.stated_range !== undefined)) return false;
+  const os = node.observed_state;
+  if (os?.range !== undefined && os.range !== null) return false;
+  if (!usersLevel(node)) return true;
+  return num(os?.raw_value) && Math.abs(os.raw_value) <= F * (1 + TOL);
 }
 
 /** Fit only pending Olumi estimates, after the user's pass. PURE; refusals leave only the old placeholder. */
@@ -362,7 +371,7 @@ export function refitFramesForOlumiEstimates(graph: Rec): {
       const into = cuts(next).filter((e) => e.to === target.id);
       const F = niceFrameAtLeast(Math.max(...into.map((e) => Math.abs(e.strength.mean))) * Fold);
       reason = widenRefusal(next, target, Fold, F, { goalOwnRows: true });
-      if (reason === undefined && !olumiMayReframe(target, next.edges)) reason = 'levels_set_on_node';
+      if (reason === undefined && !olumiMayReframe(target, next.edges, F)) reason = 'levels_set_on_node';
       if (reason !== undefined) break;
       next = reframed(next, target.id, F);
       moved.add(target.id);
