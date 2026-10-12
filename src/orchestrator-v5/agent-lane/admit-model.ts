@@ -3132,6 +3132,113 @@ function briefGoalObservedState(normalised: number, unit: string | null | undefi
 }
 
 /**
+ * ⭐ RECOVERY BATCH C — A GOAL'S CURRENT LEVEL THE BRIEF DEFINES BY ITS PARTS IS THE USER'S (adjudication (c), served CEE
+ * c85817f2: GOAL_FIGURES_MISSING_CURRENT_LEVEL on the capacity brief).
+ *
+ * WHERE THE MEANING WAS LOST: the level limb (`admitOnce`, `goalLevelIsEstimated`) decides on the drafter's LABEL alone.
+ * The served draft (`cee_drafter_raw_responses` 470fa988) typed the goal's level as `baseline_value: 80`,
+ * `baseline_known: true`, `baseline_provenance: "inferred"` — because the brief writes the 80 about the existing team and
+ * DEFINES the goal from it: "Our existing team resolves 80 tickets per week. … Keep current staffing adds no specialist.
+ * … Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity."
+ * Admission withheld it as "Olumi's own estimate … would rest on a guess", which is false, and the Run then had no level
+ * to read the "at least 100" target against. A figure is the user's when the brief binds it, never by a drafter label
+ * (Batch C L2), in either direction.
+ *
+ * So a level withheld ONLY as Olumi's estimate is asked again here, on the admitted model, with no new reader. It is the
+ * user's exactly when ALL hold (anything else: untouched, byte for byte):
+ *  · the drafter marks it known, and it is not the target figure written once (the same guard as the level limb);
+ *  · the goal is DEFINED by its parts: every link into it is a definitional link (`definitionalLink`: ±1 per 1 in one
+ *    unit, sign as drafted) from a quantity, drafted as the brief's relationship (`brief_extraction`; never Olumi's own
+ *    minted sum), so the goal today is the sum of its parts today;
+ *  · exactly ONE part holds a non-zero level, it is the user's (`brief_extraction`, or their unverified claim — never
+ *    Olumi's estimate), it equals the drafter's figure, its link is +1 per 1, and the brief WRITES that figure about that
+ *    part (`writtenAbout`: the strict scoped reader construction injects as `sizeWritten`, the same strict reading
+ *    `goalLevelTheUserWrote` applies to a goal);
+ *  · every other part is 0 today by the user's own figures: it holds the user's level of 0, or it holds none, no option
+ *    sets it, and each link into it that the USER sized or that holds by definition comes from a quantity whose level is
+ *    the user's 0 (capacity: "Additional specialists" 0, "adds no specialist", at the user's 20 per specialist). Olumi's
+ *    own mechanisms into that part (its estimates and placeholders) are its model of how the part MOVES, not a level
+ *    anyone stated: the Run reads every option against the status quo, so they never set today's level.
+ * Then the SAME pair rule as every stated level (`admitStatedGoalLevel`) on the target's own cap, and #1840's writer
+ * (`briefGoalObservedState`). The "Olumi's own estimate" line goes; what was read, and from which parts, is said once
+ * (the ledger's `goal_level_reading` line, which construction already says in `not_represented`).
+ * Never a level from a frame, a target or a guess (Science F5: "Never infer a target, baseline or confidence from the
+ * frame"). PURE.
+ */
+export function admitGoalLevelDefinedByParts(args: {
+  readonly goal: CandidateModel['goal'];
+  readonly nodes: readonly AdmittedNode[];
+  readonly edges: readonly AdmittedEdge[];
+  readonly loss: readonly RepairEntry[];
+  readonly writtenAbout: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean;
+  readonly targetFigureWrittenAgain: (value: number, unit: unknown) => boolean;
+}): { readonly nodes: readonly AdmittedNode[]; readonly loss: readonly RepairEntry[] } {
+  const { goal, nodes, edges, loss } = args;
+  const unchanged = { nodes, loss };
+  const goals = nodes.filter((n) => n.kind === 'goal');
+  if (goals.length !== 1) return unchanged;
+  const g = goals[0]!;
+  const level = goal.baseline_value;
+  const raw = g.goal_threshold_raw;
+  const cap = g.goal_threshold_cap;
+  if (g.observed_state !== undefined || goal.baseline_known !== true || typeof level !== 'number' || !Number.isFinite(level)) return unchanged;
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw !== goal.value || typeof cap !== 'number' || !Number.isFinite(cap)) return unchanged;
+  if (sameLevel(level, raw) && !args.targetFigureWrittenAgain(level, goal.unit)) return unchanged;
+  const path = `nodes[${slugId(goal.metric)}].observed_state.baseline`;
+  if (loss.filter((l) => l.field_path === path).length !== 1) return unchanged;
+
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const quantity = (n: AdmittedNode | undefined): n is AdmittedNode => n !== undefined && n.kind !== 'option' && n.kind !== 'decision';
+  const usersLevel = (n: AdmittedNode): number | undefined => {
+    const os = n.observed_state;
+    return os !== undefined && typeof os.raw_value === 'number' && Number.isFinite(os.raw_value)
+      && (os.source === 'brief_extraction' || os.user_material_unverified === true) ? os.raw_value : undefined;
+  };
+  const into = edges.filter((e) => e.to === g.id);
+  if (into.length === 0 || !into.every((e) => quantity(byId.get(e.from)) && e.provenance?.definitional === true
+    && e.provenance.source === 'brief_extraction')) return unchanged;
+  const levelled = into.filter((e) => byId.get(e.from)!.observed_state !== undefined && usersLevel(byId.get(e.from)!) !== 0);
+  if (levelled.length !== 1) return unchanged;
+  const partEdge = levelled[0]!;
+  const part = byId.get(partEdge.from)!;
+  const partLevel = usersLevel(part);
+  if (partLevel === undefined || !sameLevel(partLevel, level) || !(partEdge.strength.mean > 0) || partEdge.effect_direction === 'negative') return unchanged;
+  const others = nodes.filter((n) => quantity(n) && n.id !== part.id).map((n) => n.label);
+  if (!args.writtenAbout(level, goal.unit, { target: [part.label], others })) return unchanged;
+  const setByOption = (id: string): boolean => nodes.some((n) => n.kind === 'option' && n.interventions !== undefined
+    && Object.prototype.hasOwnProperty.call(n.interventions, id));
+  const zeroToday = (q: AdmittedNode): boolean => {
+    if (q.observed_state !== undefined) return usersLevel(q) === 0;
+    if (setByOption(q.id)) return false;
+    const defining = edges.filter((e) => e.to === q.id && quantity(byId.get(e.from))
+      && (e.provenance?.magnitude === 'user_stated' || e.provenance?.definitional === true));
+    return defining.length > 0 && defining.every((e) => usersLevel(byId.get(e.from)!) === 0);
+  };
+  const rest = into.filter((e) => e !== partEdge).map((e) => byId.get(e.from)!);
+  if (!rest.every(zeroToday)) return unchanged;
+
+  const verdict = admitStatedGoalLevel({
+    metric: goal.metric, operator: goal.operator, rawTarget: raw, rawBaseline: level, cap, targetUnit: goal.unit,
+  });
+  if (!verdict.admitted) return { nodes, loss: loss.map((l) => (l.field_path === path ? { ...l, reason: verdict.reason } : l)) };
+  const observed_state = briefGoalObservedState(verdict.normalised, goal.unit, level, cap);
+  const unit = goal.unit ? ` ${goal.unit}` : '';
+  const zeroes = rest.map((q) => `“${q.label}”`).join(' and ');
+  return {
+    nodes: nodes.map((n) => (n === g ? { ...g, observed_state } : n)),
+    loss: [...loss.filter((l) => l.field_path !== path), {
+      // Said where the build's ledger is said (`not_represented`, the `goal_level_reading` line); the node holds the user's.
+      field_path: `nodes[${slugId(goal.metric)}].goal_level_reading`,
+      before: null,
+      after: { raw_value: level, parts: [part.id, ...rest.map((q) => q.id)] },
+      reason: `“${goal.metric}” is ${level}${unit} today, as your brief defines it: your ${level} for “${part.label}”`
+        + (rest.length > 0 ? `, with nothing yet from ${zeroes}.` : '.'),
+      severity: 'info',
+    } as RepairEntry],
+  };
+}
+
+/**
  * ⭐ THE STATED CURRENT LEVEL OF A GOAL WITH A HELD CEILING (MG #72 5870097103; AIQ defect 1, "£45k dropped").
  *
  * Admission runs before the brief attests the comparator, so it withholds every `<=` level
@@ -3494,6 +3601,8 @@ function admitOnce(
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
   const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
   const levelReading = { value: null as BriefGoalLevel | null };
+  // Recovery Batch C: whether the goal's stated level was withheld ONLY on the drafter's label (`admitGoalLevelDefinedByParts`).
+  const goalLevelWithheldAsEstimate = { value: false };
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
@@ -3764,6 +3873,7 @@ function admitOnce(
         // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
         const estimated = goalLevelIsEstimated(model.goal);
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
+          goalLevelWithheldAsEstimate.value = true;
           withheld(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
             `so no chance of reaching ${raw} is shown: that figure would rest on a guess, not on anything you ` +
@@ -5463,9 +5573,16 @@ function admitOnce(
     } as RepairEntry);
   }
   const atZero = (n: AdmittedNode): AdmittedNode => (createdZero.has(n.id) ? { ...n, observed_state: { value: 0, source: 'cee_inference' } } : n);
-  const admittedNodes = carriers.size === 0
+  const carried = carriers.size === 0
     ? levers.nodes
     : levers.nodes.map((n) => (carriers.has(n.id) ? { ...atZero(n), nonlinear_identity: carriers.get(n.id)! } : atZero(n)));
+  // ⭐ Recovery Batch C: a level withheld only as "Olumi's own estimate" is the user's where the brief defines the goal by
+  // its parts (`admitGoalLevelDefinedByParts`), read on the FINAL structure; otherwise untouched.
+  const definedLevel = goalLevelWithheldAsEstimate.value
+    ? admitGoalLevelDefinedByParts({ goal: model.goal, nodes: carried, edges: finalEdges, loss, writtenAbout: sizeWritten, targetFigureWrittenAgain })
+    : { nodes: carried, loss };
+  const admittedNodes = definedLevel.nodes as AdmittedNode[];
+  if (definedLevel.loss !== loss) loss.splice(0, loss.length, ...definedLevel.loss);
 
   return {
     nodes: admittedNodes,
