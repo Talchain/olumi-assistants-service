@@ -84,6 +84,7 @@ import {
 import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ordering.js';
 import { projectGoalProbabilitiesForTransport } from './compose/goal-probability-transport.js';
 import { projectObjectiveContradictionSummary } from './coaching/objective-contradiction.js';
+import { summaryWithoutLeadSentence } from './coaching/analysis-result-headline.js';
 import { readOptionResultSources } from '../orchestrator/context/option-result-source.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
@@ -1387,7 +1388,10 @@ function buildAnalysisResultBlockUnconfined(
       const claimSafeSummary = readOptionResultSources(enrichment ?? {}).reduce(
         (copy, records) => projectObjectiveContradictionSummary(copy, records, fact.result.goal_certainty), summary,
       );
-      return mayNameLeadingOption ? claimSafeSummary : projectAnalysisSummaryForWithheldClaim(claimSafeSummary);
+      // ⭐ Recovery Batch E (DL, 12 Oct; ruling A, Paul's #87): never the lead ladder's win-share sentence, on any
+      // branch (`summaryWithoutLeadSentence`); what follows it is kept byte for byte.
+      return summaryWithoutLeadSentence(
+        mayNameLeadingOption ? claimSafeSummary : projectAnalysisSummaryForWithheldClaim(claimSafeSummary));
     })(),
     // `null` is the schema's own honest value here (`leading_option_id:
     // z.string().nullable()`, boundary/blocks.ts — the key is REQUIRED, so
