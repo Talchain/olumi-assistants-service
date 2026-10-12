@@ -665,13 +665,15 @@ describe('readback RESPONSE → LICENCE — marketing: "above 15%" is said only 
 });
 
 // ── RE-SCOPE 2 (DL 12 Oct, R5-1; re-scope check r2 BLOCKING 1): the checker's EXACT case, loader → Run → screen ─────────────
-// Every input made the person's (each starting value confirmed, each option cell from the brief, each link stated by the
-// user), then ONE Olumi `cee_hypothesis` setting DIRECTLY ON THE SCORED GOAL. The request carries it; the returned chance must
-// say it rests on it — on that option's chance only — for the single target AND the joint.
+// Every input made the person's (each starting value and each option cell from the brief WITH its attestation, each link
+// stated by the user), then ONE Olumi `cee_hypothesis` setting DIRECTLY ON THE SCORED GOAL. The request carries it; the
+// returned chance must say it rests on it — on that option's chance only — for the single target AND the joint.
+// DL 12 Oct (last check BLOCKING 1/3): a figure is the person's only ATTESTED (`brief_extraction` + `explicit`); a type-less
+// brief stamp is disclosed as unverified, and `user_confirmed` is Olumi's figure ACCEPTED (provisional) — neither is "theirs".
 const allTheirs = (g: Rec): Rec => {
   for (const n of g.nodes as Rec[]) {
-    if (n.observed_state) { n.observed_state.source = 'user_confirmed'; n.observed_state.extractionType = 'explicit'; delete n.observed_state.user_material_unverified; }
-    if (n.kind === 'option' && n.interventions) for (const c of Object.values(n.interventions as Rec)) if (c && typeof c === 'object') (c as Rec).source = 'brief_extraction';
+    if (n.observed_state) { n.observed_state.source = 'brief_extraction'; n.observed_state.extractionType = 'explicit'; delete n.observed_state.user_material_unverified; }
+    if (n.kind === 'option' && n.interventions) for (const c of Object.values(n.interventions as Rec)) if (c && typeof c === 'object') Object.assign(c as Rec, { source: 'brief_extraction', extractionType: 'explicit' });
   }
   for (const e of g.edges as Rec[]) e.provenance = { ...e.provenance, source: 'user_specified', magnitude: 'user_stated' };
   return g;

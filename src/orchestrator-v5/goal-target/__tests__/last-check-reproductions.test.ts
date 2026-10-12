@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../../agent-lane/runtime/build-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
-import { createRunAnalysisHandler, wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { goalChanceLicenceForAgent, goalChanceLicenceOf, UNVERIFIED_SOURCES_NOTE } from '../goal-chance-licence.js';
 import { goalChanceCellFacesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { goalChanceEstimateCounts, inputOriginOf, settingOriginOf } from '../../agent-lane/goal-chance-estimate-attribution.js';
@@ -29,7 +29,6 @@ import { transformNodeToV3 } from '../../../cee/transforms/schema-v3.js';
 import { transformNodeToV2 } from '../../../cee/transforms/schema-v2.js';
 import { actionFactsOf } from '../../agent-lane/actions/state.js';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 type Rec = Record<string, any>;
 const clone = <T>(x: T): T => structuredClone(x);
 const sid = '9c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c';

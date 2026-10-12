@@ -127,9 +127,12 @@ describe('typed current-level sentence authority', () => {
     expect(valueAuthorshipOf(os)).toBe('olumi_estimate');
     expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('ai_inferred');
   });
-  it('the trusted human formatter preserves its absent-type carrier without a validator verdict', () => {
+  it('the trusted human formatter writes its attestation (`explicit`) beside the stamp, without a validator verdict', () => {
+    // DL 12 Oct: the typed door verified the figure (`figureTheUserWrote`), so it attests it; a type-less stamp would be the
+    // person's by its stamp alone, disclosed as unverified on the chance.
     const os = framedObservedState(model().factors[0]!);
-    expect(os).toStrictEqual({ value: 0.46, raw_value: 920, cap: 2000, declared_scale: 'unit_interval', unit: 'appointments/month', source: 'brief_extraction' });
+    expect(os).toStrictEqual({ value: 0.46, raw_value: 920, cap: 2000, declared_scale: 'unit_interval', unit: 'appointments/month', source: 'brief_extraction',
+      extractionType: 'explicit' });
     expect(valueAuthorshipOf(os)).toBe('yours');
     expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('from_brief');
   });
@@ -145,7 +148,9 @@ describe('typed current-level sentence authority', () => {
   it('withdrawal preserves unverified claims and leaves legacy withdrawn numeric origins unknown', () => {
     const m = model(); m.factors[0]!.baseline_evidence = null;
     const unverified = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
-    const legacy = { kind: 'factor', label: cases[2]!.label, observed_state: framedObservedState(model().factors[0]!) };
+    // The LEGACY carrier: the formatter's type-less shape from before it wrote its attestation (DL 12 Oct).
+    const { extractionType: _attested, ...legacyState } = framedObservedState(model().factors[0]!);
+    const legacy = { kind: 'factor', label: cases[2]!.label, observed_state: legacyState };
     const [kept, withdrawn] = withdrawUnstatedBaselineStamps([unverified, legacy], 'We are reviewing service.');
     expect(kept).toBe(unverified);
     expect(kept?.observed_state).toMatchObject({ source: 'cee_inference', extractionType: 'inferred', user_material_unverified: true });

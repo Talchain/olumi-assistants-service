@@ -260,8 +260,8 @@ describe('RE-SCOPE 2 — the census spec, generatively: every node / every optio
     expect(countsOf(licenceOf(g, which))).toEqual(ZERO);
   });
 
-  // POLARITY (R5-1, as amended): a setting is the person's ONLY on positive attestation — `user_specified` or `brief_extraction`,
-  // the intervention schema's human set — and nothing contradicting it (`estimate: true` is Olumi's draft-widening level). It is
+  // POLARITY (R5-1, as amended; DL 12 Oct): a setting is the person's ONLY on positive attestation — `user_specified`, or
+  // `brief_extraction` WITH `explicit` beside it — and nothing contradicting it (`estimate: true` is Olumi's draft-widening level). It is
   // Olumi's only on a RECOGNISED AI source (`cee_hypothesis`, `domain_knowledge`, `cee_inference`). Anything else — the legacy
   // `user` (derived 12 Oct: no production writer stamps it on an option cell), an unknown string — is UNVERIFIED.
   const upstreamSettings = INPUTS.filter((x) => x.kind === 'setting' && upstreamOf(allHuman(), eventOf('joint')).has(x.feeds));
@@ -272,18 +272,27 @@ describe('RE-SCOPE 2 — the census spec, generatively: every node / every optio
       g.nodes.find((n: Rec) => n.id === input.option).interventions[input.feeds].source = source;
       expect(countsOf(licenceOf(g, 'joint'))).toEqual({ ...ZERO, provisional: true, settings: { [input.option!]: 1 } });
     });
-  it.each([['user'], ['something_else'], ['user_specified + estimate: true']].flatMap(([source]) => upstreamSettings.map((x) => [x.name, source!] as const)))(
+  // ⛔ RULED (DL 12 Oct, last check BLOCKING 1): a type-less `brief_extraction` cell is the person's BY ITS STAMP ALONE
+  // (`stampOnly`) — the drafter's single-entry option levels and the legacy prose extractor write it for figures nobody said.
+  // The chance discloses it like any unverified input (labelled, never withheld; every gate still reads it as staging does).
+  it.each([['user'], ['something_else'], ['user_specified + estimate: true'], ['brief_extraction (no attestation)']]
+    .flatMap(([source]) => upstreamSettings.map((x) => [x.name, source!] as const)))(
     'POLARITY: %s with source "%s" is UNVERIFIED (joint) — the note once, never Olumi\'s, never the person\'s', (name, source) => {
       const input = INPUTS.find((x) => x.name === name)!;
       const g = allHuman();
       const cell = g.nodes.find((n: Rec) => n.id === input.option).interventions[input.feeds];
-      if (source === 'user_specified + estimate: true') { cell.source = 'user_specified'; cell.estimate = true; } else cell.source = source;
+      if (source === 'user_specified + estimate: true') { cell.source = 'user_specified'; cell.estimate = true; }
+      else if (source === 'brief_extraction (no attestation)') cell.source = 'brief_extraction';
+      else cell.source = source;
       // LABEL, DON'T WITHHOLD (DL 12 Oct): shown, provisional, the note once.
       expect(countsOf(licenceOf(g, 'joint'))).toEqual({ ...ZERO, provisional: true, unverified: 1 });
     });
-  it.each(['user_specified', 'brief_extraction'])('POLARITY CONTROL: a setting stamped "%s" is the person\'s — nothing is added', (source) => {
+  it.each(['user_specified', 'brief_extraction + explicit'])('POLARITY CONTROL: a setting stamped "%s" is the person\'s — nothing is added', (source) => {
     const g = allHuman();
-    for (const o of g.nodes.filter((n: Rec) => n.kind === 'option')) for (const c of Object.values(o.interventions as Rec)) (c as Rec).source = source;
+    for (const o of g.nodes.filter((n: Rec) => n.kind === 'option')) for (const c of Object.values(o.interventions as Rec)) {
+      if (source === 'brief_extraction + explicit') Object.assign(c as Rec, { source: 'brief_extraction', extractionType: 'explicit' });
+      else (c as Rec).source = source;
+    }
     expect(countsOf(licenceOf(g, 'joint'))).toEqual(ZERO);
   });
 

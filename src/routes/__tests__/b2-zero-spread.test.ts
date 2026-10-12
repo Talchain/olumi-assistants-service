@@ -98,7 +98,10 @@ function produced(envelope = producerEnvelope(), graph = READ.graph): Rec {
 // `cee_inference` is a recognised AI source (AIE R5 item 1; the UI's `classifyValueProvenance` reads it 'ai'): Olumi's.
 const STARTER_RANGE = '‘Launch starter tier’: between about 95% and 99% chance of meeting your goal, in this model, '
   + 'using Olumi\'s estimates for 3 starting values, 2 option settings and 2 relationships (see Check estimates).';
-const AMENDMENT_7 = { olumi_estimate_value_count: 3, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true };
+// DL 12 Oct (LABEL-ONLY, last check BLOCKING 1): this capture's goal level and 'Starter support cost per subscriber' are
+// type-less `brief_extraction` — the person's by their stamp alone — so the result also carries the unverified note, once.
+const AMENDMENT_7 = { olumi_estimate_value_count: 3, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true,
+  notes: ['This result uses inputs whose sources have not been verified.'] };
 const withoutAmendment7 = (record: Rec): Rec => Object.fromEntries(Object.entries(record).filter(([key]) => !Object.hasOwn(AMENDMENT_7, key)));
 const withoutAmendment7InRecord = (enrichment: Rec): Rec => ({ ...enrichment, inference_warnings: enrichment.inference_warnings
   .map((warning: Rec) => (warning.code === GOAL_CHANCE_LICENSED ? withoutAmendment7(warning) : warning)) });

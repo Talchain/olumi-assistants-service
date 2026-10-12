@@ -175,7 +175,7 @@ const mrrGraph = (source: string): Rec => ({
   nodes: [
     { id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold_frame: 'change_rel', goal_threshold_raw: 0.1, goal_threshold: 0.1,
       goal_threshold_unit: 'GBP/month', goal_threshold_cap: 27500, goal_direction: '>=',
-      observed_state: { value: 20000 / 27500, baseline: 20000 / 27500, unit: 'GBP/month', source, raw_value: 20000, cap: 27500 },
+      observed_state: { value: 20000 / 27500, baseline: 20000 / 27500, unit: 'GBP/month', source, ...(source === 'brief_extraction' ? { extractionType: 'explicit' } : {}), raw_value: 20000, cap: 27500 },
       goal_target_basis: { quantity_frame: 'level', target_frame: 'change_rel', target_raw: 0.1, reference: 'today',
         denominator: 'today’s MRR', period_months: 3, period_kind: 'at_end', effect_unit: 'GBP/month per change', effects_at_period_end: true,
         source: 'olumi_reading' } },
@@ -448,7 +448,7 @@ describe('DL contract rulings (12 Oct): precision names follow PLoT\'s wire; nev
     // "needs month-by-month changes" instead (its own row in item 3 below).
     // Batch C: AIE status-quo disposition (12 Oct) — the same-draw reference needs the goal REACHED through a link (not a root).
     const level = hiringGraph({ quantity_frame: 'level', goal_threshold_frame: 'level', goal_target_basis: undefined, goal_horizon_months: undefined,
-      observed_state: { value: 0, baseline: 0, raw_value: 0, cap: 100, unit: '%', source: 'brief_extraction' } },
+      observed_state: { value: 0, baseline: 0, raw_value: 0, cap: 100, unit: '%', source: 'brief_extraction', extractionType: 'explicit' } },
       { edges: [{ from: 'cost', to: 'productivity', strength: { mean: 0.1, std: 0.05 } }] });
     const kept = withGoalChanceLicence(run, level, 'productivity', () => false, undefined, level, hiringConstraints(level)) as Rec;
     const keptRows = Object.fromEntries((kept.option_comparison as Rec[]).map((r) => [r.option_id, r]));
@@ -551,10 +551,10 @@ const capacityGraph = (over: { factorOs?: Rec; setting?: Rec; goal?: Rec } = {})
   nodes: [
     { id: 'capacity', kind: 'goal', label: 'Development capacity', goal_threshold_frame: 'level', goal_threshold_raw: 85,
       goal_threshold_unit: '%', goal_threshold_cap: 100, goal_threshold: 0.85, goal_direction: '>=',
-      observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction' }, ...over.goal },
+      observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction', extractionType: 'explicit' }, ...over.goal },
     { id: 'devs', kind: 'factor', label: 'Developers', observed_state: over.factorOs ?? { value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'brief_extraction', extractionType: 'explicit' } },
-    { id: 'lead', kind: 'option', label: 'Hire a tech lead', interventions: { devs: over.setting ?? { value: 0.6, raw_value: 6, source: 'brief_extraction', target_match: { node_id: 'devs' } } } },
-    { id: 'two', kind: 'option', label: 'Hire two developers', interventions: { devs: { value: 0.8, raw_value: 8, source: 'brief_extraction', target_match: { node_id: 'devs' } } } },
+    { id: 'lead', kind: 'option', label: 'Hire a tech lead', interventions: { devs: over.setting ?? { value: 0.6, raw_value: 6, source: 'brief_extraction', extractionType: 'explicit', target_match: { node_id: 'devs' } } } },
+    { id: 'two', kind: 'option', label: 'Hire two developers', interventions: { devs: { value: 0.8, raw_value: 8, source: 'brief_extraction', extractionType: 'explicit', target_match: { node_id: 'devs' } } } },
     { id: 'carry_on', kind: 'option', label: 'Carry on as now', is_baseline: true, interventions: {} },
   ],
   edges: [
@@ -578,7 +578,7 @@ describe('independent check r1 — item 1: a percentage quantity changed by an a
   const CAPACITY_BASIS = { ...HIRING_BASIS, quantity_frame: 'level', denominator: 'today’s development capacity (75%)',
     effect_unit: 'percentage points of capacity per added person, at month three' };
   const capacityChange = (goal: Rec): Rec => hiringGraph({ label: 'Development capacity',
-    observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction' }, ...goal });
+    observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction', extractionType: 'explicit' }, ...goal });
   const wordsOf = (g: Rec) => goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
 
   it('RED (level, as admission stores it): no frame on the node, Olumi\'s validated reading "level" — "10 percentage points higher" (75% → 85%, never 82.5%)', () => {
@@ -771,10 +771,21 @@ describe('RE-SCOPE 2 (R5-2): an input whose source is unverified is disclosed on
     expect(l).not.toHaveProperty('olumi_estimate_settings_by_option');
     expect(l.provisional).toBe(true);
   });
-  it('CONTROL: admission\'s own goal-level stamp (`brief_extraction`, no extraction type) and every attested input → no note', () => {
+  it('CONTROL: every input attested as the user\'s (`brief_extraction` + `explicit`, or the person\'s own stamps) → no note', () => {
     const l = capacityLicence()! as unknown as Loose;
     expect(unverifiedNotes(l)).toBe(0);
     expect(l.provisional).toBeUndefined();
+  });
+  // ⛔ RULED (DL 12 Oct, after the last check's BLOCKING 1: "my ruling 1 … was WRONG"): admission's own goal-level stamp —
+  // `brief_extraction` with no extraction type, written at `admit-model.ts` `briefGoalObservedState` on the drafter's claim
+  // alone — is the person's BY ITS STAMP ALONE. It is LABELLED (the note once, provisional), never withheld.
+  it('RULED: admission\'s own type-less goal-level stamp → licensed, the note said once, provisional (labelled, never withheld)', () => {
+    const typeless = { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction' };
+    const l = capacityLicence(capacityGraph({ goal: { observed_state: typeless } }))! as unknown as Loose;
+    expect(Object.keys(l.pct_by_option)).toEqual(['lead', 'two']);
+    expect(unverifiedNotes(l)).toBe(1);
+    expect(l.provisional).toBe(true);
+    expect(l).not.toHaveProperty('olumi_estimate_value_count');
   });
   it('CONTROL: a recognised AI source is Olumi\'s (counted), never the unverified note', () => {
     const l = capacityLicence(unverifiedFactor({ value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'cee_inference', extractionType: 'inferred' }))! as unknown as Loose;
@@ -895,7 +906,7 @@ describe('AIE status-quo disposition — the same-draw reference is decided by t
 
   it.each([
     ['a ROOT goal (no link reaches it)', (g: Rec) => { g.edges = (g.edges as Rec[]).filter((e) => e.to !== 'capacity'); }],
-    ['a goal an option SETS directly', (g: Rec) => { ((g.nodes as Rec[])[2]!.interventions as Rec).capacity = { value: 0.8, raw_value: 80, source: 'brief_extraction' }; }],
+    ['a goal an option SETS directly', (g: Rec) => { ((g.nodes as Rec[])[2]!.interventions as Rec).capacity = { value: 0.8, raw_value: 80, source: 'brief_extraction', extractionType: 'explicit' }; }],
     ['a goal read from a LAUNCH, not today', (g: Rec) => { (g.nodes as Rec[])[0]!.goal_target_basis = { quantity_frame: 'level', target_frame: 'level', target_raw: 85,
       reference: 'launch', period_months: 3, period_kind: 'at_end', effect_unit: 'percentage points', effects_at_period_end: true, source: 'olumi_reading' }; }],
     ['a held month the Run did not carry', (g: Rec) => { (g.nodes as Rec[])[0]!.goal_horizon_months = 9; }],
@@ -966,11 +977,11 @@ describe('AIE status-quo disposition — the same-draw reference is decided by t
 });
 
 // AND: each condition keeps its own frame, population and timing — the primary goal never attests a secondary target.
-const pairedPair = (conversion: Rec = { observed_state: { value: 0.1, raw_value: 10, cap: 100, unit: '%', source: 'brief_extraction' } }): Rec => {
+const pairedPair = (conversion: Rec = { observed_state: { value: 0.1, raw_value: 10, cap: 100, unit: '%', source: 'brief_extraction', extractionType: 'explicit' } }): Rec => {
   const g = marketingGraph();
   const nodes = g.nodes as Rec[];
   Object.assign(nodes[0]!, { goal_target_basis: { ...MARKETING_BASIS, reference: 'today', period_kind: 'at_end' },
-    observed_state: { value: 0.2, raw_value: 5, cap: 25, unit: 'customers', source: 'brief_extraction' } });
+    observed_state: { value: 0.2, raw_value: 5, cap: 25, unit: 'customers', source: 'brief_extraction', extractionType: 'explicit' } });
   Object.assign(nodes[1]!, conversion);
   nodes.push({ id: 'carry_on', kind: 'option', label: 'Carry on as now', is_baseline: true });
   g.edges = [{ from: 'annual_spend', to: 'new_customers' }, { from: 'annual_spend', to: 'conversion_rate' }];
@@ -1040,7 +1051,7 @@ const pairedWithLimit = (setDirectly: boolean): Rec => {
   nodes.push({ id: 'pricing', kind: 'factor', label: 'Pricing', observed_state: { value: 0.3, raw_value: 30, cap: 100, unit: 'points', source: 'brief_extraction', extractionType: 'explicit' } });
   (g.edges as Rec[]).push({ from: 'pricing', to: 'annual_spend' });
   // An uncertain budget: the options set it directly, so carrying on's own spend is not established as unchanged.
-  if (setDirectly) nodes.find((n) => n.id === 'hire_manager')!.interventions = { annual_spend: { value: 0.45, raw_value: 45000, source: 'brief_extraction' } };
+  if (setDirectly) nodes.find((n) => n.id === 'hire_manager')!.interventions = { annual_spend: { value: 0.45, raw_value: 45000, source: 'brief_extraction', extractionType: 'explicit' } };
   return g;
 };
 const sqWith = (limitP: number, joint: number): Rec => withSqRow(marketingRun(), { probability_of_joint_goal: joint,
@@ -1102,7 +1113,7 @@ const marketingWithInputs = (estimate?: { readonly target: keyof typeof LEVER; r
     nodes.push({ id: lever, kind: 'factor', label: lever === 'outreach' ? 'Outreach' : 'Ad quality',
       observed_state: olumi(target, 'value') ? OLUMIS_LEVEL(40, 'points') : USERS_LEVEL(40, 'points') });
     nodes.find((n) => n.id === option)!.interventions = { [lever]: { value: 0.6, raw_value: 60,
-      source: olumi(target, 'setting') ? 'cee_hypothesis' : 'brief_extraction', target_match: { node_id: lever } } };
+      source: olumi(target, 'setting') ? 'cee_hypothesis' : 'brief_extraction', ...(olumi(target, 'setting') ? {} : { extractionType: 'explicit' }), target_match: { node_id: lever } } };
     (g.edges as Rec[]).push({ from: option, to: lever, strength: { mean: 1, std: 0 } },
       { from: lever, to: target, ...(olumi(target, 'link') ? OLUMIS_LINK : USERS_LINK) });
   }
