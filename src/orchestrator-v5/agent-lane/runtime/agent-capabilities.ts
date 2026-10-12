@@ -215,7 +215,7 @@ import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 import { preconditionRiskIds } from '../../../graph/inert-risk.js';
-import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
+import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, isStatedLevelRange, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_QUOTE_MAX, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
@@ -1930,6 +1930,21 @@ function resolveLinkEffectEnds(g: GraphRead, ctx: AgentToolContext, fromName: st
 type AmbiguousTarget = { readonly requested: string; readonly candidates: readonly Record<string, unknown>[] };
 
 /** One ambiguous request, with what tells its candidates apart — the SAME projection as every other tool. */
+/**
+ * Recovery Batch B (SYS3 TRACE L6): the ONE sentence of the user's own words that states BOTH ends of a range ("currently
+ * they spend between 20% and 30% of their time on non-development tasks …"), whole and trimmed, or `null`. Sentences end
+ * where `quoteOfFigure`'s do (. ! ? before a space, or a new line); each end must be a figure `quoteOfFigure` finds in
+ * that sentence, in the figure's unit. Longer than a hold quote may be: `null` (asked, never cut).
+ */
+function sentenceStatingBoth(low: number, high: number, unit: string, userText: string): string | null {
+  for (const raw of userText.split(/(?<=[.!?])(?=\s)|\n/)) {
+    const sentence = raw.trim();
+    if (sentence === '' || sentence.length > USER_TODAY_QUOTE_MAX) continue;
+    if (quoteOfFigure(low, unit, sentence) !== null && quoteOfFigure(high, unit, sentence) !== null) return sentence;
+  }
+  return null;
+}
+
 function describeAmbiguity(g: Pick<GraphRead, 'nodes' | 'edges'>, requested: string, candidates: GraphRead['nodes']): AmbiguousTarget {
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label]));
   return {
@@ -9078,7 +9093,8 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string }[] = [];
+      const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string;
+        range?: { low: number; high: number; quote: string } }[] = [];
       const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
       const ambiguous: AmbiguousTarget[] = [];
       const recordOf = (x: unknown): Record<string, unknown> => (x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {});
@@ -9169,10 +9185,30 @@ export function createAgentCapabilities(
         // THE ONE FRAMING RULE (ruling point 3; `proposeNewOption` statedToday): Olumi's default range over the largest
         // figure this change carries for the factor — its own — then stamped as the user's.
         const v = t.value;
-        const observed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
+        const framed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
           plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }), source: USER_TODAY_SOURCE };
+        // ⭐ RECOVERY BATCH B (SYS3 TRACE L6): the RANGE the user gave for this figure ("between 20% and 30%") is stored AS A
+        // RANGE beside the figure they chose (`isStatedLevelRange`, add-factor-transaction.ts), only when BOTH ends are in ONE
+        // sentence the user wrote in this conversation and the chosen figure lies inside. Never a midpoint: the figure is still
+        // the one they wrote in THIS message (checked above), or nothing is prepared.
+        let range: { low: number; high: number; quote: string } | undefined;
+        if (t.range_low !== undefined || t.range_high !== undefined) {
+          const lo = t.range_low, hi = t.range_high;
+          const sentence = typeof lo === 'number' && typeof hi === 'number' ? sentenceStatingBoth(lo, hi, todayUnit, ctx.user_text ?? turnText) : null;
+          const stored = sentence === null ? undefined
+            : { low: lo as number, high: hi as number, meaning: 'min_max' as const, source: USER_TODAY_SOURCE, source_quote: sentence };
+          if (stored === undefined || !isStatedLevelRange(stored, framed)) {
+            todayNotSet.push({ factor: label, value: t.value,
+              reason: `The range ${String(lo ?? '?')} to ${String(hi ?? '?')} ${todayUnit} for "${label}" is not one the user wrote, both ends in one sentence of theirs, `
+                + `with ${shown} inside it, so nothing was prepared. Ask the user; never supply a range, an end or a midpoint of your own.` });
+            continue;
+          }
+          range = { low: stored.low, high: stored.high, quote: sentence! };
+        }
+        const observed = range === undefined ? framed
+          : { ...framed, range: { low: range.low, high: range.high, meaning: 'min_max', source: USER_TODAY_SOURCE, source_quote: range.quote } };
         planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed,
-          basis: confirmPairing ? 'confirmed_by_approval' : 'written_about', quote });
+          basis: confirmPairing ? 'confirmed_by_approval' : 'written_about', quote, ...(range !== undefined ? { range } : {}) });
       }
       if (ambiguous.length > 0) {
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
@@ -9241,7 +9277,8 @@ export function createAgentCapabilities(
           label: p.label,
           // `user_to_confirm`: the figure is in their words, and the PAIRING is Olumi's until they approve it (the card
           // shows `quote`). `user`: one figure for one factor, written about it.
-          current_value: { value: p.value, unit: p.unit, stated_by: p.basis === 'confirmed_by_approval' ? 'user_to_confirm' : 'user', quote: p.quote },
+          current_value: { value: p.value, unit: p.unit, stated_by: p.basis === 'confirmed_by_approval' ? 'user_to_confirm' : 'user', quote: p.quote,
+            ...(p.range !== undefined ? { range: { low: p.range.low, high: p.range.high, quote: p.range.quote } } : {}) },
           affects: `${labelOfId(p.to_id)} (${p.direction === 'positive' ? 'raises it' : 'lowers it'})`,
           how_strongly: FACTOR_PLACEHOLDER_STRENGTH,
         })),
