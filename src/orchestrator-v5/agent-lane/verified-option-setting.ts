@@ -593,21 +593,90 @@ export function quoteBindsFactorFigure(model: CandidateModel, factor: Factor, br
  */
 export function briefWritesFactorFigure(factor: Factor, brief: string | undefined): boolean {
   try {
-    const value = factor.baseline_value;
-    if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value)) return false;
-    const named = words(factor.label).filter(w => !grammar(w));
-    const writes = assertions(brief).filter(a => a.text.length <= MAX_ASSERTION && directContext(brief, a)
-      && words(a.text).some(w => named.some(n => sameName(n, w)))
-      && findLinkEffectAmounts(a.text).some(amount => {
-        const span = { start: amount.index, end: amount.index + amount.matchedText.length };
-        return amount.magnitude === Math.abs(value)
-          && occurrenceRoleOf(plainQuotes(a.text), amount.index) !== 'aim'
-          && sameFrame(a.text, span, factor.unit, amount, false, true);
-      }));
-    return writes.length > 0;
+    return sentencesWritingFigure(factor, brief).length > 0;
   } catch {
     return false;
   }
+}
+/** The brief's direct sentences that write THIS factor's figure in its typed frame, naming it, not as an aim or bound. */
+function sentencesWritingFigure(factor: Factor, brief: string | undefined): { text: string; amount: StatedAmount }[] {
+  const value = factor.baseline_value;
+  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value)) return [];
+  const named = words(factor.label).filter(w => !grammar(w));
+  return assertions(brief).filter(a => a.text.length <= MAX_ASSERTION && directContext(brief, a)
+    && words(a.text).some(w => named.some(n => sameName(n, w)))).flatMap(a => findLinkEffectAmounts(a.text)
+    .filter(amount => amount.magnitude === Math.abs(value)
+      && occurrenceRoleOf(plainQuotes(a.text), amount.index) !== 'aim'
+      && sameFrame(a.text, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, false, true))
+    .map(amount => ({ text: a.text, amount })));
+}
+
+/**
+ * ⭐ Recovery Batch B, Row5 (DL 12 Oct): a RANGE the brief states for a factor, read at construction for L6's carrier
+ * (`observed_state.range`). Paul's "Each additional specialist resolves about 20 tickets per week, between 10 and 30." was
+ * admitted on 9 of 9 served drafts with the 20 and without the 10–30. A pair is "between X and Y", "X–Y" or "X to Y"; ends
+ * written with their own unit must be in the factor's frame (bare ends take the figure's, so a range with no figure beside
+ * it must write its unit).
+ */
+function statedRangePair(text: string, unit: unknown, figure?: StatedAmount): { low: number; high: number } | undefined {
+  const ends = findLinkEffectAmounts(text).filter(a => a.index !== figure?.index);
+  for (let i = 0; i + 1 < ends.length; i++) {
+    const lo = ends[i]!, hi = ends[i + 1]!;
+    const gap = text.slice(lo.index + lo.matchedText.length, hi.index);
+    const paired = (/\bbetween\s+$/iu.test(text.slice(0, lo.index)) && /^\s+and\s+$/iu.test(gap)) || /^\s*(?:[-–—]|to)\s*$/iu.test(gap);
+    if (!paired || !(lo.magnitude < hi.magnitude)) continue;
+    const after = text.slice(hi.index + hi.matchedText.length).match(/^[^,;.!?)]*/u)?.[0] ?? '';
+    const bare = !/[\p{L}%£$€]/u.test(after) && !/[%£$€]/u.test(hi.matchedText);
+    if (bare ? figure === undefined : !sameFrame(text, { start: hi.index, end: hi.index + hi.matchedText.length }, unit, hi, false, true)) continue;
+    return { low: lo.magnitude, high: hi.magnitude };
+  }
+  return undefined;
+}
+/**
+ * The USER's own range for a figure they wrote: both ends in the ONE sentence that writes it (`sentencesWritingFigure`),
+ * never a third party's sentence (`FOREIGN_LEVEL`). Stored only as L6's validator admits it (`isStatedLevelRange`: the
+ * figure inside, the user's own sentence).
+ */
+export function briefStatedLevelRange(factor: Factor, brief: string | undefined): { low: number; high: number; quote: string } | undefined {
+  try {
+    for (const { text, amount } of sentencesWritingFigure(factor, brief)) {
+      if (FOREIGN_LEVEL.test(text) || ATTRIBUTED_EVIDENCE.test(text)) continue;
+      const pair = statedRangePair(text, factor.unit, amount);
+      if (pair !== undefined) return { ...pair, quote: text };
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+/** "Customer interviews suggest …": evidence the user reports from a source, not a figure of their own. */
+const ATTRIBUTED_EVIDENCE = /\b(?:suggests?|interviews?|survey|surveys)\b/iu;
+/**
+ * Row5 RULING (DL 12 Oct 13:1xZ; AIE 0825 "retain the supplied claim and its uncertainty/source", 0418): a range a THIRD
+ * PARTY states in the brief ("A supplier says a specialist can contribute 10–30 features per week; I have not verified
+ * that claim.") is carried with its attribution — the sentence that names that party — role unverified: a label, never
+ * withheld, never the user's range. The sentence must name the factor and write both ends with the factor's frame.
+ */
+export function briefAttributedLevelRange(factor: Factor, brief: string | undefined): { low: number; high: number; quote: string } | undefined {
+  try {
+    if (typeof brief !== 'string') return undefined;
+    const attributed = (text: string): boolean => FOREIGN_LEVEL.test(text) || ATTRIBUTED_EVIDENCE.test(text);
+    // A sentence that also writes the figure anchors bare ends ("… about 20 tickets per week, between 10 and 30").
+    for (const { text, amount } of sentencesWritingFigure(factor, brief)) {
+      const pair = attributed(text) ? statedRangePair(text, factor.unit, amount) : undefined;
+      if (pair !== undefined) return { ...pair, quote: text };
+    }
+    const named = words(factor.label).filter(w => !grammar(w));
+    for (const a of assertions(brief)) {
+      if (a.text.length > MAX_ASSERTION || !directContext(brief, a) || !attributed(a.text)) continue;
+      if (!words(a.text).some(w => named.some(n => sameName(n, w)))) continue;
+      const pair = statedRangePair(a.text, factor.unit);
+      if (pair !== undefined) return { ...pair, quote: a.text };
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
