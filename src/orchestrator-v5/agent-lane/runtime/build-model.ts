@@ -1,4 +1,4 @@
-import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -2587,6 +2587,9 @@ export async function buildModelFromBrief(
     ...(admitted.loss.some((l) => /\.event_risk$/.test(l.field_path)) ? {
       event_risk_disclosures: admitted.loss.filter((l) => /\.event_risk$/.test(l.field_path)).map((l) => l.reason),
     } : {}),
+    // ⭐ EBD E4 (DL GO): what the deadline model set aside from the brief, said ONCE on the build turn in the reply's detail
+    // (the same composer channel). Not in open_questions: there it was counted as "1 more question remains unresolved".
+    ...(eventSetAsideLine(admitted) !== null ? { event_forecast_disclosures: [eventSetAsideLine(admitted)!] } : {}),
     not_represented: [
       // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as

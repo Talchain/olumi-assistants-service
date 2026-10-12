@@ -96,7 +96,7 @@ const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: '
 const call = (name: string, args: Rec) => ({ output: [{ type: 'function_call', name, call_id: `call_${name}_${randomUUID().slice(0, 8)}`, arguments: JSON.stringify(args) }] });
 
 const hash = (g: Rec) => computeAnalysisAffectingGraphHash(g as never)!;
-function world() {
+function world(brief: string = PAUL.brief) {
   const sid = randomUUID();
   let bytes: string | null = null;
   const read = (): Rec => (bytes === null ? { nodes: [], edges: [] } : JSON.parse(bytes));
@@ -104,7 +104,7 @@ function world() {
   const writes: Rec[] = [];
   const latest = () => rows.find(r => !r.turn_id.endsWith(':claim'));
   const store = createMockSessionStore({
-    loadGraph: async () => (bytes === null ? null : read()), loadGraphAndBriefText: async () => ({ graph: bytes === null ? null : read(), briefText: bytes === null ? null : PAUL.brief }),
+    loadGraph: async () => (bytes === null ? null : read()), loadGraphAndBriefText: async () => ({ graph: bytes === null ? null : read(), briefText: bytes === null ? null : brief }),
     ensureScenarioExists: async () => ({ user_id: null }),
     readCommittedTurn: async (_sid, id) => { const r = rows.find(x => x.turn_id === id); return r ? { id: r.id, request_hash: r.request_hash,
       user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used, pending_actions: (r as Rec).pending_actions ?? [] } : null; },
@@ -122,19 +122,21 @@ function world() {
     },
   });
   live.store = store;
-  const graphWire = () => bytes === null ? { graph: null, graph_hash: null } : { graph: read(), graph_hash: hash(read()), brief_text: PAUL.brief,
+  const graphWire = () => bytes === null ? { graph: null, graph_hash: null } : { graph: read(), graph_hash: hash(read()), brief_text: brief,
     scenario_created_at: DRAFTED_AT, analysis_ready: buildCanonicalAnalysisReadyFromGraph(read()) };
   const versions = () => ({ versions: bytes === null ? [] : [{ version_id: 'draft-v1', sequence: 1, created_at: DRAFTED_AT,
-    creation: { kind: 'initial', source_turn_id: registrationTurnId(sid, constructionOperationId(sid, PAUL.brief)) } }] });
+    creation: { kind: 'initial', source_turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)) } }] });
   const register = (graph: Rec) => { bytes = JSON.stringify(graph); };
   return { sid, store, rows, read, graphWire, versions, register };
 }
 
 /** One queue of scripted Agent outputs per turn; structured calls (drafter, widening, brief reading) are answered by kind. */
 let agentScript: Rec[] = [];
+/** The drafter's scripted output for this test (Paul's event candidate unless a row swaps it). */
+let drafterOutput: () => Rec = () => candidate();
 const providerCalls: string[] = [];
 const apps: FastifyInstance[] = [];
-beforeEach(() => { vi.useFakeTimers({ now: NOW, toFake: ['Date'] }); agentScript = []; providerCalls.length = 0; });
+beforeEach(() => { vi.useFakeTimers({ now: NOW, toFake: ['Date'] }); agentScript = []; providerCalls.length = 0; drafterOutput = () => candidate(); });
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 async function route(w: ReturnType<typeof world>) {
   vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
@@ -148,7 +150,7 @@ async function route(w: ReturnType<typeof world>) {
       if (String(body.instructions).includes("This is Olumi's own check of a first draft")) { providerCalls.push('widening');
         return new Response(JSON.stringify(say(JSON.stringify({ risk_suggestions: [] }))), { status: 200 }); }
       providerCalls.push('drafter');
-      return new Response(JSON.stringify(say(JSON.stringify(candidate()))), { status: 200 });
+      return new Response(JSON.stringify(say(JSON.stringify(drafterOutput()))), { status: 200 });
     }
     providerCalls.push('agent');
     return new Response(JSON.stringify(agentScript.shift() ?? say('Done.')), { status: 200 });
@@ -254,6 +256,8 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     const ask1 = expectOneVoice(w.read(), 'after the brief');
     expect(ask1).toBe(chanceGoalDeadlineAsk('next feature launch'));
     expect(readinessAsks(t1.analysis_ready).filter(m => !m.startsWith('Review'))).toContain(ask1);
+    // E4 control: Paul's drafted event model set nothing aside, so no set-aside sentence.
+    expect(JSON.stringify(t1)).not.toContain('set aside');
 
     // ── Typed turn 2: Paul's deadline sentence (served turn 3, refused twice). The quoted phrase is placed on the calendar.
     const t2 = await turn({ message: PAUL.deadline, agent_session_id: t1._agent.session_id },
@@ -307,5 +311,28 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
       expect(lines.find(l => l.option_id === id)!.chance).toContain("Olumi's estimates of hiring time (2–4 months)");
     }
     expect(providerCalls.filter(c => c !== 'agent' && c !== 'drafter' && c !== 'widening' && c !== 'brief_spans')).toEqual([]);
+  });
+
+  it('E4: what the deadline model set aside from a brief is said ONCE, on the build turn, and never on a later turn', async () => {
+    const brief = 'Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?';
+    drafterOutput = () => ({ ...candidate(), goal: { ...candidate().goal, deliverable: 'the new platform', metric: 'Platform completion', unit: '%' },
+      options: [
+        { label: 'Current team', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [], added_capacity: null },
+        { label: 'Hire two senior engineers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Senior engineers hired', value: 2, unit: 'engineers', provenance: 'explicit', stated_evidence: null }], added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire four junior engineers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Junior engineers hired', value: 4, unit: 'engineers', provenance: 'explicit', stated_evidence: null }], added_capacity: { monthly_share_pct: 10, lead_months_low: 3, lead_months_high: 5 } },
+      ],
+      factors: [
+        { label: 'Senior engineers hired', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'engineers', provenance: 'inferred', plausible_max: 10 },
+        { label: 'Junior engineers hired', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'engineers', provenance: 'inferred', plausible_max: 20 },
+      ], decision_question: brief });
+    const w = world(brief), turn = await route(w);
+    const said = 'Olumi modelled this as a deadline question; it set aside "Senior engineers hired", "Junior engineers hired" and "£400k" from your brief, which this forecast doesn\'t use yet.';
+    const t1 = await turn({ message: brief }, [call('build_model_from_brief', { brief }), say('I have set up the comparison.')]);
+    expect(t1._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
+    expect(t1.assistant_text.split(said)).toHaveLength(2);
+    expect(t1._answer_shape?.detail).toContain(said);
+    expect(t1.assistant_text).not.toMatch(/1 more question remains/);
+    const t2 = await turn({ message: 'What does the model still need?', agent_session_id: t1._agent.session_id }, [say('The deadline, first.')]);
+    expect(JSON.stringify(t2)).not.toContain('set aside');
   });
 });

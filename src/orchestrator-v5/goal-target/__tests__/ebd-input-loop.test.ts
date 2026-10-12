@@ -12,13 +12,13 @@ import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js
 import { assessRouteAdmission } from '../../../cee/graph-readiness/canonical-readiness.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { decisionInputAsk } from '../../agent-lane/decision-input-ask.js';
-import { draftedTeamPartOf, eventModelAsk, withEventShareDate } from '../event-by-date-model.js';
+import { draftedTeamPartOf, eventModelAsk, eventSetAsideLine, withEventShareDate } from '../event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../goal-kind.js';
 import { readStatedDeadline } from '../deadline-date.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { constructionOperationId } from '../../agent-lane/runtime/build-model.js';
+import { buildModelFromBrief, constructionOperationId, type CallStructuredModel } from '../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { applyTeamShareEdit, bindTeamTimeQuote, teamTimeCard, teamTimesInQuote, widenedTeamTime, type ApprovedTeamTime } from '../team-share-write.js';
 import { shareChanceRunBlock } from '../share-by-date-run.js';
@@ -321,5 +321,37 @@ describe('E2 — a range line never calls Olumi\'s range "yours"', () => {
     expect(line).toBe("‘Carry on as now’: between about 20% and 60% chance of launching by 12 April 2027, in this model, using Olumi's estimate from your 7 months "
       + '(7–10.5 months), from the slow end of your 7 months, which Olumi widened to 7–10.5 months to the fast end.');
     expect(line).not.toContain('your 7–10.5');
+  });
+});
+
+describe('E4 — what the deadline model set aside from the brief is named, once', () => {
+  const B3 = 'Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?';
+  const b3 = (): CandidateModel => ({ ...candidate(), goal: { ...candidate().goal, deliverable: 'the new platform', metric: 'Platform completion', unit: '%' },
+    options: [
+      { label: 'Current team', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [], added_capacity: null },
+      { label: 'Hire two senior engineers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Senior engineers hired', value: 2, unit: 'engineers', provenance: 'explicit', stated_evidence: null }], added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+      { label: 'Hire four junior engineers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Junior engineers hired', value: 4, unit: 'engineers', provenance: 'explicit', stated_evidence: null }], added_capacity: { monthly_share_pct: 10, lead_months_low: 3, lead_months_high: 5 } },
+    ],
+    factors: [
+      { label: 'Senior engineers hired', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'engineers', provenance: 'inferred', plausible_max: 10 },
+      { label: 'Junior engineers hired', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'engineers', provenance: 'inferred', plausible_max: 20 },
+    ] });
+  const flagged = (c: CandidateModel, brief: string) => admitCandidateModel(c, {}, brief, undefined, undefined, undefined, undefined, undefined, { event_by_date_prompted: true });
+  it('the brief\'s own factors kept as context and its unmodelled figure, in ONE sentence', () => {
+    expect(eventSetAsideLine(flagged(b3(), B3))).toBe('Olumi modelled this as a deadline question; it set aside "Senior engineers hired", '
+      + '"Junior engineers hired" and "£400k" from your brief, which this forecast doesn\'t use yet.');
+  });
+  it('CONTROL: Paul\'s drafted event model set nothing aside: no sentence', () => {
+    expect(eventSetAsideLine(flagged(candidate(), BRIEF))).toBeNull();
+  });
+  it('the build owes it once as a construction disclosure (the reply\'s detail), never as an open question', async () => {
+    const call: CallStructuredModel = async () => ({ text: JSON.stringify(b3()) });
+    const r = await buildModelFromBrief(SID, B3, async path => path.endsWith('/graph/register')
+      ? { status: 200, json: { registered: true, model_version: { version_number: 1 } } } : { status: 200, json: { graph: { nodes: [], edges: [] } } }, call) as Rec;
+    expect(r.ok).toBe(true);
+    const line = eventSetAsideLine(flagged(b3(), B3))!;
+    expect(r.event_forecast_disclosures).toEqual([line]);
+    expect(r.open_questions).not.toContain(line);
+    expect(r.open_questions[0]).toBe(chanceGoalDeadlineAsk('the new platform'));
   });
 });
