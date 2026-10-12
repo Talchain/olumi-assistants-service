@@ -14,7 +14,9 @@ export function composeEligibleIntervention(composed: ReplyComposition, interven
   // R2 N2r (friction audit N2): a whole proposal ships unshaped, so a <details> suffix reached the user as raw markup
   // ("<details> <summary>Why?</summary>…", hiring step 5, deadline step 3). It keeps every byte and carries no Why.
   if (wholeProposal) return composed;
-  const disclosure = whySaid ? '' : `<details>\n<summary>${INTERVENTION_WHY_LABEL}</summary>\n\n${intervention.why}\n\n</details>`;
+  // R3-1: the UI escapes HTML, so "<details>…" reached the user as tags (run 2: hiring 10–14, marketing 2–6). The same
+  // label and Science's words, byte for byte, ship as a plain final paragraph the chat renders.
+  const disclosure = whySaid ? '' : `${INTERVENTION_WHY_LABEL} ${intervention.why}`;
   // Run/Draft H/W/E/N belongs to the existing composer, byte for byte.
   if (faceContract) {
     if (whySaid) return composed;
