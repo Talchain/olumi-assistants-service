@@ -194,7 +194,8 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     const label = typeof option.label === 'string' && option.label.trim() !== '' && !/[\r\n]/.test(option.label) ? option.label.trim() : 'this option';
     out = withholdOptionGoalFigures(out, new Set([id]), {
       code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id],
-      message: `Not shown. Olumi can use at most two start times for ‘${label}’ yet: say which two starts to use.`,
+      // AIE 6128697025, verbatim (it counts RANGED starts; fixed starts stay as context, never deleted).
+      message: `Not shown. This forecast can use at most two uncertain hiring starts for ‘${label}’ at once. Say which two it should model.`,
     }, { keepOutcome: true, keepOrdering: true });
   }
   return out;

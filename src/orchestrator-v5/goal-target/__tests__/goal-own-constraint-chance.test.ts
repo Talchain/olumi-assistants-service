@@ -18,6 +18,8 @@ import { describe, expect, it } from 'vitest';
 import { goalOwnConstraintChanceRecords, GOAL_OWN_CONSTRAINT_ID, type SentRunInputs } from '../goal-own-constraint-chance.js';
 import { goalChanceLicenceOf } from '../goal-chance-licence.js';
 import { GOAL_FIGURES_SHARE_APPROXIMATION } from '../../../orchestrator/context/option-result-source.js';
+import { sharePartsForOption } from '../share-by-date-run.js';
+import { withShareByDateChanceGate } from '../goal-chance-range.js';
 
 type Rec = Record<string, any>;
 const fixture = (name: string): Rec => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
@@ -98,4 +100,21 @@ describe('AIE 6125204695: the goal’s own constraint, bound per option to what 
   });
 
 
+  // AIE 6128697025 (row 9, verbatim): the range module's one remaining withhold, on every deadline Run. It counts RANGED
+  // starts; fixed starts stay as context, never deleted.
+  it('the too-many-starts withhold says the AIE\'s words: three ranged starts on one option (the forecast uses at most two)', () => {
+    const g = GRAPH();
+    const third = { ...structuredClone(g.nodes.find((n: Rec) => n.id === 'event_capacity_1')), id: 'event_capacity_3', label: 'Third hire' };
+    g.nodes.push(third);
+    g.edges.push({ ...structuredClone(g.edges.find((e: Rec) => e.from === 'event_capacity_1' && e.to === GOAL)), from: 'event_capacity_3' });
+    for (const o of g.nodes.filter((n: Rec) => n.kind === 'option')) {
+      o.interventions = { ...o.interventions, event_capacity_3: { value: o.id === 'event_option_2' ? 1 : 0 } };
+      g.edges.push({ ...structuredClone(g.edges.find((e: Rec) => e.from === o.id && e.to === 'event_capacity_1')), to: 'event_capacity_3' });
+    }
+    g.nodes.find((n: Rec) => n.id === 'event_option_2').interventions.event_capacity_1 = { value: 1 };
+    expect(sharePartsForOption(g, 'event_option_2'), 'three ranged starts').toBeNull();
+    const out = withShareByDateChanceGate(ENGINE(), g, GOAL) as Rec;
+    const own = (out.inference_warnings ?? []).filter((w: Rec) => Array.isArray(w.option_ids) && w.option_ids.includes('event_option_2'));
+    expect(own.map((w: Rec) => w.message)).toEqual(['Not shown. This forecast can use at most two uncertain hiring starts for ‘Hire two developers’ at once. Say which two it should model.']);
+  });
 });

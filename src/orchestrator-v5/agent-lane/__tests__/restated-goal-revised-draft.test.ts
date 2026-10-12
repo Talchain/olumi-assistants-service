@@ -14,7 +14,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilities, draftGateDetail, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { humanMaterialAfterTheDraft } from '../runtime/draft-replacement.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
@@ -286,31 +287,42 @@ describe('approve → save → Run → cold reopen, on the same model', () => {
   });
 });
 
+/** AIE 6128697025 (row 10), verbatim: said whenever a target's quantity is not on the canvas, then what is missing. */
+const AIE_NOT_HELD = 'This goal change was not applied. The model needs quantities or conditions it does not yet hold, and this route cannot add them without replacing your saved work.';
+
 describe('the gates refuse, and nothing is drafted or written', () => {
-  const refusedAtOffer = async (s: ReturnType<typeof server>, found: RegExp) => {
+  // Marketing's turn-2 request (L20): neither conversion nor new customers is on the canvas, so the canvas step does not
+  // exist; the AIE's words name what is missing, from the call's own target. The gate's findings are no longer said
+  // (the AIE's sentence replaces them): each row below changes ONE input from the CONTROL, which is offered.
+  const refusedAtOffer = async (s: ReturnType<typeof server>) => {
     const { caps, drafts } = lane(s);
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
-    expect(String(r.detail)).toMatch(found);
-    // DL ruling 12 Oct (never a dead end): the one step that exists today, in this call's own target.
-    expect(String(r.detail)).toMatch(/give the one step that works today: edit the goal on the canvas to \u2018conversion rate\u2019 above 15%\. Never rebuild part of it\.$/);
+    expect(String(r.detail)).toBe(`${AIE_NOT_HELD} Missing: \u2018conversion rate\u2019 above 15%.`);
     expect(drafts()).toBe(0);
     expect(s.commits).toHaveLength(0);
   };
 
+  it('CONTROL: the untouched state is offered the revised-draft card, so each refusal below is its one changed input', async () => {
+    const r = await lane(server()).caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: true, mutated: false });
+    expect(typeof r.proposal_id).toBe('string');
+  });
+
   it('G2: one saved edit since the draft (a UI edit\'s commit row, as on this scenario at 02:18:35Z) refuses', async () => {
-    await refusedAtOffer(server({ ledger: { write_turn_ids: [FX.construction_commit_turn_id, 'd920b614-9d04-413f-a047-dab6bcf807ac'] } }), /1 saved change since the draft/);
+    await refusedAtOffer(server({ ledger: { write_turn_ids: [FX.construction_commit_turn_id, 'd920b614-9d04-413f-a047-dab6bcf807ac'] } }));
   });
 
   it('G1: a reviewed Olumi estimate refuses (an adopted figure is the user\'s act, whatever its number)', async () => {
     const g = structuredClone(FX.graph);
     const f = (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!;
     f.observed_state = { ...f.observed_state, source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } };
-    await refusedAtOffer(server({ graph: g }), /your review of the value for ‘Advertising spend’/);
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['your review of the value for \u2018Advertising spend\u2019']);
+    await refusedAtOffer(server({ graph: g }));
   });
 
   it('G3: a message between the brief and this turn refuses, typed or chip alike', async () => {
-    await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }), /1 other message since your brief/);
+    await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }));
   });
 
   it('a revised draft that drops one of the brief\'s limits is never offered (the 25%-of-time limit, here)', async () => {
@@ -323,7 +335,7 @@ describe('the gates refuse, and nothing is drafted or written', () => {
   });
 
   it('unknown authority refuses: a ledger that cannot be read', async () => {
-    await refusedAtOffer(server({ ledgerFails: true }), /a saved history that could not be read/);
+    await refusedAtOffer(server({ ledgerFails: true }));
   });
 
   it('no approval, no write: the Agent\'s own authorise_change (no pressed card) is refused', async () => {
@@ -357,9 +369,24 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     s.said('typed-turn-after-l20');
     const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
-    // At the press: the targets the card carried, as the canvas step (never a dead end).
-    expect(String(r.detail)).toMatch(/edit the goal on the canvas to \u2018New customers\u2019 at least 20 customers and \u2018Conversion rate\u2019 above 15%\. Never rebuild part of it\.$/);
+    // At the press: the targets the card carried, neither on the canvas, named as missing (AIE 6128697025, row 10).
+    expect(String(r.detail)).toBe(`${AIE_NOT_HELD} Missing: \u2018New customers\u2019 at least 20 customers and \u2018Conversion rate\u2019 above 15%.`);
     expect(s.commits).toHaveLength(0);
+  });
+});
+
+describe('AIE 6128697025 (row 10): the canvas step is said ONLY when every target\'s quantity is already on the canvas', () => {
+  const found = ['1 saved change since the draft'];
+  it('CONTRAST, every target on the canvas: the canvas step, with what was found', () => {
+    expect(draftGateDetail(found, 'replaced', [{ words: '\u2018New customers\u2019 at least 20 customers', onCanvas: true },
+      { words: '\u2018Conversion rate\u2019 above 15%', onCanvas: true }])).toBe('Olumi found 1 saved change since the draft, so a revised draft '
+      + 'was not replaced: replacing the draft could discard your work, and nothing was changed. Tell the user that plainly, that their goal '
+      + 'is not yet in the model, and give the one step that works today: edit the goal on the canvas to \u2018New customers\u2019 at least '
+      + '20 customers and \u2018Conversion rate\u2019 above 15%. Never rebuild part of it.');
+  });
+  it('one target off the canvas: the AIE\'s words, naming only the missing one (never the canvas step)', () => {
+    expect(draftGateDetail(found, 'offered', [{ words: '\u2018New customers\u2019 at least 20 customers', onCanvas: true },
+      { words: '\u2018Conversion rate\u2019 above 15%', onCanvas: false }])).toBe(`${AIE_NOT_HELD} Missing: \u2018Conversion rate\u2019 above 15%.`);
   });
 });
 
@@ -371,9 +398,10 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     const g = structuredClone(FX.graph);
     delete ((g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!.observed_state as Rec).source;
     const s = server({ graph: g });
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['a value for \u2018Advertising spend\u2019 whose author is not recorded']);
     const r = await offerOn(s);
     expect(r).toMatchObject({ ok: false, refusal: 'draft_holds_your_work' });
-    expect(String(r.detail)).toMatch(/a value for \u2018Advertising spend\u2019 whose author is not recorded/);
+    expect(String(r.detail)).toBe(`${AIE_NOT_HELD} Missing: \u2018conversion rate\u2019 above 15%.`);
     expect(s.commits).toHaveLength(0);
   });
 
@@ -382,13 +410,15 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     const option = (g.nodes as Rec[]).find((n) => n.kind === 'option' && n.interventions !== undefined && Object.keys(n.interventions).length > 0)!;
     const factorId = Object.keys(option.interventions)[0]!;
     delete (option.interventions[factorId] as Rec).source;
+    expect(humanMaterialAfterTheDraft(g)).toEqual([`a level for \u2018${option.label}\u2019 whose author is not recorded`]);
     const r1 = await offerOn(server({ graph: g }));
-    expect(String(r1.detail)).toMatch(new RegExp(`a level for \u2018${option.label}\u2019 whose author is not recorded`));
+    expect(r1).toMatchObject({ ok: false, refusal: 'draft_holds_your_work' });
     const g2 = structuredClone(FX.graph);
     const link = (g2.edges as Rec[]).find((e) => e.from === 'advertising_spend')!;
     delete (link.provenance as Rec).source;
+    expect(humanMaterialAfterTheDraft(g2)).toEqual([expect.stringMatching(/^a link \u2018Advertising spend\u2019 \u2192 .* whose author is not recorded$/)]);
     const r2 = await offerOn(server({ graph: g2 }));
-    expect(String(r2.detail)).toMatch(/a link \u2018Advertising spend\u2019 \u2192 .* whose author is not recorded/);
+    expect(r2).toMatchObject({ ok: false, refusal: 'draft_holds_your_work' });
   });
 
   it('CONTROL (unknown): construction\'s own unstamped "100 % of today" definition is not a human contribution', async () => {

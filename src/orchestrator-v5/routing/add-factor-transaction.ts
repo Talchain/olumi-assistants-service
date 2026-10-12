@@ -258,7 +258,7 @@ export function levelRangePointBasis(os: Readonly<Record<string, unknown>>): 'st
   if (!parsed.success) return undefined;
   if (isStatedLevelRange(os.range, os)) return 'stated_figure';
   const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
-  const olumis = provenanceOf({ value: os }).origin === 'ai';
+  const olumis = os.source === 'cee_inference' && os.user_material_unverified !== true;
   return olumis && figure === rangePointEstimate({ min: parsed.data.low, max: parsed.data.high }) ? 'midpoint' : undefined;
 }
 

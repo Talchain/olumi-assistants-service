@@ -152,10 +152,10 @@ const UNCONFIRMED_WORDS: Record<string, string> = {
  */
 const GENERIC_NOT_SAVED = 'the change could not be made this time — ask me to try again';
 /**
- * R2 T1 words, FOR AIE ACK: an unapproved change is waiting, not failed. "or type its words" is offered only when
- * exactly ONE card waits, the only case in which typed words bind (`agent-v1-turn.ts`); otherwise the button alone.
+ * R2 T1 words: an unapproved change is waiting, not failed. AIE AMENDED (#94 6128697025): the button alone, always ("or type
+ * its words" is gone: the typed binding matches the card's message, which the button may not show).
  */
-export const APPROVAL_REQUIRED_WORDS = 'Not saved yet: press the approval button on the card, or type its words.';
+export const APPROVAL_REQUIRED_WORDS = 'Not saved yet: press the approval button on the card.';
 export const APPROVAL_REQUIRED_BUTTON_WORDS = 'Not saved yet: press the approval button on the card.';
 const GENERIC_PARTLY_SAVED = 'not all of the change could be made — ask me what is still missing';
 const GENERIC_NOT_BUILT = 'something went wrong while building it — ask me to try again';
