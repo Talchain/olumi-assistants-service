@@ -134,9 +134,9 @@ function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledg
   };
 }
 
-function lane(s: ReturnType<typeof server>, proposals = new ProposalStore()) {
+function lane(s: ReturnType<typeof server>, proposals = new ProposalStore(), draft: () => Rec = candidate) {
   let drafted = 0;
-  const call = (async () => { drafted += 1; return { text: JSON.stringify(candidate()) }; }) as unknown as CallStructuredModel;
+  const call = (async () => { drafted += 1; return { text: JSON.stringify(draft()) }; }) as unknown as CallStructuredModel;
   const caps = createAgentCapabilities(s.dispatch, proposals, call, 'full', undefined, {
     readCommittedTurnLedger: s.readCommittedTurnLedger,
     readStatedObjections: async () => [],
@@ -301,6 +301,15 @@ describe('the gates refuse, and nothing is drafted or written', () => {
 
   it('G3: a message between the brief and this turn refuses, typed or chip alike', async () => {
     await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }), /1 other message since your brief/);
+  });
+
+  it('a revised draft that drops one of the brief\'s limits is never offered (the 25%-of-time limit, here)', async () => {
+    const s = server();
+    const losesTime = () => { const c = candidate(); c.constraints = (c.constraints as Rec[]).filter((x) => x.metric !== 'Founder marketing time'); return c; };
+    const r = await lane(s, new ProposalStore(), losesTime).caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_dropped_a_limit' });
+    expect(String(r.detail)).toMatch(/\u2018Founder marketing time\u2019 at most 25%/);
+    expect(s.commits).toHaveLength(0);
   });
 
   it('unknown authority refuses: a ledger that cannot be read', async () => {
