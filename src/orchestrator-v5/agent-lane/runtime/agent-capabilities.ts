@@ -6224,7 +6224,10 @@ export function createAgentCapabilities(
           : typeof fromLabel === 'string' && typeof toLabel === 'string'
             // Quoted: shown through `withoutAgentDirections`, where an unquoted label can drop the sentence (Codex P2).
             ? formatEdgeStrengthConfirmed({ fromLabel: quoteLabelForUser(fromLabel), toLabel: quoteLabelForUser(toLabel), sizing })
-            : 'Recorded your review of this link; its strength stays as it was.';
+            // A′ round 2 (DL): a placeholder has no strength to "stay"; it says the contract, as the labelled receipt does.
+            : sizing === 'placeholder'
+              ? 'Review recorded; this link is still unsized. Its values are unchanged. Give a figure, or ask Olumi to estimate it.'
+              : 'Recorded your review of this link; its strength stays as it was.';
         const whoseNote = sizing === 'user'
           ? 'Recorded as the user’s own estimate.'
           : sizing === 'olumi_accepted'

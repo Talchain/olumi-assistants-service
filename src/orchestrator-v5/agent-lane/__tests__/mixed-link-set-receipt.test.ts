@@ -228,3 +228,54 @@ describe('every set shape: each review-only link says it is still unsized, its o
     expect(unchanged.split(NEXT_STEP)).toHaveLength(2);
   });
 });
+
+/**
+ * A′ round 2 (DL, 12 Oct): the single-link receipt's label-less fallback (`agent-capabilities.ts` after
+ * `formatEdgeStrengthConfirmed`) said "its strength stays as it was" of a placeholder, as though a strength existed. It
+ * now follows the stored sizing: a placeholder says the contract; a sized link keeps its sentence.
+ */
+describe('single link whose endpoint label cannot be read after the write: the fallback follows the stored sizing', () => {
+  const PR = { from_label: 'Price', to_label: 'Revenue' };
+  const said = 'Price has a strong effect on Revenue.';
+  const c = { ...ctx, user_text: said, user_turn_text: said };
+  function single(provenance: Record<string, unknown>) {
+    let revision = 0;
+    let graph = { nodes: [{ id: 'price', kind: 'factor', label: 'Price' } as Record<string, unknown>, { id: 'revenue', kind: 'goal', label: 'Revenue' }],
+      edges: [{ from: 'price', to: 'revenue', strength: { mean: 0.5, std: 0.125 }, exists_probability: 1, effect_direction: 'positive', provenance }] };
+    const dispatch: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: `h${revision}` } };
+      const event = (body as { event: Record<string, unknown> }).event;
+      expect(event).toMatchObject({ kind: 'edge_strength_edit', from: 'price', to: 'revenue', intent: 'confirm_current' });
+      const e = graph.edges[0]!;
+      // The review is recorded; the price node comes back without a label (the fallback's only way in).
+      graph = { nodes: [{ id: 'price', kind: 'factor' }, graph.nodes[1]!],
+        edges: [{ ...e, provenance: { ...e.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-10-12T00:00:00.000Z' } } }] };
+      revision += 1;
+      return { status: 200, json: { assistant_text: 'Recorded.', graph_hash: `h${revision}` } };
+    };
+    const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full', undefined, {});
+    return { caps, edge: () => graph.edges[0]! };
+  }
+  const approve = async (provenance: Record<string, unknown>) => {
+    const w = single(provenance);
+    const p = await w.caps.proposeLinkStrength!(c, { ...PR, strength: 'strong', rationale: 'A′ round 2 fallback' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const out = await w.caps.authoriseChange(c, { proposal_id: String(p.proposal_id) });
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true });
+    return { w, followUp: String(out.follow_up) };
+  };
+
+  it('RED: a reviewed placeholder says it is still unsized, its values unchanged, then the next action (was "its strength stays as it was")', async () => {
+    const { w, followUp } = await approve({ source: 'user_specified', mean_projected: true });
+    expect(linkSizing(w.edge())).toBe('placeholder');
+    expect(followUp).toBe(`${REVIEW} ${NEXT_STEP}`);
+    witnessed(followUp);
+    expect(followUp).not.toMatch(/strength stays/);
+  });
+
+  it('CONTROL: a sized link keeps "its strength stays as it was"', async () => {
+    const { w, followUp } = await approve({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    expect(linkSizing(w.edge())).toBe('olumi_accepted');
+    expect(followUp).toBe('Recorded your review of this link; its strength stays as it was.');
+  });
+});
