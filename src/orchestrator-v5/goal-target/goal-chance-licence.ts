@@ -299,8 +299,14 @@ function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: bo
   if (typeof p === 'number' && p !== 0 && p !== 1) return 'moved';
   const o = isRec(row.outcome) ? row.outcome : undefined;
   if (o === undefined) return 'assumed';
-  if (finite(o.std) && o.std > 0) return 'moved';
-  if (finite(o.p10) && finite(o.p90) && o.p10 !== o.p90) return 'moved';
+  // D2 FLOAT TOLERANCE (DL ruling on PL #94 6129218237, 12 Oct, recovery Batch D): a spread is a spread beyond floating-point
+  // representation error of the row's OWN values, never its rounding. The 11 Oct capacity Run's status quo held 0.4 on every
+  // draw and reported std 5.55e-17 (≈ 0.63·ε·|centre|): residue, not a spread. Pure representation error, no unit floor, so
+  // the verdict is the same in any unit: std ≤ 16·ε·|centre| (the row's mean, else p50, in the same frame); deciles equal only
+  // within 16·ε·max(|p10|, |p90|). Anything larger is real spread and stays "moved" (AIE same-frame equality, 6118336179).
+  const centre = finite(o.mean) ? o.mean : finite(o.p50) ? o.p50 : undefined;
+  if (finite(o.std) && o.std > (centre === undefined ? 0 : 16 * Number.EPSILON * Math.abs(centre))) return 'moved';
+  if (finite(o.p10) && finite(o.p90) && Math.abs(o.p10 - o.p90) > 16 * Number.EPSILON * Math.max(Math.abs(o.p10), Math.abs(o.p90))) return 'moved';
   // D2: a reference whose frame is not known is never compared, so the row is neither "moved" nor "no change".
   if (a.reference === 'unknown') return ['p10', 'p50', 'p90', 'mean'].some((k) => finite(o[k])) ? 'unknown' : 'assumed';
   const ref = a.reference;
