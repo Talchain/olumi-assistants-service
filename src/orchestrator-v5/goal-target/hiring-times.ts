@@ -17,7 +17,7 @@
  * "another M later" (the coupled law is DEFERRED, DL (c): the two starts would be one draw), an "at least N" beyond Olumi's
  * latest or a "within N" below Olumi's soonest (DL CUT). The pace stays Olumi's estimate, split equally across the starts.
  */
-import { extraShareMoments } from './event-by-date-share.js';
+import { extraShareLinkMoments } from './event-by-date-share.js';
 import { timeBetween } from './deadline-date.js';
 import { withEventShareDate } from './event-by-date-model.js';
 import { goalDeadlineFromRecord } from './goal-kind.js';
@@ -282,7 +282,7 @@ export function hiringTimesHeld(after: unknown, a: ApprovedHiringTimes): boolean
       const link = after.edges.find((e: Rec) => e.from === node.id && e.to === a.goal_id);
       const D = typeof c.reference_date === 'string' && typeof c.deadline === 'string' ? timeBetween(c.reference_date, c.deadline, 'months') : NaN;
       if (!(D > 0) || c.deadline !== a.deadline || link?.defaulted === true) return false;
-      const m = extraShareMoments(p.monthly_share.value / 100, D, p.lead_low.value, p.lead_high.value);
+      const m = extraShareLinkMoments(p.monthly_share.value / 100, D, p.lead_low.value, p.lead_high.value);
       return c.lead_low === p.lead_low.value && c.lead_high === p.lead_high.value && c.monthly_share === p.monthly_share.value
         && sameRecord(c.statement, p.statement) && rec(c.figures) && sameRecord(c.figures.lead_low, p.lead_low)
         && sameRecord(c.figures.lead_high, p.lead_high) && sameRecord(c.figures.monthly_share, p.monthly_share)

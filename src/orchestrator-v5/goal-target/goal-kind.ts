@@ -23,7 +23,7 @@ import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { endsOfGraph, validatedDefinition, withHeldUserLinks } from './held-user-links.js';
 import { timeBetween } from './deadline-date.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
-import { extraShareMoments, momentsOfTeam, type TeamShare } from './event-by-date-share.js';
+import { extraShareLinkMoments, momentsOfTeam, type TeamShare } from './event-by-date-share.js';
 import { COMPUTE_SIGMA_FLOOR } from '../../cee/constants.js';
 
 type Rec = Record<string, unknown>;
@@ -197,7 +197,7 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
       || options.some(o => setting(o) !== 0 && setting(o) !== 1)) return null;
     const D = timeBetween(c.reference_date, deadline, 'months');
     if (D <= 0) return null;
-    const expected = extraShareMoments(c.monthly_share / 100, D, c.lead_low, c.lead_high);
+    const expected = extraShareLinkMoments(c.monthly_share / 100, D, c.lead_low, c.lead_high);
     if (!finite(e.strength.mean) || !finite(e.strength.std) || Math.abs(e.strength.mean - expected.mean) > 0.0005
       || !partSpreadMatches(e.strength.std, expected.sd)
       || !finite(held.strength.mean) || !finite(held.strength.std) || held.exists_probability !== 1

@@ -4,7 +4,7 @@ import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js';
 import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
 import { readStatedDeadline, sayDate, timeBetween } from './deadline-date.js';
-import { extraShareMoments, teamShareMoments } from './event-by-date-share.js';
+import { extraShareLinkMoments, teamShareMoments } from './event-by-date-share.js';
 import { denormalisedMagnitude, findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { CURRENCY_WORD_TO_CODE } from '../../utils/currency-alphabet.js';
 import { figureTheUserWroteForSpan } from '../agent-lane/stated-by-user.js';
@@ -408,7 +408,10 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
     const c = out.nodes.find((n: Rec) => n.id === edge.from)?.observed_state?.extra_share_by_date;
     if (!c) continue;
     Object.assign(c, { deadline, reference_date: c.reference_date ?? reference });
-    const m = extraShareMoments(c.monthly_share / 100, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high);
+    const m = extraShareLinkMoments(c.monthly_share / 100, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high);
+    // E-tail (b): the capacity records what the cap at the whole deliverable replaced (absent when nothing was capped).
+    if (m.capped_from !== undefined) c.capped_from_mean = m.capped_from;
+    else delete c.capped_from_mean;
     edge.strength = { mean: m.mean, std: m.sd };
     delete edge.defaulted;
     edge.provenance.natural_effect = { amount: m.mean * 100, amount_unit: unit, per_source_change: 1,

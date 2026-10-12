@@ -63,6 +63,20 @@ export function extraShareMoments(m: number, D: number, a: number, b: number): M
   return { mean, sd: Math.sqrt(Math.max(0, second - mean * mean)) };
 }
 
+/**
+ * ⭐ E-TAIL (b) (DL option 1, 12 Oct; pending the AIE's ACK): A HIRE'S LINK CARRIES AT MOST THE WHOLE DELIVERABLE. Run 4's
+ * drafter said "Hire two developers" adds 35 % of the launch a month: 35 % × 3 months is 1.05, a link the writer's own base
+ * check refuses (|β| ≤ 1), so the user's deadline could never be saved. A hire cannot add more than all of it by the date:
+ * the mean is capped at 1 and the spread scaled by the same factor (its coefficient of variation kept), and what the cap
+ * replaced is returned so the capacity can record it. The ONE sizing of a hire's link: its writer (`withEventShareDate`) and
+ * both of its readers (`shareByDateGoalOf`, `hiringTimesHeld`) call this. `extraShareMoments` stays the uncapped law that the
+ * reference calculations use.
+ */
+export function extraShareLinkMoments(m: number, D: number, a: number, b: number): Moments & { readonly capped_from?: number } {
+  const raw = extraShareMoments(m, D, a, b);
+  return raw.mean > 1 ? { mean: 1, sd: raw.sd / raw.mean, capped_from: raw.mean } : raw;
+}
+
 export function momentsOfTeam(t: TeamShare): Moments {
   return t.quantity === 'months_to_finish' ? teamShareMoments(t.D, t.low, t.high)
     : paceShareMoments(t.D, t.low, t.high);
