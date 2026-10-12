@@ -4315,7 +4315,11 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'replace_keeps_direction',
           detail: `Nothing was prepared. Tell the user exactly this: "${REPLACE_KEEPS_DIRECTION_TEXT}"` };
       }
-      const confirm = !replacesFigure && currentBand === band && wanted === current;
+      // ⭐ D1 (DL ruling 12 Oct, recovery Batch D; the class closed for this door too): a placeholder has no current band,
+      // so the band the user names for it SIZES it at the band's midpoint, as theirs; never "kept as it is". It stays a review
+      // only where that write could not size it: the default already IS the midpoint.
+      const placeholderMoves = linkSizing(edge) === 'placeholder' && Math.abs(mean) !== bandMidpoint(band);
+      const confirm = !replacesFigure && currentBand === band && wanted === current && !placeholderMoves;
       const keptIsTheirs = linkSizing(edge) === 'user';
       const heldFigure = confirm ? null : heldNow;
       if (heldFigure !== null && !replacesFigure) {

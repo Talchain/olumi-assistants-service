@@ -194,10 +194,10 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
       : await caps.proposeLinkStrengths!(context, { links: [link], rationale: userText });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     const proposal = store.get(String(result.proposal_id))!;
-    // Same-band approval stays a review at 0.5 on a sized link, in the singular door, and for Olumi's band on a drawn link
-    // (the adoption writer cannot size it). D1 (DL 12 Oct, Batch D, amending Batch A ruling 1): otherwise a placeholder has
-    // no current band, so the set door sizes it at the band's midpoint.
-    const reviews = sized || singular || (drawn && !named);
+    // Same-band approval stays a review at 0.5 on a sized link, and for Olumi's band on a drawn link (the adoption writer
+    // cannot size it). D1 (DL 12 Oct, Batch D, amending Batch A ruling 1): otherwise a placeholder has no current band, so
+    // either door sizes it at the band's midpoint.
+    const reviews = sized || (drawn && !named && !singular);
     expect(proposal.operations).toEqual([expect.objectContaining({
       op: singular ? 'update_edge' : 'set_link_strength', path: `${FROM}::${TO}`,
       value: expect.objectContaining(reviews ? { magnitude: 0.5, intent: 'confirm_current', band: 'strong' }
@@ -256,15 +256,13 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     expect(text).not.toContain('Olumi\u2019s estimates stay marked as Olumi\u2019s');
   });
 
-  it('RED: singular same-band placeholder note says nobody sized it; user review receives no authorship', async () => {
+  it('RED (D1, single-link door): the user\'s same-band words for the placeholder size it as their own estimate, never "kept"', async () => {
     const { result, proposal } = await prepare(false, true);
-    expect(proposal.public_label).toContain(`${pair} as strong`);
-    expect(proposal.public_label).not.toContain('as your own estimate');
-    expect(result.note).toContain('nobody had sized this link; approving records review, never the user\u2019s authorship');
-    expect(result.note).not.toMatch(/Olumi[’']s estimate/);
+    expect(proposal.public_label).toBe(`Record ${pair} as strong, as your own estimate`);
+    expect(result).toMatchObject({ link: { keeps_current_strength: false } });
+    expect(result.note).not.toMatch(/Olumi[’']s estimate|nobody had sized this link|kept exactly/);
     // P53x (Codex #2819 r2 P2): a placeholder has no band to "sit in".
     expect(result.note).not.toContain('already sits in that band');
-    expect(result.note).toContain('Its numbers are kept exactly as they are');
   });
 
   it('P53x (Codex #2819 r4 P2) × D1: plural same-band, user-named, on the D1 placeholder → theirs, never "already sits in the band"', async () => {
