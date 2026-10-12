@@ -23,9 +23,9 @@
  * Paul's hiring lead times ("a tech lead would take at least 3 months…") are E5 (SYS1's start-time door) and are not
  * replayed here: Olumi's own labelled hiring estimates stand until that card is approved.
  *
- * ⛔ WHAT THIS IS NOT (PL 6122519782, AIE 6122738619). The first `it` is a SHORTENED fixture: four typed inputs (brief, deadline
- * sentence, Paul's team-time sentence, which the base door refuses, then a range he types: E delta, 12 Oct) plus two approvals
- * and a Run, with his late team forecast moved to typed turn 3 and his E5 hiring timings left out. It is a transport check of CEE's doors and words, not the original transcript (see the full-transcript
+ * ⛔ WHAT THIS IS NOT (PL 6122519782, AIE 6122738619). The first `it` is a SHORTENED fixture: three typed inputs (brief, deadline
+ * sentence, team-time sentence) plus two approvals and a Run, with Paul's late team forecast moved to typed turn 3 and his E5
+ * hiring timings left out. It is a transport check of CEE's doors and words, not the original transcript (see the full-transcript
  * `it`), not the real numerical engine, and not proof of usable chances.
  */
 import { createHash, randomUUID } from 'node:crypto';
@@ -82,16 +82,6 @@ const PAUL = {
 const DEADLINE_WORDS = 'launch deadline in six months time';
 /** What Paul's team-time sentence says the team's time is, as the Agent reads it: one figure. */
 const TEAM_QUOTE = "they're going to be a month late delivering the next feature (so, 7 months), but I have low confidence in this because they keep missing deadlines.";
-/**
- * ⭐ RECOVERY BATCH E delta (DL, 12 Oct; independent check FAIL 3c7d1a71, E2 BLOCKING): the quote-bound team-time reader is
- * removed again, so the base door reads only a time THIS message states, and Paul's sentence is refused. The team time then
- * reaches the model the base way: the user types a range. NOT Paul's words: the range the base team-time specs use.
- */
-const TEAM_RANGE = 'It’ll take 6–10 months';
-/** The base team-time card for the user's own range (its words, as served on the base door). */
-const TEAM_RANGE_CARD = 'Use 6–10 months for today\'s team? By 12 April 2027 that is about 77% of next feature launch.';
-/** What the base writer holds for the user's own 6–10 months: their range, no forecast, no Olumi range. */
-const TEAM_RANGE_HELD: Rec = { quantity: 'months_to_finish', unit: 'months', low: 6, high: 10, deadline: '2027-04-12', reference_date: '2026-10-12' };
 const DRAFTED_AT = '2026-10-12T08:41:24.992Z';
 const NOW = new Date('2026-10-12T09:14:24.374Z');
 const LEVEL_ASK = /before any option changes it|treat it as zero/;
@@ -234,16 +224,9 @@ function expectOneVoice(graph: Rec, label: string): string {
 }
 
 /** The request CEE posted to staging PLoT for Paul's Run (`recovery/bB/ebd/paul-plot-capture/paul-plot-request.json`). */
-/**
- * ⭐ E delta (DL, 12 Oct): the team time now reaches the model as the user's range (the base door), so what CEE sends
- * changed (only the team part: `fixtures/ebd-paul-plot-request-range-39748a8b.json` against the 7ea1f711… request). It was
- * posted ONCE to staging PLoT 6ec01e8 + ISL at 2026-10-12T18:38:47Z (HTTP 200, 0 provider calls; the recipe in
- * `recovery/score/EBD-REAL-ENGINE.md`; evidence `recovery/bE/delta/plot-range-capture/`). The 7ea1f711… recording is kept
- * (`goal-own-constraint-chance.test.ts` still reads it).
- */
-const POSTED_REQUEST_SHA256 = '39748a8be38d08d9e5b721c4c9e7e9245226c321d0f922330de422cd2ac9e832';
-const ENGINE_RESPONSE_BYTES = readFileSync(new URL('./fixtures/ebd-paul-real-engine-response-range-6ec01e8.json', import.meta.url));
-const ENGINE_RESPONSE_SHA256 = '7d4639548621ab9e89b5c503c1f94d67fb678064f52a722bc4da9dd575e31dcc';
+const POSTED_REQUEST_SHA256 = '7ea1f711d495511e1249aa14d77ad034574e1a7d13f25adfb74e3136c034be5e';
+const ENGINE_RESPONSE_BYTES = readFileSync(new URL('./fixtures/ebd-paul-real-engine-response-6ec01e8.json', import.meta.url));
+const ENGINE_RESPONSE_SHA256 = '2b9d1b3c999dc669e34f003d9b8819890a9b9daca40138d64f57d2060a73b4b8';
 const sha256 = (b: string | Buffer): string => createHash('sha256').update(b).digest('hex');
 
 /**
@@ -254,9 +237,6 @@ async function runOn(w: ReturnType<typeof world>, mutate: (response: Rec) => Rec
   const snapshot = await loadScenarioSnapshotForRunAnalysis(w.sid, 'ebd-run-load', w.store as never);
   expect(sha256(ENGINE_RESPONSE_BYTES), 'the real-engine response, as captured').toBe(ENGINE_RESPONSE_SHA256);
   const run = vi.fn(async (request: unknown) => {
-    // The one capture route for a reviewed change to what is sent (§7.4): the request, exactly as hashed below.
-    const capture = process.env.EBD_CAPTURE_REQUEST;
-    if (capture !== undefined && capture !== '') (await import('node:fs')).writeFileSync(capture, JSON.stringify(request, null, 2));
     // A recording answers only the request it was recorded for: any change to what CEE sends invalidates it (§7.4).
     expect(sha256(JSON.stringify(request, null, 2)), 'CEE sends the request the engine answered').toBe(POSTED_REQUEST_SHA256);
     return mutate(JSON.parse(ENGINE_RESPONSE_BYTES.toString('utf8'))) as unknown as V2RunResponseEnvelope;
@@ -277,8 +257,8 @@ async function runOn(w: ReturnType<typeof world>, mutate: (response: Rec) => Rec
   return { result: fact.result as Rec, request: (run.mock.calls[0] as unknown[] | undefined)?.[0] };
 }
 
-describe("EBD: Paul's hiring conversation reaches a labelled chance per option by his 4th typed turn", () => {
-  it('brief → deadline → team time (his words refused, then a range he types): one question at a time, no "% today", then a chance per option', async () => {
+describe("EBD: Paul's hiring conversation reaches a labelled chance per option by his 3rd typed turn", () => {
+  it('brief → deadline → team time (Paul\'s own words): one question at a time, no "% today", then a chance per option', async () => {
     const w = world(), turn = await route(w);
     const seen: Rec[] = [];
 
@@ -307,33 +287,29 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     expect(ask2).toBe('How long would next feature launch take with the team you have now?');
     expect(readinessAsks(t2yes.analysis_ready)).toContain(ask2);
 
-    // ── Typed turn 3: Paul's team-time sentence (served turn 13). E delta: the base door refuses it, writes nothing, and asks
-    // for the soonest and latest times; the model still asks the same one question.
-    const beforeRefusal = JSON.stringify(w.read());
+    // ── Typed turn 3: Paul's team-time sentence (served turn 13, refused). ONE card: his 7 months + Olumi's labelled range.
     const t3 = await turn({ message: PAUL.teamTime, agent_session_id: t2yes._agent.session_id },
-      [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('How long would it take at the soonest, and at the latest?')]);
+      [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('Please confirm.')]);
     seen.push(t3);
-    expect(t3._agent.tool_calls).toEqual([expect.objectContaining({ name: 'propose_team_time', ok: false, mutated: false, refusal: 'team_time_not_stated' })]);
-    expect(JSON.stringify(w.read()), 'the refusal wrote nothing').toBe(beforeRefusal);
-    expect(expectOneVoice(w.read(), 'after the refused team time')).toBe(ask2);
-
-    // ── Typed turn 4: the user gives a range (the base route). ONE card: the user's own range.
-    const t4 = await turn({ message: TEAM_RANGE, agent_session_id: t3._agent.session_id },
-      [call('propose_team_time', { low_months: 6, high_months: 10 }), say('Please confirm.')]);
-    seen.push(t4);
-    const team = proposed(t4, 'propose_team_time');
-    expect(cardOf(t4, team.proposal_id)).toBe(TEAM_RANGE_CARD);
-    const t4yes = await turn(approve(t4, team.proposal_id));
-    seen.push(t4yes);
-    expect(t4yes._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    const team = proposed(t3, 'propose_team_time');
+    const card = cardOf(t3, team.proposal_id);
+    // AIE 6122738619, verbatim: Olumi's provisional [0.5P, 1.5P] for his low confidence IN THIS forecast; his words kept.
+    // AIE 6125204695 (b1), verbatim: Olumi's provisional model from his forecast and an assumed range; the bell-curve note; his qualifier.
+    expect(card).toBe('Use Olumi’s provisional model based on your 7-month forecast and an assumed 3.5–10.5-month range? '
+      + 'The calculation uses bell-curve approximations of progress and can include outcomes outside those time bounds. '
+      + 'You described low confidence in that forecast.');
+    const t3yes = await turn(approve(t3, team.proposal_id));
+    seen.push(t3yes);
+    expect(t3yes._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
     const held = w.read(), part = draftedTeamPartOf(held)!;
-    expect(part.team.observed_state.stated_time).toEqual(TEAM_RANGE_HELD);
+    expect(part.team.observed_state).toMatchObject({ stated_time: { quantity: 'months_to_finish', low: 3.5, high: 10.5, forecast: 7, forecast_origin: 'user',
+      forecast_words: TEAM_QUOTE, range_origin: 'olumi_estimate', range_rule: 'low_confidence' } });
     expect(Number.isFinite(part.team.observed_state.value)).toBe(true);
 
     // ONE readiness authority: the Run, the readiness route and the turn's readback all say ready; the coach asks nothing.
     expect(resolveRunAdmission(held).willProceed).toBe(true);
     expect(assessRouteAdmission(held).can_run_analysis).toBe(true);
-    expect(t4yes.analysis_ready?.status).toBe('ready');
+    expect(t3yes.analysis_ready?.status).toBe('ready');
     expect(decisionInputAsk(held, askContext)).toBeNull();
     expect(shareChanceRunBlock(held)).toBeNull();
 
@@ -359,32 +335,36 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
       writeFileSync(`${out}/paul-run-result-real-engine.json`, JSON.stringify({ result, lines }, null, 2));
     }
     expect(lines.map(l => l.option_id).sort()).toEqual(['event_option_1', 'event_option_2', 'event_option_3']);
-    // The engine's own figures on the range request (81.72 / 98.68 / 2.75 %, `recovery/bE/delta/plot-range-capture/`), each a
-    // point, none a range.
-    expect(Object.fromEntries(lines.map(l => [l.option_id, l.figure]))).toEqual({ event_option_1: 'about 82%', event_option_2: 'about 99%', event_option_3: 'about 3%' });
-    // E delta: the team's 6–10 months is the user's own range, so no team-time assumption of Olumi's is attributed (the base
-    // rule, as in ebd-input-loop's E5 combine row); each line exactly as served on this request.
+    // The engine's own figures (83.01 / 95.15 / 41.58 %, `recovery/score/EBD-REAL-ENGINE.md`), each a point, none a range.
+    expect(Object.fromEntries(lines.map(l => [l.option_id, l.figure]))).toEqual({ event_option_1: 'about 83%', event_option_2: 'about 95%', event_option_3: 'about 42%' });
+    // Each served line EXACTLY (B2-c; was toContain on the E2 build, as exact as the base-door rows in Batch E).
     expect(lines.map(l => l.chance)).toEqual([
-      '‘Hire a Tech lead’: about 82% chance of launching by 12 April 2027, in this model, using Olumi’s estimates of hiring time (2–4 months) '
-        + 'and of the additional progress from the hires (12% of next feature launch per month), using Olumi\'s estimates for 2 relationships (see Check estimates).',
-      '‘Hire two developers’: about 99% chance of launching by 12 April 2027, in this model, using Olumi’s estimates of hiring time (2–4 months) '
-        + 'and of the additional progress from the hires (20% of next feature launch per month), using Olumi\'s estimates for 2 relationships (see Check estimates).',
-      '‘Carry on as now’: about 3% chance of launching by 12 April 2027, in this model, using Olumi\'s estimates for 2 relationships (see Check estimates).',
+      '‘Hire a Tech lead’: about 83% chance of launching by 12 April 2027, in this model, using your 7-month forecast and Olumi’s bell-curve approximation based on an assumed 3.5–10.5-month range, '
+        + 'and Olumi’s estimates of hiring time (2–4 months) and of the additional progress from the hires (12% of next feature launch per month), '
+        + 'using Olumi\'s estimates for 2 relationships (see Check estimates).',
+      '‘Hire two developers’: about 95% chance of launching by 12 April 2027, in this model, using your 7-month forecast and Olumi’s bell-curve approximation based on an assumed 3.5–10.5-month range, '
+        + 'and Olumi’s estimates of hiring time (2–4 months) and of the additional progress from the hires (20% of next feature launch per month), '
+        + 'using Olumi\'s estimates for 2 relationships (see Check estimates).',
+      '‘Carry on as now’: about 42% chance of launching by 12 April 2027, in this model, using your 7-month forecast and Olumi’s bell-curve approximation based on an assumed 3.5–10.5-month range, '
+        + 'using Olumi\'s estimates for 2 relationships (see Check estimates).',
     ]);
     for (const l of lines) {
-      expect(l.chance, l.chance).not.toMatch(/forecast|bell-curve|assumed .*-month range|equally likely|your 3\.5|most likely|which Olumi widened|slow end|between about/);
+      // AIE 6125204695 (b1), verbatim: the team part of the attribution.
+      expect(l.chance, l.chance).toContain('using your 7-month forecast and Olumi’s bell-curve approximation based on an assumed 3.5–10.5-month range');
+      expect(l.chance, l.chance).not.toMatch(/equally likely|your 3\.5|most likely|which Olumi widened|slow end|between about/);
     }
     // ⭐ DISCRIMINATING MUTANT (DL (b1)(ii)): what the user sees is the ENGINE's figure, never CEE's `normalChance`. The same
     // request, the engine's answer for two developers moved to 0.9015: the line follows it (90), while CEE's own approximation
-    // of that option stays at 99.
+    // of that option stays at 95.
     const parts2 = sharePartsForOption(held, 'event_option_2')!;
-    expect(Math.round(normalChance(parts2, 1) * 100)).toBe(99);
+    expect(Math.round(normalChance(parts2, 1) * 100)).toBe(95);
     const moved = await runOn(w, r => ({ ...r, option_comparison: r.option_comparison.map((o: Rec) => o.option_id !== 'event_option_2' ? o
       : { ...o, constraint_probabilities: { ...o.constraint_probabilities, auto_goal_threshold: 0.9015 } }) }));
     expect(goalChanceScreenLinesForAgent(moved.result, held, true).find(l => l.option_id === 'event_option_2')!.figure).toBe('about 90%');
-    // AIE 6125204695 (3): Olumi's assumed time range is noted only when Olumi assumed one; the user's own range is not.
+    // AIE 6125204695 (3): the input time range is said ONCE, beside the chances (never a probability interval).
     const notes = goalChanceNotesForAgent(result, held, true);
-    expect(notes).toEqual([]);
+    expect(notes).toEqual(['You gave 7 months. Olumi’s assumed 3.5–10.5-month range informs '
+      + 'this approximate calculation; modelled outcomes can fall outside those time bounds.']);
     // MISMATCH NEGATIVE (AIE 6125204695): an engine row not scored on THIS goal node is never read; no figure is said for it.
     const offGoal = await runOn(w, r => ({ ...r, option_comparison: r.option_comparison.map((o: Rec) => o.option_id !== 'event_option_2' ? o
       : { ...o, goal_fit_basis: { ...o.goal_fit_basis, node_ids: ['event_team'] } }) }));
@@ -432,7 +412,7 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
    * (one plausible tool call or answer per turn, no provider), so this measures CEE's doors, readiness and retention on his
    * real sequence, not the Agent's judgement or the real engine. It reports the real interaction count to a licensed result.
    */
-  it('ORIGINAL TRANSCRIPT: all 13 of Paul\'s messages, then his range, the card and the Run; count the interactions and keep what he said', async () => {
+  it('ORIGINAL TRANSCRIPT: all 13 of Paul\'s messages, then the card and the Run; count the interactions and keep what he said', async () => {
     const ORIGINAL = {
       needs: PAUL.needs,
       blockerPaste: 'Not ready for analysis yet\n\nWhat is "Share today\'s team finishes by the deadline" today, before any option changes it? Without a current level the analysis would treat it as zero. - Please explain this error message to me.',
@@ -478,13 +458,10 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     await send('typed', ORIGINAL.onboarding, [say('It is a risk Olumi suggested; it is not connected to the forecast yet.')]);
     await send('chip', ORIGINAL.risks, [say('Two more risks to consider: key-person dependency and scope growth.')], chip(t8, 'agent-next-suggest-risks'));
     await send('typed', ORIGINAL.blockerPaste2, [say(teamAsk)]);
-    const t13 = await send('typed', PAUL.teamTime, [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('How long would it take at the soonest, and at the latest?')]);
-    // E delta: the base door refuses his sentence (nothing written); he then gives a range, the base route.
-    expect(t13._agent.tool_calls).toEqual([expect.objectContaining({ name: 'propose_team_time', ok: false, refusal: 'team_time_not_stated' })]);
-    const t14 = await send('typed', TEAM_RANGE, [call('propose_team_time', { low_months: 6, high_months: 10 }), say('Please confirm.')]);
-    const team = proposed(t14, 'propose_team_time');
-    const t15 = await turn(approve(t14, team.proposal_id));
-    log.push({ n: 15, by: 'chip', said: 'Yes (team-time card)', tools: (t15._agent?.tool_calls ?? []).map((c: Rec) => `${c.name}:${c.ok ? 'ok' : 'refused'}`), text: String(t15.assistant_text) });
+    const t13 = await send('typed', PAUL.teamTime, [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('Please confirm.')]);
+    const team = proposed(t13, 'propose_team_time');
+    const t14 = await turn(approve(t13, team.proposal_id));
+    log.push({ n: 14, by: 'chip', said: 'Yes (team-time card)', tools: (t14._agent?.tool_calls ?? []).map((c: Rec) => `${c.name}:${c.ok ? 'ok' : 'refused'}`), text: String(t14.assistant_text) });
     const held = w.read();
     expect(resolveRunAdmission(held).willProceed).toBe(true);
     const { result } = await runOn(w);
@@ -494,7 +471,7 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     // What he said is kept: the six-month goal on the model, his forecast with its qualifier on the team part, and the
     // 25%/three-month condition and his hiring qualifier in what the Agent reads on his last turn (the model holds neither).
     expect(draftedTeamPartOf(held)!.goal.goal_horizon).toEqual({ deadline: '2027-04-12' });
-    expect(draftedTeamPartOf(held)!.team.observed_state.stated_time).toEqual(TEAM_RANGE_HELD);
+    expect(draftedTeamPartOf(held)!.team.observed_state.stated_time).toMatchObject({ forecast: 7, forecast_words: TEAM_QUOTE, range_rule: 'low_confidence' });
     const lastContext = JSON.stringify(agentBodies[agentBodies.length - 1] ?? {});
     const kept = {
       productivity_25pct_3months: lastContext.includes("increase our developer's output by 25%, in the next three months"),
@@ -510,7 +487,7 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     }
     expect(lines.map(l => l.option_id).sort()).toEqual(['event_option_1', 'event_option_2', 'event_option_3']);
     expect(deadlineSavedAt).toBe(7);
-    expect(interactionsToResult).toBe(16);
+    expect(interactionsToResult).toBe(15);
     expect(kept).toEqual({ productivity_25pct_3months: true, six_month_deadline_words: true, low_confidence_words: true, hiring_qualifier_words: true });
     for (const body of [t1, t2]) expect(JSON.stringify(body)).not.toMatch(LEVEL_ASK);
   }, 60_000);
