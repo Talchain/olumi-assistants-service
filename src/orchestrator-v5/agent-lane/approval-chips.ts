@@ -42,6 +42,9 @@ const POINTS_SAID: readonly string[] = [...POINTS_SPELLINGS, 'points'];
 const meetsReading = (stated: unknown, reading: string): boolean => stated === reading || statedInOneOf(stated, [reading])
   || (reading.trim() === '%' && typeof stated === 'string' && POINTS_SAID.includes(stated.trim().toLowerCase().replace(/\s+/g, ' ')));
 
+/** The revised-draft card's own button (B restated goal, `runtime/draft-replacement.ts`); the card's words ride in `detail`. */
+const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, use the revised draft.' } as const;
+
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
   propose_assumptions: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -209,8 +212,9 @@ export function approvalChipsFor(
     if (stored!.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
       || typeof stored!.public_label !== 'string' || stored!.public_label.trim() === ''
       || held.public_label !== stored!.public_label) return [];
+    const replacesDraft = stored!.operations.some((op) => op.op === 'replace_draft');
     return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
-      message: approve.message, detail: stored!.public_label }, AMEND_CHIP];
+      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : approve.message, detail: stored!.public_label }, AMEND_CHIP];
   }
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
     return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
@@ -627,6 +631,8 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const result = source?.result;
   if (proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return fallback;
   const ops = proposal.operations;
+  // A revised draft replaces the whole early draft: its button says so, never "Set this target" (B restated goal).
+  if (ops.length === 1 && ops[0]!.op === 'replace_draft') return REPLACE_DRAFT_APPROVE.label;
   /**
    * ⛔ LEVELS THE USER GAVE ARE RECORDED, NOT "STARTING" ONES (AI Conversation #70 5848452740): beside "the levels are
    * your stated figures" the chip read "Use as starting option levels" — the per-tool fallback, since the links the

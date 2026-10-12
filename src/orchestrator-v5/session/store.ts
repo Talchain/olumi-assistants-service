@@ -300,6 +300,18 @@ export interface SessionTurnWrite {
   readonly modelVersion?: AtomicCommittedModelVersionWrite;
 }
 
+/** What {@link SessionStore.readCommittedTurnLedger} returns. Turn ids are distinct, oldest first. */
+export interface CommittedTurnLedger {
+  /** Turns whose row committed a model write (`model_version_mutation_id` set). */
+  readonly write_turn_ids: readonly string[];
+  /** Turns whose row carries a non-empty user message, whatever its origin. */
+  readonly user_message_turn_ids: readonly string[];
+  /** The first of those messages, trimmed (the brief, on a scenario built from one); `null` when there is none. */
+  readonly first_user_message: string | null;
+  /** `false` when the scenario holds more rows than the read covered: the ledger is then not a census. */
+  readonly complete: boolean;
+}
+
 /** What {@link SessionStore.readCommittedTurn} returns — the durable facts a replay is answered from. */
 export interface CommittedTurnRecord {
   readonly agent_guidance?: AnswerGuidance;
@@ -632,6 +644,15 @@ export interface SessionStore {
     /** Stop paging once this many DIFFERENT findings are covered (a rewritten reason must not starve the others). */
     distinctFindings?: number,
   ): Promise<readonly HandlerFact[]>;
+  /**
+   * ⭐ B RESTATED GOAL — THE SCENARIO'S COMMITTED TURN LEDGER, oldest first: which turns committed a model write (the
+   * atomic writer's `model_version_mutation_id`, set for guests too, who have no model versions), and which carry a
+   * user message (typed, chip or unknown origin alike). Read ONLY when a revised draft is offered or applied
+   * (`agent-lane/runtime/draft-replacement.ts`), never per turn, and NOT a conversation history: no text but the first
+   * message's reaches the caller. `complete: false` when the scenario holds more rows than the read covers; a failed or
+   * malformed read throws, so the caller refuses ("unknown"), never treats it as "nothing written".
+   */
+  readCommittedTurnLedger?(scenarioId: string): Promise<CommittedTurnLedger>;
   /**
    * Load the bounded, scenario-wide `run_analysis` fact set used by the
    * existing freshness/analysis selectors.

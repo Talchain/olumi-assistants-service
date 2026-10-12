@@ -478,11 +478,15 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'When the target is DERIVED from a figure the user gave ("we\u2019re at £100,000 … aiming to double that"), give the '
       + 'result as value and pass derived_from {base, multiplier} (100000 and 2): the base must be a figure they wrote. '
       + 'When the user did not say at least or at most, give your reading in constraint_type: the card offers it as a '
-      + 'decision with the other direction beside it, and the user chooses.',
+      + 'decision with the other direction beside it, and the user chooses. '
+      + 'Give measures whenever the user names what the target is a figure OF. When the model does not contain that '
+      + 'quantity yet, Olumi may answer with ONE card offering a revised draft built from their brief and this message; '
+      + 'the user decides on that card. Call this once per target the user stated; never build the model yourself.',
     parameters: obj({
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
       unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
+      measures: { type: 'string', description: 'What the figure is a figure OF, in the user\u2019s own words from this message (for example "conversion rate", "new customers").' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
       derived_from: obj({
         base: { type: 'number', description: 'The figure the user wrote that the target is derived from, in their units (100000 for "£100,000").' },
@@ -930,6 +934,8 @@ export interface AgentCapabilities {
     constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
+    /** What the figure is a figure OF, in the user's words: a quantity the draft lacks may get a revised-draft card (B). */
+    measures?: string;
   }): Promise<ToolResult>;
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { low_months: number; high_months: number }): Promise<ToolResult>;
