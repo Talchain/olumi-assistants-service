@@ -117,7 +117,8 @@ describe('U2-1: one typed reason the face has no fixed words for is said on the 
   it('nothing else moves: every other served line keeps its place (capacity_02/03 detail as served, less the reason)', () => {
     for (const name of ['capacity_02', 'capacity_03']) {
       const served = cases[name]!.served_shape as Rec;
-      expect(compose(name).shape!.detail).toBe(paras(String(served.detail)).filter((p) => p !== REASON).join('\n\n'));
+      // Technique (c) (AIE 6130197656 §3): capacity 3's appended "Why? …" is the guidance row's detail, never the reply's.
+      expect(compose(name).shape!.detail).toBe(paras(String(served.detail)).filter((p) => p !== REASON && p !== `Why? ${WHY}`).join('\n\n'));
     }
   });
 });

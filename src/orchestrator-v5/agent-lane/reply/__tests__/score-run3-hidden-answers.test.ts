@@ -78,15 +78,15 @@ describe('IDENTITY: the five served replies, as captured', () => {
   }
 });
 
-describe('the answer is on the face, and only the Why sits below', () => {
+describe('the answer is on the face; what the composer folds sits below', () => {
   for (const name of Object.keys(HIDDEN)) {
-    it(`${name}: every hidden answer line is on the face; the Why is the last paragraph, once; no line is lost`, () => {
+    // Technique (c) (AIE 6130197656 §3, DL 12 Oct; re-pinned from "the Why is the last paragraph, once"): the method's
+    // Why? rides the guidance row, never the reply.
+    it(`${name}: every hidden answer line is on the face; no Why? in the reply (technique (c)); no line is lost`, () => {
       const c = compose(name);
-      const why = `Why? ${whyOf(cases[name]!)}`;
       for (const s of HIDDEN[name]!) expect(face(c), s).toContain(s);
-      expect(c.text.endsWith(`\n\n${why}`), c.text).toBe(true);
-      expect(c.text.split(why).length - 1).toBe(1);
-      expect(face(c)).not.toContain('Why?');
+      expect(c.text).not.toContain('Why?');
+      expect(c.text).not.toContain(whyOf(cases[name]!));
       // Every served sentence (the Why markup aside) is still said, byte for byte.
       for (const sentence of sentencesOf(String(cases[name]!.assistant_text).replace(DETAILS, ''))) expect(c.text, sentence).toContain(sentence);
       if (c.shape !== null) expect(c.text).toBe(deriveAnswerTextFromShape(c.shape));
@@ -101,19 +101,19 @@ describe('the answer is on the face, and only the Why sits below', () => {
       expect(below(c)).toContain(closingOf(cases[name]!));
     });
   }
-  it('deadline_2: the reply the composer kept whole ships whole, every byte, then the action, then the Why', () => {
+  it('deadline_2: the reply the composer kept whole ships whole, every byte, then the action (no Why: technique (c))', () => {
     const c = compose('deadline_2');
     expect(c.shape).toBeNull();
     const reply = String(compose('deadline_2', { eligibleIntervention: undefined, interventionActionLabel: undefined }).text);
-    expect(c.text).toBe(`${reply}\n\n- Give your estimate\n\nWhy? ${whyOf(cases.deadline_2!)}`);
+    expect(c.text).toBe(`${reply}\n\n- Give your estimate`);
   });
-  it('deadline_8: the composer\'s face stays exactly as composed (its question included); the action that no longer fits sits below, before the Why', () => {
+  it('deadline_8: the composer\'s face stays exactly as composed (its question included); the action that no longer fits sits below (no Why: technique (c))', () => {
     const c = compose('deadline_8');
     const plain = compose('deadline_8', { eligibleIntervention: undefined, interventionActionLabel: undefined });
     expect(c.shape!.headline).toBe(plain.shape!.headline);
     expect(c.shape!.bullets).toEqual(plain.shape!.bullets);
     expect(c.shape!.bullets).toHaveLength(3);
-    expect(below(c)).toBe(`${plain.shape!.detail}\n\n- Give your estimate\n\nWhy? ${whyOf(cases.deadline_8!)}`);
+    expect(below(c)).toBe(`${plain.shape!.detail}\n\n- Give your estimate`);
   });
 });
 
@@ -136,8 +136,9 @@ describe('controls: each placement keeps its own reason', () => {
     const c = compose('marketing_6', { faceContract: undefined, notRunOrExplain: undefined, obligations: [] });
     expect(c.shape!.bullets).toEqual(['Keep annual marketing spend within £100,000.', 'Keep your time commitment within 25%.', 'Give your estimate']);
   });
-  it('CONTROL: the Why already said on this state is not repeated; the action is still carried (E6)', () => {
-    const c = compose('deadline_8', { interventionWhySaid: true });
+  // Technique (c) supersedes E6 Why-once: no reply carries the Why?, so there is nothing to say once.
+  it('CONTROL: the action is still carried; the Why? never is (technique (c), superseding E6 Why-once)', () => {
+    const c = compose('deadline_8');
     expect(c.text).not.toContain('Why?');
     expect(below(c).endsWith('- Give your estimate')).toBe(true);
     expect(face(c)).toContain(HIDDEN.deadline_8![0]);
@@ -146,7 +147,7 @@ describe('controls: each placement keeps its own reason', () => {
     const ei = { policy_id: 'RC-STRENGTHEN-ITEM', variant_id: 'S3L', name: 'x', why: 'W.', trigger: 't' };
     const inSentence = composeReplyShape({ text: 'Give your estimate of the delivery time when you are ready.', profile: 'coaching',
       interventionActionLabel: 'Give your estimate', eligibleIntervention: ei } as never);
-    expect(inSentence.text).toBe('Give your estimate of the delivery time when you are ready.\n\n- Give your estimate\n\nWhy? W.');
+    expect(inSentence.text).toBe('Give your estimate of the delivery time when you are ready.\n\n- Give your estimate');
     const asBullet = composeReplyShape({ text: 'The delivery time is still open.\n\n- Give your estimate', profile: 'coaching',
       interventionActionLabel: 'Give your estimate', eligibleIntervention: ei } as never);
     expect(asBullet.text.split('Give your estimate').length - 1).toBe(1);
@@ -157,6 +158,6 @@ describe('controls: each placement keeps its own reason', () => {
       eligibleIntervention: { policy_id: 'RC-STRENGTHEN-ITEM', variant_id: 'S3L', name: 'x', why: 'W.', trigger: 't' } } as never);
     expect(long.split(/\s+/).length).toBeGreaterThan(80);
     expect(c.shape).toBeNull();
-    expect(c.text).toBe(`${long}\n\n- Give your estimate\n\nWhy? W.`);
+    expect(c.text).toBe(`${long}\n\n- Give your estimate`);
   });
 });

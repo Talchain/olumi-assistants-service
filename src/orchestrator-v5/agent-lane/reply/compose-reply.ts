@@ -30,7 +30,7 @@
  */
 import { z } from 'zod';
 import type { EligibleIntervention } from '../turn-context/guidance-wire.js';
-import { composeEligibleIntervention } from './eligible-intervention-reply.js';
+import { withInterventionAction } from './eligible-intervention-reply.js';
 import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
@@ -149,8 +149,6 @@ export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope
 export interface ReplyComposeInput {
   readonly eligibleIntervention?: EligibleIntervention;
   readonly interventionActionLabel?: string;
-  /** E6 Why-once: the policy's Why? was already said on this state (`selectTurnGuidanceShown`); the action stays. */
-  readonly interventionWhySaid?: boolean;
   /** The final prose, after every gate: exactly what would ship without the composer. */
   readonly text: string;
   /** Only a typed Draft mutation or Run/Explain turn opts into the H/W/E/N face contract. */
@@ -638,13 +636,10 @@ function expectedSentences(text: string, dropped: readonly string[]): string[] |
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const composed = composeNormalReplyShape(input);
-  if (input.eligibleIntervention !== undefined && composed.reason === 'proposal') {
-    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, false, true, input.interventionWhySaid === true);
-  }
-  if (input.eligibleIntervention !== undefined && (input.profile ?? 'coaching') === 'coaching') {
-    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, input.faceContract !== undefined,
-      false, input.interventionWhySaid === true);
-  }
+  // A coaching reply carries RC's selected action; a whole proposal and a Run/Draft face keep every byte. The policy's
+  // Why? is never the reply's (technique (c)): it stays with the guidance row.
+  if (input.eligibleIntervention !== undefined && composed.reason !== 'proposal' && (input.profile ?? 'coaching') === 'coaching'
+    && input.faceContract === undefined) return withInterventionAction(composed, input.interventionActionLabel);
   return composed;
 }
 
