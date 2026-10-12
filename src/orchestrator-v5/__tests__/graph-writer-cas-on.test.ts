@@ -86,7 +86,7 @@ function baseGraph() {
  * exactly, table filters are honoured, and the append persists turn + graph +
  * facts atomically. No store method, commit or persisted-graph read is mocked.
  */
-function harness(options: { failGraphReadAt?: number; renameInFlight?: boolean; bareReturn?: boolean; missingRpc?: boolean; advanceAfterFirstGraphRead?: boolean } = {}) {
+function harness(options: { failGraphReadAt?: number; renameInFlight?: boolean; bareReturn?: boolean; missingRpc?: boolean; advanceAfterFirstGraphRead?: boolean; appendError?: Row } = {}) {
   ports.edit.mockClear();
   ports.draft.mockClear();
   const tables: Record<string, Row[]> = {
@@ -113,6 +113,8 @@ function harness(options: { failGraphReadAt?: number; renameInFlight?: boolean; 
         scenario.revision = Number(scenario.revision) + 1;
       }
       if (options.missingRpc) return { data: null, error: { code: 'PGRST202', message: 'function missing' } };
+      // The database refused this turn's graph-bearing append and rolled it back (a fence verdict, or an unknown error).
+      if (options.appendError && !prior && args.p_graph != null) return { data: null, error: options.appendError };
       if ((name === 'append_turn_atomic_v6' || name === 'append_turn_atomic_v4r') && !prior && args.p_expected_revision !== scenario.revision) {
         return { data: null, error: { code: 'OLRV1', message: 'revision_conflict',
           details: JSON.stringify({ reason: 'revision_conflict', expected: args.p_expected_revision, current: scenario.revision }) } };
@@ -703,6 +705,95 @@ describe.each([true, false])('CAS-ON real HTTP wire (model versions=%s)', versio
       expect(ports.edit).not.toHaveBeenCalled();
       expect(h.rpcCalls.filter(c => c.name.startsWith('append_'))).toEqual([]);
     } finally { await app.close(); }
+  });
+});
+
+/**
+ * ⛔ J (DL brief, 12 Oct; recovery/sys3/CAPACITY-CONCURRENT-409-vs-500.md): two tabs change one option level at once.
+ * A loser that reaches the write AFTER the winner is refused by the revision guard: 409 revision_conflict. A loser that
+ * reaches it BEFORE the winner, while the winner holds the later fence claim, is refused by the fence (`superseded`,
+ * "Nothing was written; the turn row rolled back"), and that CONFIRMED non-write reached the UI as 500 "could not confirm".
+ *   (a) the fence's superseded refusal is the revision guard's 409, and nothing is written;
+ *   (b) an unknown commit error, and a fence verdict that is not a scenario conflict, stay 500 unverified;
+ *   (c) the revision guard's own 409 is unchanged.
+ * (d) The Agent's in-process doors keep their flag path: b8-fence-verdict-reaches-wrapper.test.ts, unchanged.
+ * The refusal is produced by the REAL store (`classifyAtomicFenceError` → `throwFenceRefusal`); only the RPC is fake.
+ */
+describe.each([true, false])('J: a fence-refused wire option edit is the revision guard\'s 409 (model versions=%s)', versionsEnabled => {
+  beforeEach(() => { vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', String(versionsEnabled)); _resetConfigCache(); });
+  const FENCE = (code: 'OLTF1' | 'OLTF2' | 'OLTF3') => ({ code, message: 'turn fence refused the append',
+    details: JSON.stringify({ generation: 1, max_generation: 2 }) });
+  async function wireEdit(h: ReturnType<typeof harness>) {
+    const app = Fastify(); await ceeOrchestratorRouteV2(app);
+    try {
+      const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+        kind: 'system_event', scenario_id: SCENARIO, turn_id: TURN, stage: 'analyse',
+        event: { kind: 'option_intervention_edit', option_id: 'opt_raise', factor_id: 'fac_price', value: 0.65,
+          base_graph_hash: computeAnalysisAffectingGraphHash(baseGraph() as never)! },
+      } });
+      const { request_id: _requestId, ...body } = result.json() as Record<string, unknown>;
+      return { status: result.statusCode, body, raw: result.body };
+    } finally { await app.close(); }
+  }
+  const fenceRefusals = () => warningSpy.mock.calls.map(call => call[0] as Record<string, unknown>)
+    .filter(row => row !== null && typeof row === 'object' && row.event === 'v5.turn_fence.graph_write_refused');
+  const expectNothingWritten = (h: ReturnType<typeof harness>) => {
+    expect(h.rpcCalls.some(c => ['append_turn_atomic_v6', 'append_turn_atomic_v4r'].includes(c.name) && c.args.p_graph != null)).toBe(true);
+    expect(h.tables.v5_conversation_turns).toEqual([]); expect(h.tables.v5_handler_facts).toEqual([]);
+    expect(h.tables.scenarios![0]!.graph).toEqual(baseGraph()); expect(h.tables.scenarios![0]!.revision).toBe(7);
+  };
+  /** The revision guard's 409 for this very edit (row c), less the two revision numbers only the guard can know. */
+  async function revisionGuardBody() {
+    const h = harness({ renameInFlight: true });
+    const { status, body } = await wireEdit(h);
+    expect(status).toBe(409);
+    const { expected: _e, current: _c, details, ...rest } = body as Record<string, unknown> & { details: Record<string, unknown> };
+    const { expected: _de, current: _dc, ...detailsRest } = details;
+    warningSpy.mockClear();
+    return { ...rest, details: detailsRest };
+  }
+
+  it('(a) the fence\'s superseded refusal → the revision guard\'s 409 revision_conflict, refresh_and_reconfirm; nothing written', async () => {
+    const guard = await revisionGuardBody();
+    const h = harness({ appendError: FENCE('OLTF2') });
+    const { status, body, raw } = await wireEdit(h);
+    expect(fenceRefusals().map(r => r.verdict)).toEqual(['superseded']);
+    expect(status, raw).toBe(409);
+    expect(body).toEqual(guard);
+    expect(body).toMatchObject({ code: 'revision_conflict', message: REVISION_CONFLICT_MESSAGE, retryable: false,
+      details: { code: 'revision_conflict', recovery_action: 'refresh_and_reconfirm', conflict_category: 'revision_conflict' } });
+    expect(body).not.toHaveProperty('expected'); expect(body).not.toHaveProperty('current');
+    expectNothingWritten(h);
+  });
+
+  it.each([
+    ['an unknown commit error', { code: '08006', message: 'connection failure' }, []],
+    ['the fence\'s stopped verdict', FENCE('OLTF1'), ['stopped']],
+    ['the fence\'s unclaimed verdict', FENCE('OLTF3'), ['unclaimed']],
+  ] as const)('(b) %s stays 500 unverified (retryable), never "nothing was saved"', async (_name, appendError, verdicts) => {
+    const h = harness({ appendError: { ...appendError } });
+    const { status, body, raw } = await wireEdit(h);
+    expect(fenceRefusals().map(r => r.verdict)).toEqual(verdicts);
+    expect(status, raw).toBe(500);
+    expect(body).toMatchObject({ retryable: true });
+    expect(raw).toContain('system_event_commit_failed');
+    expect(raw).not.toContain('revision_conflict'); expect(raw).not.toContain(REVISION_CONFLICT_MESSAGE);
+    expectNothingWritten(h);
+  });
+
+  it('(c) the revision guard\'s own 409 is unchanged: revision_conflict with its measured revisions', async () => {
+    const h = harness({ renameInFlight: true });
+    const { status, body, raw } = await wireEdit(h);
+    expect(status, raw).toBe(409);
+    expect(fenceRefusals()).toEqual([]);
+    expectRevisionEvent(versionsEnabled ? 'v6' : 'v4r', 7, 8, null);
+    // Byte-pinned as served at staging 551258bb (captured before J's change), less the request id.
+    expect(body).toEqual({ error: 'GRAPH_DIVERGED', boundary: 'B1', direction: 'egress', validator: 'turn_commit',
+      details: { retryable: false, reason: 'graph_write_conflict', failure_type: 'GRAPH_DIVERGED', event_kind: 'option_intervention_edit',
+        recovery_action: 'refresh_and_reconfirm', conflict_category: 'revision_conflict', expected: 7, current: 8,
+        expected_base_graph_hash: null, stage: 'analyse', code: 'revision_conflict' },
+      retryable: false, code: 'revision_conflict', message: REVISION_CONFLICT_MESSAGE, expected: 7, current: 8 });
+    expect(h.tables.v5_conversation_turns).toEqual([]); expect(h.tables.v5_handler_facts).toEqual([]);
   });
 });
 
