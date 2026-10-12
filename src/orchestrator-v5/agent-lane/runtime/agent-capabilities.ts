@@ -5314,9 +5314,11 @@ export function createAgentCapabilities(
       // Sorted by node id so an identical set proposed in a different order is
       // the SAME proposal, not a second one.
       const ordered = [...adopted].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
-      // A revision the user named AND wrote is theirs; anything else is Olumi's (`valueOpAuthor`). ONE predicate for
-      // what is stored and for what the Agent is told to say, so the words cannot drift from the authorship.
-      const usersOwn = (a: { replaces?: number; userWrote: boolean }): boolean => typeof a.replaces === 'number' && a.userWrote;
+      // A figure the user WROTE is theirs, a revision or a first value alike (DL ruling, X8: what the user stated is the
+      // user's; crediting only revisions stored a typed first figure as Olumi's assumption, a false attribution). Anything
+      // else is Olumi's (`valueOpAuthor`). ONE predicate for what is stored, what the card heads it as and what the Agent
+      // is told to say, so the words cannot drift from the authorship.
+      const usersOwn = (a: { userWrote: boolean }): boolean => a.userWrote;
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
@@ -5347,29 +5349,37 @@ export function createAgentCapabilities(
             : `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
           : `${a.label} = ${withUnit(a)}`;
       const kept = ordered.filter((a) => a.kept);
+      // A first value the user wrote is RECORDED as theirs, never offered as a starting assumption (`usersOwn`).
+      const freshYours = fresh.filter(usersOwn);
+      const freshOlumis = fresh.filter((a) => !usersOwn(a));
+      const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+      const acts = [
+        ...(revisions.length > 0 ? [`revise ${plural(revisions.length, 'value')}${fresh.length === 0 ? ' you asked to change' : ''}`] : []),
+        ...(freshYours.length > 0 ? [`record ${plural(freshYours.length, 'figure')} you gave`] : []),
+        ...(freshOlumis.length > 0 ? [`adopt ${plural(freshOlumis.length, 'starting assumption')}`] : []),
+      ];
+      const actsSaid = acts.length <= 1 ? (acts[0] ?? '') : `${acts.slice(0, -1).join(', ')} and ${acts[acts.length - 1]}`;
       const heading =
         kept.length > 0
           // The figure is unchanged and stays Olumi's; what the Yes records is the user's acceptance (AIQ words).
           ? `Accept Olumi\u2019s estimate${kept.length === 1 ? '' : 's'}, unchanged: `
-          : revisions.length === 0
-          ? `Adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `
-          : fresh.length === 0
-            ? `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} you asked to change: `
-            : `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} and adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `;
+          : `${actsSaid.charAt(0).toUpperCase()}${actsSaid.slice(1)}: `;
+      const allYours = kept.length === 0 && ordered.every(usersOwn);
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations,
         provenance: {
-          // A revision the user named is theirs, not the model's. Only a proposal
-          // made entirely of those may claim it.
-          authored_by: fresh.length === 0 && revisions.length > 0 && notWritten.length === 0 ? 'user_stated' : 'model_proposed',
+          // Figures the user wrote are theirs, not the model's. Only a proposal made entirely of those may claim it.
+          authored_by: allYours ? 'user_stated' : 'model_proposed',
           basis:
             kept.length > 0
               ? KEEP_PROPOSAL_BASIS
-              : revisions.length > 0 && fresh.length === 0 && notWritten.length === 0
+              : allYours && fresh.length === 0
               ? 'values the user asked to change, at the figures they gave'
+              : allYours
+              ? 'figures the user gave, recorded as theirs'
               : 'starting assumptions offered for the user to adopt or correct',
         },
         validation: { admitted: true, loss_count: 0, refusals: [] },

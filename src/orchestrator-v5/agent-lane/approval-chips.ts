@@ -651,9 +651,13 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const usersOwn = tool === 'propose_assumptions' && allUsersOwnValues(proposal);
   const ownFallback = usersOwn ? (ops.length === 1 ? 'Record your figure' : `Record your ${ops.length} figures`) : fallback;
   if (ops.length > 1) {
-    // A revision the user asked for replaces figures already there: it is not a set of starting figures.
-    const revises = ops.some((o) => o.op === 'set_factor_value' && (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated');
-    return revises ? ownFallback : `Use these ${ops.length} starting figures`;
+    // A figure the user WROTE is recorded as theirs, a revision or a first value alike (DL ruling, X8): never a starting
+    // figure or assumption. All theirs: recorded as theirs; some: named with how many are Olumi's (as a mixed level batch
+    // is, above); none: Olumi's starting figures.
+    const yours = ops.filter((o) => (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated').length;
+    const olumi = ops.length - yours;
+    return usersOwn ? ownFallback : yours === 0 ? `Use these ${ops.length} starting figures`
+      : `Record ${ops.length} figures (${olumi} Olumi estimate${olumi === 1 ? '' : 's'})`;
   }
   const op = ops[0]!;
   const stored = (op.value ?? {}) as { raw?: unknown; value?: unknown; unit?: unknown };
