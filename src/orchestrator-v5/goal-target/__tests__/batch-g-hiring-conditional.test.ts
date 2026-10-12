@@ -35,6 +35,10 @@ const NOTE = 'Provisional: this calculation assumes the estimated effects are in
 const WITHHOLD = 'The chance of reaching your target for ‘productivity’ (up at least 10% from today) by month three isn’t shown: '
   + 'the model has not established how much of these effects would be in place by then.';
 const OWN_TARGET = 'chance of ‘productivity’ being at least 10% higher than today at three months';
+/** Amendment 1, read in the change frame (DL ruling after G r1: the AIE's D2 exact equality in the Run's own recorded frame). */
+const DOING_NOTHING = 'Doing nothing: no change to ‘productivity’ in this model, by assumption.';
+const SQ_ASSUMED = 'This assumes carrying on as now leaves ‘productivity’ unchanged through month three; each option is measured against that.';
+const SQ_MOVED = 'Not shown: this run’s result for carrying on as now doesn’t match ‘productivity’ as it stands today in the model, so it needs checking first.';
 const CONDITIONS = 'This chance covers ‘productivity’ only. It does not include: ‘Hiring spend’ at most £200,000; maintaining code quality; the urgent launch date.';
 const FACE = {
   hire_a_tech_lead: `‘Hire a Tech lead’: about 24% ${OWN_TARGET}, in this model, using Olumi's estimates for 4 starting values, 2 option settings and 7 relationships (see Check estimates).`,
@@ -52,11 +56,12 @@ function sentRunOf(graph: Rec): Rec {
 const earned = (id: string, p: 0 | 1): boolean => (FX.goal_certainty as Rec[]).some((d) => d.option_id === id && d.probability_of_goal === p && d.earned);
 
 /** The Run handler's own order: E's withhold, then the licence, with the same inputs (`run-analysis.ts`). */
-function runAsTheHandlerDoes(o: { graph?: Rec; brief?: string | null; sentRun?: Rec } = {}): { envelope: Rec; view: Rec } {
+function runAsTheHandlerDoes(o: { graph?: Rec; brief?: string | null; sentRun?: Rec; envelope?: Rec } = {}): { envelope: Rec; view: Rec } {
   const graph = o.graph ?? FX.graph;
+  const served = o.envelope ?? FX.envelope;
   const sentRun = o.sentRun ?? sentRunOf(graph);
   const brief = 'brief' in o ? o.brief : FX.brief;
-  const withheld = withholdForPeriodEndEffects(FX.envelope, graph, GOAL, { sentRun, brief });
+  const withheld = withholdForPeriodEndEffects(served, graph, GOAL, { sentRun, brief });
   const envelope = withGoalChanceLicence(withheld, graph, GOAL, earned, sentGoalThresholdOf(withheld, sentRun.graph, GOAL, earned, sentRun),
     graph, { storedConstraints: graph.goal_constraints, sentConstraints: graph.goal_constraints, sentRun, brief });
   return { envelope, view: { type: 'analysis_result', enrichment: envelope } };
@@ -102,6 +107,11 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     const cells = cellsOf(run.view);
     expect(cells.hire_a_tech_lead).toEqual({ kind: 'figure', display: 'about 24%', face: FACE.hire_a_tech_lead });
     expect(cells.hire_two_developers).toEqual({ kind: 'figure', display: 'about 32%', face: FACE.hire_two_developers });
+    // Carrying on as now: no change, by assumption (amendment 1), read in the paired-change frame the Run scored.
+    expect(licence.status_quo).toEqual({ option_id: SQ, line: DOING_NOTHING });
+    expect(cells[SQ]).toMatchObject({ kind: 'withheld', face: 'No change, by assumption', why: DOING_NOTHING });
+    expect(goalChanceNotesForAgent(run.view, FX.graph, true)).toEqual([DOING_NOTHING, SQ_ASSUMED, NOTE, CONDITIONS,
+      'Provisional: this result uses inputs whose sources have not been verified.']);
     // E's withhold did not run; the Run's own figures stand; the protected field is never written (still false).
     expect((run.envelope.inference_warnings as Rec[]).some((w) => w.detail?.reason === 'effects_at_period_end_unstated')).toBe(false);
     expect(JSON.stringify(FX.graph)).toBe(before);
@@ -151,6 +161,24 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     for (const face of Object.values(FACE)) expect(owed).toContain(face);
     expect(owed.split(NOTE)).toHaveLength(2);
     expect(withScreenLinesOwed(owed, lines, notes).text).toBe(owed);
+  });
+
+  it('D2 IN THE CHANGE FRAME: carrying on\'s recorded chance is what a zero change scores; a level-frame spread is not compared', () => {
+    // As served, the status-quo row's outcome is the goal's raw LEVEL samples (std 0.188), and its chance is the paired change's 0.
+    const row = (FX.envelope.option_comparison as Rec[]).find((r) => r.option_id === SQ)!;
+    expect(row.outcome.std).toBeGreaterThan(0.18);
+    expect(row.probability_of_goal).toBe(0);
+    expect(goalChanceLicenceForAgent(runAsTheHandlerDoes().view)!.status_quo).toEqual({ option_id: SQ, line: DOING_NOTHING });
+    // A change baseline that genuinely moved is still withheld, never relabelled: a chance a zero change cannot have
+    // (1 against "at least +10%"), or one strictly between 0 and 1.
+    for (const p of [1, 0.3]) {
+      const envelope = structuredClone(FX.envelope);
+      (envelope.option_comparison as Rec[]).find((r) => r.option_id === SQ)!.probability_of_goal = p;
+      const licence = goalChanceLicenceForAgent(runAsTheHandlerDoes({ envelope }).view)!;
+      expect(licence.status_quo, String(p)).toBeUndefined();
+      expect(licence.withheld_reason_by_option?.[SQ], String(p)).toEqual({ reason: 'reference_moved', line: SQ_MOVED });
+      expect(licence.notes, String(p)).not.toContain(SQ_ASSUMED);
+    }
   });
 
   it('NEGATIVE (c): a stated PARTIAL effect by the period withholds with E\'s sentence', () => {

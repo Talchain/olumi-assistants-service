@@ -303,12 +303,22 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
  * deciles apart; or any recorded centre or decile not exactly the reference in the Run's frame (D2, exact equality).
  * A row that records none of these (no outcome, or its spread already withheld) agrees.
  */
-function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined }): StatusQuoReading {
+function statusQuoReadingOf(a: {
+  readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined;
+  /** A goal measured AS a change: the chance a ZERO change has against the held target (1 meets it, 0 does not). */
+  readonly zeroChange?: 0 | 1;
+}): StatusQuoReading {
   if (!a.paired) return a.forecast ? 'projection' : 'unknown';
   const row = a.row;
   if (row === undefined) return 'assumed';
   const p = row.probability_of_goal;
   if (typeof p === 'number' && p !== 0 && p !== 1) return 'moved';
+  // ⭐ G (DL ruling 12 Oct: the AIE's D2 exact equality, applied IN THE RUN'S OWN RECORDED FRAME): a goal measured AS a change is
+  // scored as the PAIRED change (each option minus carrying on, on the same draw), so carrying on's change is 0 = the
+  // reference by construction, and its recorded chance must be exactly what a zero change gives against the held target. The
+  // row's `outcome` holds the goal's raw level samples — another frame — and is never compared with the change's reference.
+  // A recorded chance at the other extreme is a change that moved: withheld, never relabelled.
+  if (a.zeroChange !== undefined) return typeof p === 'number' && p !== a.zeroChange ? 'moved' : 'assumed';
   const o = isRec(row.outcome) ? row.outcome : undefined;
   if (o === undefined) return 'assumed';
   // ⭐ D2 EXACT SAME-FRAME EQUALITY (AIE 6129749753 AMEND, PL 6130375396, 12 Oct; the 16ε tolerance is REJECTED): ANY positive
@@ -460,6 +470,8 @@ export function goalChanceLicenceOf(
       // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in
       // the Run's own frame).
       reference: changeQuantity ? 0 : levelToday,
+      // G: D2 in the change frame — what a zero change scores against the held target (a level goal: unchanged, undefined).
+      ...(changeQuantity ? { zeroChange: zeroChangeMeets(held, target.value) ? 1 as const : 0 as const } : {}),
     });
   const sqByAssumption = sqReading === 'assumed';
   const sqP = sqRow?.probability_of_goal;
@@ -1538,6 +1550,11 @@ export function periodEndConditionalOf(
     || targetChanceWords({ label, frame, comparator, value: target.raw, unit: target.unit, quantityFrame: held.basis.quantity_frame,
       basis: held.basis }) === undefined) return undefined;
   return { ...held, note: periodEndAssumptionNote(held.basis) };
+}
+
+/** Whether a change of exactly 0 meets the held comparison against the target (`held` is the stated comparator). */
+function zeroChangeMeets(held: string, value: number): boolean {
+  return held === '>=' ? 0 >= value : held === '>' ? 0 > value : held === '<=' ? 0 <= value : held === '<' ? 0 < value : false;
 }
 
 /** The comparator a chance is stated with: the held one, else — a change carries its direction in its sign — the Run's own sense. */
