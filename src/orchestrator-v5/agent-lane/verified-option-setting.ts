@@ -98,6 +98,20 @@ const NOT_POINT = new Set([...BOUNDS, 'not', 'cannot', 'no', 'many', 'between', 
 const ARMS = new Set([...ACTIONS, 'provide', 'offer', 'raise', 'lower', 'hold', 'stop', 'start', 'continue', 'maintain',
   'close', 'move', 'build', 'buy', 'lease', 'rent', 'delay', 'defer', 'do']);
 const MAX_ASSERTION = 1000;
+/**
+ * ⭐ L2 (DL brief 12 Oct; AIE #94 6134029017): the drafter's quote for a declared SUM, located by CEE as ONE direct sentence
+ * of the brief, through the readers above (`exactEvidence`, `directContext`), never a new one. The sentence as the brief
+ * writes it, else null: no quote, a quote the brief does not hold exactly once as a sentence, or one under a heading.
+ */
+export function locatedBriefSentence(brief: string | undefined, quote: unknown): string | null {
+  try {
+    if (typeof brief !== 'string') return null;
+    const a = exactEvidence(brief, quote, assertions(brief));
+    return a !== null && a.text.length <= MAX_ASSERTION && directContext(brief, a) ? a.text : null;
+  } catch {
+    return null;
+  }
+}
 /** Words a credited clause may hold besides the option's, the factor's and its unit's own words. */
 const CLAUSE = new Set(['about', 'around', 'roughly', 'approximately', 'exactly', 'with', 'new']);
 const figure = (w: string): number | null => /^[0-9]{1,12}$/u.test(w) ? Number(w) : parseCardinalAmount(w);
