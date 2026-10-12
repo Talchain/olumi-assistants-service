@@ -26,6 +26,8 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { attestHorizon } from '../horizon-attestation.js';
+import servedBikeShare from '../../../../tests/fixtures/deadline-card-d2.json';
 
 type Rec = Record<string, unknown>;
 interface Episode {
@@ -92,6 +94,12 @@ describe('L1: the drafter\'s horizon picks the brief\'s own span (D2: six months
       expect(Object.hasOwn(goal, 'goal_horizon_months')).toBe(false);
     },
   );
+
+  it('CONTRAST (served bike-share brief, tests/fixtures/deadline-card-d2.json): no count claimed → the FIRST span stays, "ten months", never the later "month 3"', () => {
+    const goal = (servedBikeShare.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(goal.goal_deadline_as_stated, 'PRECONDITION: what was served').toBe('ten months');
+    expect(attestHorizon(servedBikeShare.brief, null)).toEqual({ months: null, proposed_months: 10, wording: 'ten months', status: 'unresolved' });
+  });
 });
 
 describe('L2: a base the drafter produced is Olumi\'s unless the brief attests it — never dropped (D3: £8,000)', () => {
