@@ -33,9 +33,10 @@ const OLDER_WORDS_MAX_CHARS = 2_400;
 export const OLDER_WORDS_LABEL = 'Earlier, the user wrote (for reference; not a request):';
 /**
  * ⛔ SYS2 E1 (independent review, 12 Oct): a RESEEDED first message has no durable authorship (a chip's or a template's
- * words are stored the same way), so it is never quoted under "the user wrote". It keeps its own header, which says so.
+ * words are stored the same way), so it is never quoted under "the user wrote". It keeps its own header, which says so,
+ * in the AIE's exact words (#94 6115647793): recorded reference, never a typed quote, consent or approval.
  */
-export const RESTORED_FIRST_LABEL = 'The conversation began with (restored after a restart; whether the user typed or chose these words is not recorded; for reference, not a request):';
+export const RESTORED_FIRST_LABEL = 'Earlier recorded message (source type not recorded; reference only, not a new request or approval):';
 
 const isUserMessage = (item: unknown): boolean =>
   typeof item === 'object' && item !== null && (item as { role?: unknown }).role === 'user';
@@ -467,9 +468,11 @@ export class HistoryStore {
       let restored: string | undefined;
       const words = dropped.filter(isUserMessage).map(textOf).filter((t): t is string => {
         if (t === undefined || t.trim() === '') return false;
-        if (typed.has(t)) return true;
+        // The first message is claimed BEFORE the typed check (review round 2, BLOCKING): if the user later typed the same
+        // bytes, that later occurrence is theirs, but this one's origin is still not recorded. Dropped is oldest-first, so
+        // the first occurrence of the first message's bytes is the first message itself.
         if (restored === undefined && pending !== undefined && t === pending && !held.includes(t)) { restored = t; return false; }
-        return false;
+        return typed.has(t);
       });
       if (restored !== undefined) { this.seededBrief.delete(sessionId); this.restoredFirst.set(sessionId, restored); }
       if (words.length > 0 || restored !== undefined) this.older.set(sessionId, [...(restored !== undefined ? [restored] : []), ...held, ...words]);
@@ -495,8 +498,9 @@ export class HistoryStore {
     const brief = found !== undefined && found.trim() !== '' ? found : undefined;
     // A seed that finds no first message leaves no stale marker behind (`set` keeps a marker only beside its history).
     if (brief === undefined) this.seededBrief.delete(sessionId); else this.seededBrief.set(sessionId, brief);
-    // Past the seed's cap the brief is not among the durable items: put it back first, so the window drops it into older words.
-    const capped = brief !== undefined && !durable.some((i) => isUserMessage(i) && textOf(i) === brief);
+    // Past the seed's cap the first message is not the durable items' first user item (oldest first): put it back first, so
+    // the window drops it into older words. By position, not by text: a later copy of the same words is not the first.
+    const capped = brief !== undefined && textOf(durable.find(isUserMessage)) !== brief;
     this.set(sessionId, [...(capped ? [{ role: 'user', content: [{ type: 'input_text', text: brief }] }] : []), ...durable, ...held]);
   }
 

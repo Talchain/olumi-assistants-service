@@ -12,7 +12,8 @@
  * Rows W1–W4 are AIC's acceptance; W1–W3 are also served witnesses (AIC), W4 is measured here on served sizes.
  */
 import { describe, it, expect } from 'vitest';
-import { HistoryStore, OLDER_WORDS_LABEL, BOARD_EDIT_PREFIX, needsDurableSeed, dropDanglingCalls, APPLIED_PROPOSAL_OUTPUT } from '../history-store.js';
+import { HistoryStore, OLDER_WORDS_LABEL, BOARD_EDIT_PREFIX, needsDurableSeed, dropDanglingCalls, APPLIED_PROPOSAL_OUTPUT,
+  RESTORED_FIRST_LABEL, DURABLE_SEED_ROWS_READ, briefFromDurableTurns, historyFromDurableTurns } from '../history-store.js';
 
 const user = (text: string) => ({ role: 'user', content: [{ type: 'input_text', text }] });
 const said = (text: string) => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
@@ -141,5 +142,144 @@ describe('the history window keeps 8 turns, and the user’s older words verbati
     const { history } = drive(Array.from({ length: 8 }, (_, k) => turn(k + 1)));
     expect(olderItem(history)).toBeUndefined();
     expect(userTexts(history)).toHaveLength(8);
+  });
+});
+
+/**
+ * SYS2 E1 · A COLD RESEED KEEPS THE CONVERSATION'S FIRST MESSAGE (core system 2). After a restart, redeploy or eviction
+ * the route reseeds from durable answer rows, and every row the window dropped was barred from the older-words item, so
+ * the brief reached the model in no carrier. `seed()` restores the first message from the rows the seed already read
+ * (no new read) — under RESTORED_FIRST_LABEL, never "the user wrote": a durable row does not record typed versus chip,
+ * and a chip's message carries Olumi's words (independent review rounds 1–2, BLOCKING; AIE 6115647793 wording).
+ * Paul's hiring words, verbatim. The route rows are in `history-sent-text.route.test.ts`.
+ */
+describe('SYS2 E1 · HistoryStore.seed', () => {
+  const BRIEF = "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.";
+  const L133 = "You're talking about links, but what about missing data from this decision?";
+  const e1Older = (h: readonly unknown[]) => h.map(firstText).find((t) => t?.startsWith(OLDER_WORDS_LABEL) || t?.startsWith(RESTORED_FIRST_LABEL));
+  const e1Head = (h: readonly unknown[]) => e1Older(h)?.split('\n').slice(0, 2);
+  const quotes = (text: string | undefined, words: string) => (text ?? '').split(`- "${words}"`).length - 1;
+  /** Answer rows newest first, as `readRecent` returns them: `first`, then `n - 1` further turns. */
+  const e1Rows = (n: number, first = BRIEF) => Array.from({ length: n }, (_, i) => ({ request_hash: `agent_turn:${i}`,
+    user_message: i === 0 ? first : i === 1 ? L133 : `Turn ${i + 1}.`, assistant_message: `Reply ${i + 1}.` })).reverse();
+  const seedCold = (store: HistoryStore, sid: string, rows: ReturnType<typeof e1Rows>) => store.seed(sid, historyFromDurableTurns(rows), [], rows);
+  const advance = (store: HistoryStore, sid: string, n: number, typed = false) => {
+    const next = [...store.get(sid)];
+    for (let i = 0; i < n; i += 1) { if (typed) store.recordTyped(sid, `Later ${i}.`); next.push(user(`Later ${i}.`), said('ok')); }
+    store.set(sid, next);
+  };
+
+  it('hot and cold carry the same first-message bytes; hot says the user wrote them, cold says the source is not recorded', () => {
+    const hot = new HistoryStore();
+    const items: unknown[] = [];
+    for (const r of [...e1Rows(16)].reverse()) { hot.recordTyped('s', r.user_message); items.push(user(r.user_message), said(r.assistant_message)); hot.set('s', items); }
+    const cold = new HistoryStore();
+    seedCold(cold, 's', e1Rows(16));
+    expect(e1Head(hot.get('s'))).toEqual([OLDER_WORDS_LABEL, `- "${BRIEF}"`]);
+    expect(e1Head(cold.get('s'))).toEqual([RESTORED_FIRST_LABEL, `- "${BRIEF}"`]);
+  });
+  it('no later reseeded row (origin unknown) is carried, and nothing reseeded is quoted under "the user wrote"', () => {
+    const cold = new HistoryStore();
+    seedCold(cold, 's', e1Rows(16));
+    expect(e1Older(cold.get('s'))).not.toContain(L133);
+    expect(e1Older(cold.get('s'))).not.toContain(OLDER_WORDS_LABEL);
+  });
+  it('AUTHORSHIP: a chip- or template-first conversation is quoted only under the source-not-recorded header', () => {
+    const cold = new HistoryStore();
+    seedCold(cold, 's', e1Rows(16, 'Use the hiring example.'));
+    expect(e1Head(cold.get('s'))).toEqual([RESTORED_FIRST_LABEL, '- "Use the hiring example."']);
+    expect(e1Older(cold.get('s'))).not.toContain(OLDER_WORDS_LABEL);
+  });
+  it('AUTHORSHIP (review round 2): the user later TYPING the same words does not make the first occurrence "the user wrote"', () => {
+    const cold = new HistoryStore();
+    seedCold(cold, 's', e1Rows(3, 'Use the hiring example.'));
+    const next = [...cold.get('s')];
+    cold.recordTyped('s', 'Use the hiring example.');
+    next.push(user('Use the hiring example.'), said('ok'));
+    for (let i = 0; i < 9; i += 1) next.push(user(`Later ${i}.`), said('ok'));
+    cold.set('s', next);
+    const older = e1Older(cold.get('s'))!;
+    expect(older.split('\n').slice(0, 2)).toEqual([RESTORED_FIRST_LABEL, '- "Use the hiring example."']);
+    // The later typed copy is the user's, quoted under the typed header; the first occurrence never is.
+    expect(older.split(`${OLDER_WORDS_LABEL}\n`)[1]).toBe('- "Use the hiring example."');
+  });
+  it('past the seed\'s 20-answer-row cap the first message still leads (30 turns); a later copy of its words is not the first', () => {
+    const cold = new HistoryStore();
+    const rows = e1Rows(30);
+    expect(historyFromDurableTurns(rows).map(firstText)).not.toContain(BRIEF);
+    seedCold(cold, 's', rows);
+    expect(e1Head(cold.get('s'))).toEqual([RESTORED_FIRST_LABEL, `- "${BRIEF}"`]);
+    const copied = rows.map((r) => r.user_message === 'Turn 30.' ? { ...r, user_message: BRIEF } : r);
+    const again = new HistoryStore();
+    seedCold(again, 's', copied);
+    expect(e1Head(again.get('s'))).toEqual([RESTORED_FIRST_LABEL, `- "${BRIEF}"`]);
+  });
+  it('a short conversation keeps it in the window, then admits it ONCE when it drops; later typed words follow under "the user wrote"', () => {
+    const cold = new HistoryStore();
+    seedCold(cold, 's', e1Rows(3));
+    expect(e1Older(cold.get('s'))).toBeUndefined();
+    advance(cold, 's', 9, true);
+    const older = e1Older(cold.get('s'))!;
+    expect(older.split('\n').slice(0, 2)).toEqual([RESTORED_FIRST_LABEL, `- "${BRIEF}"`]);
+    expect(quotes(older, BRIEF)).toBe(1);
+    expect(older).toContain(`${OLDER_WORDS_LABEL}\n`);
+    expect(older).toContain('- "Later 0."');
+  });
+  it('ONCE: the same words twice among the dropped rows are restored once', () => {
+    const cold = new HistoryStore();
+    seedCold(cold, 's', e1Rows(16).map((r) => r.user_message === 'Turn 3.' ? { ...r, user_message: BRIEF } : r));
+    expect(quotes(e1Older(cold.get('s')), BRIEF)).toBe(1);
+  });
+  it('PRE-EXISTING older words (held from before an eviction) keep their place behind the restored first message', () => {
+    const store = new HistoryStore();
+    const items: unknown[] = [];
+    for (let i = 0; i < 10; i += 1) { store.recordTyped('s', `Typed ${i}.`); items.push(user(`Typed ${i}.`), said('ok')); store.set('s', items); }
+    expect(e1Head(store.get('s'))).toEqual([OLDER_WORDS_LABEL, '- "Typed 0."']);
+    seedCold(store, 's', e1Rows(16, 'Use the hiring example.'));
+    expect(e1Head(store.get('s'))).toEqual([RESTORED_FIRST_LABEL, '- "Use the hiring example."']);
+    expect(e1Older(store.get('s'))).toContain(`${OLDER_WORDS_LABEL}\n- "Typed 0."`);
+  });
+  it('EVICTION follows the history: seed A, seed B, write A, seed C (capacity 2) → A keeps its pending marker', () => {
+    const store = new HistoryStore(2, 8);
+    seedCold(store, 'A', e1Rows(3));
+    seedCold(store, 'B', e1Rows(3));
+    store.set('A', store.get('A'));
+    seedCold(store, 'C', e1Rows(3));
+    expect([store.has('A'), store.has('B')]).toEqual([true, false]);
+    advance(store, 'A', 9);
+    expect(e1Head(store.get('A'))).toEqual([RESTORED_FIRST_LABEL, `- "${BRIEF}"`]);
+  });
+  it('EVICTION: a restored marker leaves with its older words — the same words later TYPED in this process are the user\'s', () => {
+    const store = new HistoryStore(1, 8);
+    seedCold(store, 'A', e1Rows(16));
+    expect(e1Head(store.get('A'))?.[0]).toBe(RESTORED_FIRST_LABEL);
+    const items: unknown[] = [];
+    for (let i = 0; i < 10; i += 1) { store.recordTyped('B', `Typed ${i}.`); items.push(user(`Typed ${i}.`), said('ok')); store.set('B', items); }
+    expect(e1Older(store.get('A'))).toBeUndefined(); // A's older words (and its marker) evicted
+    const again: unknown[] = [];
+    for (const w of [BRIEF, ...Array.from({ length: 9 }, (_, i) => `Again ${i}.`)]) { store.recordTyped('A', w); again.push(user(w), said('ok')); store.set('A', again); }
+    expect(e1Head(store.get('A'))).toEqual([OLDER_WORDS_LABEL, `- "${BRIEF}"`]);
+  });
+  it('a later seed that finds no first message (unknown start) clears a stale pending marker', () => {
+    const store = new HistoryStore();
+    seedCold(store, 's', e1Rows(3));
+    const full = Array.from({ length: DURABLE_SEED_ROWS_READ }, (_, i) => ({ request_hash: `agent_turn:${i}`, user_message: `Turn ${i}.` })).reverse();
+    store.seed('s', [user(BRIEF)], [], full);
+    advance(store, 's', 9);
+    expect(e1Older(store.get('s'))).toBeUndefined();
+  });
+  it('HEADER: the restored item is recognised as the labelled carrier — never counted as conversation, never stored as history', () => {
+    const store = new HistoryStore();
+    seedCold(store, 's', e1Rows(16));
+    const restored = store.get('s').find((i) => firstText(i)?.startsWith(RESTORED_FIRST_LABEL) === true)!;
+    expect(needsDurableSeed([restored])).toBe(true);
+    store.set('s', store.get('s'));
+    expect(store.get('s').filter((i) => firstText(i)?.startsWith(RESTORED_FIRST_LABEL) === true)).toHaveLength(1);
+  });
+  it('UNKNOWN start: a full read names no first message; only Agent answer rows count', () => {
+    const full = Array.from({ length: DURABLE_SEED_ROWS_READ }, (_, i) => ({ request_hash: `agent_turn:${i}`, user_message: `Turn ${i}.` }));
+    expect(briefFromDurableTurns(full)).toBeUndefined();
+    expect(briefFromDurableTurns(e1Rows(16))).toBe(BRIEF);
+    expect(briefFromDurableTurns([...e1Rows(2), { request_hash: 'sha256:x', user_message: 'Add the option "Test £54 at release".' }])).toBe(BRIEF);
   });
 });

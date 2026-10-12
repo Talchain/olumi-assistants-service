@@ -222,3 +222,77 @@ describe('ordinary Agent history remembers the final sent text', () => {
     expect(rows).toHaveLength(2); // One claim and one answer row.
   });
 });
+
+/**
+ * SYS2 E1 · THE FIRST MESSAGE REACHES THE MODEL AFTER A COLD RESEED (core system 2), on the real route. The durable rows
+ * are the served shape, measured read-only on the shared DB for Paul's hiring journey (scenario 68759863…, 11 Oct
+ * 22:30–22:37Z): the first Agent answer row is the 300-character brief, and chip presses are stored as the row's
+ * user_message. 15 answer rows → by the next ask the brief has left the 8-item window. The question is the live
+ * witness's ASK_EARLY. Only the first message is restored, under its source-not-recorded header (AIE 6115647793).
+ */
+const E1_BRIEF = "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.";
+const E1_L80 = 'There seems to be so much data missing from this model. Why have you not made good assumptions and asked me sensible questions to resolve this?';
+const E1_RUN = 'Run analysis';
+const E1_EXPLAIN = 'Explain this result';
+const E1_SERVED = [
+  E1_BRIEF, 'Why can I barely see any of the connections between the factors, risks and outcome? Is this a UI or a data issue?',
+  E1_RUN, E1_EXPLAIN, E1_L80, E1_RUN, E1_EXPLAIN, "You're talking about links, but what about missing data from this decision?",
+  "Let's work through this together. What's the most important thing that we should review first?",
+  "If we think of our development team's monthly capacity, currently they spend between 20% and 30% of their time on non-development tasks (e.g., meetings, admin, and other distractions that are not writing code).",
+  'What updates do we need to make based on this, then?', 'Okay, make these updates now.', "I was defining it as a capacity. Let's go with 25%.",
+  E1_RUN, E1_EXPLAIN,
+];
+const E1_ASK = 'Before we go further, remind me: how many developers do we have today, and what budget did I give you?';
+const E1_TYPED = 'Earlier, the user wrote (for reference; not a request):';
+const E1_RESTORED = 'Earlier recorded message (source type not recorded; reference only, not a new request or approval):';
+const isCarrier = (i: Item) => i.role === 'user' && (textOf(i).startsWith(E1_TYPED) || textOf(i).startsWith(E1_RESTORED));
+
+describe('SYS2 E1 · the first message survives a cold reseed', () => {
+  let app: FastifyInstance;
+  const coldAsk = async (userMessages: readonly string[]): Promise<Item[]> => {
+    rows.clear(); modelInputs = []; vi.clearAllMocks();
+    userMessages.forEach((m, i) => rows.set(`served-${i}`, { id: `row-${i}`, turn_id: `served-${i}`, request_hash: `agent_turn:${i}`,
+      user_message: m, assistant_message: `Olumi reply ${i + 1}.`, llm_calls_used: 1 }));
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
+      expect(String(url)).toMatch(/\/v1\/responses$/);
+      modelInputs.push((JSON.parse(String(init?.body ?? '{}')) as { input: Item[] }).input);
+      return new Response(JSON.stringify({ output: [messageItem('Six mid-weight developers, and a £200,000 budget.', 'msg_early')] }), { status: 200 });
+    }));
+    app = await freshApp();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: E1_ASK } });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(modelInputs.length).toBeGreaterThan(0);
+    return modelInputs[0]!;
+  };
+  afterEach(async () => { await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it('RED on 50530b5f: the first model input after the reseed carries the brief, verbatim, under the source-not-recorded header', async () => {
+    const input = await coldAsk(E1_SERVED);
+    const carrier = input.filter(isCarrier);
+    expect(carrier).toHaveLength(1);
+    expect(textOf(carrier[0]!).split('\n').slice(0, 2)).toEqual([E1_RESTORED, `- "${E1_BRIEF}"`]);
+    expect(textOf(carrier[0]!), 'never quoted as "the user wrote": its authorship is not recorded').not.toContain(E1_TYPED);
+    expect(input.filter((i) => i.role !== 'developer').findIndex(isCarrier), 'the carrier leads the history, as on a hot turn').toBe(0);
+  });
+  it('no chip\'s words are carried: "Run analysis" / "Explain this result" never enter the carrier', async () => {
+    const carrier = (await coldAsk(E1_SERVED)).filter(isCarrier).map(textOf).join('\n');
+    expect(carrier).not.toContain(`"${E1_RUN}"`);
+    expect(carrier).not.toContain(`"${E1_EXPLAIN}"`);
+  });
+  it('AUTHORSHIP: a chip- or template-first conversation is never quoted as "the user wrote"', async () => {
+    const carrier = (await coldAsk(['Use the hiring example.', ...E1_SERVED.slice(1)])).filter(isCarrier).map(textOf).join('\n');
+    expect(carrier.split('\n').slice(0, 2)).toEqual([E1_RESTORED, '- "Use the hiring example."']);
+    expect(carrier).not.toContain(E1_TYPED);
+  });
+  it('CONTRAST (unchanged): the window is the newest 8 user rows, then the question; E1 adds no history read', async () => {
+    const input = await coldAsk(E1_SERVED);
+    expect(input.filter((i) => i.role === 'user' && !isCarrier(i)).map(textOf)).toEqual([...E1_SERVED.slice(-8), E1_ASK]);
+    // The reseed's one seed read; the first message comes from those rows. (This double has no pending-actions reader, so
+    // the pre-existing, conditional deadline-card read at turn start is not exercised here; E1 does not touch it.)
+    expect(store.readRecent).toHaveBeenCalledTimes(1);
+  });
+  it.fails('GAP (stated, DL: not tonight): a LATER typed objection (L80) dropped by the window survives a cold reseed — needs a typed-or-chip marker on the durable row', async () => {
+    expect((await coldAsk(E1_SERVED)).filter(isCarrier).map(textOf).join('\n')).toContain(`- "${E1_L80}"`);
+  });
+});
+
