@@ -16,6 +16,8 @@
  *                        tool parameter's `source`, a goal threshold's `threshold_source`);
  *   · ladder-class     — compares the authority's own ladder answer (`user_stated` / `user_ratified`), not a stamp;
  *   · hard-limit       — `runtime/build-model.ts`, which this batch may never touch (listed for the DL to rule on).
+ *   · role not expressible by provenanceOf — a role the authority has no answer for (it has no `cee_inference`-only
+ *                        role; routing broadens it to every AI origin). Independent check delta on 48ac90fa.
  *   · draft-time       — asks WHEN a figure entered (in the draft, or after it), not WHOSE it is; the authority answers
  *                        whose (DL ruling (i), 12 Oct, Batch B × C merge).
  * Shrink-only: a count may only fall, and when it does the entry is lowered in the same change.
@@ -25,7 +27,7 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-type Category = 'writer' | 'writer-readback' | 'pipeline' | 'different-field' | 'ladder-class' | 'hard-limit' | 'draft-time' | 'authorship, deferred';
+type Category = 'writer' | 'writer-readback' | 'pipeline' | 'different-field' | 'ladder-class' | 'hard-limit' | 'draft-time' | 'role not expressible by provenanceOf' | 'authorship, deferred';
 interface Entry {
   readonly categories: Partial<Record<Category, number>>;
   /** What the remaining reads feed. 'neither' = not what the person/Agent is told and no licence/withhold/refuse/label. */
@@ -74,7 +76,8 @@ const RATCHET: Readonly<Record<string, Entry>> = {
   'src/orchestrator-v5/agent-lane/stated-by-user.ts': { categories: { writer: 1 }, feeds: 'neither', note: 'withdraws brief stamps the brief does not support' },
   'src/orchestrator-v5/goal-target/goal-chance-driver.ts': { categories: { 'different-field': 1 }, feeds: 'neither', note: "ISL spread_source" },
   'src/orchestrator-v5/goal-target/goal-horizon-detail.ts': { categories: { 'ladder-class': 1 }, feeds: 'neither', note: 'compares valueClassOf output' },
-  'src/orchestrator-v5/routing/add-factor-transaction.ts': { categories: { 'writer-readback': 1 }, feeds: 'neither', note: 'stated-today shape of its own write' },
+  'src/orchestrator-v5/routing/add-factor-transaction.ts': { categories: { 'writer-readback': 1, 'role not expressible by provenanceOf': 1 }, feeds: 'told',
+    note: "stated-today shape of its own write; levelRangePointBasis's olumis (cee_inference, not user-material): provenanceOf has no cee_inference-only role and routing broadened it to every AI origin (recovery/bB/check-B-cee/CHECK-delta.md: raw 20, source 'inferred', brief range 10–30 became 'midpoint')" },
   'src/orchestrator-v5/routing/add-option-transaction.ts': { categories: { 'writer-readback': 2 }, feeds: 'neither',
     note: "stated-today shape of its own write: its stamp, and the door's own `explicit` attestation (DL 12 Oct)" },
   'src/orchestrator-v5/routing/tool-schema.ts': { categories: { 'different-field': 1 }, feeds: 'neither', note: "a tool parameter's source" },
@@ -144,6 +147,7 @@ describe('ONE PROVENANCE AUTHORITY — no reader outside the authority interpret
   it('only the hard-limit file may feed a decision, and only through its hard-limit reads', () => {
     const feeding = Object.entries(RATCHET).filter(([, e]) => e.feeds !== 'neither').map(([f]) => f);
     // DL ruling (i), 12 Oct: draft-replacement's ONE draft-time read (when, not whose) gates G1's refusal; named, not a pattern.
-    expect(feeding).toEqual(['src/orchestrator-v5/agent-lane/runtime/build-model.ts', 'src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts']);
+    // DL ruling on the delta check (12 Oct): add-factor-transaction's one cee_inference-only read feeds what the Agent is told (the point).
+    expect(feeding).toEqual(['src/orchestrator-v5/agent-lane/runtime/build-model.ts', 'src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts', 'src/orchestrator-v5/routing/add-factor-transaction.ts']);
   });
 });

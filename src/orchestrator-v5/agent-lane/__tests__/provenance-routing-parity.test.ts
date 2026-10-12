@@ -47,6 +47,9 @@ describe('group 2 — the stated level range and the point beside it, exactly as
     ['a human-written figure whose role is unverified', os('cee_inference', { user_material_unverified: true }), undefined],
     ['a type-less brief figure at the midpoint', os('brief_extraction'), undefined],
     ['the user\'s figure at the midpoint', os(USER_TODAY_SOURCE), undefined],
+    // Independent check delta on 48ac90fa (CHECK-delta.md): routing made these "Olumi's midpoint"; they never were.
+    ['the checker\'s counterexample: raw 20, source \'inferred\', a brief range 10–30', os('inferred'), undefined],
+    ['a user-confirmed figure at the midpoint', os('user_confirmed'), undefined],
   ] as const)('levelRangePointBasis: %s', (_name, level, expected) => {
     expect(levelRangePointBasis({ ...level, range: range('brief_extraction') })).toBe(expected);
   });
