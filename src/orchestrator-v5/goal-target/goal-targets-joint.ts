@@ -174,8 +174,12 @@ export function goalTargetsBlockOf(args: {
     // ⛔ Ruling 16: "above 15%" must have been SENT as ">" — never scored as "at least 15%" and called "above". The joint
     // waits, and so does THIS condition's own chance (independent check r1 item 4): its marginal was scored on the sent bound.
     if (row.operator !== op) { strictLost = true; strictLostIds.add(id); }
+    // ⛔ RE-SCOPE 2 (R5-4; AIE open 2): EXACT finite agreement, in the same unit and frame, from the same caller snapshot —
+    // never a unit-dependent tolerance (`1e-9 × max(1, |v|)` was not an attested representation equality: 15 + 1e-12 is
+    // another figure). A row whose sent unit or frame differs from the stored one was scored on another quantity reading.
+    const differs = (k: 'unit' | 'value_frame'): boolean => typeof row[k] === 'string' && typeof storedRow?.[k] === 'string' && row[k] !== storedRow[k];
     if (storedRow !== undefined && finite(storedRow.value)
-      && !(finite(row.value) && Math.abs(row.value - storedRow.value) <= 1e-9 * Math.max(1, Math.abs(storedRow.value)))) figureLostIds.add(id);
+      && (!(finite(row.value) && row.value === storedRow.value) || differs('unit') || differs('value_frame'))) figureLostIds.add(id);
     const label = labelOf(node);
     const unit = typeof row.unit === 'string' && row.unit.trim() !== '' ? row.unit.trim()
       : typeof storedRow?.unit === 'string' && storedRow.unit.trim() !== '' ? storedRow.unit.trim() : undefined;

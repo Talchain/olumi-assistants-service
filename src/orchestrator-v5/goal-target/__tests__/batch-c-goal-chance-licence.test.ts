@@ -1233,6 +1233,25 @@ describe('RE-SCOPE r1 (DL item 3): a SENT figure that is not the stored one is n
   });
 });
 
+describe('RE-SCOPE 2 (R5-4; AIE open 2): the sent figure agrees with the stored one EXACTLY — no unit-dependent tolerance', () => {
+  const sentWith = (over: Rec): Rec[] => (wireGoalConstraints(marketingGraph().goal_constraints) as Rec[])
+    .map((r) => (r.constraint_id === 'target:conversion_rate' ? { ...r, ...over } : r));
+  it.each([
+    ['15 + 1e-12 (inside the old 1e-9 × max(1, |v|) tolerance)', { value: 15 + 1e-12 }],
+    ['15.000000001 (inside the old tolerance at 15)', { value: 15.000000001 }],
+    ['the same figure in another unit (sent "percent", stored "%")', { unit: 'percent' }],
+    ['the same figure in another frame (sent "change", stored "level")', { value_frame: 'change' }],
+  ])('RED on e58b8dbd: sent %s is not the stored figure → the joint and that target wait, said', (_name, over) => {
+    const l = licenceFor(marketingRun(), marketingGraph(), sentWith(over))!;
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved' });
+    expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
+  });
+  it('CONTROL: exactly the stored figure, unit and frame → licensed (the same Run as before)', () => {
+    const l = licenceFor(marketingRun(), marketingGraph(), sentWith({ value: 15, unit: '%', value_frame: 'level' }))!;
+    expect(l.targets!.joint.status).toBe('licensed');
+  });
+});
+
 // ── RE-SCOPE 2 (DL ruling on marginals, (B); DL AMEND item 3 — EVENT SCOPE): each figure keeps the dependency set of the event
 // it MEASURES. The joint rests on the union; the goal's own figure on the goal's upstream set alone; each target's own chance
 // ("On its own, …") on its own condition's — and says so in ONE note when it rests on any Olumi estimate, in the points' count
