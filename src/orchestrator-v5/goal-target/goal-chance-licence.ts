@@ -475,12 +475,12 @@ export function goalChanceLicenceOf(
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
   const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
   // Amendment 7 (independent check r1 item 6): every Olumi input on the goal paths — links, starting values, option settings.
-  // ⛔ Re-scope (r2 BLOCKING 4): on the paths to EVERY target this Run sent (the joint rests on all of them), never only the
-  // scored goal's — one census (`goalChanceEstimateCounts`) over the union.
-  const otherTargets = otherTargetNodeIds(constraints, goalId);
-  const estimates = licensed.length === 0 && otherTargets.length === 0
+  // ⛔ Re-scope (r2 BLOCKING 4; re-scope r1 BLOCKING 2): over everything upstream of EVERY node of the event this Run sent —
+  // each target and each included limit (the joint rests on all of them), by any path — one census (`goalChanceEstimateCounts`).
+  const eventNodes = eventNodeIdsOf(constraints, goalId);
+  const estimates = licensed.length === 0 && eventNodes.length === 0
     ? { links: 0, values: 0, settingsByOption: {} as Readonly<Record<string, number>> }
-    : goalChanceEstimateCounts(graph, option_ids, goalId, otherTargets);
+    : goalChanceEstimateCounts(graph, option_ids, goalId, eventNodes);
   const settingsByOption = Object.fromEntries(Object.entries(estimates.settingsByOption).filter(([id, n]) => licensed.includes(id) && n > 0));
   const estimateLinks = estimates.links;
   // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
@@ -625,15 +625,17 @@ function withBatchCWords(single: GoalChanceLicence, c: {
 type GoalChanceEstimates = ReturnType<typeof goalChanceEstimateCounts>;
 
 /**
- * ⛔ Re-scope (r2 BLOCKING 4): every OTHER target node this Run sent — a stored row of role target that the Run included —
- * so the estimate census covers each one's paths. The same rows the joint is built from (`goalTargetsBlockOf`).
+ * ⛔ Re-scope (r2 BLOCKING 4; re-scope r1 BLOCKING 2): every OTHER node of the event this Run sent. With several targets the
+ * joint is every condition the engine was sent (`goalTargetsBlockOf`: each target AND each included limit), so each one's
+ * node is the event's; with no target row sent the chance is the goal's alone (a limit is outside it, amendment 4): none.
  */
-function otherTargetNodeIds(c: GoalChanceConstraintInputs, goalId: unknown): string[] {
+function eventNodeIdsOf(c: GoalChanceConstraintInputs, goalId: unknown): string[] {
+  if (!sentTargetRows(c)) return [];
   const stored = Array.isArray(c.storedConstraints) ? c.storedConstraints.filter(isRec) : [];
   const sent = Array.isArray(c.sentConstraints) ? c.sentConstraints.filter(isRec) : [];
   return [...new Set(sent.flatMap((r) => {
-    const row = stored.find((x) => x.constraint_id === r.constraint_id && x.role === GOAL_TARGET_ROLE);
-    const id = row === undefined ? undefined : typeof row.node_id === 'string' ? row.node_id : r.node_id;
+    const row = stored.find((x) => x.constraint_id === r.constraint_id);
+    const id = typeof row?.node_id === 'string' ? row.node_id : r.node_id;
     return typeof id === 'string' && id !== goalId ? [id] : [];
   }))];
 }

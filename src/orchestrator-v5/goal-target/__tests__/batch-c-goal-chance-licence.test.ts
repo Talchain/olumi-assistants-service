@@ -994,3 +994,102 @@ describe('RE-SCOPE 4 — the joint is provisional when an Olumi input feeds ANY 
     }
   });
 });
+
+// ── Re-scope check r1 (DL, BLOCKING 2): the census is EVERY node upstream of EVERY node of the event — targets AND included
+// limits, by ANY path, not only the option-lever paths into the goal ─────────────────────────────────────────────────────
+const SPEND_LIMIT = { constraint_id: 'limit:annual_spend', node_id: 'annual_spend', operator: '<=', value: 50000, unit: 'GBP', value_frame: 'level' };
+/** Marketing with an INCLUDED limit (annual spend at most £50,000, sent with the Run), every input the user's. */
+const marketingWithLimit = (): Rec => {
+  const g = marketingWithInputs();
+  (g.goal_constraints as Rec[]).push({ ...SPEND_LIMIT });
+  (g.nodes as Rec[]).find((n) => n.id === 'annual_spend')!.observed_state = USERS_LEVEL(40, 'GBP');
+  return g;
+};
+/** An outside factor (no option sets it) two hops upstream of `into`, its own level Olumi's or the user's, its links the user's. */
+const withOutsideInput = (g: Rec, into: string, olumi: { readonly value?: boolean; readonly link?: boolean }): Rec => {
+  (g.nodes as Rec[]).push({ id: 'season', kind: 'factor', label: 'Season', observed_state: olumi.value ? OLUMIS_LEVEL(30, 'points') : USERS_LEVEL(30, 'points') },
+    { id: 'demand', kind: 'factor', label: 'Market demand', observed_state: USERS_LEVEL(50, 'points') });
+  (g.edges as Rec[]).push({ from: 'season', to: 'demand', ...USERS_LINK }, { from: 'demand', to: into, ...(olumi.link ? OLUMIS_LINK : USERS_LINK) });
+  return g;
+};
+const countsOf = (l: Rec): Rec => ({
+  ...(l.olumi_estimate_link_count !== undefined ? { olumi_estimate_link_count: l.olumi_estimate_link_count } : {}),
+  ...(l.olumi_estimate_value_count !== undefined ? { olumi_estimate_value_count: l.olumi_estimate_value_count } : {}),
+  ...(l.olumi_estimate_settings_by_option !== undefined ? { olumi_estimate_settings_by_option: l.olumi_estimate_settings_by_option } : {}),
+});
+
+describe('RE-SCOPE r1 — every node upstream of every node of the event: targets, included limits, any path', () => {
+  it('CONTROL: the included limit joins the joint\'s words; every input the user\'s → not provisional', () => {
+    const l = licenceFor(marketingRun(), marketingWithLimit())!;
+    expect(l.targets!.joint).toMatchObject({ status: 'licensed',
+      words: '‘New customers’ being at least 20 customers and ‘Conversion rate’ being above 15% over the first three months after launch, while ‘Annual spend’ is at most £50,000' });
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48 });
+    expect(l.provisional).toBeUndefined();
+    expect(countsOf(l as unknown as Rec)).toEqual({});
+  });
+
+  it('RED on 5145af8 (re-scope r1 BLOCKING 2a): an INCLUDED limit whose starting value and option setting are Olumi\'s → the joint says so', () => {
+    const g = marketingWithLimit();
+    (g.nodes as Rec[]).find((n) => n.id === 'annual_spend')!.observed_state = OLUMIS_LEVEL(40, 'GBP');
+    const ads = (g.nodes as Rec[]).find((n) => n.id === 'ai_plus_ads')!;
+    ads.interventions = { ...(ads.interventions as Rec), annual_spend: { value: 0.3, raw_value: 30, source: 'cee_hypothesis', target_match: { node_id: 'annual_spend' } } };
+    const l = licenceFor(marketingRun(), g)!;
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48 });
+    expect(l.provisional).toBe(true);
+    expect(countsOf(l as unknown as Rec)).toEqual({ olumi_estimate_value_count: 1, olumi_estimate_settings_by_option: { ai_plus_ads: 1 } });
+  });
+
+  it('RED on 5145af8 (re-scope r1 BLOCKING 2b): an outside input feeding conversion, on no option\'s path → the joint says so', () => {
+    const l = licenceFor(marketingRun(), withOutsideInput(marketingWithLimit(), 'conversion_rate', { value: true, link: true }))!;
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48 });
+    expect(l.provisional).toBe(true);
+    expect(countsOf(l as unknown as Rec)).toEqual({ olumi_estimate_link_count: 1, olumi_estimate_value_count: 1 });
+  });
+
+  // CENSUS: each node of the licensed event — the goal, the other target, the included limit — with ONE Olumi input two hops
+  // upstream of it on no option's path, alone: provisional, counted once. Its CONTROL (the same input the user's) is not.
+  const eventNodes = ['new_customers', 'conversion_rate', 'annual_spend'];
+  it.each(eventNodes.flatMap((n) => [[n, 'value'], [n, 'link']] as const))('CENSUS: an Olumi %s-upstream %s on no option path makes the joint provisional', (into, kind) => {
+    const l = licenceFor(marketingRun(), withOutsideInput(marketingWithLimit(), into, { [kind]: true }))!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect(l.provisional).toBe(true);
+    expect(countsOf(l as unknown as Rec)).toEqual(kind === 'value' ? { olumi_estimate_value_count: 1 } : { olumi_estimate_link_count: 1 });
+    const control = licenceFor(marketingRun(), withOutsideInput(marketingWithLimit(), into, {}))!;
+    expect(control.provisional).toBeUndefined();
+  });
+
+  it('CENSUS: the census rows cover every node of the licensed event (the joint\'s conditions and the goal, by identity)', () => {
+    const l = licenceFor(marketingRun(), marketingWithLimit())!;
+    expect([...new Set([l.goal_node_id, ...l.targets!.conditions.map((x) => x.node_id)])].sort()).toEqual([...eventNodes].sort());
+  });
+
+  it('RED on 5145af8 (re-scope r1 BLOCKING 2b): a goal-alone chance counts an outside input upstream of the goal, on no option path', () => {
+    const l = capacityLicence(withOutsideInput(capacityGraph(), 'devs', { value: true }))!;
+    expect(l.provisional).toBe(true);
+    expect(countsOf(l as unknown as Rec)).toEqual({ olumi_estimate_value_count: 1 });
+  });
+
+  it('CONTROL: with no target row sent, a limit stays outside the goal-alone chance (amendment 4) — its inputs are not the chance\'s', () => {
+    const outside = capacityGraph();
+    (outside.nodes as Rec[]).push({ id: 'budget', kind: 'factor', label: 'Budget', observed_state: OLUMIS_LEVEL(40, 'GBP') });
+    outside.goal_constraints = [{ constraint_id: 'limit:budget', node_id: 'budget', operator: '<=', value: 50, unit: 'GBP', value_frame: 'level' }];
+    expect(capacityLicence(outside)!.provisional).toBeUndefined();
+  });
+});
+
+describe('RE-SCOPE r1 (DL item 3): a SENT figure that is not the stored one is never described as what was analysed', () => {
+  it('sent ">25%", stored ">15%" → the joint and that target\'s own chance wait, with the reason', () => {
+    const g = marketingGraph();
+    const sent = (wireGoalConstraints(g.goal_constraints) as Rec[]).map((r) => (r.constraint_id === 'target:conversion_rate' ? { ...r, value: 25 } : r));
+    const l = licenceFor(marketingRun(), g, sent)!;
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved',
+      line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
+        + 'the figure the analysis used is not the one you stated.' });
+    expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
+    expect(l.pct_by_option).toEqual({});
+  });
+
+  it('CONTROL: the same figure sent and stored → licensed as before', () => {
+    expect(licenceFor(marketingRun(), marketingGraph())!.targets!.joint.status).toBe('licensed');
+  });
+});

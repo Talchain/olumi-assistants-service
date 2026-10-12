@@ -189,11 +189,11 @@ export function guidanceModelReadable(graph: unknown): boolean {
 }
 
 /** The link's stored value: what a change to the assumption changes. Provenance is `link_sizing`'s, not this. */
-const linkValueHash = (e: Rec): string =>
+export const linkValueHash = (e: Rec): string =>
   computeResponseHash({ strength: e.strength, exists_probability: e.exists_probability, effect_direction: e.effect_direction });
 
 /** The factor's stored value. Authorship stamps (`source`, `extractionType`, review) are `value_authorship`'s, not this. */
-const factorValueHash = (n: Rec): string => {
+export const factorValueHash = (n: Rec): string => {
   const os = rec(n.observed_state);
   return computeResponseHash(os === undefined ? null : { value: os.value, raw_value: os.raw_value, unit: os.unit, baseline: os.baseline, cap: os.cap });
 };

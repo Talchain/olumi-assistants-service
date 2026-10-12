@@ -32,7 +32,7 @@ const unit01 = (v: unknown): v is number => finite(v) && v >= 0 && v <= 1;
 export const GOAL_TARGET_ROLE = 'goal_target';
 
 export type JointWithholdReason = 'not_returned' | 'precision_missing' | 'strict_not_preserved' | 'condition_not_named' | 'olumi_base' | 'no_option'
-  | 'target_not_supported';
+  | 'target_not_supported' | 'figure_not_preserved';
 
 export interface GoalCondition {
   readonly constraint_id: string;
@@ -99,6 +99,12 @@ export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupp
       : `, and nor is the chance of ${listWords(strictLost)} on ${strictLost.length === 1 ? 'its' : 'their'} own`;
     return `The chance of meeting ${all} together isn’t shown${own}: the comparison the analysis used is not the one you stated.`;
   }
+  // Re-scope r1 (non-blocking, DL item 3): the figure the engine was sent is not the stored one — never describe the stored one.
+  if (reason === 'figure_not_preserved') {
+    const own = strictLost.length === 0 ? ''
+      : `, and nor is the chance of ${listWords(strictLost)} on ${strictLost.length === 1 ? 'its' : 'their'} own`;
+    return `The chance of meeting ${all} together isn’t shown${own}: the figure the analysis used is not the one you stated.`;
+  }
   if (reason === 'condition_not_named') return `The chance of meeting ${all} together isn’t shown: one of its conditions can’t be said in your units.`;
   if (reason === 'olumi_base') return `The chance of meeting ${all} together isn’t shown yet: it rests on Olumi’s own assumed starting value for a target, which you haven’t given.`;
   // Independent check r1 item 7: a joint figure that came back WITHOUT its precision was calculated; say what is missing.
@@ -153,6 +159,9 @@ export function goalTargetsBlockOf(args: {
   let unnamed = false;
   let strictLost = false;
   const strictLostIds = new Set<string>();
+  // ⛔ Re-scope r1 (DL item 3): a row whose SENT figure is not the stored one was scored on another threshold — the joint and
+  // that condition's own chance wait, with that reason; the stored figure is never described as what was analysed.
+  const figureLostIds = new Set<string>();
   const conditions: GoalCondition[] = [];
   // AIE C clause 3: a target kept in its own (change) frame is named here, never forced into a level clause.
   const unsupported: string[] = [];
@@ -165,6 +174,8 @@ export function goalTargetsBlockOf(args: {
     // ⛔ Ruling 16: "above 15%" must have been SENT as ">" — never scored as "at least 15%" and called "above". The joint
     // waits, and so does THIS condition's own chance (independent check r1 item 4): its marginal was scored on the sent bound.
     if (row.operator !== op) { strictLost = true; strictLostIds.add(id); }
+    if (storedRow !== undefined && finite(storedRow.value)
+      && !(finite(row.value) && Math.abs(row.value - storedRow.value) <= 1e-9 * Math.max(1, Math.abs(storedRow.value)))) figureLostIds.add(id);
     const label = labelOf(node);
     const unit = typeof row.unit === 'string' && row.unit.trim() !== '' ? row.unit.trim()
       : typeof storedRow?.unit === 'string' && storedRow.unit.trim() !== '' ? storedRow.unit.trim() : undefined;
@@ -212,7 +223,7 @@ export function goalTargetsBlockOf(args: {
 
   // Each target's own chance, per option, from the same Run (never re-derived).
   const perTarget: GoalTargetChance[] = targets.flatMap((t) => {
-    if (olumiBase.has(t.constraint_id) || strictLostIds.has(t.constraint_id)) return [];
+    if (olumiBase.has(t.constraint_id) || strictLostIds.has(t.constraint_id) || figureLostIds.has(t.constraint_id)) return [];
     const pct: Record<string, number> = {};
     const rounding: Record<string, GoalChanceDisplayRounding> = {};
     for (const id of comparedFor(t.constraint_id)) {
@@ -234,7 +245,8 @@ export function goalTargetsBlockOf(args: {
   const n = Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2);
   const withheld = (reason: JointWithholdReason): GoalJoint => ({
     status: 'withheld', reason,
-    line: jointWithheldLine(n, reason, unsupported, targets.filter((t) => strictLostIds.has(t.constraint_id)).map((t) => t.clause)),
+    line: jointWithheldLine(n, reason, unsupported, targets.filter((t) => (reason === 'figure_not_preserved' ? figureLostIds : strictLostIds)
+      .has(t.constraint_id)).map((t) => t.clause)),
     // Amendment 6: the bound needs each named target's own chance on the screen, for every compared option.
     ...(perTarget.length >= 2 && perTarget.length === targets.length && !unnamed && unsupported.length === 0 && ordered.length === targets.length
       && compared.every((id) => perTarget.every((t) => Object.hasOwn(t.pct_by_option, id))) ? { frechet_line: frechetLine(targets.length) } : {}),
@@ -243,6 +255,7 @@ export function goalTargetsBlockOf(args: {
   if (unsupported.length > 0) joint = withheld('target_not_supported');
   else if (unnamed) joint = withheld('condition_not_named');
   else if (strictLost) joint = withheld('strict_not_preserved');
+  else if (figureLostIds.size > 0) joint = withheld('figure_not_preserved');
   else if (olumiBase.size > 0) joint = withheld('olumi_base');
   else {
     const pct: Record<string, number> = {};
