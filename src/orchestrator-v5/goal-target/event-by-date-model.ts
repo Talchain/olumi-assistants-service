@@ -172,24 +172,36 @@ export function withEventNumberLoss(model: AdmittedModel, brief: string): Admitt
  * factors kept as reasoning context (`retained_excluded`) and its figures this forecast does not model reached only
  * `not_represented`, which only the Agent reads: they were dropped silently for the user. ONE sentence, from admission's own
  * loss ledger (the event_context nodes it set aside, then the brief's unmodelled figures), carried by the build result as
- * `event_forecast_disclosures` into the reply's detail on the build turn (`disclosure.ts`), never as an open question.
- * `null` when nothing was set aside. New sentence: AIE ACK.
+ * `event_forecast_disclosures` into the reply's detail on the build turn (`disclosure.ts`), never as an open question. AIE 6122738619's
+ * words for what the saved model keeps as context; the real limit for what it does not hold. `null` when nothing was set aside.
  */
 export function eventSetAsideLine(model: Pick<AdmittedModel, 'nodes' | 'loss'>): string | null {
-  const named: string[] = [];
-  const add = (words: unknown): void => {
+  const retained: string[] = [], dropped: string[] = [], inQuestion: string[] = [];
+  const add = (into: string[], words: unknown): void => {
     if (typeof words !== 'string' || words.trim() === '' || words.length > 120) return;
     const quoted = `"${words.trim()}"`;
-    if (!named.includes(quoted)) named.push(quoted);
+    if (![...retained, ...dropped, ...inQuestion].includes(quoted)) into.push(quoted);
   };
+  // Kept in the saved model as reasoning context: "remain" is true of these (the saved graph holds the node).
   for (const n of model.nodes) {
     if (n.id.startsWith('event_context_') && n.analysis_participation === 'retained_excluded'
-      && model.loss.some(l => l.field_path === `nodes[${n.id}].event_forecast_not_modelled` && l.after === 'retained_excluded')) add(n.label);
+      && model.loss.some(l => l.field_path === `nodes[${n.id}].event_forecast_not_modelled` && l.after === 'retained_excluded')) add(retained, n.label);
   }
-  for (const l of model.loss) if (/^brief\[\d+\]\.event_forecast_not_modelled$/.test(l.field_path)) add(l.before);
-  if (named.length === 0) return null;
-  const list = named.length === 1 ? named[0]! : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
-  return `Olumi modelled this as a deadline question; it set aside ${list} from your brief, which this forecast doesn't use yet.`;
+  // The brief's figures this forecast does not model: never "remain". Said as the real limit: kept only in the words of the
+  // saved decision question when its label holds them, otherwise not held by the model at all.
+  const question = model.nodes.find(n => n.kind === 'decision')?.label;
+  for (const l of model.loss) if (/^brief\[\d+\]\.event_forecast_not_modelled$/.test(l.field_path)) {
+    add(typeof question === 'string' && typeof l.before === 'string' && question.includes(l.before.trim()) ? inQuestion : dropped, l.before);
+  }
+  const list = (q: string[]): string => q.length === 1 ? q[0]! : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
+  const lines = [
+    // AIE 6122738619, verbatim (the pronoun agrees with the count).
+    ...(retained.length > 0 ? [`This forecast does not yet use ${list(retained)} from your brief; ${retained.length === 1 ? 'it remains' : 'they remain'} as context for the wider productivity question.`] : []),
+    // The real retention limit (AIE: "otherwise state the real retention limit"); new words, for AIE ACK.
+    ...(inQuestion.length > 0 ? [`This forecast does not yet use ${list(inQuestion)} from your brief; the model keeps ${inQuestion.length === 1 ? 'it' : 'them'} only in the wording of your decision question.`] : []),
+    ...(dropped.length > 0 ? [`This forecast does not yet use ${list(dropped)} from your brief, and the model does not hold ${dropped.length === 1 ? 'it' : 'them'}.`] : []),
+  ];
+  return lines.length === 0 ? null : lines.join(' ');
 }
 
 /** Persisted provenance is passthrough at every graph boundary, unlike node labels. */

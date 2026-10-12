@@ -22,11 +22,14 @@ import { buildModelFromBrief, constructionOperationId, type CallStructuredModel 
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { applyTeamShareEdit, bindTeamTimeQuote, teamTimeCard, teamTimesInQuote, widenedTeamTime, type ApprovedTeamTime } from '../team-share-write.js';
 import { shareChanceRunBlock } from '../share-by-date-run.js';
+import { withShareByDateChanceGate } from '../goal-chance-range.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import type { SessionTurnWrite } from '../../session/store.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
+import { readinessSentence, readinessSentenceOnce, type ReadinessView } from '../../agent-lane/readiness-view.js';
+import { narrateWriteOutcome } from '../../agent-lane/write-outcome.js';
 
 type Rec = Record<string, any>;
 const SID = 'ebdebdeb-0000-4000-8000-000000004184';
@@ -119,9 +122,11 @@ describe('E3 — the door: the user\'s phrase is placed, and an unplaceable one 
   it('an unplaceable phrase: the Agent is told to ask the model\'s own deadline question, never "never offer a date"', async () => {
     const { proposals, dispatch } = caps(), c = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { now: () => new Date('2026-10-12T08:52:27Z') });
     const r = await c.proposeGoalDeadline!(ctx('Our deadline is the next sprint.') as never, { deadline_words: 'the next sprint', rationale: '' }) as Rec;
-    expect(r).toMatchObject({ ok: false, refusal: 'deadline_not_placed' });
-    expect(r.detail).toBe('Olumi cannot place "the next sprint" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. '
-      + `Ask the user directly: "${chanceGoalDeadlineAsk('next feature launch')}" Then call propose_goal_deadline with the words they reply with; Olumi works out the date from them.`);
+    expect(r).toMatchObject({ ok: false, refusal: 'deadline_not_placed', deadline_ask: chanceGoalDeadlineAsk('next feature launch') });
+    // AIE 6122738619, verbatim.
+    expect(r.detail).toBe('No deadline change was prepared because the quoted words do not resolve to a calendar date against the recorded reference date. '
+      + "Re-read the user's deadline words and recorded reference first. If they still do not identify a date, ask the one question in deadline_ask, "
+      + 'then call propose_goal_deadline with their answer. Do not ask them to restate a date already resolved and held.');
     expect(proposals.outstanding(SID, null)).toEqual([]);
   });
 });
@@ -143,20 +148,25 @@ describe('E2 — the team\'s time, bound by quote, from any of the user\'s messa
     'recruitment may take over 3 months', 'we have 2 months left',
   ])('CONTROL: "%s" states no team time', quote => { expect(teamTimesInQuote(quote)).toEqual([]); });
 
-  it("Paul's sentence: his 7 months is the most likely time, and Olumi's range for his low confidence is P to 1.5 × P", () => {
+  it("Paul's sentence: his 7-month forecast, kept with his words; his low confidence IN THIS forecast gives Olumi's [0.5P, 1.5P] = 3.5–10.5", () => {
     const quote = "they're going to be a month late delivering the next feature (so, 7 months)";
     expect(bindTeamTimeQuote({ now: PAUL_TEAM }, { quote, low_months: 7, high_months: 7 })).toEqual({ kind: 'bound', quote,
-      time: { low_months: 7, high_months: 10.5, most_likely_months: 7, range_origin: 'olumi_estimate', widening: 'doubt' } });
+      time: { low_months: 3.5, high_months: 10.5, forecast_months: 7, forecast_words: quote, range_origin: 'olumi_estimate', range_rule: 'low_confidence' } });
   });
   it.each([
-    ['The team say 7 months.', 'The team say 7 months', 7, { low_months: 6, high_months: 8.8, widening: 'default' }],
-    ['It will take about 13 months, I think.', 'about 13 months', 13, { low_months: 11.1, high_months: 16.3, widening: 'default' }],
-    ["About 8 months, but I'm not confident in that.", 'About 8 months', 8, { low_months: 8, high_months: 12, widening: 'doubt' }],
-    ['We have no doubt: 8 months.', '8 months', 8, { low_months: 6.8, high_months: 10, widening: 'default' }],
-  ])('the one widening rule: "%s"', (now, quote, p, expected) => {
+    ['The team say 7 months.', 'The team say 7 months', 7, { low_months: 5.3, high_months: 8.8, range_rule: 'default' }],
+    ['It will take about 13 months, I think.', 'about 13 months', 13, { low_months: 9.8, high_months: 16.3, range_rule: 'default' }],
+    ["About 8 months, but I'm not confident in that.", 'About 8 months', 8, { low_months: 4, high_months: 12, range_rule: 'low_confidence' }],
+    ['I doubt it, but the team say 8 months.', 'the team say 8 months', 8, { low_months: 4, high_months: 12, range_rule: 'low_confidence' }],
+    // CONTROLS: a confidence keyword with no forecast as its object is not confidence attribution (AIE 6122738619).
+    ["About 8 months, but I'm not confident.", 'About 8 months', 8, { low_months: 6, high_months: 10, range_rule: 'default' }],
+    ['They keep missing deadlines; the team say 8 months.', 'the team say 8 months', 8, { low_months: 6, high_months: 10, range_rule: 'default' }],
+    ['We have no doubt: 8 months.', '8 months', 8, { low_months: 6, high_months: 10, range_rule: 'default' }],
+    ['I have low confidence in the vendor; the team say 8 months.', 'the team say 8 months', 8, { low_months: 6, high_months: 10, range_rule: 'default' }],
+  ])('the one range convention: "%s"', (now, quote, p, expected) => {
     const r = bindTeamTimeQuote({ now }, { quote, low_months: p, high_months: p });
-    expect(r).toEqual({ kind: 'bound', quote, time: { ...expected, most_likely_months: p, range_origin: 'olumi_estimate' } });
-    expect(widenedTeamTime(p, expected.widening as 'doubt' | 'default')).toEqual({ low_months: expected.low_months, high_months: expected.high_months });
+    expect(r).toEqual({ kind: 'bound', quote, time: { ...expected, forecast_months: p, forecast_words: quote, range_origin: 'olumi_estimate' } });
+    expect(widenedTeamTime(p, expected.range_rule as 'low_confidence' | 'default')).toEqual({ low_months: expected.low_months, high_months: expected.high_months });
   });
   it('a stated range is written as stated, never widened', () => {
     expect(bindTeamTimeQuote({ now: 'Probably 6 to 9 months' }, { quote: 'Probably 6 to 9 months', low_months: 6, high_months: 9 }))
@@ -165,7 +175,7 @@ describe('E2 — the team\'s time, bound by quote, from any of the user\'s messa
   it('FROM ANY MESSAGE: a chip turn binds the quote to an earlier message; the quote must be the user\'s and hold the figure', () => {
     const conversation = [BRIEF, PAUL_TEAM].join('\n');
     expect(bindTeamTimeQuote({ now: '', conversation }, { quote: '(so, 7 months)', low_months: 7, high_months: 7 }))
-      .toMatchObject({ kind: 'bound', time: { low_months: 7, high_months: 10.5, most_likely_months: 7 } });
+      .toMatchObject({ kind: 'bound', time: { low_months: 3.5, high_months: 10.5, forecast_months: 7 } });
     expect(bindTeamTimeQuote({ now: '', conversation }, { quote: 'the team say 7 months', low_months: 7, high_months: 7 }))
       .toMatchObject({ kind: 'refused' });
     expect(bindTeamTimeQuote({ now: '', conversation }, { quote: 'but I have low confidence in this', low_months: 7, high_months: 7 }))
@@ -177,19 +187,22 @@ describe('E2 — the team\'s time, bound by quote, from any of the user\'s messa
     // No quote: THIS message, as before.
     expect(bindTeamTimeQuote({ now: '6–10 months' }, { low_months: 6, high_months: 10 })).toMatchObject({ kind: 'bound', time: { low_months: 6, high_months: 10 } });
   });
-  it('the card says the user\'s figure and labels the range as Olumi\'s estimate from it; the write keeps both authorships', () => {
+  it('the card (AIE 6122738619, verbatim): Olumi\'s provisional range, the user\'s forecast, the human qualifier; no progress headline', () => {
     const g = dated(), part = draftedTeamPartOf(g)!;
+    const words = "they're going to be a month late delivering the next feature (so, 7 months)";
     const a: ApprovedTeamTime = { goal_id: part.goal.id, team_id: part.team.id, deadline: '2027-04-12', reference_date: '2026-10-12',
-      low_months: 7, high_months: 10.5, most_likely_months: 7, range_origin: 'olumi_estimate', widening: 'doubt' };
-    expect(teamTimeCard(a, part.goal.goal_threshold_unit, part.deliverable)).toBe("Use Olumi's 7–10.5 months for today's team? It is Olumi's estimate "
-      + 'from your 7 months, allowing for it to run later because you have doubts about it. By 12 April 2027 that is about 70% of next feature launch.');
-    expect(teamTimeCard({ ...a, low_months: 6, high_months: 8.8, widening: 'default' }, part.goal.goal_threshold_unit, part.deliverable))
-      .toBe("Use Olumi's 6–8.8 months for today's team? It is Olumi's estimate from your 7 months, allowing for it to run earlier or later. "
-        + 'By 12 April 2027 that is about 82% of next feature launch.');
+      low_months: 3.5, high_months: 10.5, forecast_months: 7, forecast_words: words, range_origin: 'olumi_estimate', range_rule: 'low_confidence' };
+    expect(teamTimeCard(a, part.goal.goal_threshold_unit, part.deliverable)).toBe('Use Olumi’s provisional 3.5–10.5-month range for the current team? '
+      + 'It uses your 7-month forecast and assumes all times in the range are equally likely. You described low confidence in that forecast.');
+    expect(teamTimeCard({ ...a, low_months: 5.3, high_months: 8.8, range_rule: 'default' }, part.goal.goal_threshold_unit, part.deliverable))
+      .toBe('Use Olumi’s provisional 5.3–8.8-month range for the current team? It uses your 7-month forecast and assumes all times in the range are equally likely.');
     const written = applyTeamShareEdit(g, a, computeAnalysisAffectingGraphHash(g as never)!);
     if (written.kind !== 'mutated') throw new Error(JSON.stringify(written));
-    expect(draftedTeamPartOf(written.mutatedGraph)!.team.observed_state.stated_time).toEqual({ quantity: 'months_to_finish', low: 7, high: 10.5,
-      unit: 'months', deadline: '2027-04-12', reference_date: '2026-10-12', most_likely: 7, most_likely_origin: 'user', range_origin: 'olumi_estimate', widening: 'doubt' });
+    // The writer's confirmation is the card's explanation, whole (never a split of the joined card).
+    expect(written.confirmation).toBe('It uses your 7-month forecast and assumes all times in the range are equally likely. You described low confidence in that forecast.');
+    expect(draftedTeamPartOf(written.mutatedGraph)!.team.observed_state.stated_time).toEqual({ quantity: 'months_to_finish', low: 3.5, high: 10.5,
+      unit: 'months', deadline: '2027-04-12', reference_date: '2026-10-12', forecast: 7, forecast_origin: 'user', forecast_words: words,
+      range_origin: 'olumi_estimate', range_rule: 'low_confidence' });
     expect(shareChanceRunBlock(written.mutatedGraph)).toBeNull();
     expect(resolveRunAdmission(written.mutatedGraph).willProceed).toBe(true);
   });
@@ -261,7 +274,7 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     expect(computeAnalysisAffectingGraphHash(moved as never)).not.toBe(card.base_revision);
     w.replace(moved);
     expect(await approve(w, card.proposal_id)).toMatchObject({ ok: true, applied: true });
-    expect(draftedTeamPartOf(w.graph())!.team.observed_state.stated_time).toMatchObject({ low: 7, high: 10.5, most_likely: 7 });
+    expect(draftedTeamPartOf(w.graph())!.team.observed_state.stated_time).toMatchObject({ low: 3.5, high: 10.5, forecast: 7 });
     // The hiring times that landed first are kept: the write is scoped to the team part.
     expect(w.graph().nodes.find((n: Rec) => n.id === 'event_capacity_2').observed_state.extra_share_by_date).toMatchObject({ lead_low: 1, lead_high: 3 });
   });
@@ -274,7 +287,7 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     ['the team part\'s own time changed', (g: Rec): Rec => { const out = structuredClone(g); const t = draftedTeamPartOf(out)!.team;
       out.nodes.find((n: Rec) => n.id === t.id).observed_state = { value: 0.5, std: 0.1, raw_value: 50, unit: t.observed_state?.unit ?? '% of next feature launch', cap: 100, source: 'cee_inference',
         stated_time: { quantity: 'months_to_finish', low: 5, high: 8, unit: 'months', deadline: '2027-04-12', reference_date: '2026-10-12' } }; return out; }],
-    ['the deadline changed', (g: Rec): Rec => { const out = structuredClone(g); draftedTeamPartOf(out)!.goal; out.nodes.find((n: Rec) => n.kind === 'goal').goal_horizon = { deadline: '2027-05-12' }; return out; }],
+    ['the deadline changed', (g: Rec): Rec => { const out = structuredClone(g); out.nodes.find((n: Rec) => n.kind === 'goal').goal_horizon = { deadline: '2027-05-12' }; return out; }],
   ])('CONTROL: %s → refused as superseded, nothing written', async (_name, change) => {
     const w = world();
     const card = await w.caps.proposeTeamTime!(ctx(PAUL_TEAM) as never, { quote, low_months: 7, high_months: 7 }) as Rec;
@@ -301,26 +314,54 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
   });
 });
 
-describe('E2 — a range line never calls Olumi\'s range "yours"', () => {
+describe('E2 — a range line never calls Olumi\'s range "yours" (AIE 6122738619 words)', () => {
+  const words = "they're going to be a month late delivering the next feature (so, 7 months)";
   const held = (): Rec => {
     const g = dated(), part = draftedTeamPartOf(g)!;
     Object.assign(g.nodes.find((n: Rec) => n.id === part.goal.id), { goal_horizon_months: 6, goal_horizon_reference_date: '2026-10-12', goal_horizon_stated_months: 6 });
     const written = applyTeamShareEdit(g, { goal_id: part.goal.id, team_id: part.team.id, deadline: '2027-04-12', reference_date: '2026-10-12',
-      low_months: 7, high_months: 10.5, most_likely_months: 7, range_origin: 'olumi_estimate', widening: 'doubt' }, computeAnalysisAffectingGraphHash(g as never)!);
+      low_months: 3.5, high_months: 10.5, forecast_months: 7, forecast_words: words, range_origin: 'olumi_estimate', range_rule: 'low_confidence' },
+      computeAnalysisAffectingGraphHash(g as never)!);
     if (written.kind !== 'mutated') throw new Error('write');
     return written.mutatedGraph;
   };
-  it('RANGE line: "from the slow end of your 7 months, which Olumi widened to 7–10.5 months"', () => {
+  it('RANGE line: "You gave 7 months; Olumi’s provisional model range is 3.5–10.5 months."', () => {
     const g = held(), team = draftedTeamPartOf(g)!.team.id;
     const target = { comparator: 'at_least', value: 100, unit: '% of next feature launch', by_date: '2027-04-12' };
     const range = { inference_warnings: [{ code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Stated time.', option_ids: ['event_option_3'], target,
       range_by_option: { event_option_3: { kind: 'stated_time', basis: 'stated_time', quantity: 'months_to_finish',
-        stated_estimate: { low: 7, high: 10.5, unit: 'months' }, low: 0.2, high: 0.6, low_pct: 20, high_pct: 60,
+        stated_estimate: { low: 3.5, high: 10.5, unit: 'months' }, low: 0.2, high: 0.6, low_pct: 20, high_pct: 60,
         low_rounding: 'whole', high_rounding: 'whole', from: team, to: 'event_goal', among: 'all' } } }] };
     const line = goalChanceScreenLinesForAgent(range, g, true).find(l => l.option_id === 'event_option_3')!.chance;
-    expect(line).toBe("‘Carry on as now’: between about 20% and 60% chance of launching by 12 April 2027, in this model, using Olumi's estimate from your 7 months "
-      + '(7–10.5 months), from the slow end of your 7 months, which Olumi widened to 7–10.5 months to the fast end.');
-    expect(line).not.toContain('your 7–10.5');
+    expect(line).toBe('‘Carry on as now’: between about 20% and 60% chance of launching by 12 April 2027, in this model, from the slow end of the range '
+      + 'to the fast end. You gave 7 months; Olumi’s provisional model range is 3.5–10.5 months.');
+    expect(line).not.toMatch(/your 3\.5|your 7 months|most likely/);
+  });
+  // The Run's own range warnings use the same words; a range the user stated keeps its words (control).
+  const gated = (g: Rec): Rec[] => (withShareByDateChanceGate({ option_comparison: [
+    { option_id: 'event_option_1', probability_of_goal: 0.5 }, { option_id: 'event_option_2', probability_of_goal: 0.5 },
+    { option_id: 'event_option_3', probability_of_goal: 0.5 }] }, g, draftedTeamPartOf(g)!.goal.id) as Rec).inference_warnings ?? [];
+  const said = (ws: Rec[]): string[] => ws.filter(w => w.code === 'GOAL_CHANCE_RANGE' || /^Not shown as a single figure/.test(String(w.message))).map(w => String(w.message));
+  const teamAt = (t: Partial<ApprovedTeamTime> & { low_months: number; high_months: number }): Rec => {
+    const g = dated(), part = draftedTeamPartOf(g)!;
+    const written = applyTeamShareEdit(g, { goal_id: part.goal.id, team_id: part.team.id, deadline: '2027-04-12', reference_date: '2026-10-12', ...t },
+      computeAnalysisAffectingGraphHash(g as never)!);
+    if (written.kind !== 'mutated') throw new Error('write');
+    return written.mutatedGraph;
+  };
+  it('the range warnings attribute the forecast to the user and the range to Olumi, never "your time estimate" (P = 6, low confidence: 3–9)', () => {
+    expect(widenedTeamTime(6, 'low_confidence')).toEqual({ low_months: 3, high_months: 9 });
+    const ws = said(gated(teamAt({ low_months: 3, high_months: 9, forecast_months: 6, range_origin: 'olumi_estimate', range_rule: 'low_confidence' })));
+    expect(ws).toContain("Not shown as a single figure. The approximation of your 6-month forecast and Olumi’s assumed 3–9-month range does not support one figure here, so this chance is shown as a range.");
+    expect(ws).toContain("Not shown as a single figure. The approximation of your 6-month forecast and Olumi’s assumed 3–9-month range together with Olumi's hiring-time range and pace estimate does not support one figure here, so this chance is not shown.");
+    expect(ws).toContain('Each chance runs from the slow end of the range to the fast end. You gave 6 months; Olumi’s provisional model range is 3–9 months.');
+    for (const m of ws) expect(m).not.toMatch(/your time estimate|stated time or pace range|your 3–9/);
+  });
+  it('CONTROL: the same range stated by the user (3–9 months) keeps the existing words, byte for byte', () => {
+    const ws = said(gated(teamAt({ low_months: 3, high_months: 9 })));
+    expect(ws).toContain("Not shown as a single figure. The approximation of your team's stated time or pace range does not support one figure here, so this chance is shown as a range.");
+    expect(ws).toContain('Each chance runs from the slow end of your time estimate to the fast end.');
+    expect(ws.join(' ')).not.toContain('Olumi’s assumed');
   });
 });
 
@@ -337,9 +378,9 @@ describe('E4 — what the deadline model set aside from the brief is named, once
       { label: 'Junior engineers hired', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'engineers', provenance: 'inferred', plausible_max: 20 },
     ] });
   const flagged = (c: CandidateModel, brief: string) => admitCandidateModel(c, {}, brief, undefined, undefined, undefined, undefined, undefined, { event_by_date_prompted: true });
-  it('the brief\'s own factors kept as context and its unmodelled figure, in ONE sentence', () => {
-    expect(eventSetAsideLine(flagged(b3(), B3))).toBe('Olumi modelled this as a deadline question; it set aside "Senior engineers hired", '
-      + '"Junior engineers hired" and "£400k" from your brief, which this forecast doesn\'t use yet.');
+  it('the brief\'s own factors kept as context ("remain") and its unmodelled figure (the real limit: not held), in one disclosure', () => {
+    expect(eventSetAsideLine(flagged(b3(), B3))).toBe('This forecast does not yet use "Senior engineers hired" and "Junior engineers hired" from your brief; they remain as context for the wider productivity question. '
+      + 'This forecast does not yet use "£400k" from your brief, and the model does not hold it.');
   });
   it('CONTROL: Paul\'s drafted event model set nothing aside: no sentence', () => {
     expect(eventSetAsideLine(flagged(candidate(), BRIEF))).toBeNull();
@@ -353,5 +394,38 @@ describe('E4 — what the deadline model set aside from the brief is named, once
     expect(r.event_forecast_disclosures).toEqual([line]);
     expect(r.open_questions).not.toContain(line);
     expect(r.open_questions[0]).toBe(chanceGoalDeadlineAsk('the new platform'));
+  });
+});
+
+describe('EACH ASK ONCE PER REPLY: the readiness line says only what the reply has not said (DL, 12 Oct)', () => {
+  const ASK = chanceGoalDeadlineAsk('next feature launch');
+  const OTHER = 'What does "Hire a Tech lead" set "Team size" to?';
+  const view = (messages: string[], may_run = false): ReadinessView => ({ checked: true, may_run,
+    needs_from_user: messages.map(message => ({ message })), olumi_can_offer: [], will_run_without: [], levels_not_set: [] });
+  it('nothing said yet: byte-identical to the existing sentence', () => {
+    expect(readinessSentenceOnce(view([ASK]), 'I have set up the comparison.', false)).toBe(readinessSentence(view([ASK])));
+  });
+  it('the first analysis already said the ask AND that it could not run: no line at all (Paul\'s reply 1)', () => {
+    expect(readinessSentenceOnce(view([ASK]), `I have set up the comparison.\nThe first analysis could not run yet: ${ASK}`, true)).toBeNull();
+  });
+  it('the ask already said, the refusal not: the refusal alone, never the ask again', () => {
+    expect(readinessSentenceOnce(view([ASK]), `Next: ${ASK}`, false)).toBe("The analysis can't run yet.");
+  });
+  it('one of two needs already said: only the other', () => {
+    expect(readinessSentenceOnce(view([ASK, OTHER]), `The first analysis could not run yet: ${ASK}`, true)).toBe(`The analysis can't run yet. ${OTHER}`);
+  });
+  it('CONTROL: a view that may run is untouched', () => {
+    expect(readinessSentenceOnce(view([], true), ASK, true)).toBe(readinessSentence(view([], true)));
+  });
+  const build = { ok: true, mutated: true, model_version: { version_number: 1 }, displayed_next_question: ASK,
+    open_questions: [ASK, 'What evidence supports the productivity assumption?', 'Lead time is an Olumi estimate.'] };
+  const status = (alreadySaid?: string): string => narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [build as never],
+    alreadySaid === undefined ? {} : { alreadySaid }).status ?? '';
+  it('the build line does not restate the question the reply already said; the others stay counted behind the toggle', () => {
+    expect(status(`The first analysis could not run yet: ${ASK}`)).toBe('Questions this model does not answer yet: 2 more questions remain unresolved.');
+  });
+  it('CONTROL: with nothing said before it, the build line is byte-identical (the one displayed question, then the count)', () => {
+    expect(status()).toBe(`Questions this model does not answer yet: ${ASK} 2 more questions remain unresolved.`);
+    expect(status('I have set up the comparison.')).toBe(status());
   });
 });

@@ -202,8 +202,8 @@ describe('S2b draft -> canonical forecast parts', () => {
 });
 
 describe('S2b team-time door', () => {
-  // EBD E2: a single time (about 8 months) is the user's most likely time with Olumi's range from it (0.85 × to 1.25 ×).
-  it.each([['It’ll take 6–10 months', 6, 10, 6, 10], ['6 to 10 months', 6, 10, 6, 10], ['about 8 months', 8, 8, 6.8, 10]])('THIS message: %s', async (text, argLow, argHigh, low, high) => {
+  // EBD E2 (AIE 6122738619): a single time (about 8 months) is the user's forecast, with Olumi's assumed range from it (0.75 × to 1.25 ×).
+  it.each([['It’ll take 6–10 months', 6, 10, 6, 10], ['6 to 10 months', 6, 10, 6, 10], ['about 8 months', 8, 8, 6, 10]])('THIS message: %s', async (text, argLow, argHigh, low, high) => {
     const w = world();
     const r = await w.caps.proposeTeamTime!(ctx(text) as never, { low_months: argLow, high_months: argHigh }) as Rec;
     expect(r.ok).toBe(true); expect(r.team_time).toMatchObject({ low_months: low, high_months: high });
@@ -656,7 +656,7 @@ describe('DL accepted root rows and controls', () => {
     expect(decisionInputAsk(w.graph(), { ...askContext, recentReplies: [ask] })).toBeNull();
     // EBD E2: typed again, the single time is offered with Olumi's range from it (not "already held").
     const again = await w.caps.proposeTeamTime!(ctx('about 6 months') as never, { low_months: 6, high_months: 6 }) as Rec;
-    expect(again).toMatchObject({ ok: true, team_time: { low_months: 5.1, high_months: 7.5, most_likely_months: 6, range_origin: 'olumi_estimate' } });
+    expect(again).toMatchObject({ ok: true, team_time: { low_months: 4.5, high_months: 7.5, forecast_months: 6, range_origin: 'olumi_estimate' } });
     const range = await w.caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
     expect((await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: range.proposal_id } as never, { proposal_id: range.proposal_id }) as Rec).ok).toBe(true);
     expect(part(w.graph()).team.observed_state.stated_time).toMatchObject({ low: 6, high: 10 });
@@ -669,7 +669,7 @@ describe('DL accepted root rows and controls', () => {
     const notStated = await world().caps.proposeTeamTime!(ctx('soon') as never, { low_months: 6, high_months: 10 }) as Rec;
     const noDate = await world(admitted()).caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
     const passed = await world(dated(), false, '2028-01-01').caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
-    for (const r of [notStated, noDate, passed]) { expect(r.ok).toBe(false); expect(r.detail).toMatch(/Type|type|Ask the user for the deadline first/); }
+    for (const r of [notStated, noDate, passed]) { expect(r.ok).toBe(false); expect(r.detail).toMatch(/Type|type|^No team-time change was prepared because the deadline is not confirmed|^No change was prepared\. Re-read the verified human messages/); }
     expect((await world().caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec).ok).toBe(true);
   });
   it('P2-one-team-proposal-and-change-words with separate deadline control', async () => {
@@ -802,8 +802,8 @@ describe('singleton recovery at the atomic door', () => {
     const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
     expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ applied: false, refusal: 'not_confirmed' });
     expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, applied: true, mutated: false });
-    // EBD E2: the single 8 months is held as the user's most likely time inside Olumi's range, on the team part.
-    expect(w.rows).toHaveLength(1); expect(part(w.graph()).team.observed_state.stated_time.most_likely).toBe(8);
+    // EBD E2: the single 8 months is held as the user's forecast beside Olumi's assumed range, on the team part.
+    expect(w.rows).toHaveLength(1); expect(part(w.graph()).team.observed_state.stated_time.forecast).toBe(8);
     expect(await w.commit(w.commits[0]!)).toMatchObject({ status: 'committed', already_applied: true });
     expect(w.rows).toHaveLength(1);
   });

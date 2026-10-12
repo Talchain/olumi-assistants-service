@@ -19,6 +19,11 @@
  *
  * Paul's hiring lead times ("a tech lead would take at least 3 months…") are E5 (SYS1's start-time door) and are not
  * replayed here: Olumi's own labelled hiring estimates stand until that card is approved.
+ *
+ * ⛔ WHAT THIS IS NOT (PL 6122519782, AIE 6122738619). The first `it` is a SHORTENED fixture: three typed inputs (brief, deadline
+ * sentence, team-time sentence) plus two approvals and a Run, with Paul's late team forecast moved to typed turn 3 and his E5
+ * hiring timings left out. It is a transport check of CEE's doors and words, not the original transcript (see the full-transcript
+ * `it`), not the real numerical engine, and not proof of usable chances.
  */
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -135,8 +140,10 @@ let agentScript: Rec[] = [];
 /** The drafter's scripted output for this test (Paul's event candidate unless a row swaps it). */
 let drafterOutput: () => Rec = () => candidate();
 const providerCalls: string[] = [];
+/** Every request body sent to the Agent model, in order: what the Agent was given to read (its context). */
+const agentBodies: Rec[] = [];
 const apps: FastifyInstance[] = [];
-beforeEach(() => { vi.useFakeTimers({ now: NOW, toFake: ['Date'] }); agentScript = []; providerCalls.length = 0; drafterOutput = () => candidate(); });
+beforeEach(() => { vi.useFakeTimers({ now: NOW, toFake: ['Date'] }); agentScript = []; providerCalls.length = 0; agentBodies.length = 0; drafterOutput = () => candidate(); });
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 async function route(w: ReturnType<typeof world>) {
   vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
@@ -153,6 +160,7 @@ async function route(w: ReturnType<typeof world>) {
       return new Response(JSON.stringify(say(JSON.stringify(drafterOutput()))), { status: 200 });
     }
     providerCalls.push('agent');
+    agentBodies.push(body);
     return new Response(JSON.stringify(agentScript.shift() ?? say('Done.')), { status: 200 });
   }));
   const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
@@ -190,6 +198,11 @@ const readinessAsks = (analysisReady: Rec | undefined): string[] => [
 ].filter((m: unknown): m is string => typeof m === 'string');
 const askContext = { builtOrRan: true, awaitingApproval: false, restingText: '', questionsToggle: false, recentReplies: [] };
 
+/** How many times `ask` is said in one reply: its text (however the composer lays it out), and the questions toggle list. */
+const oneLine = (s: string): string => s.replace(/\s+/g, ' ');
+const timesSaid = (body: Rec, ask: string): number => oneLine(String(body.assistant_text ?? '')).split(oneLine(ask)).length - 1
+  + (Array.isArray(body._agent?.open_questions) ? body._agent.open_questions.filter((q: unknown) => q === ask).length : 0);
+
 /** ONE VOICE: the Run path, the readiness route and the coach put the SAME question while the team part has no level. */
 function expectOneVoice(graph: Rec, label: string): string {
   const coach = decisionInputAsk(graph, askContext);
@@ -207,7 +220,7 @@ function expectOneVoice(graph: Rec, label: string): string {
 }
 
 /** The REAL Run producer over the stored graph; PLoT faked with CEE's own normal approximation of each option's share. */
-async function runOn(w: ReturnType<typeof world>): Promise<Rec> {
+async function runOn(w: ReturnType<typeof world>): Promise<{ result: Rec; request: unknown }> {
   const snapshot = await loadScenarioSnapshotForRunAnalysis(w.sid, 'ebd-run-load', w.store as never);
   const graph = w.read();
   const options = graph.nodes.filter((n: Rec) => n.kind === 'option');
@@ -240,7 +253,7 @@ async function runOn(w: ReturnType<typeof world>): Promise<Rec> {
   const fact = outcome.handler_facts[0]!;
   if (fact.fact_type !== 'run_analysis') throw new Error(`wrong fact_type ${fact.fact_type}`);
   expect(RunAnalysisResultSchema.safeParse(fact.result).success).toBe(true);
-  return fact.result as Rec;
+  return { result: fact.result as Rec, request: (run.mock.calls[0] as unknown[] | undefined)?.[0] };
 }
 
 describe("EBD: Paul's hiring conversation reaches a labelled chance per option by his 3rd typed turn", () => {
@@ -279,14 +292,15 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     seen.push(t3);
     const team = proposed(t3, 'propose_team_time');
     const card = cardOf(t3, team.proposal_id);
-    expect(card).toContain('7 months');
-    expect(card).toContain('7–10.5 months');
-    expect(card).toMatch(/Olumi/);
+    // AIE 6122738619, verbatim: Olumi's provisional [0.5P, 1.5P] for his low confidence IN THIS forecast; his words kept.
+    expect(card).toBe('Use Olumi’s provisional 3.5–10.5-month range for the current team? It uses your 7-month forecast and assumes all times '
+      + 'in the range are equally likely. You described low confidence in that forecast.');
     const t3yes = await turn(approve(t3, team.proposal_id));
     seen.push(t3yes);
     expect(t3yes._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
     const held = w.read(), part = draftedTeamPartOf(held)!;
-    expect(part.team.observed_state).toMatchObject({ stated_time: { quantity: 'months_to_finish', low: 7, high: 10.5, most_likely: 7 } });
+    expect(part.team.observed_state).toMatchObject({ stated_time: { quantity: 'months_to_finish', low: 3.5, high: 10.5, forecast: 7, forecast_origin: 'user',
+      forecast_words: TEAM_QUOTE, range_origin: 'olumi_estimate', range_rule: 'low_confidence' } });
     expect(Number.isFinite(part.team.observed_state.value)).toBe(true);
 
     // ONE readiness authority: the Run, the readiness route and the turn's readback all say ready; the coach asks nothing.
@@ -298,14 +312,31 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
 
     // No "% today" question ever reached the user, on any surface of any turn.
     for (const body of seen) expect(JSON.stringify(body)).not.toMatch(LEVEL_ASK);
+    // ⭐ EACH ASK ONCE PER REPLY (DL, 12 Oct: reply 1 said the deadline question 3×): every question the model asks on any
+    // turn (readiness, the coach) is said at most once in each reply; the deadline ask IS said, once, on the build turn.
+    const asks = [...new Set([ask1, ask2, ...seen.flatMap(b => readinessAsks(b.analysis_ready))])];
+    for (const [k, body] of seen.entries()) for (const ask of asks) expect(timesSaid(body, ask), `turn ${k + 1}: ${ask}`).toBeLessThanOrEqual(1);
+    expect(timesSaid(t1, ask1), String(t1.assistant_text)).toBe(1);
 
-    // ── Run (the Run click): a chance per option, each labelled with what rests on Olumi's estimates.
-    const result = await runOn(w);
+    // ── Run (the Run click). ⛔ A TRANSPORT CHECK, NOT A CAPABILITY (PL 6122519782): PLoT is faked with CEE's own normal
+    // approximation (`normalChance`, `runOn` above), so no figure here is the engine's. The real-engine route takes the
+    // captured stored graph and analysis request (`EBD_CAPTURE_DIR`). Checked here: every option gets a line, attributed in the
+    // AIE's words; the 2-point gate (unchanged) decides point or range, and the capture keeps its decisions as the diagnostic.
+    const { result, request } = await runOn(w);
     const lines = goalChanceScreenLinesForAgent(result, held, true);
+    // For the DL's real-engine route (PL 6122519782): the exact stored graph and the analysis request CEE sent to PLoT.
+    const out = process.env.EBD_CAPTURE_DIR;
+    if (out !== undefined && out !== '') {
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(`${out}/paul-stored-graph.json`, JSON.stringify(held, null, 2));
+      writeFileSync(`${out}/paul-plot-request.json`, JSON.stringify(request, null, 2));
+      writeFileSync(`${out}/paul-run-result-fake-plot.json`, JSON.stringify({ result, lines }, null, 2));
+    }
     expect(lines.map(l => l.option_id).sort()).toEqual(['event_option_1', 'event_option_2', 'event_option_3']);
     for (const l of lines) {
-      expect(l.chance).toContain('chance of launching by 12 April 2027, in this model');
-      expect(l.chance, l.chance).toContain("Olumi's estimate from your 7 months (7–10.5 months)");
+      expect(l.chance).toContain('chance of launching by 12 April 2027');
+      expect(l.chance, l.chance).toMatch(/using your 7-month forecast and Olumi’s assumed 3\.5–10\.5-month range|You gave 7 months; Olumi’s provisional model range is 3\.5–10\.5 months\./);
+      expect(l.chance, l.chance).not.toMatch(/your 3\.5|most likely|which Olumi widened/);
     }
     for (const id of ['event_option_1', 'event_option_2']) {
       expect(lines.find(l => l.option_id === id)!.chance).toContain("Olumi's estimates of hiring time (2–4 months)");
@@ -326,13 +357,106 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
         { label: 'Junior engineers hired', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'engineers', provenance: 'inferred', plausible_max: 20 },
       ], decision_question: brief });
     const w = world(brief), turn = await route(w);
-    const said = 'Olumi modelled this as a deadline question; it set aside "Senior engineers hired", "Junior engineers hired" and "£400k" from your brief, which this forecast doesn\'t use yet.';
+    const said = 'This forecast does not yet use "Senior engineers hired" and "Junior engineers hired" from your brief; they remain as context for the wider productivity question. ' + 'This forecast does not yet use "£400k" from your brief; the model keeps it only in the wording of your decision question.';
     const t1 = await turn({ message: brief }, [call('build_model_from_brief', { brief }), say('I have set up the comparison.')]);
     expect(t1._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
     expect(t1.assistant_text.split(said)).toHaveLength(2);
     expect(t1._answer_shape?.detail).toContain(said);
+    // "remain" only where the SAVED model keeps them (AIE): the two factors are held as context nodes; the figure only in the
+    // decision question's words (its label), never as a figure the model uses.
+    const saved = w.read();
+    for (const label of ['Senior engineers hired', 'Junior engineers hired']) {
+      expect(saved.nodes.find((n: Rec) => n.label === label), label).toMatchObject({ analysis_participation: 'retained_excluded' });
+    }
+    expect(saved.nodes.filter((n: Rec) => JSON.stringify(n).includes('400k')).map((n: Rec) => n.kind)).toEqual(['decision']);
+    expect(JSON.stringify(saved.edges)).not.toContain('400k');
     expect(t1.assistant_text).not.toMatch(/1 more question remains/);
     const t2 = await turn({ message: 'What does the model still need?', agent_session_id: t1._agent.session_id }, [say('The deadline, first.')]);
     expect(JSON.stringify(t2)).not.toContain('set aside');
+  });
+  /**
+   * ⭐ PAUL'S ORIGINAL TRANSCRIPT, ALL 13 OF HIS MESSAGES IN ORDER (PL 6122519782; DL, 12 Oct). Every user message is verbatim
+   * from `v5_conversation_turns` (scenario 4184e877, 08:41–09:14Z), chips sent as chip presses. The Agent's side is SCRIPTED
+   * (one plausible tool call or answer per turn, no provider), so this measures CEE's doors, readiness and retention on his
+   * real sequence, not the Agent's judgement or the real engine. It reports the real interaction count to a licensed result.
+   */
+  it('ORIGINAL TRANSCRIPT: all 13 of Paul\'s messages, then the card and the Run; count the interactions and keep what he said', async () => {
+    const ORIGINAL = {
+      needs: PAUL.needs,
+      blockerPaste: 'Not ready for analysis yet\n\nWhat is "Share today\'s team finishes by the deadline" today, before any option changes it? Without a current level the analysis would treat it as zero. - Please explain this error message to me.',
+      lateRate: "We have a launch deadline in 6 months. At our current rate of development, we are likely to miss that deadline by over a month. We need to bring in additional development capacity or technical leadership to help accelerate the team's progress. We're not sure which to do. What information do I need to make this decision effectively?",
+      workItOut: "I've said it's 6 months from today. Can you not work that out?",
+      yes: 'Yes, that is my deadline.',
+      onboarding: 'What does ‘Developer onboarding burdens team’ do in this decision, and what is it assumed to depend on?',
+      risks: "Suggest risks I haven't considered.",
+      blockerPaste2: 'Not ready for analysis yet\n\nWhat is "Share today\'s team finishes by 12 April 2027" today, before any option changes it? Without a current level the analysis would treat it as zero. - I don\'t understand this. I don\'t understand what you need. Can you not provide an estimate from what I\'ve told you so far? If not, ask me directly what you need.',
+    } as const;
+    const w = world(), turn = await route(w);
+    const log: { n: number; by: 'typed' | 'chip'; said: string; tools: string[]; text: string }[] = [];
+    let session: string | undefined;
+    /** The first interaction after which the model holds his deadline. */
+    let deadlineSavedAt: number | null = null;
+    const noteDeadline = (): void => { if (deadlineSavedAt === null && draftedTeamPartOf(w.read())?.goal.goal_horizon?.deadline === '2027-04-12') deadlineSavedAt = log.length; };
+    const send = async (by: 'typed' | 'chip', said: string, script: Rec[], extra: Rec = {}): Promise<Rec> => {
+      const body = await turn({ message: said, ...(session !== undefined ? { agent_session_id: session } : {}), ...extra }, script);
+      session = body._agent?.session_id ?? session;
+      log.push({ n: log.length + 1, by, said, tools: (body._agent?.tool_calls ?? []).map((c: Rec) => `${c.name}:${c.ok ? 'ok' : c.refusal ?? 'refused'}`), text: String(body.assistant_text) });
+      noteDeadline();
+      const dir = process.env.EBD_CAPTURE_DIR;
+      if (dir !== undefined && dir !== '') (await import('node:fs')).writeFileSync(`${dir}/paul-original-transcript-log.json`, JSON.stringify({ deadlineSavedAt, log }, null, 2));
+      return body;
+    };
+    const chip = (body: Rec, id: string): Rec => { const c = body.suggested_actions.find((a: Rec) => a.id === id); return c === undefined ? {} : { source: 'chip_click', chip: { id: c.id } }; };
+    const deadlineAsk = chanceGoalDeadlineAsk('next feature launch'), teamAsk = 'How long would next feature launch take with the team you have now?';
+
+    const t1 = await send('typed', PAUL.brief, [call('build_model_from_brief', { brief: PAUL.brief }), say('I have set up the comparison.')]);
+    const t2 = await send('chip', ORIGINAL.needs, [say(deadlineAsk)], chip(t1, 'agent-suggest-what-it-needs'));
+    const t3 = await send('typed', PAUL.deadline, [call('propose_goal_deadline', { deadline_words: DEADLINE_WORDS, rationale: PAUL.deadline }), say('Please confirm the date.')]);
+    proposed(t3, 'propose_goal_deadline');
+    await send('typed', ORIGINAL.blockerPaste, [say('That was the old question. The deadline card above is the one step: 12 April 2027.')]);
+    const t5 = await send('typed', ORIGINAL.lateRate, [call('propose_goal_deadline', { deadline_words: 'a launch deadline in 6 months', rationale: ORIGINAL.lateRate }), say('Please confirm the date.')]);
+    const t6 = await send('typed', ORIGINAL.workItOut, [say('Yes: 6 months from today is 12 April 2027. Please confirm it.')]);
+    // His "Yes, that is my deadline." is the card's Yes chip (a durable row stores a chip's text as user_message): pressed on the
+    // latest offer of the held deadline card.
+    const offered = [t6, t5, t3].flatMap(b => (b.suggested_actions ?? []).filter((a: Rec) => typeof a.id === 'string' && a.id.startsWith(approvalChipIdFor(''))).map((a: Rec) => ({ b, a })))[0];
+    expect(offered, 'a Yes chip for the deadline card').toBeDefined();
+    const t7 = await send('chip', ORIGINAL.yes, [], { source: 'chip_click', chip: { id: offered!.a.id }, message: offered!.a.message });
+    const t8 = await send('chip', ORIGINAL.needs, [say(teamAsk)], chip(t7, 'agent-suggest-what-it-needs'));
+    await send('typed', PAUL.hiring, [say('I will use those hiring timings when the hiring card is ready; first, how long would the launch take with the team you have now?')]);
+    await send('typed', ORIGINAL.onboarding, [say('It is a risk Olumi suggested; it is not connected to the forecast yet.')]);
+    await send('chip', ORIGINAL.risks, [say('Two more risks to consider: key-person dependency and scope growth.')], chip(t8, 'agent-next-suggest-risks'));
+    await send('typed', ORIGINAL.blockerPaste2, [say(teamAsk)]);
+    const t13 = await send('typed', PAUL.teamTime, [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('Please confirm.')]);
+    const team = proposed(t13, 'propose_team_time');
+    const t14 = await turn(approve(t13, team.proposal_id));
+    log.push({ n: 14, by: 'chip', said: 'Yes (team-time card)', tools: (t14._agent?.tool_calls ?? []).map((c: Rec) => `${c.name}:${c.ok ? 'ok' : 'refused'}`), text: String(t14.assistant_text) });
+    const held = w.read();
+    expect(resolveRunAdmission(held).willProceed).toBe(true);
+    const { result } = await runOn(w);
+    const lines = goalChanceScreenLinesForAgent(result, held, true);
+    const interactionsToResult = log.length + 1; // + the Run press
+
+    // What he said is kept: the six-month goal on the model, his forecast with its qualifier on the team part, and the
+    // 25%/three-month condition and his hiring qualifier in what the Agent reads on his last turn (the model holds neither).
+    expect(draftedTeamPartOf(held)!.goal.goal_horizon).toEqual({ deadline: '2027-04-12' });
+    expect(draftedTeamPartOf(held)!.team.observed_state.stated_time).toMatchObject({ forecast: 7, forecast_words: TEAM_QUOTE, range_rule: 'low_confidence' });
+    const lastContext = JSON.stringify(agentBodies[agentBodies.length - 1] ?? {});
+    const kept = {
+      productivity_25pct_3months: lastContext.includes("increase our developer's output by 25%, in the next three months"),
+      six_month_deadline_words: lastContext.includes('launch deadline in six months time'),
+      low_confidence_words: lastContext.includes('but I have low confidence in this because they keep missing deadlines'),
+      hiring_qualifier_words: lastContext.includes("I would think, but I'm not sure, that a tech lead would take at least 3 months"),
+    };
+    const out = process.env.EBD_CAPTURE_DIR;
+    if (out !== undefined && out !== '') {
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(`${out}/paul-original-transcript.json`, JSON.stringify({ deadline_saved_at_interaction: deadlineSavedAt,
+        interactions_to_result: interactionsToResult, kept, log, lines }, null, 2));
+    }
+    expect(lines.map(l => l.option_id).sort()).toEqual(['event_option_1', 'event_option_2', 'event_option_3']);
+    expect(deadlineSavedAt).toBe(7);
+    expect(interactionsToResult).toBe(15);
+    expect(kept).toEqual({ productivity_25pct_3months: true, six_month_deadline_words: true, low_confidence_words: true, hiring_qualifier_words: true });
+    for (const body of [t1, t2]) expect(JSON.stringify(body)).not.toMatch(LEVEL_ASK);
   });
 });

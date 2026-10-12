@@ -3910,17 +3910,19 @@ export function createAgentCapabilities(
       const stated = dating?.required !== undefined && datedWeekday?.weekday !== dating.required ? null
         : readStatedDeadline(words, today, { ...(datedWeekday !== null ? { lastWeekday: datedWeekday } : {}), relativeWeekdays: reference !== undefined });
       if (stated === null) {
+        const deadlineAsk = chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
+          ?? (g.nodes.filter((n) => n.kind === 'goal').length === 1 ? g.nodes.find((n) => n.kind === 'goal')!.label : 'your goal'));
         return { ok: false, mutated: false, refusal: 'deadline_not_placed',
+          ...(named !== null ? {} : { deadline_ask: deadlineAsk }),
           detail: named !== null
             ? `Olumi cannot tell which date "last ${named}" in "${words}" is without guessing, so nothing was prepared. `
               + 'Ask which date the user means. Once they explicitly date that weekday, call propose_goal_deadline with the original deadline_words. '
               + 'Never invent or offer a start date.'
-            // EBD E3 (Paul, 12 Oct: refused twice, then "Can you not work that out?"): a direct question that invites a time
-            // from today, which Olumi then places — not a ban that left the Agent asking for an exact calendar date.
-            : `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
-              + `Ask the user directly: "${chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
-                ?? (g.nodes.filter((n) => n.kind === 'goal').length === 1 ? g.nodes.find((n) => n.kind === 'goal')!.label : 'your goal'))}" `
-              + 'Then call propose_goal_deadline with the words they reply with; Olumi works out the date from them.' };
+            // EBD E3 (Paul, 12 Oct: refused twice, then "Can you not work that out?"; AIE 6122738619, verbatim): re-read what the
+            // user said first, then at most the ONE question in `deadline_ask`, never a restatement of a date already held.
+            : 'No deadline change was prepared because the quoted words do not resolve to a calendar date against the recorded reference date. '
+              + "Re-read the user's deadline words and recorded reference first. If they still do not identify a date, ask the one question in deadline_ask, "
+              + 'then call propose_goal_deadline with their answer. Do not ask them to restate a date already resolved and held.' };
       }
       const goals = g.nodes.filter((n) => n.kind === 'goal');
       if (goals.length !== 1) {
@@ -5132,7 +5134,8 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
-        detail: 'The deadline is not held yet, so nothing was prepared. Ask the user for the deadline first; once they confirm it, call propose_team_time again with the same quote.' };
+        // AIE 6122738619, verbatim.
+        detail: 'No team-time change was prepared because the deadline is not confirmed. Keep the supplied team-time quote; resolve and confirm the deadline, then prepare the team time from the same verified human statement.' };
       const read = teamTimeReadDigest(g.raw);
       const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
         reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}) };

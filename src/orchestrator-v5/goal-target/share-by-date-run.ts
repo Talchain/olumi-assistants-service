@@ -120,15 +120,37 @@ export function shareGateForOption(graph: unknown, optionId: string, displayedPo
   return gate(parts, share.threshold_raw / 100, displayedPoint, rounding);
 }
 
-/** Per-option words: the active capacity's Olumi estimates and, for every option, Olumi's range from the user's single time. */
-export function shareOptionEstimateWords(graph: unknown, optionId: string): string {
+/**
+ * EBD E2: the team's time when its range is Olumi's assumption from the user's single forecast (`range_origin`), else null.
+ * The ONE reader every sentence about that range uses, so none calls Olumi's range the user's (AIE 6122738619).
+ */
+export function olumiAssumedTeamRange(graph: unknown): { readonly forecast: number; readonly low: number; readonly high: number } | null {
+  const share = shareByDateGoalForChanceOf(graph);
+  const stated = share === null ? undefined : (graph as Rec).nodes.find((n: Rec) => n.id === share.team_part_id)?.observed_state?.stated_time;
+  return stated?.range_origin === 'olumi_estimate' && [stated.forecast, stated.low, stated.high].every(v => typeof v === 'number' && Number.isFinite(v))
+    ? { forecast: stated.forecast, low: stated.low, high: stated.high } : null;
+}
+const months = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+/** AIE 6122738619, verbatim: the provisional chance attribution, after "using ". */
+export function olumiAssumedRangeAttribution(t: { readonly forecast: number; readonly low: number; readonly high: number }): string {
+  return `your ${months(t.forecast)}-month forecast and Olumi’s assumed ${months(t.low)}–${months(t.high)}-month range`;
+}
+/** AIE 6122738619, verbatim: the range line's sentence. */
+export function olumiAssumedRangeLine(t: { readonly forecast: number; readonly low: number; readonly high: number }): string {
+  return `You gave ${months(t.forecast)} months; Olumi’s provisional model range is ${months(t.low)}–${months(t.high)} months.`;
+}
+
+/**
+ * Per-option words: the active capacity's Olumi estimates and, for every option, the user's forecast with Olumi's assumed range
+ * (`withoutTeam`: the range line, which says that range in its own sentence).
+ */
+export function shareOptionEstimateWords(graph: unknown, optionId: string, opts: { readonly withoutTeam?: boolean } = {}): string {
   const share = shareByDateGoalForChanceOf(graph), parts = sharePartsForOption(graph, optionId);
   if (share === null || parts === null) return '';
   const number = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-  // EBD E2: a team time held as Olumi's estimate from the user's single figure is labelled as Olumi's on every option.
-  const stated = (graph as Rec).nodes.find((n: Rec) => n.id === share.team_part_id)?.observed_state?.stated_time;
-  const team = stated?.range_origin === 'olumi_estimate' && typeof stated.most_likely === 'number'
-    ? `Olumi's estimate from your ${number(stated.most_likely)} months (${number(stated.low)}–${number(stated.high)} months)` : '';
+  // EBD E2: a team time held as Olumi's assumption from the user's single forecast is attributed as that on every option.
+  const assumed = opts.withoutTeam === true ? null : olumiAssumedTeamRange(graph);
+  const team = assumed === null ? '' : olumiAssumedRangeAttribution(assumed);
   const extra = parts.extra;
   if (extra === undefined) return team === '' ? '' : `using ${team}`;
   const lead = extra.leadLow === extra.leadHigh ? number(extra.leadLow) : `${number(extra.leadLow)}–${number(extra.leadHigh)}`;

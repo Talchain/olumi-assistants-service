@@ -9,7 +9,8 @@ import {
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
 import { isEventShareForecast, missingEventCapacityOptionIds, unresolvedEventOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
-import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption, sharePartsForOption } from './share-by-date-run.js';
+import { olumiAssumedRangeAttribution, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption,
+  sharePartsForOption } from './share-by-date-run.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -208,6 +209,8 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
       from: share.team_part_id, to: goalId as string, among: 'all' };
   }
   if (withheld.size === 0) return inputScopedEnvelope;
+  // EBD E2 (AIE 6122738619): a range Olumi assumed from the user's single forecast is attributed as that, never as their figures.
+  const assumed = olumiAssumedTeamRange(graph);
   let out = inputScopedEnvelope;
   for (const shownAsRange of [false, true]) for (const usesAddedCapacity of [false, true]) {
     const ids = [...withheld].filter(id => Object.hasOwn(ranges, id) === shownAsRange && addedCapacity.has(id) === usesAddedCapacity);
@@ -215,7 +218,9 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     out = withholdOptionGoalFigures(out, new Set(ids), {
       code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ids,
       message: 'Not shown as a single figure. The approximation of '
-        + (usesAddedCapacity ? "your team's time together with Olumi's hiring-time range and pace estimate"
+        + (assumed !== null
+          ? `${olumiAssumedRangeAttribution(assumed)}${usesAddedCapacity ? " together with Olumi's hiring-time range and pace estimate" : ''}`
+          : usesAddedCapacity ? "your team's time together with Olumi's hiring-time range and pace estimate"
           : "your team's stated time or pace range")
         + ' does not support one figure here, '
         + (shownAsRange ? 'so this chance is shown as a range.' : 'so this chance is not shown.'),
@@ -223,7 +228,8 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
   }
   if (Object.keys(ranges).length > 0) out = appendInferenceWarning(out, {
     code: GOAL_CHANCE_RANGE, severity: 'info', option_ids: Object.keys(ranges), range_by_option: ranges,
-    message: 'Each chance runs from the slow end of your time estimate to the fast end.',
+    message: assumed === null ? 'Each chance runs from the slow end of your time estimate to the fast end.'
+      : `Each chance runs from the slow end of the range to the fast end. ${olumiAssumedRangeLine(assumed)}`,
     target: { comparator: 'at_least', value: share.threshold_raw, unit: share.goal.goal_threshold_unit, by_date: share.deadline },
   });
   return out;

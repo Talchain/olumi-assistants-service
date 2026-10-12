@@ -68,32 +68,47 @@ export function teamTimesInQuote(quote: unknown): { low_months: number; high_mon
 }
 
 /**
- * ⭐ EBD E2 (a) — THE ONE WIDENING RULE, FOR AIE REVIEW. A single time (Paul's "7 months") is the user's most likely time,
- * and the chance needs a soonest and latest time. Olumi proposes the range from that figure P by ONE rule, shown on the
- * card as "Olumi's estimate from your P months", never as the user's:
- *   · the user expressed doubt about the time in the same sentence (`TEAM_TIME_DOUBT`): P to 1.5 × P;
- *   · otherwise: 0.85 × P to 1.25 × P.
- * Each end is rounded to 0.1 month (0.01 month when P is under a month). The user approves or changes it on the card.
+ * ⭐ EBD E2 (a) — THE MODEL RANGE FROM A SINGLE FORECAST (AIE 6121986101 / 6122738619, PL 6122519782; settled 12 Oct). A single
+ * time (Paul's "7 months") is the user's FORECAST P, a human point kept with their words; it is never called their "most
+ * likely" time. The chance needs bounds, so Olumi assumes a provisional model range from P by ONE convention, labelled as
+ * Olumi's on the card and on every result line, with every time in it equally likely:
+ *   · low confidence positively bound to that forecast in the same sentence (`TEAM_TIME_LOW_CONFIDENCE`): 0.5 × P to 1.5 × P;
+ *   · otherwise: 0.75 × P to 1.25 × P.
+ * These widths are an explicitly assumed convention, not calibrated uncertainty. Each end is rounded to 0.1 month (0.01
+ * month when P is under a month). The user approves or changes the range on the card.
  */
-export const TEAM_TIME_WIDENING = { doubt: { low: 1, high: 1.5 }, default: { low: 0.85, high: 1.25 } } as const;
-export const TEAM_TIME_DOUBT = /\b(?:low|little|limited|not\s+much|no)\s+confidence\b|\bnot\s+(?:very\s+|that\s+|so\s+|really\s+|fully\s+|too\s+)?(?:confident|sure|certain)\b|\bunsure\b|\buncertain\b|\bsceptical\b|\bskeptical\b|(?<!\bno\s)(?<!\bwithout\s)(?<!\blittle\s)\bdoubt(?:s|ful)?\b|\bkeeps?\s+(?:missing|slipping)\b|\b(?:over-?)?optimistic\b/iu;
-export type TeamTimeWidening = keyof typeof TEAM_TIME_WIDENING;
-export function widenedTeamTime(p: number, widening: TeamTimeWidening): { low_months: number; high_months: number } {
-  const f = TEAM_TIME_WIDENING[widening], step = p >= 1 ? 10 : 100;
-  // Factors as whole hundredths, so 13 × 0.85 = 11.05 rounds to 11.1 (binary 0.85 would give 11.0).
+export const TEAM_TIME_WIDENING = { low_confidence: { low: 0.5, high: 1.5 }, default: { low: 0.75, high: 1.25 } } as const;
+/**
+ * Low confidence POSITIVELY BOUND to the forecast: a confidence statement whose object is that forecast ("low confidence in
+ * this", "not sure about that estimate", "I doubt it"). A keyword elsewhere in the sentence ("they keep missing deadlines",
+ * "no doubt") is not confidence attribution.
+ */
+const FORECAST_OBJECT = String.raw`(?:this|that|it|these|those|them|(?:the|their|this|that)\s+(?:estimate|forecast|figure|number|time|timing|date)s?)\b`;
+export const TEAM_TIME_LOW_CONFIDENCE = new RegExp(String.raw`\b(?:low|little|limited|not\s+much|no)\s+confidence\s+(?:in|about|on)\s+${FORECAST_OBJECT}`
+  + String.raw`|\bnot\s+(?:very\s+|that\s+|so\s+|really\s+|fully\s+|too\s+)?(?:confident|sure|certain)\s+(?:in|about|of)\s+${FORECAST_OBJECT}`
+  + String.raw`|\b(?:unsure|uncertain|sceptical|skeptical|doubtful)\s+(?:about|of)\s+${FORECAST_OBJECT}`
+  + String.raw`|\bI\s+doubt\s+${FORECAST_OBJECT}|\b(?:don['’]t|do\s+not)\s+(?:trust|believe)\s+${FORECAST_OBJECT}`, 'iu');
+export type TeamTimeRangeRule = keyof typeof TEAM_TIME_WIDENING;
+export function widenedTeamTime(p: number, rule: TeamTimeRangeRule): { low_months: number; high_months: number } {
+  const f = TEAM_TIME_WIDENING[rule], step = p >= 1 ? 10 : 100;
+  // Factors as whole hundredths, so binary floating point never moves a rounded end (13 × 0.75 = 9.75 → 9.8).
   const end = (factor: number): number => Math.round(p * step * Math.round(factor * 100) / 100) / step;
   return { low_months: end(f.low), high_months: end(f.high) };
 }
 
-/** A time the user stated, bound to their words; a single time carries Olumi's range and both authorships. */
+/** A time the user stated, bound to their words; a single forecast carries Olumi's assumed range, each with its own origin. */
 export interface BoundTeamTime {
   readonly low_months: number;
   readonly high_months: number;
-  /** The user's own single time, when the range is Olumi's estimate from it. */
-  readonly most_likely_months?: number;
+  /** The user's own single forecast P (human), when the range is Olumi's assumption from it. Never called "most likely". */
+  readonly forecast_months?: number;
+  /** The user's words for it, qualifier included, as they typed them. */
+  readonly forecast_words?: string;
   readonly range_origin?: 'olumi_estimate';
-  readonly widening?: TeamTimeWidening;
+  readonly range_rule?: TeamTimeRangeRule;
 }
+/** AIE 6122738619, verbatim: the Agent re-reads what the user already said, and asks only if the forecast is missing or unclear. */
+export const TEAM_TIME_NOT_STATED = "No change was prepared. Re-read the verified human messages and quote the words that give the current team's time to finish. Ask for that forecast only if the user has not supplied it or its meaning is still ambiguous.";
 const plainWords = (t: string): string => t.replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/[ \t]+/g, ' ').trim();
 /** The sentence(s) of `text` that hold `quote` (never split at a decimal point). */
 function sentencesHolding(text: string, quote: string): string {
@@ -113,18 +128,18 @@ export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonl
   const source = [now, typeof texts.conversation === 'string' ? texts.conversation : '']
     .map(plainWords).find(t => quote !== '' && quoteSpansIn(t, quote).length > 0);
   if (source === undefined) {
-    return { kind: 'refused', detail: 'Nothing was prepared: `quote` must be the user\u2019s own words stating the time, copied exactly from one of their messages.' };
+    return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
   }
   const low = Number(args?.low_months), high = Number(args?.high_months);
   const stated = Number.isFinite(low) && Number.isFinite(high)
     ? teamTimesInQuote(quote).find(r => teamTimeArgumentsMatch(quote, { low_months: low, high_months: high }, r)) : undefined;
   if (stated === undefined) {
-    return { kind: 'refused', detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months".' };
+    return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
   }
   if (stated.low_months !== stated.high_months) return { kind: 'bound', time: stated, quote: quoted };
-  const widening: TeamTimeWidening = TEAM_TIME_DOUBT.test(sentencesHolding(source, quote)) ? 'doubt' : 'default';
-  return { kind: 'bound', quote: quoted, time: { ...widenedTeamTime(stated.low_months, widening),
-    most_likely_months: stated.low_months, range_origin: 'olumi_estimate', widening } };
+  const rule: TeamTimeRangeRule = TEAM_TIME_LOW_CONFIDENCE.test(sentencesHolding(source, quote)) ? 'low_confidence' : 'default';
+  return { kind: 'bound', quote: quoted, time: { ...widenedTeamTime(stated.low_months, rule),
+    forecast_months: stated.low_months, forecast_words: quoted, range_origin: 'olumi_estimate', range_rule: rule } };
 }
 
 export interface ApprovedTeamTime {
@@ -134,10 +149,11 @@ export interface ApprovedTeamTime {
   readonly high_months: number;
   readonly deadline: string;
   readonly reference_date: string;
-  /** EBD E2: the user's single time when the range is Olumi's estimate from it (`bindTeamTimeQuote`). */
-  readonly most_likely_months?: number;
+  /** EBD E2: the user's single forecast and their words, when the range is Olumi's assumption from it (`bindTeamTimeQuote`). */
+  readonly forecast_months?: number;
+  readonly forecast_words?: string;
   readonly range_origin?: 'olumi_estimate';
-  readonly widening?: TeamTimeWidening;
+  readonly range_rule?: TeamTimeRangeRule;
   /** EBD: what the card read (`teamTimeReadDigest`) — its approval precondition, field-scoped. */
   readonly read_digest?: string;
 }
@@ -169,25 +185,36 @@ export function teamObservedState(a: ApprovedTeamTime, unit: string): Rec {
   return { value: m.mean, std: m.sd, raw_value: m.mean * 100, unit, cap: 100, source: 'cee_inference',
     stated_time: { quantity: 'months_to_finish', low: a.low_months, high: a.high_months, unit: 'months',
       deadline: a.deadline, reference_date: a.reference_date,
-      // EBD E2: human-origin most likely time, AI-origin range. Never read back as the user's range.
-      ...(a.most_likely_months !== undefined && a.range_origin === 'olumi_estimate' ? {
-        most_likely: a.most_likely_months, most_likely_origin: 'user', range_origin: 'olumi_estimate', widening: a.widening } : {}) } };
+      // EBD E2: the human forecast and its words (qualifier kept), apart from Olumi's assumed range. Never read back as theirs.
+      ...(a.forecast_months !== undefined && a.range_origin === 'olumi_estimate' ? {
+        forecast: a.forecast_months, forecast_origin: 'user', ...(a.forecast_words !== undefined ? { forecast_words: a.forecast_words } : {}),
+        range_origin: 'olumi_estimate', range_rule: a.range_rule } : {}) } };
 }
 /** Single estimates live on the held definition carrier, outside modelled numeric observed_state. */
 export function teamTimeIsHeld(team: Rec, a: ApprovedTeamTime, unit: string, graph: unknown): boolean {
   return isDeepStrictEqual(a.low_months === a.high_months ? eventShareCarrierOf(graph)?.provenance.share_by_date.stated_time : team.observed_state, teamObservedState(a, unit));
 }
-export function teamTimeCard(a: ApprovedTeamTime, _unit: string, deliverable: string): string {
-  if (a.low_months === a.high_months) return `Use about ${a.low_months} months as your most likely time with today's team? The chance stays withheld until you give the soonest and latest times.`;
-  const time = a.low_months === a.high_months ? `${a.low_months}` : `${a.low_months}–${a.high_months}`;
-  const pct = displayedPctAt(cappedTeamShareMean(timeBetween(a.reference_date, a.deadline, 'months'), a.low_months, a.high_months), 'whole');
-  const by = `By ${sayDate(a.deadline)} that is about ${pct}% of ${deliverable}.`;
-  // EBD E2: ONE card for a single time — the user's figure, and Olumi's range from it, labelled as Olumi's (AIE review).
-  if (a.most_likely_months !== undefined && a.range_origin === 'olumi_estimate') {
-    return `Use Olumi's ${time} months for today's team? It is Olumi's estimate from your ${a.most_likely_months} months, `
-      + (a.widening === 'doubt' ? 'allowing for it to run later because you have doubts about it. ' : 'allowing for it to run earlier or later. ') + by;
+/**
+ * The team-time card as its question and the explanation after it, kept apart: the writer's fact summary is the question,
+ * its confirmation the explanation (never a split of the joined text).
+ */
+export function teamTimeCardParts(a: ApprovedTeamTime, _unit: string, deliverable: string): { readonly question: string; readonly explanation: string } {
+  if (a.low_months === a.high_months) return { question: `Use about ${a.low_months} months as your most likely time with today's team?`,
+    explanation: 'The chance stays withheld until you give the soonest and latest times.' };
+  // ⭐ EBD E2 (AIE 6122738619, verbatim): ONE card for a single forecast, Olumi's provisional range labelled as Olumi's, with
+  // the human qualifier said back; no derived progress headline on an input-approval card.
+  if (a.forecast_months !== undefined && a.range_origin === 'olumi_estimate') {
+    return { question: `Use Olumi’s provisional ${a.low_months}–${a.high_months}-month range for the current team?`,
+      explanation: `It uses your ${a.forecast_months}-month forecast and assumes all times in the range are equally likely.`
+        + (a.range_rule === 'low_confidence' ? ' You described low confidence in that forecast.' : '') };
   }
-  return `Use ${time} months for today's team? ${by}`;
+  const pct = displayedPctAt(cappedTeamShareMean(timeBetween(a.reference_date, a.deadline, 'months'), a.low_months, a.high_months), 'whole');
+  return { question: `Use ${a.low_months}–${a.high_months} months for today's team?`,
+    explanation: `By ${sayDate(a.deadline)} that is about ${pct}% of ${deliverable}.` };
+}
+export function teamTimeCard(a: ApprovedTeamTime, unit: string, deliverable: string): string {
+  const { question, explanation } = teamTimeCardParts(a, unit, deliverable);
+  return `${question} ${explanation}`;
 }
 export type TeamTimeEditResult =
   | { kind: 'mutated'; mutatedGraph: Rec; handlerFacts: readonly HandlerFact[]; confirmation: string }
@@ -207,7 +234,7 @@ export function applyTeamShareEdit(graph: unknown, a: ApprovedTeamTime, expected
   const out = structuredClone(graph) as Rec;
   const team = out.nodes.find((n: Rec) => n.id === a.team_id);
   const carrier = eventShareCarrierOf(out)!.provenance.share_by_date;
-  // EBD E2 (b): a single most likely time (a card approved before the widening rule) is held on the carrier and never
+  // EBD E2 (b): a legacy single time (a card approved before the range convention) is held on the carrier and never
   // deletes the team part's level; a range is the level.
   if (a.low_months === a.high_months) carrier.stated_time = os;
   else { team.observed_state = os; delete carrier.stated_time; }
@@ -215,8 +242,8 @@ export function applyTeamShareEdit(graph: unknown, a: ApprovedTeamTime, expected
     result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1,
       affected_entities: [{ kind: 'factor', label: part.team.label.slice(0, 120) }],
       graph_hash_before: expectedHash, graph_hash_after: computeAnalysisAffectingGraphHash(out as never),
-      safe_summary: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable).split('?')[0], impact: 'low', rerun_recommended: true } });
-  return { kind: 'mutated', mutatedGraph: out, handlerFacts: [fact as HandlerFact], confirmation: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable).split('? ')[1]! };
+      safe_summary: teamTimeCardParts(a, String(part.goal.goal_threshold_unit), part.deliverable).question.replace(/\?$/, ''), impact: 'low', rerun_recommended: true } });
+  return { kind: 'mutated', mutatedGraph: out, handlerFacts: [fact as HandlerFact], confirmation: teamTimeCardParts(a, String(part.goal.goal_threshold_unit), part.deliverable).explanation };
 }
 /** Only the one part's observed state can differ. */
 export function teamSharePostimageIsScoped(before: unknown, after: unknown, id: string): boolean {

@@ -365,19 +365,27 @@ function contextAskOf(r: ToolResult | undefined): string | null {
  */
 const OPEN_QUESTIONS_SHOWN = 2;
 
-/** The questions the build parked instead of modelling — what to examine next, not answers. */
-function openQuestionsLine(r: ToolResult): string {
+/**
+ * The questions the build parked instead of modelling — what to examine next, not answers.
+ *
+ * ⭐ EBD (DL, 12 Oct): EACH ASK ONCE PER REPLY. A question this reply already says before this line (`alreadySaid`: the Agent's
+ * words and the owed lines, e.g. the first analysis's blocked line, which is readiness's ask) is not shown again; the count
+ * of the rest is unchanged. Paul's first reply said the deadline question there, here, and in the readiness line.
+ */
+function openQuestionsLine(r: ToolResult, alreadySaid = ''): string {
   const qs = openQuestionsForReply(r);
   if (qs.length === 0) return '';
   // Each question kept whole, so it still reads as a question the team can take up.
   const next = typeof r.displayed_next_question === 'string' ? r.displayed_next_question : null;
   const shownCount = next === null ? OPEN_QUESTIONS_SHOWN : 1;
-  const shown = (next === null ? qs.slice(0, shownCount) : [next]).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
+  const shownQs = (next === null ? qs.slice(0, shownCount) : [next]).filter((q) => alreadySaid === '' || !alreadySaid.includes(q.trim()));
+  const shown = shownQs.map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
   const rest = qs.length - shownCount;
   // DL #70 5851835121: no promise the Agent does not keep ("Ask me for the other N" — asked, it summarised). The count
   // names the omitted items even if an earlier sentence is dropped; the disclosure lists all (`_agent.open_questions`).
   const more = rest > 0 ? ` ${rest} more question${rest === 1 ? ' remains' : 's remain'} unresolved.` : '';
-  return ` Questions this model does not answer yet: ${shown}${more}`;
+  if (shown === '' && more === '') return '';
+  return ` Questions this model does not answer yet: ${shown === '' ? more.trim() : `${shown}${more}`}`;
 }
 
 /** Every question a build parked, in the producer's order. */
@@ -426,7 +434,7 @@ export function partialRangeLevelsWarning(ranges: readonly { factor: string; ran
 }
 
 /** One authoritative line per write the turn attempted. */
-function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
+function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, alreadySaid = ''): string {
   const partialMessage = r.mutated === true ? PARTIAL_WRITE_MESSAGES[String(r.outcome)] : undefined;
   if (isPartialWriteResult(r)) {
     if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
@@ -459,7 +467,7 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
       const approval = pending === null ? '' : pending === 'figures'
         ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
         : 'What I proposed above is not made until you approve it.';
-      return [approval, leftOutLine(r), contextFactorsLine(r), openQuestionsLine(r)]
+      return [approval, leftOutLine(r), contextFactorsLine(r), openQuestionsLine(r, alreadySaid)]
         .map((line) => line.trim()).filter((line) => line !== '').join(' ');
     }
     if (r.refusal === 'event_goal_unadmitted') {
@@ -522,7 +530,11 @@ export function narrateWriteOutcome(
   toolCalls: readonly { name: string }[],
   toolResults: readonly ToolResult[],
   /** False for a guest, whose saves are never versioned: a save without a version is then not an anomaly. */
-  opts: { readonly versioned?: boolean } = {},
+  opts: {
+    readonly versioned?: boolean;
+    /** EBD (DL, 12 Oct): what the reply already says before the status line; a question in it is not shown again. */
+    readonly alreadySaid?: string;
+  } = {},
 ): WriteOutcomeNarration {
   const writes = toolCalls
     .map((c, i) => ({ name: c.name, result: toolResults[i] }))
@@ -571,7 +583,7 @@ export function narrateWriteOutcome(
   }
 
   const pending = awaitingApproval(toolCalls, toolResults);
-  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true));
+  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true, opts.alreadySaid ?? ''));
   const status = lines.length > 0
     ? lines.map((line) => line.trim()).filter((line) => line !== '').join(' ') || null
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
