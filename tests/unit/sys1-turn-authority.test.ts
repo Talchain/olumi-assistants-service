@@ -396,7 +396,7 @@ describe('S1T2 residual Responses sites', () => {
   };
   it.each(residualSites)('%s happy-path bytes equal the BEFORE golden', async site => {
     const { response } = await drive(site);
-    // ONE structured call per build: E6 (in the B combine) parks the draft-time widening call, so only the drafter's is sent.
+    // ONE structured call per build: E6 (Batch R; also in the B combine) parks the draft-time widening call, so only the drafter's is sent.
     expect(response.statusCode, response.body).toBe(200); expect(attempts).toHaveLength(1); expect(consumed).toHaveLength(attempts.length);
     const proof = attempts.map((bytes, i) => {
       const body = JSON.parse(bytes);

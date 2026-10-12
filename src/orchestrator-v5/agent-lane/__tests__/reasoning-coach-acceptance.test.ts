@@ -39,8 +39,11 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
     // R2 re-pin: claim predicates, duration exemption, kind-correct fallback and licensed control; historical fixtures stay intact.
     // Q4 DL re-pin: one bounded contrary-change class predicate, clause-scoped uncertainty and metadata-only drop logs.
-    // E6 DL re-pin (12 Oct, Paul's test): cooldown_default counts a SHOWN row (status offered), and a shown item quiets its item row; no case or other constant changes.
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('aafa47a147f745d3b3b56a6c22a9a3153d711e47ad67539a0a7f686f93e81298');
+    // E6 DL re-pin (12 Oct, Paul's test): cooldown_default counts a SHOWN row (status offered); no case or other constant changes.
+    // Batch R: staging's bytes plus only the E6 cooldown_default line (E6 on B-on-C pinned aafa47a1's different base).
+    // Batch R round 2 (independent check P1): the line no longer claims a shown item quiets its whole item row.
+    // Batch B (merge of staging after R, 12 Oct): R's bytes (354e8e0a) plus ONLY SYS2 G1's W4/W6 why_now corrections (dfc52dc8).
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('d97b918fda14a15b534ff545a6e9ca892ea1be01e5c7beb567d6011e71b8a58a');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('0ed74500de3ebb72683ba212e1a48db0c080896c6ae7044256f96d4b72156df2');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
