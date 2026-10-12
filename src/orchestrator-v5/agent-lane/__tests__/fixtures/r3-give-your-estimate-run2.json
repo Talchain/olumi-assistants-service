@@ -1,0 +1,2703 @@
+{
+ "_source": "score run 2, live/runs/2026-10-12T144844Z (served CEE aadcf897): response_body of hiring/turns/02.json and marketing/turns/02.json, trimmed to the fields the next-step offer reads; bytes otherwise unchanged",
+ "cases": {
+  "hiring-02": {
+   "assistant_text": "The connections exist in the data; this points towards a display issue, though I can’t confirm a UI fault.\n\n• Could you share a screenshot of the canvas so we can distinguish hidden or faint links from missing rendering?\n\n- Eight causal connections are stored.\n- No factors, risks or outcomes are unconnected.\n\nFor example, ‘Leadership coverage’ connects to both ‘Productivity change’ and ‘Code quality degradation’; both then connect to ‘Launch completion’.\n\nFive links still lack effect sizing. That is a modelling gap—their strength is unknown—not missing connection data.\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>",
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "ref": "D1",
+      "kind": "decision",
+      "label": "Should I hire a Tech lead or two developers to increase productivity by at…",
+      "provenance": "from_brief",
+      "description": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality?"
+     },
+     {
+      "id": "launch_completion",
+      "ref": "G1",
+      "kind": "goal",
+      "label": "Launch completion",
+      "provenance": "ai_inferred",
+      "goal_threshold_unit": "%",
+      "goal_threshold_frame": "level",
+      "goal_deadline_as_stated": "three months"
+     },
+     {
+      "id": "hire_a_tech_lead",
+      "ref": "O1",
+      "kind": "option",
+      "label": "Hire a Tech lead",
+      "provenance": "from_brief",
+      "interventions": {
+       "new_tech_leads": {
+        "unit": "hires",
+        "value": 0.2,
+        "source": "cee_hypothesis",
+        "raw_value": 1,
+        "target_match": {
+         "node_id": "new_tech_leads",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "total_hiring_spend": {
+        "unit": "GBP",
+        "value": 0.4,
+        "source": "cee_hypothesis",
+        "raw_value": 120000,
+        "target_match": {
+         "node_id": "total_hiring_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "hire_two_developers",
+      "ref": "O2",
+      "kind": "option",
+      "label": "Hire two developers",
+      "provenance": "from_brief",
+      "interventions": {
+       "total_hiring_spend": {
+        "unit": "GBP",
+        "value": 0.5333333333333333,
+        "source": "cee_hypothesis",
+        "raw_value": 160000,
+        "target_match": {
+         "node_id": "total_hiring_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "new_mid_weight_developers": {
+        "unit": "hires",
+        "value": 0.1,
+        "source": "brief_extraction",
+        "raw_value": 2,
+        "target_match": {
+         "node_id": "new_mid_weight_developers",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "continue_as_now",
+      "ref": "O3",
+      "kind": "option",
+      "label": "Continue as now",
+      "provenance": "ai_inferred",
+      "is_baseline": true
+     },
+     {
+      "id": "current_mid_weight_developers",
+      "ref": "F1",
+      "kind": "factor",
+      "label": "Current mid-weight developers",
+      "category": "observable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 30,
+       "unit": "developers",
+       "value": 0.2,
+       "source": "brief_extraction",
+       "raw_value": 6,
+       "declared_scale": "unit_interval",
+       "extractionType": "explicit"
+      }
+     },
+     {
+      "id": "new_tech_leads",
+      "ref": "F2",
+      "kind": "factor",
+      "label": "New Tech leads",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 5,
+       "unit": "hires",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval",
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "new_mid_weight_developers",
+      "ref": "F3",
+      "kind": "factor",
+      "label": "New mid-weight developers",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 20,
+       "unit": "hires",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval",
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "leadership_coverage",
+      "ref": "F4",
+      "kind": "factor",
+      "label": "Leadership coverage",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "score out of 100",
+       "value": 0.35,
+       "source": "cee_inference",
+       "raw_value": 35,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "total_hiring_spend",
+      "ref": "F5",
+      "kind": "factor",
+      "label": "Total hiring spend",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 300000,
+       "unit": "GBP",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval",
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "code_quality_degradation",
+      "ref": "R1",
+      "kind": "risk",
+      "label": "Code quality degradation",
+      "provenance": "from_brief"
+     },
+     {
+      "id": "productivity_change",
+      "ref": "OC1",
+      "kind": "outcome",
+      "label": "Productivity change",
+      "provenance": "from_brief",
+      "scale_frame": 100
+     }
+    ],
+    "edges": [
+     {
+      "to": "hire_a_tech_lead",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hire_two_developers",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "continue_as_now",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "new_tech_leads",
+      "from": "hire_a_tech_lead",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "total_hiring_spend",
+      "from": "hire_a_tech_lead",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "new_mid_weight_developers",
+      "from": "hire_two_developers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "total_hiring_spend",
+      "from": "hire_two_developers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "new_tech_leads",
+      "from": "continue_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "total_hiring_spend",
+      "from": "continue_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "new_mid_weight_developers",
+      "from": "continue_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "productivity_change",
+      "from": "current_mid_weight_developers",
+      "strength": {
+       "std": 0.15,
+       "mean": 0.3
+      },
+      "defaulted": true,
+      "provenance": {
+       "basis": "Each established developer provides a baseline unit of delivery capacity.",
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 1,
+        "amount_unit": "percentage points",
+        "strength_mean": 0.3,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "developers"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "leadership_coverage",
+      "from": "new_tech_leads",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "productivity_change",
+      "from": "new_mid_weight_developers",
+      "strength": {
+       "std": 0.5,
+       "mean": 1
+      },
+      "defaulted": true,
+      "provenance": {
+       "basis": "A mid-weight hire adds delivery capacity after onboarding.",
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 5,
+        "amount_unit": "percentage points",
+        "strength_mean": 1,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "hires"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "code_quality_degradation",
+      "from": "new_mid_weight_developers",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "productivity_change",
+      "from": "leadership_coverage",
+      "strength": {
+       "std": 0.1,
+       "mean": 0.2
+      },
+      "defaulted": true,
+      "provenance": {
+       "basis": "Stronger technical direction reduces coordination and decision delays.",
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 0.2,
+        "amount_unit": "percentage points",
+        "strength_mean": 0.2,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "score out of 100"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "code_quality_degradation",
+      "from": "leadership_coverage",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "launch_completion",
+      "from": "productivity_change",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "launch_completion",
+      "from": "code_quality_degradation",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 12,
+    "edge_count": 18,
+    "goal_constraints": [
+     {
+      "label": "Productivity change",
+      "value": 0.1,
+      "node_id": "productivity_change",
+      "operator": ">=",
+      "provenance": "explicit",
+      "value_frame": "change_rel",
+      "constraint_id": "agent-lane:productivity_change:>=:change_rel"
+     },
+     {
+      "unit": "GBP",
+      "label": "Total hiring spend",
+      "value": 200000,
+      "node_id": "total_hiring_spend",
+      "operator": "<=",
+      "provenance": "explicit",
+      "value_frame": "level",
+      "constraint_id": "agent-lane:total_hiring_spend:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-10-12T14:50:06.680Z"
+    },
+    "readiness": {
+     "status": "ready",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "unrequested_analysis_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "hire_a_tech_lead",
+      "label": "Hire a Tech lead",
+      "status": "ready",
+      "interventions": {
+       "new_tech_leads": 0.2,
+       "total_hiring_spend": 0.4
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "new_tech_leads": {
+        "display_value": "1 hires",
+        "normalised_value": 0.2,
+        "raw_value": 1,
+        "unit": "hires"
+       },
+       "total_hiring_spend": {
+        "display_value": "£120k",
+        "normalised_value": 0.4,
+        "raw_value": 120000,
+        "unit": "GBP"
+       }
+      },
+      "raw_interventions": {
+       "new_tech_leads": 1,
+       "total_hiring_spend": 120000
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "hire_two_developers",
+      "label": "Hire two developers",
+      "status": "ready",
+      "interventions": {
+       "total_hiring_spend": 0.5333333333333333,
+       "new_mid_weight_developers": 0.1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "total_hiring_spend": {
+        "display_value": "£160k",
+        "normalised_value": 0.5333333333333333,
+        "raw_value": 160000,
+        "unit": "GBP"
+       },
+       "new_mid_weight_developers": {
+        "display_value": "2 hires",
+        "normalised_value": 0.1,
+        "raw_value": 2,
+        "unit": "hires"
+       }
+      },
+      "raw_interventions": {
+       "total_hiring_spend": 160000,
+       "new_mid_weight_developers": 2
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "continue_as_now",
+      "label": "Continue as now",
+      "status": "ready",
+      "interventions": {},
+      "is_baseline": true,
+      "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed"
+     }
+    ],
+    "goal_node_id": "launch_completion",
+    "status": "ready",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": false,
+     "permitted_analysis_mode": "quantified_provisional",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "USER_STATED_PARAMETERS_NOT_MATERIAL",
+       "message": "The values you have set sit outside what this comparison turns on, so none of the figures that decide it are yours yet. Figures, and which option they favour, can be shown only as provisional until you have set a value on a factor one of the options changes, or on another factor on the chain from there to your goal."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "USER_STATED_PARAMETERS_NOT_MATERIAL",
+       "message": "The values you have set sit outside what this comparison turns on, so none of the figures that decide it are yours yet. Figures, and which option they favour, can be shown only as provisional until you have set a value on a factor one of the options changes, or on another factor on the chain from there to your goal."
+      }
+     ],
+     "graph_hash": "96955f9179c9016da4135fe177f4d2f4b2eae6ceec1ee0745e30bb578b89a407",
+     "semantic_signals": {
+      "confidence_parameters_total": 16,
+      "confidence_parameters_user_stated": 1,
+      "confidence_parameters_machine_authored": 12,
+      "confidence_parameters_unattributed": 3,
+      "material_parameters_total": 10,
+      "material_parameters_user_stated": 0,
+      "intervened_factor_baselines_total": 3,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+       "new_tech_leads",
+       "new_mid_weight_developers",
+       "leadership_coverage"
+      ],
+      "goal_target_stated": false
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "96955f9179c9016d",
+    "current_graph_hash": "96955f9179c9016d",
+    "computed_at": "2026-10-12T14:50:06.680Z"
+   },
+   "blocks": [
+    {
+     "type": "analysis_result",
+     "summary": "Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, so no option is put forward and no result is called reliable. Use it to find what is wrong.",
+     "leading_option_id": null,
+     "computed_against_hash": "96955f9179c9016d",
+     "enrichment": {
+      "option_comparison": [
+       {
+        "id": "hire_a_tech_lead",
+        "label": "Hire a Tech lead",
+        "status": "computed",
+        "outcome": {
+         "n_samples": 10000,
+         "validity_ratio": 1,
+         "n_valid_samples": 10000,
+         "percentiles_source": "samples"
+        },
+        "option_id": "hire_a_tech_lead",
+        "option_label": "Hire a Tech lead",
+        "constraint_margins": [],
+        "constraint_probabilities": {},
+        "constraints_decision_grade": false,
+        "constraint_probabilities_precision": {
+         "agent-lane:total_hiring_spend:<=": {
+          "n_informative": 10000,
+          "standard_error": 0
+         }
+        }
+       },
+       {
+        "id": "hire_two_developers",
+        "label": "Hire two developers",
+        "status": "computed",
+        "outcome": {
+         "n_samples": 10000,
+         "validity_ratio": 1,
+         "n_valid_samples": 10000,
+         "percentiles_source": "samples"
+        },
+        "option_id": "hire_two_developers",
+        "option_label": "Hire two developers",
+        "constraint_margins": [],
+        "constraint_probabilities": {},
+        "constraints_decision_grade": false,
+        "constraint_probabilities_precision": {
+         "agent-lane:total_hiring_spend:<=": {
+          "n_informative": 10000,
+          "standard_error": 0
+         }
+        }
+       },
+       {
+        "id": "continue_as_now",
+        "label": "Continue as now",
+        "status": "computed",
+        "outcome": {
+         "p10": 0.08004384436320963,
+         "p50": 0.140344048813206,
+         "p90": 0.2215470799468383,
+         "std": 0.05611314806597349,
+         "mean": 0.14656416253825233,
+         "n_samples": 10000,
+         "validity_ratio": 1,
+         "n_valid_samples": 10000,
+         "percentiles_source": "samples"
+        },
+        "downside": {
+         "p05": 0.06488852603878732,
+         "cvar_10": 0.06210775190571863,
+         "expected_regret": 0.040382262333511366
+        },
+        "option_id": "continue_as_now",
+        "option_label": "Continue as now",
+        "constraint_margins": [
+         {
+          "constraint_id": "agent-lane:total_hiring_spend:<="
+         }
+        ],
+        "constraint_probabilities": {
+         "agent-lane:total_hiring_spend:<=": 1
+        },
+        "constraints_decision_grade": false,
+        "constraint_probabilities_precision": {
+         "agent-lane:total_hiring_spend:<=": {
+          "n_informative": 10000,
+          "standard_error": 0
+         }
+        }
+       }
+      ],
+      "factor_sensitivity": [
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "leadership_coverage",
+        "confidence": 0.61865,
+        "elasticity": 1,
+        "evpi_method": "heuristic",
+        "driver_label": "biggest",
+        "factor_label": "Leadership coverage",
+        "value_source": "cee_inference",
+        "evidence_hint": true,
+        "influence_rank": 1,
+        "rank_flip_rate": 0,
+        "importance_rank": 1,
+        "influence_basis": "isl_structural",
+        "influence_score": 1,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0.35,
+        "flip_risk_category": "isolated",
+        "value_of_information": 0.07599999999999998,
+        "attribution_stability": "low",
+        "confidence_components": {
+         "sampling_stability": 0.25,
+         "structural_certainty": 0.8
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "inferred",
+        "evpi_percentage_points": 1.2,
+        "range_derivation_source": "inferred_value"
+       },
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "current_mid_weight_developers",
+        "confidence": 0.44045,
+        "elasticity": 0.4285714285714286,
+        "evpi_method": "heuristic",
+        "driver_label": "moderate",
+        "factor_label": "Current mid-weight developers",
+        "value_source": "brief_extraction",
+        "evidence_hint": false,
+        "influence_rank": 4,
+        "rank_flip_rate": 0,
+        "importance_rank": 2,
+        "influence_basis": "isl_structural",
+        "influence_score": 0.34285714285714286,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0.15,
+        "flip_risk_category": "correlated",
+        "value_of_information": 0,
+        "attribution_stability": "low",
+        "confidence_components": {
+         "sampling_stability": 0.25,
+         "structural_certainty": 0.5
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "explicit",
+        "evpi_percentage_points": 0,
+        "range_derivation_source": "explicit_cap"
+       },
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "new_mid_weight_developers",
+        "confidence": 0.3,
+        "elasticity": 0,
+        "zero_reason": "intervention_override",
+        "driver_label": "strong",
+        "factor_label": "New mid-weight developers",
+        "value_source": "cee_inference",
+        "influence_rank": 2,
+        "rank_flip_rate": 0,
+        "importance_rank": 3,
+        "influence_basis": "isl_structural",
+        "influence_score": 0.5714285714285715,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0,
+        "flip_risk_category": "negligible",
+        "value_of_information": 0,
+        "attribution_stability": "negligible",
+        "confidence_components": {
+         "sampling_stability": 0,
+         "structural_certainty": 0.5
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "inferred",
+        "range_derivation_source": "explicit_cap"
+       },
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "new_tech_leads",
+        "confidence": 0.3,
+        "elasticity": 0,
+        "zero_reason": "intervention_override",
+        "driver_label": "moderate",
+        "factor_label": "New Tech leads",
+        "value_source": "cee_inference",
+        "influence_rank": 3,
+        "rank_flip_rate": 0,
+        "importance_rank": 4,
+        "influence_basis": "isl_structural",
+        "influence_score": 0.4000000000000001,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0,
+        "flip_risk_category": "isolated",
+        "value_of_information": 0,
+        "attribution_stability": "negligible",
+        "confidence_components": {
+         "sampling_stability": 0,
+         "structural_certainty": 0.5
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "inferred",
+        "range_derivation_source": "explicit_cap"
+       },
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "total_hiring_spend",
+        "confidence": 0.3,
+        "elasticity": 0,
+        "zero_reason": "intervention_override",
+        "driver_label": "minor",
+        "factor_label": "Total hiring spend",
+        "value_source": "cee_inference",
+        "influence_rank": 5,
+        "rank_flip_rate": 0,
+        "importance_rank": 5,
+        "influence_basis": "isl_structural",
+        "influence_score": 0,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0,
+        "flip_risk_category": "negligible",
+        "value_of_information": 0,
+        "attribution_stability": "negligible",
+        "confidence_components": {
+         "sampling_stability": 0,
+         "structural_certainty": 0.5
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "inferred",
+        "range_derivation_source": "explicit_cap"
+       }
+      ],
+      "robustness": {
+       "robust_edges": [],
+       "fragile_edges": []
+      },
+      "option_comparison_status": "computed",
+      "edge_e_values": [
+       {
+        "to_id": "leadership_coverage",
+        "e_value": 1,
+        "edge_id": "new_tech_leads::leadership_coverage",
+        "from_id": "new_tech_leads",
+        "to_label": "Leadership coverage",
+        "flip_mean": 0.357142,
+        "stability": {
+         "n_seeds": 10,
+         "band_max": 0.954882,
+         "band_min": -1e-06,
+         "band_width": 0.954883,
+         "band_median": 0.280728,
+         "n_seeds_flipped": 8,
+         "seed_flip_means": [
+          -1e-06,
+          0.449147,
+          0.954882,
+          null,
+          0.606007,
+          0.134034,
+          -1e-06,
+          0.427422,
+          -1e-06,
+          null
+         ]
+        },
+        "from_label": "New Tech leads",
+        "current_mean": 0.5,
+        "flip_direction": "decrease"
+       },
+       {
+        "to_id": "code_quality_degradation",
+        "e_value": 1,
+        "edge_id": "new_mid_weight_developers::code_quality_degradation",
+        "from_id": "new_mid_weight_developers",
+        "to_label": "Code quality degradation",
+        "flip_mean": 0.299999,
+        "stability": {
+         "n_seeds": 10,
+         "band_max": 0.907353,
+         "band_min": -0.562395,
+         "band_width": 1.469748,
+         "band_median": 0.203989,
+         "n_seeds_flipped": 9,
+         "seed_flip_means": [
+          -0.503457,
+          0.500834,
+          0.907353,
+          null,
+          -0.015342,
+          0.76158,
+          0.203989,
+          0.112456,
+          -0.562395,
+          0.734293
+         ]
+        },
+        "from_label": "New mid-weight developers",
+        "current_mean": 0.5,
+        "flip_direction": "decrease"
+       },
+       {
+        "to_id": "productivity_change",
+        "e_value": 1,
+        "edge_id": "leadership_coverage::productivity_change",
+        "from_id": "leadership_coverage",
+        "to_label": "Productivity change",
+        "flip_mean": 0,
+        "stability": {
+         "n_seeds": 10,
+         "band_max": 0.894762,
+         "band_min": -0.801685,
+         "band_width": 1.696447,
+         "band_median": 0.043043,
+         "n_seeds_flipped": 9,
+         "seed_flip_means": [
+          -0.554774,
+          0.043043,
+          0.22417,
+          0.894762,
+          0.112209,
+          null,
+          -0.801685,
+          -0.064703,
+          -0.447696,
+          0.579079
+         ]
+        },
+        "from_label": "Leadership coverage",
+        "current_mean": 0.2,
+        "flip_direction": "decrease"
+       },
+       {
+        "to_id": "code_quality_degradation",
+        "e_value": 1,
+        "edge_id": "leadership_coverage::code_quality_degradation",
+        "from_id": "leadership_coverage",
+        "to_label": "Code quality degradation",
+        "flip_mean": -0.299999,
+        "stability": {
+         "n_seeds": 10,
+         "band_max": 0.325449,
+         "band_min": -0.955261,
+         "band_width": 1.28071,
+         "band_median": -0.135717,
+         "n_seeds_flipped": 8,
+         "seed_flip_means": [
+          0.325449,
+          -0.129148,
+          -0.658136,
+          null,
+          -0.383702,
+          null,
+          0.127252,
+          -0.142285,
+          0.095233,
+          -0.955261
+         ]
+        },
+        "from_label": "Leadership coverage",
+        "current_mean": -0.5,
+        "flip_direction": "increase"
+       },
+       {
+        "to_id": "launch_completion",
+        "e_value": 1.25,
+        "edge_id": "productivity_change::launch_completion",
+        "from_id": "productivity_change",
+        "to_label": "Launch completion",
+        "flip_mean": 0.625,
+        "stability": {
+         "n_seeds": 10,
+         "band_max": 0.74703,
+         "band_min": -0.781534,
+         "band_width": 1.5285639999999998,
+         "band_median": 0.42491,
+         "n_seeds_flipped": 9,
+         "seed_flip_means": [
+          -0.781534,
+          0.679193,
+          0.456052,
+          0.251791,
+          0.570542,
+          0.390876,
+          0.42491,
+          0.74703,
+          null,
+          0.22922
+         ]
+        },
+        "from_label": "Productivity change",
+        "current_mean": 0.5,
+        "flip_direction": "increase"
+       },
+       {
+        "to_id": "launch_completion",
+        "e_value": 1,
+        "edge_id": "code_quality_degradation::launch_completion",
+        "from_id": "code_quality_degradation",
+        "to_label": "Launch completion",
+        "flip_mean": -0.399999,
+        "stability": {
+         "n_seeds": 10,
+         "band_max": 0.076272,
+         "band_min": -0.916916,
+         "band_width": 0.993188,
+         "band_median": -0.435354,
+         "n_seeds_flipped": 9,
+         "seed_flip_means": [
+          0.076272,
+          -0.435354,
+          -0.650113,
+          -0.916916,
+          -0.497418,
+          -0.519089,
+          -0.232078,
+          -0.334444,
+          0.05811,
+          null
+         ]
+        },
+        "from_label": "Code quality degradation",
+        "current_mean": -0.5,
+        "flip_direction": "increase"
+       }
+      ],
+      "inference_warnings": [
+       {
+        "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+        "message": "2 edge E-value entries were omitted from edge_e_values: 2 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+        "severity": "info"
+       },
+       {
+        "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+        "field": "nodes[productivity_change].base",
+        "message": "Node 'productivity_change' has no ParameterUncertainty — base offset defaulted to 0.0; its samples are the forward-propagated composition of its parents (all root ancestors carry data), so the constraint probability is model-derived, not a missing-data placeholder",
+        "severity": "info"
+       },
+       {
+        "code": "GOAL_BASE_MISSING",
+        "field": "nodes[productivity_change].observed_state.baseline",
+        "message": "A relative target on constraint target node 'productivity_change' needs today's level, and the node carries none. this constraint's entry in constraint_analysis is omitted rather than measured against a guessed base.",
+        "severity": "warning"
+       },
+       {
+        "code": "GOAL_DIRECTION_UNATTESTED",
+        "field": "goal_direction",
+        "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+        "severity": "warning"
+       },
+       {
+        "code": "EVPI_UNAVAILABLE",
+        "field": "p_win_sensitivity",
+        "message": "Win-probability sensitivity (p_win_sensitivity) was skipped: its metric is P(joint_goal) and at least one goal constraint could not be resolved into its target's sample frame. Base analysis is unaffected.",
+        "severity": "warning",
+        "elapsed_ms": 1838
+       },
+       {
+        "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+        "links": [
+         {
+          "to": "launch_completion",
+          "from": "productivity_change"
+         },
+         {
+          "to": "launch_completion",
+          "from": "code_quality_degradation"
+         },
+         {
+          "to": "code_quality_degradation",
+          "from": "new_mid_weight_developers"
+         },
+         {
+          "to": "code_quality_degradation",
+          "from": "leadership_coverage"
+         },
+         {
+          "to": "leadership_coverage",
+          "from": "new_tech_leads"
+         }
+        ],
+        "message": "This comparison turns on the links from ‘Productivity change’ to ‘Launch completion’, from ‘Code quality degradation’ to ‘Launch completion’ and from ‘New mid-weight developers’ to ‘Code quality degradation’ and 2 more, whose strengths aren't sized in the model yet. To size them, I first need today’s level of ‘Launch completion’. What is it, in %?",
+        "node_ids": [
+         "new_tech_leads",
+         "leadership_coverage",
+         "code_quality_degradation",
+         "productivity_change",
+         "launch_completion",
+         "new_mid_weight_developers"
+        ],
+        "severity": "warning",
+        "first_ask": {
+         "kind": "goal_level",
+         "node_id": "launch_completion",
+         "question": "To size them, I first need today’s level of ‘Launch completion’. What is it, in %?"
+        },
+        "option_ids": [
+         "hire_a_tech_lead",
+         "hire_two_developers"
+        ],
+        "acceptable_links": [
+         {
+          "to": "leadership_coverage",
+          "from": "new_tech_leads"
+         },
+         {
+          "to": "code_quality_degradation",
+          "from": "leadership_coverage"
+         },
+         {
+          "to": "code_quality_degradation",
+          "from": "new_mid_weight_developers"
+         }
+        ],
+        "win_shares_withheld": true
+       }
+      ],
+      "confidence_tier": "needs_work",
+      "decision_brief": {
+       "options": [
+        {
+         "label": "Continue as now",
+         "option_id": "continue_as_now"
+        },
+        {
+         "label": "Hire a Tech lead",
+         "option_id": "hire_a_tech_lead"
+        },
+        {
+         "label": "Hire two developers",
+         "option_id": "hire_two_developers"
+        }
+       ],
+       "version": "1",
+       "brief_id": "51fce336-be57-44f3-b8c7-610db9729c08",
+       "warnings": [
+        {
+         "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+         "message": "Constraint node 'productivity_change' has no ParameterUncertainty and is non-root — base offset defaulted to 0.0; its samples are the forward-propagated composition of its parents (all root ancestors carry data), so the constraint probability is model-derived, not a missing-data placeholder",
+         "severity": "warning"
+        },
+        {
+         "code": "CONSTRAINT_UNGROUNDED",
+         "message": "Constraint on \"Productivity change\" lacks a baseline value. The feasibility assessment for this constraint is based on defaults rather than evidence.",
+         "severity": "warning"
+        },
+        {
+         "code": "GRAPH_DISCONNECTED",
+         "message": "Graph has 2 disconnected components",
+         "severity": "warning"
+        },
+        {
+         "code": "M2_UNAVAILABLE",
+         "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+         "severity": "warning"
+        }
+       ],
+       "created_at": "2026-10-12T14:50:11.386Z",
+       "top_drivers": [
+        {
+         "direction": "positive",
+         "sensitivity": 1,
+         "factor_label": "Leadership coverage"
+        },
+        {
+         "direction": "positive",
+         "sensitivity": 0.4285714285714286,
+         "factor_label": "Current mid-weight developers"
+        }
+       ],
+       "warning_codes": [
+        "EVPI_UNAVAILABLE",
+        "GOAL_BASE_MISSING",
+        "GOAL_DIRECTION_UNATTESTED"
+       ],
+       "key_assumptions": [
+        "Leadership coverage",
+        "Current mid-weight developers"
+       ],
+       "defaulted_assumptions": [
+        {
+         "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+         "note": "Node 'productivity_change' has no ParameterUncertainty — base offset defaulted to 0.0; its samples are the forward-propagated composition of its parents (all root ancestors carry data), so the constraint probability is model-derived, not a missing-data placeholder",
+         "source": "default_disclosure",
+         "doctrine": "provisional_doctrine_v0",
+         "factor_label": null
+        }
+       ]
+      },
+      "critiques": [
+       {
+        "id": "critique_6362127f37d0",
+        "code": "GRAPH_DISCONNECTED",
+        "severity": "warning",
+        "source": "isl",
+        "blocks_analysis": false,
+        "user_message": "Some parts of the model are not connected to your goal. Link them through to your goal, or remove them."
+       }
+      ],
+      "run_provenance": {
+       "provisional": true,
+       "initiated_by": "auto_post_construction",
+       "construction_turn_id": "graph_registration:b50db4b8-7f28-40a8-92b0-5e839fe68d1c"
+      },
+      "flip_thresholds_status": "all_no_effect"
+     }
+    }
+   ],
+   "option_participation": [],
+   "suggested_actions": [
+    {
+     "id": "agent-next-strengthen",
+     "label": "Give your estimate",
+     "message": "What would most strengthen this model?"
+    },
+    {
+     "id": "agent-next-pre-mortem",
+     "label": "Run a pre-mortem",
+     "message": "Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?"
+    },
+    {
+     "id": "agent-next-what-would-change",
+     "label": "What would change this?",
+     "message": "What would most likely change this result?"
+    }
+   ],
+   "guidance": {
+    "slot1": {
+     "policy_id": "RC-STRENGTHEN-ITEM",
+     "priority": "P1",
+     "variant": "S1",
+     "item": "code_quality_degradation->launch_completion",
+     "primary_action": {
+      "label": "Give your estimate",
+      "action_kind": "edit_inline",
+      "target": "code_quality_degradation->launch_completion"
+     },
+     "state_key_hash": "e9dc18be3905",
+     "copy": {
+      "title": "The comparison rests on a link nobody has sized yet.",
+      "why": "Until it is sized, Olumi can't compare the options on your goal.",
+      "question": "How much does code quality degradation really change launch completion? The comparison turns on it."
+     },
+     "item_ref": {
+      "kind": "link",
+      "from_id": "code_quality_degradation",
+      "to_id": "launch_completion"
+     }
+    }
+   },
+   "graph_hash": "96955f9179c9016d",
+   "_diagnostic_trace": {
+    "fast_path": null
+   }
+  },
+  "marketing-02": {
+   "assistant_text": "Success means meeting both conditions, not just one.\n\n- Conversion rate strictly above 15%.\n- Secure 20 new customers within three months.\n\nThe current model has one broad launch goal; it does not yet represent these two measures separately. I couldn’t set a calendar deadline because “the first 3 months” needs a starting date.\n\nWhat date will the feature launch?\n\n<details>\n<summary>Why?</summary>\n\nAssumption-based planning: name the load-bearing assumption, test it, and replace a guessed number with the decision-maker's own judgement where the choice depends on it.\n\n</details>",
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+      "ref": "D1",
+      "kind": "decision",
+      "label": "Should I hire a marketing manager, or use an AI tool to plan the campaign for…",
+      "provenance": "from_brief",
+      "description": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?"
+     },
+     {
+      "id": "product_feature_launch_campaign",
+      "ref": "G1",
+      "kind": "goal",
+      "label": "Product feature launch campaign",
+      "provenance": "ai_inferred",
+      "goal_threshold_unit": "%",
+      "goal_threshold_frame": "level"
+     },
+     {
+      "id": "hire_marketing_manager",
+      "ref": "O1",
+      "kind": "option",
+      "label": "Hire marketing manager",
+      "provenance": "from_brief",
+      "interventions": {
+       "advertising_spend": {
+        "unit": "GBP/year",
+        "value": 0.26666666666666666,
+        "source": "cee_hypothesis",
+        "raw_value": 40000,
+        "target_match": {
+         "node_id": "advertising_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "founder_marketing_time": {
+        "unit": "%",
+        "value": 0.1,
+        "source": "cee_hypothesis",
+        "raw_value": 10,
+        "target_match": {
+         "node_id": "founder_marketing_time",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "campaign_planning_capacity": {
+        "unit": "% of deliverable/month",
+        "value": 0.15,
+        "source": "cee_hypothesis",
+        "raw_value": 15,
+        "target_match": {
+         "node_id": "campaign_planning_capacity",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "marketing_manager_or_tool_cost": {
+        "unit": "GBP/year",
+        "value": 0.4,
+        "source": "cee_hypothesis",
+        "raw_value": 60000,
+        "target_match": {
+         "node_id": "marketing_manager_or_tool_cost",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "ai_planning_and_more_ads",
+      "ref": "O2",
+      "kind": "option",
+      "label": "AI planning and more ads",
+      "provenance": "from_brief",
+      "interventions": {
+       "advertising_spend": {
+        "unit": "GBP/year",
+        "value": 0.6333333333333333,
+        "source": "cee_hypothesis",
+        "raw_value": 95000,
+        "target_match": {
+         "node_id": "advertising_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "founder_marketing_time": {
+        "unit": "%",
+        "value": 0.2,
+        "source": "cee_hypothesis",
+        "raw_value": 20,
+        "target_match": {
+         "node_id": "founder_marketing_time",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "campaign_planning_capacity": {
+        "unit": "% of deliverable/month",
+        "value": 0.08,
+        "source": "cee_hypothesis",
+        "raw_value": 8,
+        "target_match": {
+         "node_id": "campaign_planning_capacity",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "marketing_manager_or_tool_cost": {
+        "unit": "GBP/year",
+        "value": 0.03333333333333333,
+        "source": "cee_hypothesis",
+        "raw_value": 5000,
+        "target_match": {
+         "node_id": "marketing_manager_or_tool_cost",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "carry_on_as_now",
+      "ref": "O3",
+      "kind": "option",
+      "label": "Carry on as now",
+      "provenance": "ai_inferred",
+      "is_baseline": true
+     },
+     {
+      "id": "marketing_manager_or_tool_cost",
+      "ref": "F1",
+      "kind": "factor",
+      "label": "Marketing manager or tool cost",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 150000,
+      "observed_state": {
+       "unit": "GBP/year",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "advertising_spend",
+      "ref": "F2",
+      "kind": "factor",
+      "label": "Advertising spend",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 150000,
+      "observed_state": {
+       "unit": "GBP/year",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "campaign_planning_capacity",
+      "ref": "F3",
+      "kind": "factor",
+      "label": "Campaign planning capacity",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "% of deliverable/month",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "founder_marketing_time",
+      "ref": "F4",
+      "kind": "factor",
+      "label": "Founder marketing time",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "%",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "marketing_experience",
+      "ref": "F5",
+      "kind": "factor",
+      "label": "Marketing experience",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "score out of 100",
+       "value": 0.2,
+       "source": "cee_inference",
+       "raw_value": 20,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "campaign_underperformance",
+      "ref": "R1",
+      "kind": "risk",
+      "label": "Campaign underperformance",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "annual_marketing_spend",
+      "ref": "OC1",
+      "kind": "outcome",
+      "label": "Annual marketing spend",
+      "provenance": "ai_inferred",
+      "scale_frame": 150000,
+      "nonlinear_identity": {
+       "operation": "sum",
+       "factor_ids": [
+        "marketing_manager_or_tool_cost",
+        "advertising_spend"
+       ],
+       "stated_in_brief": false
+      }
+     },
+     {
+      "id": "campaign_readiness",
+      "ref": "OC2",
+      "kind": "outcome",
+      "label": "Campaign readiness",
+      "provenance": "ai_inferred",
+      "scale_frame": 100
+     }
+    ],
+    "edges": [
+     {
+      "to": "hire_marketing_manager",
+      "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "ai_planning_and_more_ads",
+      "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "carry_on_as_now",
+      "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "marketing_manager_or_tool_cost",
+      "from": "hire_marketing_manager",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "advertising_spend",
+      "from": "hire_marketing_manager",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "campaign_planning_capacity",
+      "from": "hire_marketing_manager",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "founder_marketing_time",
+      "from": "hire_marketing_manager",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "marketing_manager_or_tool_cost",
+      "from": "ai_planning_and_more_ads",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "advertising_spend",
+      "from": "ai_planning_and_more_ads",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "campaign_planning_capacity",
+      "from": "ai_planning_and_more_ads",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "founder_marketing_time",
+      "from": "ai_planning_and_more_ads",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "marketing_manager_or_tool_cost",
+      "from": "carry_on_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "advertising_spend",
+      "from": "carry_on_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "campaign_planning_capacity",
+      "from": "carry_on_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "founder_marketing_time",
+      "from": "carry_on_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_marketing_spend",
+      "from": "marketing_manager_or_tool_cost",
+      "strength": {
+       "std": 0.001,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "definitional": true,
+       "natural_effect": {
+        "amount": 1,
+        "amount_unit": "GBP/year",
+        "strength_mean": 1,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "GBP/year"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_marketing_spend",
+      "from": "advertising_spend",
+      "strength": {
+       "std": 0.001,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "definitional": true,
+       "natural_effect": {
+        "amount": 1,
+        "amount_unit": "GBP/year",
+        "strength_mean": 1,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "GBP/year"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "campaign_readiness",
+      "from": "advertising_spend",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "campaign_readiness",
+      "from": "campaign_planning_capacity",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "campaign_readiness",
+      "from": "founder_marketing_time",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "campaign_readiness",
+      "from": "marketing_experience",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "campaign_underperformance",
+      "from": "campaign_readiness",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "product_feature_launch_campaign",
+      "from": "campaign_readiness",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "product_feature_launch_campaign",
+      "from": "campaign_underperformance",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 13,
+    "edge_count": 24,
+    "goal_constraints": [
+     {
+      "unit": "GBP/year",
+      "label": "Annual marketing spend",
+      "value": 100000,
+      "node_id": "annual_marketing_spend",
+      "operator": "<=",
+      "provenance": "explicit",
+      "value_frame": "level",
+      "constraint_id": "agent-lane:annual_marketing_spend:<="
+     },
+     {
+      "unit": "%",
+      "label": "Founder marketing time",
+      "value": 25,
+      "node_id": "founder_marketing_time",
+      "operator": "<=",
+      "provenance": "explicit",
+      "value_frame": "level",
+      "constraint_id": "agent-lane:founder_marketing_time:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-10-12T15:03:28.203Z"
+    },
+    "readiness": {
+     "status": "ready",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "unrequested_analysis_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "hire_marketing_manager",
+      "label": "Hire marketing manager",
+      "status": "ready",
+      "interventions": {
+       "advertising_spend": 0.26666666666666666,
+       "founder_marketing_time": 0.1,
+       "campaign_planning_capacity": 0.15,
+       "marketing_manager_or_tool_cost": 0.4
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "advertising_spend": {
+        "display_value": "£40k/year",
+        "normalised_value": 0.26666666666666666,
+        "raw_value": 40000,
+        "unit": "GBP/year"
+       },
+       "founder_marketing_time": {
+        "display_value": "10%",
+        "normalised_value": 0.1,
+        "raw_value": 10,
+        "unit": "%"
+       },
+       "campaign_planning_capacity": {
+        "display_value": "15 % of deliverable/month",
+        "normalised_value": 0.15,
+        "raw_value": 15,
+        "unit": "% of deliverable/month"
+       },
+       "marketing_manager_or_tool_cost": {
+        "display_value": "£60k/year",
+        "normalised_value": 0.4,
+        "raw_value": 60000,
+        "unit": "GBP/year"
+       }
+      },
+      "raw_interventions": {
+       "advertising_spend": 40000,
+       "founder_marketing_time": 10,
+       "campaign_planning_capacity": 15,
+       "marketing_manager_or_tool_cost": 60000
+      },
+      "status_reason": "4 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "ai_planning_and_more_ads",
+      "label": "AI planning and more ads",
+      "status": "ready",
+      "interventions": {
+       "advertising_spend": 0.6333333333333333,
+       "founder_marketing_time": 0.2,
+       "campaign_planning_capacity": 0.08,
+       "marketing_manager_or_tool_cost": 0.03333333333333333
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "advertising_spend": {
+        "display_value": "£95k/year",
+        "normalised_value": 0.6333333333333333,
+        "raw_value": 95000,
+        "unit": "GBP/year"
+       },
+       "founder_marketing_time": {
+        "display_value": "20%",
+        "normalised_value": 0.2,
+        "raw_value": 20,
+        "unit": "%"
+       },
+       "campaign_planning_capacity": {
+        "display_value": "8 % of deliverable/month",
+        "normalised_value": 0.08,
+        "raw_value": 8,
+        "unit": "% of deliverable/month"
+       },
+       "marketing_manager_or_tool_cost": {
+        "display_value": "£5k/year",
+        "normalised_value": 0.03333333333333333,
+        "raw_value": 5000,
+        "unit": "GBP/year"
+       }
+      },
+      "raw_interventions": {
+       "advertising_spend": 95000,
+       "founder_marketing_time": 20,
+       "campaign_planning_capacity": 8,
+       "marketing_manager_or_tool_cost": 5000
+      },
+      "status_reason": "4 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "carry_on_as_now",
+      "label": "Carry on as now",
+      "status": "ready",
+      "interventions": {},
+      "is_baseline": true,
+      "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed"
+     }
+    ],
+    "goal_node_id": "product_feature_launch_campaign",
+    "status": "ready",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": false,
+     "permitted_analysis_mode": "quantified_provisional",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them."
+      }
+     ],
+     "graph_hash": "036c36d3c7ff90f5b82639bb82d897988e04a2eedb0be8b15eeaec18027b3f71",
+     "semantic_signals": {
+      "confidence_parameters_total": 18,
+      "confidence_parameters_user_stated": 0,
+      "confidence_parameters_machine_authored": 14,
+      "confidence_parameters_unattributed": 4,
+      "material_parameters_total": 9,
+      "material_parameters_user_stated": 0,
+      "intervened_factor_baselines_total": 4,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+       "advertising_spend",
+       "campaign_planning_capacity",
+       "founder_marketing_time"
+      ],
+      "goal_target_stated": false
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "036c36d3c7ff90f5",
+    "current_graph_hash": "036c36d3c7ff90f5",
+    "computed_at": "2026-10-12T15:03:28.203Z"
+   },
+   "blocks": [
+    {
+     "type": "analysis_result",
+     "summary": "Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, so no option is put forward and no result is called reliable. Use it to find what is wrong.",
+     "leading_option_id": null,
+     "computed_against_hash": "036c36d3c7ff90f5",
+     "enrichment": {
+      "option_comparison": [
+       {
+        "id": "hire_marketing_manager",
+        "label": "Hire marketing manager",
+        "status": "computed",
+        "outcome": {
+         "n_samples": 10000,
+         "validity_ratio": 1,
+         "n_valid_samples": 10000,
+         "percentiles_source": "samples"
+        },
+        "option_id": "hire_marketing_manager",
+        "option_label": "Hire marketing manager",
+        "constraint_margins": [],
+        "constraint_probabilities": {},
+        "constraints_decision_grade": false,
+        "constraint_probabilities_precision": {
+         "agent-lane:founder_marketing_time:<=": {
+          "n_informative": 10000,
+          "standard_error": 0
+         }
+        }
+       },
+       {
+        "id": "ai_planning_and_more_ads",
+        "label": "AI planning and more ads",
+        "status": "computed",
+        "outcome": {
+         "n_samples": 10000,
+         "validity_ratio": 1,
+         "n_valid_samples": 10000,
+         "percentiles_source": "samples"
+        },
+        "option_id": "ai_planning_and_more_ads",
+        "option_label": "AI planning and more ads",
+        "constraint_margins": [],
+        "constraint_probabilities": {},
+        "constraints_decision_grade": false,
+        "constraint_probabilities_precision": {
+         "agent-lane:founder_marketing_time:<=": {
+          "n_informative": 10000,
+          "standard_error": 0
+         }
+        }
+       },
+       {
+        "id": "carry_on_as_now",
+        "label": "Carry on as now",
+        "status": "computed",
+        "outcome": {
+         "p10": 0,
+         "p50": 0.05645059218964266,
+         "p90": 0.1288812036733633,
+         "std": 0.05172994409906039,
+         "mean": 0.060530064162136285,
+         "n_samples": 10000,
+         "validity_ratio": 1,
+         "n_valid_samples": 10000,
+         "percentiles_source": "samples"
+        },
+        "downside": {
+         "p05": 0,
+         "cvar_10": -0.002559144624305988,
+         "expected_regret": 0.2751011997317699
+        },
+        "option_id": "carry_on_as_now",
+        "option_label": "Carry on as now",
+        "constraint_margins": [
+         {
+          "constraint_id": "agent-lane:founder_marketing_time:<="
+         }
+        ],
+        "constraint_probabilities": {
+         "agent-lane:founder_marketing_time:<=": 1
+        },
+        "constraints_decision_grade": false,
+        "constraint_probabilities_precision": {
+         "agent-lane:founder_marketing_time:<=": {
+          "n_informative": 10000,
+          "standard_error": 0
+         }
+        }
+       }
+      ],
+      "factor_sensitivity": [
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "marketing_experience",
+        "confidence": 0.44725000000000004,
+        "elasticity": 1,
+        "evpi_method": "heuristic",
+        "driver_label": "biggest",
+        "factor_label": "Marketing experience",
+        "value_source": "cee_inference",
+        "evidence_hint": false,
+        "influence_rank": 4,
+        "rank_flip_rate": 0.2,
+        "importance_rank": 1,
+        "influence_basis": "isl_structural",
+        "influence_score": 1,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0.375,
+        "flip_risk_category": "correlated",
+        "value_of_information": 0,
+        "attribution_stability": "low",
+        "confidence_components": {
+         "sampling_stability": 0.25,
+         "structural_certainty": 0.5
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "inferred",
+        "evpi_percentage_points": 0,
+        "range_derivation_source": "inferred_value"
+       },
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "advertising_spend",
+        "confidence": 0.3,
+        "elasticity": 0,
+        "zero_reason": "intervention_override",
+        "driver_label": "strong",
+        "factor_label": "Advertising spend",
+        "value_source": "cee_inference",
+        "influence_rank": 1,
+        "rank_flip_rate": 0,
+        "importance_rank": 2,
+        "influence_basis": "isl_structural",
+        "influence_score": 1,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0,
+        "flip_risk_category": "correlated",
+        "value_of_information": 0,
+        "attribution_stability": "negligible",
+        "confidence_components": {
+         "sampling_stability": 0,
+         "structural_certainty": 0.5
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "inferred",
+        "range_derivation_source": "scale_frame"
+       },
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "campaign_planning_capacity",
+        "confidence": 0.3,
+        "elasticity": 0,
+        "zero_reason": "intervention_override",
+        "driver_label": "strong",
+        "factor_label": "Campaign planning capacity",
+        "value_source": "cee_inference",
+        "influence_rank": 2,
+        "rank_flip_rate": 0,
+        "importance_rank": 3,
+        "influence_basis": "isl_structural",
+        "influence_score": 1,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0,
+        "flip_risk_category": "negligible",
+        "value_of_information": 0,
+        "attribution_stability": "negligible",
+        "confidence_components": {
+         "sampling_stability": 0,
+         "structural_certainty": 0.5
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "inferred",
+        "range_derivation_source": "scale_frame"
+       },
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "founder_marketing_time",
+        "confidence": 0.3,
+        "elasticity": 0,
+        "zero_reason": "intervention_override",
+        "driver_label": "strong",
+        "factor_label": "Founder marketing time",
+        "value_source": "cee_inference",
+        "influence_rank": 3,
+        "rank_flip_rate": 0,
+        "importance_rank": 4,
+        "influence_basis": "isl_structural",
+        "influence_score": 1,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0,
+        "flip_risk_category": "correlated",
+        "value_of_information": 0,
+        "attribution_stability": "negligible",
+        "confidence_components": {
+         "sampling_stability": 0,
+         "structural_certainty": 0.5
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "inferred",
+        "range_derivation_source": "scale_frame"
+       },
+       {
+        "source": "graph",
+        "direction": "positive",
+        "factor_id": "marketing_manager_or_tool_cost",
+        "confidence": 0.3,
+        "elasticity": 0,
+        "zero_reason": "intervention_override",
+        "driver_label": "minor",
+        "factor_label": "Marketing manager or tool cost",
+        "value_source": "cee_inference",
+        "influence_rank": 5,
+        "rank_flip_rate": 0,
+        "importance_rank": 5,
+        "influence_basis": "isl_structural",
+        "influence_score": 0,
+        "importance_basis": "isl_structural",
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "sensitivity_score": 0,
+        "flip_risk_category": "negligible",
+        "value_of_information": 0,
+        "attribution_stability": "negligible",
+        "confidence_components": {
+         "sampling_stability": 0,
+         "structural_certainty": 0.5
+        },
+        "confidence_provenance": {
+         "input_quality": "standard",
+         "is_provisional": true,
+         "formula_version": "plot_unified_v3",
+         "calibration_status": "provisional_pending_pilot_calibration",
+         "computation_source": "plot_unified_from_isl_bootstrap"
+        },
+        "value_extraction_type": "inferred",
+        "range_derivation_source": "scale_frame"
+       }
+      ],
+      "robustness": {
+       "robust_edges": [],
+       "fragile_edges": []
+      },
+      "option_comparison_status": "computed",
+      "conditional_probabilities": [],
+      "edge_e_values": [
+       {
+        "to_id": "campaign_readiness",
+        "e_value": 1,
+        "edge_id": "advertising_spend::campaign_readiness",
+        "from_id": "advertising_spend",
+        "to_label": "Campaign readiness",
+        "flip_mean": -0.040909,
+        "stability": {
+         "n_seeds": 10,
+         "band_max": 0.162365,
+         "band_min": -0.192419,
+         "band_width": 0.354784,
+         "band_median": -0.028959,
+         "n_seeds_flipped": 10,
+         "seed_flip_means": [
+          0.162365,
+          -0.029651,
+          0.015473,
+          -0.043267,
+          -0.040926,
+          -0.06858,
+          -0.192419,
+          -0.025651,
+          0.048928,
+          -0.028268
+         ]
+        },
+        "from_label": "Advertising spend",
+        "current_mean": 0.5,
+        "flip_direction": "decrease"
+       },
+       {
+        "to_id": "product_feature_launch_campaign",
+        "e_value": 1,
+        "edge_id": "campaign_readiness::product_feature_launch_campaign",
+        "from_id": "campaign_readiness",
+        "to_label": "Product feature launch campaign",
+        "flip_mean": -0.250001,
+        "stability": {
+         "n_seeds": 10,
+         "band_max": -0.027359,
+         "band_min": -0.384743,
+         "band_width": 0.357384,
+         "band_median": -0.208245,
+         "n_seeds_flipped": 10,
+         "seed_flip_means": [
+          -0.174037,
+          -0.235452,
+          -0.363065,
+          -0.176435,
+          -0.174044,
+          -0.23861,
+          -0.273209,
+          -0.027359,
+          -0.384743,
+          -0.181038
+         ]
+        },
+        "from_label": "Campaign readiness",
+        "current_mean": 0.5,
+        "flip_direction": "decrease"
+       }
+      ],
+      "inference_warnings": [
+       {
+        "code": "CONSTRAINT_TARGET_UNRELIABLE",
+        "message": "The target on \"Annual marketing spend\" can't be scored against this model: \"Annual marketing spend\" is calculated from the factors feeding into it, so the analysis produces a modelled change for it, not a reading on the same scale as your target. The two are not on the same scale, so goal-fit probabilities were withheld for this run rather than computed against the wrong number. Your limit is recorded and was left unscored rather than scored against the wrong number.",
+        "severity": "warning",
+        "constraint_ids": [
+         "agent-lane:annual_marketing_spend:<="
+        ]
+       },
+       {
+        "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+        "message": "5 edge E-value entries were omitted from edge_e_values: 5 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+        "severity": "info"
+       },
+       {
+        "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+        "field": "nodes[annual_marketing_spend].base",
+        "message": "Node 'annual_marketing_spend' has no ParameterUncertainty — base offset defaulted to 0.0; its samples are the forward-propagated composition of its parents (all root ancestors carry data), so the constraint probability is model-derived, not a missing-data placeholder",
+        "severity": "info"
+       },
+       {
+        "code": "GOAL_DIRECTION_UNATTESTED",
+        "field": "goal_direction",
+        "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+        "severity": "warning"
+       },
+       {
+        "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+        "links": [
+         {
+          "to": "product_feature_launch_campaign",
+          "from": "campaign_readiness"
+         },
+         {
+          "to": "product_feature_launch_campaign",
+          "from": "campaign_underperformance"
+         },
+         {
+          "to": "campaign_readiness",
+          "from": "advertising_spend"
+         },
+         {
+          "to": "campaign_readiness",
+          "from": "campaign_planning_capacity"
+         },
+         {
+          "to": "campaign_readiness",
+          "from": "founder_marketing_time"
+         },
+         {
+          "to": "campaign_underperformance",
+          "from": "campaign_readiness"
+         }
+        ],
+        "message": "This comparison turns on the links from ‘Campaign readiness’ to ‘Product feature launch campaign’, from ‘Campaign underperformance’ to ‘Product feature launch campaign’ and from ‘Advertising spend’ to ‘Campaign readiness’ and 3 more, whose strengths aren't sized in the model yet. To size them, I first need today’s level of ‘Product feature launch campaign’. What is it, in %?",
+        "node_ids": [
+         "advertising_spend",
+         "campaign_readiness",
+         "campaign_planning_capacity",
+         "founder_marketing_time",
+         "campaign_underperformance",
+         "product_feature_launch_campaign"
+        ],
+        "severity": "warning",
+        "first_ask": {
+         "kind": "goal_level",
+         "node_id": "product_feature_launch_campaign",
+         "question": "To size them, I first need today’s level of ‘Product feature launch campaign’. What is it, in %?"
+        },
+        "option_ids": [
+         "hire_marketing_manager",
+         "ai_planning_and_more_ads"
+        ],
+        "acceptable_links": [
+         {
+          "to": "campaign_readiness",
+          "from": "advertising_spend"
+         },
+         {
+          "to": "campaign_readiness",
+          "from": "campaign_planning_capacity"
+         },
+         {
+          "to": "campaign_readiness",
+          "from": "founder_marketing_time"
+         }
+        ],
+        "win_shares_withheld": true
+       }
+      ],
+      "confidence_tier": "needs_work",
+      "decision_brief": {
+       "options": [
+        {
+         "label": "AI planning and more ads",
+         "option_id": "ai_planning_and_more_ads"
+        },
+        {
+         "label": "Carry on as now",
+         "option_id": "carry_on_as_now"
+        },
+        {
+         "label": "Hire marketing manager",
+         "option_id": "hire_marketing_manager"
+        }
+       ],
+       "version": "1",
+       "brief_id": "aa96f538-05a4-4730-bba4-84ba1bbe4543",
+       "warnings": [
+        {
+         "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+         "message": "Constraint node 'annual_marketing_spend' has no ParameterUncertainty and is non-root — base offset defaulted to 0.0; its samples are the forward-propagated composition of its parents (all root ancestors carry data), so the constraint probability is model-derived, not a missing-data placeholder",
+         "severity": "warning"
+        },
+        {
+         "code": "CONSTRAINT_OUT_OF_DOMAIN",
+         "message": "Constraint agent-lane:annual_marketing_spend:<= targets outcome node \"annual_marketing_spend\" with threshold 100000 outside [0,1] range",
+         "severity": "warning"
+        },
+        {
+         "code": "CONSTRAINT_UNGROUNDED",
+         "message": "Constraint on \"Annual marketing spend\" lacks a baseline value. The feasibility assessment for this constraint is based on defaults rather than evidence.",
+         "severity": "warning"
+        },
+        {
+         "code": "M2_UNAVAILABLE",
+         "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+         "severity": "warning"
+        }
+       ],
+       "created_at": "2026-10-12T15:03:36.363Z",
+       "top_drivers": [
+        {
+         "direction": "positive",
+         "sensitivity": 1,
+         "factor_label": "Marketing experience"
+        }
+       ],
+       "warning_codes": [
+        "CONSTRAINT_TARGET_UNRELIABLE",
+        "GOAL_DIRECTION_UNATTESTED"
+       ],
+       "key_assumptions": [
+        "Marketing experience"
+       ],
+       "defaulted_assumptions": [
+        {
+         "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+         "note": "Node 'annual_marketing_spend' has no ParameterUncertainty — base offset defaulted to 0.0; its samples are the forward-propagated composition of its parents (all root ancestors carry data), so the constraint probability is model-derived, not a missing-data placeholder",
+         "source": "default_disclosure",
+         "doctrine": "provisional_doctrine_v0",
+         "factor_label": null
+        }
+       ]
+      },
+      "run_provenance": {
+       "provisional": true,
+       "initiated_by": "auto_post_construction",
+       "construction_turn_id": "graph_registration:579b64b3-6a4b-4913-8b99-c026078e9788"
+      },
+      "flip_thresholds_status": "all_no_effect"
+     }
+    }
+   ],
+   "option_participation": [],
+   "suggested_actions": [
+    {
+     "id": "agent-next-strengthen",
+     "label": "Give your estimate",
+     "message": "What would most strengthen this model?"
+    },
+    {
+     "id": "agent-next-pre-mortem",
+     "label": "Run a pre-mortem",
+     "message": "Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?"
+    },
+    {
+     "id": "agent-next-widen",
+     "label": "Suggest options",
+     "message": "Suggest options I haven’t considered."
+    }
+   ],
+   "guidance": {
+    "slot1": {
+     "policy_id": "RC-STRENGTHEN-ITEM",
+     "priority": "P1",
+     "variant": "S1",
+     "item": "campaign_readiness->product_feature_launch_campaign",
+     "primary_action": {
+      "label": "Give your estimate",
+      "action_kind": "edit_inline",
+      "target": "campaign_readiness->product_feature_launch_campaign"
+     },
+     "state_key_hash": "631a50f6c548",
+     "copy": {
+      "title": "The comparison rests on a link nobody has sized yet.",
+      "why": "Until it is sized, Olumi can't compare the options on your goal.",
+      "question": "How much does campaign readiness really change product feature launch campaign? The comparison turns on it."
+     },
+     "item_ref": {
+      "kind": "link",
+      "from_id": "campaign_readiness",
+      "to_id": "product_feature_launch_campaign"
+     }
+    }
+   },
+   "graph_hash": "036c36d3c7ff90f5",
+   "_diagnostic_trace": {
+    "fast_path": null
+   }
+  }
+ }
+}
