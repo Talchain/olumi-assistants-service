@@ -149,13 +149,13 @@ export const TEAM_GAP_WORDS: ReadonlySet<string> = new Set([
   "they'll", 'it', "it'll", "it's", "it'd", "we're", "we'll", "we'd", 'going', 'to', 'gonna', 'need', 'needs', 'take', 'takes', 'taking',
   'finish', 'finishing', 'complete', 'completing', 'deliver', 'delivering', 'ship', 'shipping', 'release', 'releasing', 'launch', 'launching',
   'get', 'done', 'with', 'the', 'a', 'an', 'our', 'their', 'its', 'this', 'that', 'so', 'in', 'within', 'late', 'early', 'behind',
-  'work', 'project', 'feature', 'release', 'product', 'deliverable', 'next', 'current',
+  'work', 'feature', 'release', 'product', 'deliverable', 'next', 'current',
 ]);
 /** The closed list after the team's time, to the statement's end. */
 export const TEAM_AFTER_WORDS: ReadonlySet<string> = new Set([
   'to', 'finish', 'complete', 'deliver', 'ship', 'launch', 'release', 'it', 'the', 'with', 'for', 'our', 'current', 'existing', 'team', 'in',
-  'total', 'overall', 'from', 'now', 'today', 'i', 'think', 'reckon', 'guess', 'or', 'so', 'give', 'take', 'roughly', 'work', 'project',
-  'feature', 'product', 'deliverable', 'next', 'all', 'told',
+  'total', 'overall', 'from', 'now', 'today', 'i', 'think', 'reckon', 'guess', 'or', 'so', 'give', 'take', 'roughly', 'work',
+  'feature', 'product', 'deliverable', 'next', 'all',
 ]);
 /** True when `figure` (start, end in `text`) is the team's time to finish in the user's statement (B2-c, above). */
 function teamOwnsDuration(text: string, start: number, end: number, deliverable: string): boolean {
