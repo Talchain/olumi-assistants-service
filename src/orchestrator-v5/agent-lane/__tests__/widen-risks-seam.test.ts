@@ -295,6 +295,30 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     })[0];
   };
 
+  /** The construction ANSWER row this route wrote (claim rows excluded), as the store received it. */
+  const answerWrite = (): Record<string, unknown> | undefined => [...store.append.mock.calls].map(([w]) => w as Record<string, unknown>)
+    .reverse().find((w) => w.scenario_id === SCENARIO && !String(w.turn_id).endsWith(':claim') && w.response_emitted !== false);
+  it('E6 (DL 12 Oct): the construction answer that shows the thin risks offer records RC-WIDEN\'s risks row as SHOWN; CONTRAST: with one proposed option the row is W2 (options) and nothing is recorded', async () => {
+    // This file's store has no guidance history (so the route fails closed: no row); a readable, empty history here only.
+    const readable = store as Record<string, unknown>;
+    readable.readGuidanceHistory = vi.fn(async () => ({}));
+    try {
+    const t = await thinConstruction(1, () => {
+      const candidate = constructionCandidate! as { options: Record<string, unknown>[]; factors: Record<string, unknown>[]; links: Record<string, unknown>[] };
+      candidate.options.push({ label: 'Increase ad spend', provenance: 'explicit', changes: ['Ad spend'], interventions: [], is_status_quo: null, added_capacity: null });
+      candidate.factors.push({ label: 'Ad spend', role: 'controllable', baseline_known: true, baseline_value: 1000, unit: 'GBP', provenance: 'explicit', plausible_max: 10000 });
+      candidate.links.push({ from: 'Ad spend', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
+        effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
+    });
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id), JSON.stringify(t.suggested_actions)).toBe(true);
+    expect(answerWrite()?.agent_guidance, JSON.stringify(answerWrite())).toMatchObject({ version: 1, entries: { 'RC-WIDEN': { status: 'offered', variant_id: 'W6' } } });
+    nextScenario();
+    const one = await thinConstruction(1);
+    expectThinPress(one);
+    expect((answerWrite()?.agent_guidance as { entries?: Record<string, unknown> } | undefined)?.entries?.['RC-WIDEN']).toBeUndefined();
+    } finally { delete readable.readGuidanceHistory; }
+  });
+
   it('P05b-8a: construction with one risk puts the relabelled risks press first and conserves the base sentence multiset', async () => {
     const t = await thinConstruction(1);
     expect(t.suggested_actions[0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
@@ -582,20 +606,22 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
   }, 120_000);
 
-  it('#2854 served-500 row: a construction turn whose draft is WIDENED (an Olumi risk with draft_widening and no relies_on) completes 200 through the real route and names it', async () => {
+  it('#2854 served-500 row, E6 (DL 12 Oct): a construction turn whose widening provider WOULD add an Olumi risk is never asked; no risk is added and the turn completes 200 through the real route', async () => {
+    let asked = 0;
     const t = await thinConstruction(1, () => {
       wideningAnswer = (graph) => {
+        asked += 1;
         const id = (kind: string, label: string) => graph.nodes.find((n) => n.kind === kind && n.label === label)!.id;
         return { risk_suggestions: [{ label: 'Feature release slips', category: 'timing', mechanism: 'relies_on',
           hits_id: id('option', 'Raise to £59'), through_id: id('factor', 'Pro plan price'), through_direction: 'positive',
           affects_id: graph.nodes.find((n) => n.kind === 'goal')!.id, direction: 'negative',
           relies_on: 'shipping the feature release with the new price', watch_for: 'the release date moves later' }] };
       };
-    }, undefined, 2);
-    const widened = graphNow().nodes.filter((n) => (n as { draft_widening?: { provenance?: string } }).draft_widening?.provenance === 'ai_suggested_widen');
-    expect(widened.map((n) => n.label), 'control: the route really widened this draft').toEqual(['Feature release slips']);
-    expect((widened[0] as { relies_on?: unknown }).relies_on).toBeUndefined();
+    }, undefined, 1);
+    expect(asked, 'E6: the risks arm is PARKED in the served seam').toBe(0);
+    expect(graphNow().nodes.filter((n) => (n as { draft_widening?: unknown }).draft_widening !== undefined)).toHaveLength(0);
     expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
+    expectThinPress(t);
   });
 
   it('P05b-8c CONTRAST: a non-construction turn on the one-risk graph has no relabelled risks press', async () => {

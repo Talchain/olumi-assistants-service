@@ -52,6 +52,16 @@ export function guidanceHistoryOf(values: readonly unknown[]): GuidanceState | n
   return out;
 }
 
+/**
+ * E6 (Paul's test 12 Oct, DL): the build reply's thin-draft offer (`thinDraftOffer`, press `agent-next-suggest-risks`) IS
+ * RC-WIDEN's risks suggestion. That reply carries no row (its selection was made before the model existed), so the
+ * post-build risks row is recorded as SHOWN and the next reply does not say it again. Any other row is not this offer.
+ */
+export function thinDraftShownWire(postBuild: GuidanceWire | undefined): GuidanceWire | undefined {
+  const row = postBuild?.slot1;
+  return row?.policy_id === 'RC-WIDEN' && row.target === 'risks' ? { slot1: row } : undefined;
+}
+
 /** Only a method the route actually handled may settle an offer. Item presses name the actual held card's target. */
 export interface HandledGuidancePress { readonly policy_id: PolicyId; readonly item?: string }
 export function guidanceOnAnswer(wire: GuidanceWire | undefined, history: GuidanceState | null,

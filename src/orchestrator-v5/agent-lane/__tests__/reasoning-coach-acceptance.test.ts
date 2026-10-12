@@ -39,7 +39,8 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
     // R2 re-pin: claim predicates, duration exemption, kind-correct fallback and licensed control; historical fixtures stay intact.
     // Q4 DL re-pin: one bounded contrary-change class predicate, clause-scoped uncertainty and metadata-only drop logs.
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('4d7fadb469a818970283bf595bdda5951a3cd43d303df4aaf5b1a4af01f15202');
+    // E6 DL re-pin (12 Oct, Paul's test): cooldown_default counts a SHOWN row (status offered), and a shown item quiets its item row; no case or other constant changes.
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('aafa47a147f745d3b3b56a6c22a9a3153d711e47ad67539a0a7f686f93e81298');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('0ed74500de3ebb72683ba212e1a48db0c080896c6ae7044256f96d4b72156df2');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
