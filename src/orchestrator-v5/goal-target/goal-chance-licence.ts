@@ -1542,7 +1542,7 @@ export function periodEndConditionalOf(
   if (comparator === undefined || !sentRunScoresHeldChange(inputs.sentRun, graph, goalId, comparator)) return undefined;
   const brief = inputs.brief;
   if (typeof brief !== 'string' || brief.trim() === '') return undefined;
-  if (statedPartialOrLateEffect(brief, held.basis) !== undefined) return undefined;
+  if (statedPartialOrLateEffect(brief, held.basis, held.record.label) !== undefined) return undefined;
   // Through the ONE goal record (S5): the label and the stated target the licence's words are formed from.
   const label = held.record.label.trim() !== '' && !/[\r\n]/.test(held.record.label) ? held.record.label.trim() : undefined;
   const frame = target?.frame === 'change_abs' || target?.frame === 'change_rel' ? target.frame : undefined;

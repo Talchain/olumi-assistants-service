@@ -255,7 +255,7 @@ describe('G: the partial/late-effect grammar (bound to the basis\' own period; a
     ['We won’t see the full gain until month 6.', 'full gain until month 6'],
     ['The full benefit only arrives after month 3.', 'full benefit only arrives after month 3'],
     ['New developers won’t be fully productive by month 3.', 'won’t be fully productive by month 3'],
-  ])('contradiction: %s', (brief, words) => { expect(statedPartialOrLateEffect(brief, at3)).toBe(words); });
+  ])('contradiction: %s', (brief, words) => { expect(statedPartialOrLateEffect(brief, at3, 'productivity')).toBe(words); });
 
   it.each([
     'The hires start in month 2.',
@@ -264,5 +264,5 @@ describe('G: the partial/late-effect grammar (bound to the basis\' own period; a
     'Half the team is remote, and we need the full gain by month 3.',
     'We would see half the gain by month 2.',
     'Developers won’t be fully productive until month 2.',
-  ])('no contradiction: %s', (brief) => { expect(statedPartialOrLateEffect(brief, at3)).toBeUndefined(); });
+  ])('no contradiction: %s', (brief) => { expect(statedPartialOrLateEffect(brief, at3, 'productivity')).toBeUndefined(); });
 });
