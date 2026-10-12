@@ -88,7 +88,7 @@ const candidate = (): Rec => ({
 });
 
 /** The in-memory store: the read route, the register route's compare-and-set and replay rules, and the committed turn ledger. */
-function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledgerFails?: boolean } = {}) {
+function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledgerFails?: boolean; afterCommit?: (g: Rec) => void } = {}) {
   let graph: Rec = structuredClone(opts.graph ?? FX.graph);
   const commits: { turn_id: string; bytes: string }[] = [];
   const ledger = {
@@ -115,7 +115,10 @@ function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledg
       graph = stored;
       commits.push({ turn_id: turn, bytes });
       ledger.write_turn_ids.push(turn);
-      return { status: 200, json: { registered: true } };
+      // The route's acknowledgement names the bytes it stored (`assist.v1.scenario-graph-register.ts`: graph_identity_hash).
+      const acknowledged = computeGraphIdentityHash(stored as never);
+      opts.afterCommit?.(graph);
+      return { status: 200, json: { registered: true, graph_identity_hash: acknowledged } };
     }
     return { status: 404, json: {} };
   };
@@ -210,7 +213,7 @@ describe('L20 on the served early draft: ONE revised-draft card, prepared once, 
       + '(the draft modelled ‘product feature launch’). '
       + 'Kept from your brief: ‘Annual marketing spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
       + 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
-      + 'Not carried: Olumi’s earlier estimates and links, which are drafted afresh. You have not changed the draft since your brief, so nothing you set is lost.');
+      + 'Not carried: Olumi’s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.');
     // ONE chip, the card's own button, and the card rides in its detail.
     const calls = [a, b, again].map((r) => ({ name: 'propose_goal_target', ok: r.ok, mutated: false, proposal_id: r.proposal_id as string }));
     const chips = approvalChipsFor(calls, (id) => ({ proposal: proposals.get(id), result: a }));
@@ -348,5 +351,80 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
     expect(s.commits).toHaveLength(0);
+  });
+});
+
+describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targets, the whole approved graph', () => {
+  const offerOn = async (s: ReturnType<typeof server>, draft: () => Rec = candidate, args: Rec = conversion) =>
+    lane(s, new ProposalStore(), draft).caps.proposeGoalTarget!(l20Turn, args as never);
+
+  it('RED (unknown): a PRESENT value with no source stamp is unknown authority and refuses', async () => {
+    const g = structuredClone(FX.graph);
+    delete ((g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!.observed_state as Rec).source;
+    const s = server({ graph: g });
+    const r = await offerOn(s);
+    expect(r).toMatchObject({ ok: false, refusal: 'draft_holds_your_work' });
+    expect(String(r.detail)).toMatch(/a value for \u2018Advertising spend\u2019 whose author is not recorded/);
+    expect(s.commits).toHaveLength(0);
+  });
+
+  it('RED (unknown): a present option setting, and a present link, with no source stamp refuse', async () => {
+    const g = structuredClone(FX.graph);
+    const option = (g.nodes as Rec[]).find((n) => n.kind === 'option' && n.interventions !== undefined && Object.keys(n.interventions).length > 0)!;
+    const factorId = Object.keys(option.interventions)[0]!;
+    delete (option.interventions[factorId] as Rec).source;
+    const r1 = await offerOn(server({ graph: g }));
+    expect(String(r1.detail)).toMatch(new RegExp(`a level for \u2018${option.label}\u2019 whose author is not recorded`));
+    const g2 = structuredClone(FX.graph);
+    const link = (g2.edges as Rec[]).find((e) => e.from === 'advertising_spend')!;
+    delete (link.provenance as Rec).source;
+    const r2 = await offerOn(server({ graph: g2 }));
+    expect(String(r2.detail)).toMatch(/a link \u2018Advertising spend\u2019 \u2192 .* whose author is not recorded/);
+  });
+
+  it('CONTROL (unknown): construction\'s own unstamped "100 % of today" definition is not a human contribution', async () => {
+    const g = structuredClone(FX.graph);
+    (g.nodes as Rec[]).find((n) => n.id === 'marketing_experience')!.observed_state = { value: 1, raw_value: 100, unit: '% of today' };
+    const r = await offerOn(server({ graph: g }));
+    expect(r).toMatchObject({ ok: true });
+  });
+
+  it('RED (quantity): "<= 25%" on ANOTHER quantity is not the founder-time limit; the card is not offered', async () => {
+    const elsewhere = () => {
+      const c = candidate();
+      c.constraints = (c.constraints as Rec[]).map((x) => (x.metric === 'Founder marketing time' ? { ...x, metric: 'Advertising time' } : x));
+      c.factors = [...(c.factors as Rec[]), { label: 'Advertising time', role: 'controllable', baseline_known: false, baseline_value: 10, unit: '%', provenance: 'ai_proposed', plausible_max: 100 }];
+      return c;
+    };
+    const s = server();
+    const r = await offerOn(s, elsewhere);
+    expect(r).toMatchObject({ ok: false, refusal: 'revised_draft_dropped_a_limit' });
+    expect(String(r.detail)).toMatch(/\u2018Founder marketing time\u2019 at most 25%/);
+  });
+
+  it('RED (measures): a target call names its quantity; the same figure on ANOTHER quantity is not "held"', async () => {
+    const s = server();
+    // "customers" is in L20; 15% is a figure L20 states. The candidate holds "> 15%" only on Conversion rate.
+    const r = await offerOn(s, candidate, { constraint_type: 'at_least', value: 15, unit: '%', measures: 'customers', rationale: L20 });
+    expect(r).toMatchObject({ ok: true, revised_draft: { holds_this_target: false } });
+    expect(String(r.note)).toMatch(/This target \(15%\) is NOT in the revised draft/);
+  });
+
+  it('RED (whole graph): a postimage that is not the acknowledged registration is unconfirmed, and no replacement receipt is issued', async () => {
+    const s = server({ afterCommit: (g) => {
+      // A foreign write lands between the registration and the read-back; the targets and limits are untouched.
+      const e = (g.edges as Rec[]).find((x) => x.from === 'marketing_manager_hired' || x.to === 'conversion_rate')!;
+      e.strength = { mean: 0.9, std: 0.05 };
+    } });
+    const proposals = new ProposalStore();
+    const { caps } = lane(s, proposals);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    s.said(FX.l20.turn_id);
+    const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(r).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' });
+    expect(r.follow_up).toBeUndefined();
+    // The same press again is not answered "already applied": no receipt was recorded for an unconfirmed write.
+    const again = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(again.already_applied).not.toBe(true);
   });
 });

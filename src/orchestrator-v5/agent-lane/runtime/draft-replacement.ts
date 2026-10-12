@@ -32,6 +32,7 @@ import {
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
+import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -44,6 +45,14 @@ const DRAFT_LINK_SOURCES = new Set(['brief_extraction', 'cee_hypothesis', 'domai
 const DRAFT_LEVEL_SOURCES = new Set(['brief_extraction', 'cee_hypothesis']);
 /** Node-existence stamps that name the user as the one who added it (`identity-proposal.ts` USER_NODE, less the brief's). */
 const USER_ADDED_NODE = new Set(['user_set', 'user_specified', 'user_stated', 'user']);
+const finite = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v);
+/**
+ * ⛔ A PRESENT value with no stamp is UNKNOWN authority, not "nobody's" (AIE 0452 AMEND 1): a figure held without a
+ * source may be a human edit through a writer that stamps nothing. The one exception is construction's own definition,
+ * written unstamped on purpose: "today is 100 % of today" (`admit-model.ts` `framedObservedState`, `model-primitives.ts`).
+ */
+const holdsAValue = (os: Rec): boolean => finite(os.value) || finite(os.raw_value);
+const isTodayDefinition = (os: Rec): boolean => os.unit === TODAY_UNIT && os.raw_value === TODAY_LEVEL;
 
 /**
  * G1. Every later human contribution the model's own stamps record, in plain words (empty = none recorded). A stamp this
@@ -59,7 +68,9 @@ export function humanMaterialAfterTheDraft(raw: unknown): string[] {
     if (os !== undefined) {
       const source = os.source;
       if (rec(os.reviewed_by_user) !== undefined) found.push(`your review of the value for ${named(n, 'a factor')}`);
-      else if (source !== undefined && !(typeof source === 'string' && DRAFT_VALUE_SOURCES.has(source))) {
+      else if (source === undefined) {
+        if (holdsAValue(os) && !isTodayDefinition(os)) found.push(`a value for ${named(n, 'a factor')} whose author is not recorded`);
+      } else if (!(typeof source === 'string' && DRAFT_VALUE_SOURCES.has(source))) {
         found.push(reflectsAHumanAct(classifyValueSource(source))
           ? `your figure for ${named(n, 'a factor')}` : `a value for ${named(n, 'a factor')} whose author is not recorded`);
       }
@@ -71,7 +82,7 @@ export function humanMaterialAfterTheDraft(raw: unknown): string[] {
     const levels = rec(n.interventions) ?? rec(rec(n.data)?.interventions);
     for (const [factorId, level] of Object.entries(levels ?? {})) {
       const source = rec(level)?.source;
-      if (source === undefined || (typeof source === 'string' && DRAFT_LEVEL_SOURCES.has(source))) continue;
+      if (typeof source === 'string' && DRAFT_LEVEL_SOURCES.has(source)) continue;
       found.push(source === 'user_specified'
         ? `your level for ${named(n, 'an option')} on ${named(byId.get(factorId), 'a factor')}`
         : `a level for ${named(n, 'an option')} whose author is not recorded`);
@@ -84,7 +95,7 @@ export function humanMaterialAfterTheDraft(raw: unknown): string[] {
     const link = `${named(byId.get(String(e.from)), 'a factor')} → ${named(byId.get(String(e.to)), 'a factor')}`;
     const sizing = linkSizing(e);
     if (edgeReviewedByUser(e) || sizing === 'olumi_accepted') found.push(`your review of the link ${link}`);
-    else if (source !== undefined && !(typeof source === 'string' && DRAFT_LINK_SOURCES.has(source))) {
+    else if (!(typeof source === 'string' && DRAFT_LINK_SOURCES.has(source))) {
       found.push(source === 'user_specified' ? `your link ${link}` : `a link ${link} whose author is not recorded`);
     } else if (source !== 'brief_extraction' && (sizing === 'user' || edgeStrengthProvenance(e) === 'user_stated')) {
       found.push(`your size for the link ${link}`);
@@ -131,10 +142,20 @@ export function revisedDraftBrief(storedBrief: string, typedGoal: string): strin
 
 export interface HeldRow { readonly node_id: string; readonly operator: string; readonly value: number; readonly unit: string }
 const rowsOf = (raw: unknown): Rec[] => recs(rec(raw)?.goal_constraints);
+/** The quantity a row (or a target) is ON, by the lane's canonical label of its node (or the row's own label). */
+const quantityOf = (raw: unknown, c: Rec): string | null => {
+  const n = recs(rec(raw)?.nodes).find((x) => x.id === c.node_id);
+  const label = typeof n?.label === 'string' ? n.label : typeof c.label === 'string' ? c.label : null;
+  return label === null || label.trim() === '' ? null : canonicalLabel(label);
+};
 const numeric = (c: Rec): c is Rec & { value: number } => typeof c.value === 'number' && Number.isFinite(c.value);
 const unitOf = (c: Rec): string => (typeof c.unit === 'string' ? c.unit.trim() : '');
 
-/** The draft's limits (rows that are not the goal's targets), and whether the candidate keeps each at the same figure. */
+/**
+ * The draft's limits (rows that are not the goal's targets), and whether the candidate keeps each: the SAME quantity (its
+ * node's canonical label; AIE 0452 AMEND 2: "<= 25%" on another node is not the founder-time limit), comparator, figure,
+ * unit and frame. A limit whose quantity cannot be named is dropped (unresolved identity refuses).
+ */
 export function limitsKeptBy(base: unknown, candidate: unknown): { kept: HeldRow[]; dropped: HeldRow[] } {
   const isLimit = (c: Rec) => c.role !== 'goal_target' && numeric(c) && (c.operator === '<=' || c.operator === '>=') && c.deadline_metadata == null;
   const goalIds = (raw: unknown) => new Set(recs(rec(raw)?.nodes).filter((n) => n.kind === 'goal').map((n) => n.id));
@@ -144,16 +165,19 @@ export function limitsKeptBy(base: unknown, candidate: unknown): { kept: HeldRow
   const dropped: HeldRow[] = [];
   for (const c of rowsOf(base).filter((r) => isLimit(r) && !baseGoals.has(r.node_id))) {
     const row = { node_id: String(c.node_id), operator: String(c.operator), value: c.value as number, unit: unitOf(c) };
-    (theirs.some((t) => t.operator === row.operator && t.value === row.value && unitOf(t) === row.unit) ? kept : dropped).push(row);
+    const quantity = quantityOf(base, c);
+    const same = (t: Rec) => quantity !== null && quantityOf(candidate, t) === quantity && t.operator === row.operator
+      && t.value === row.value && unitOf(t) === row.unit && (t.value_frame ?? 'level') === (c.value_frame ?? 'level');
+    (theirs.some(same) ? kept : dropped).push(row);
   }
   return { kept, dropped };
 }
 
 /** The candidate's targets for the goal: each `goal_target` row and the goal's own row, with the comparator as stated. */
-export function targetsHeldBy(candidate: unknown): { node_id: string; comparator: string; value: number; unit: string }[] {
+export function targetsHeldBy(candidate: unknown): { node_id: string; quantity: string | null; comparator: string; value: number; unit: string }[] {
   const goals = new Set(recs(rec(candidate)?.nodes).filter((n) => n.kind === 'goal').map((n) => n.id));
   return rowsOf(candidate)
     .filter((c) => numeric(c) && (c.role === 'goal_target' || goals.has(c.node_id)) && c.deadline_metadata == null
       && (c.value_frame === undefined || c.value_frame === 'level'))
-    .map((c) => ({ node_id: String(c.node_id), comparator: String(c.operator_as_stated ?? c.operator), value: c.value as number, unit: unitOf(c) }));
+    .map((c) => ({ node_id: String(c.node_id), quantity: quantityOf(candidate, c), comparator: String(c.operator_as_stated ?? c.operator), value: c.value as number, unit: unitOf(c) }));
 }
