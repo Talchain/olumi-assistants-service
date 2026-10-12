@@ -723,7 +723,7 @@ describe.each([true, false])('J: a fence-refused wire option edit is the revisio
   beforeEach(() => { vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', String(versionsEnabled)); _resetConfigCache(); });
   const FENCE = (code: 'OLTF1' | 'OLTF2' | 'OLTF3') => ({ code, message: 'turn fence refused the append',
     details: JSON.stringify({ generation: 1, max_generation: 2 }) });
-  async function wireEdit(h: ReturnType<typeof harness>) {
+  async function wireEdit(_h: ReturnType<typeof harness>) {
     const app = Fastify(); await ceeOrchestratorRouteV2(app);
     try {
       const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
