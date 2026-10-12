@@ -2589,7 +2589,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
-      return withShapeOnlyIfItDerives(withoutRunShareTextAtEgress(gatedReplay, { requestId: String(req.id), exitPath: 'agent_lane_v1_replay' }));
+      return withShapeOnlyIfItDerives(gatedReplay);
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
@@ -5170,7 +5170,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (firstRunRiskMarker !== undefined && !reply.includes(firstRunRiskMarker)) reply = withDisclosures(reply, [firstRunRiskMarker]);
       // Every prose writer, including cell-owned horizons and the build's Run risk marker, crosses the ONE chokepoint
       // before shaping, history and storage. The unchanged-body branch below retains this same gated carrier.
-      wireBody = withEstimateGoalPointsAtEgress({ ...wireBody, assistant_text: reply }, {
+      // ⭐ Recovery Batch E (DL ruling (ii), 12 Oct; Paul's #87): on a turn that RAN or explains the Run, and wherever the
+      // model wrote the words (the Agent's prose about a Run), the reply is a RESULT surface: no sentence stating a share of
+      // runs, before the one chokepoint, so shaping, history, storage and any replay of this row carry the same words
+      // (`run-share-text.ts`). Host-measured reasoning answers (tipping points, 0 model calls) keep it as supporting detail.
+      const replyBody = { ...wireBody, assistant_text: reply };
+      wireBody = withEstimateGoalPointsAtEgress(runOrExplainTurn || result.timing.provider_calls > 0
+        ? withoutRunShareTextAtEgress(replyBody, { requestId: String(req.id), exitPath: 'agent_lane_v1_final', runTurn: true }) : replyBody, {
         analysisResult, graph: readbackGraph ?? null,
         current: selectedRunCurrent,
         userAuthoredTexts: userTextsForEgress(
@@ -5308,9 +5314,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(composedReply.measure ?? {}),
       }, 'agent-lane: the reply passed the one composer');
     }
-    // ⭐ Recovery Batch E (DL, 12 Oct; ruling A, Paul's #87): no sentence stating an option's share of runs ships, on any
-    // surface of the body, after every other writer (`run-share-text.ts`); the stored answer row is this same text.
-    wireBody = withoutRunShareTextAtEgress(wireBody, { requestId: String(req.id), exitPath: 'agent_lane_v1_final' });
     // History and the durable answer row below remember the same FINAL SENT text, after every gate.
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
     // Every retained Run output becomes a neutral marker; superseded pairs leave with their reasoning as before.

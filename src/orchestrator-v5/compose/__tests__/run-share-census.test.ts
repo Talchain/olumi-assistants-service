@@ -1,6 +1,9 @@
 /**
- * ⭐ RECOVERY BATCH E (DL ruling, 12 Oct): THE CEE WIN-SHARE CENSUS. No CEE text a Run can emit states an option's share of
- * runs: assistant_text on the Agent and non-Agent paths, the analysis_result summary, notes, coaching and egress.
+ * ⭐ RECOVERY BATCH E (DL ruling (ii), 12 Oct, refining ruling A to Paul's #87): THE CEE WIN-SHARE CENSUS, OVER THE RUN'S
+ * RESULT SURFACES. No result surface states an option's share of runs: the analysis_result summary, and the reply of a turn
+ * that ran (assistant_text, its shape, its chips) on the Agent and non-Agent paths. The REASONING surfaces keep it as
+ * supporting detail (tipping points, the advice gate, constraint disclosure, the decision review): a negative row proves the
+ * tipping-point answer still renders. Every filtered body still passes the strict response schema.
  *
  * Envelopes:
  *   · score run 4 capacity step 3, the served Agent body (CEE a770ce49), whole: it carried "88% of runs of this model";
@@ -17,7 +20,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import { buildAnalysisResultBlock } from '../../compose.js';
-import { RUN_SHARE_CENSUS, statesRunShare, withoutRunShareSentences, withoutRunShareTextAtEgress } from '../run-share-text.js';
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { RUN_RESULT_TEMPLATE, RUN_SHARE_CENSUS, statesRunShare, withoutRunShareSentences, withoutRunShareTextAtEgress } from '../run-share-text.js';
+import { RUN_ANALYSIS_LOCKED_TEMPLATES } from '../../coaching/analysis-result-headline.js';
 import { closenessLead } from '../../coaching/robustness-honesty.js';
 import { BODY_BY_RATIONALE } from '../lens-selector.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
@@ -42,23 +47,32 @@ function strings(value: unknown, path = '$', out: [string, string][] = []): [str
   return out;
 }
 const censusHits = (body: unknown): string[] => strings(body).filter(([, s]) => RUN_SHARE_CENSUS.test(s)).map(([p]) => p);
+/** The census over the RESULT surfaces only: every analysis_result summary, and a Run turn's reply, shape and chips. */
+const RESULT_SURFACE = /^\$\.(?:assistant_text|_answer_shape\b.*|suggested_actions\[\d+\]\.label|blocks\[\d+\]\.summary)$/;
+const resultSurfaceHits = (body: Rec): string[] => censusHits(body).filter((p) => RESULT_SURFACE.test(p)
+  && (!p.startsWith('$.blocks') || body.blocks[Number(/\[(\d+)\]/.exec(p)![1])].type === 'analysis_result'));
+const RUN = { exitPath: 'census', runTurn: true } as const;
+const REASONING = { exitPath: 'census', runTurn: false } as const;
+/** The strict wire schema over the V5 envelope's own members (the Agent's sidecars are not V5 members). */
+const V5_KEYS = ['response_version', 'assistant_text', 'blocks', 'suggested_actions', 'insights', 'stage_indicator'] as const;
+const v5 = (body: Rec): Rec => Object.fromEntries(V5_KEYS.filter((k) => k in body).map((k) => [k, body[k]]));
 
 describe('census 1 — score run 4 capacity step 3, the served Agent body', () => {
   it('BEFORE: the census sees the class (the analysis_result summary)', () => {
-    expect(censusHits(SERVED)).toContain('$.blocks[0].summary');
+    expect(resultSurfaceHits(SERVED)).toContain('$.blocks[0].summary');
   });
-  it('AFTER the exit: no CEE text matches; the chance line and the structured win_probabilities data are unchanged', () => {
-    const out = withoutRunShareTextAtEgress(SERVED, { exitPath: 'census' });
-    expect(censusHits(out)).toEqual([]);
+  it('AFTER the exit (a Run turn): no result surface matches; the chance line and the structured win_probabilities are unchanged', () => {
+    const out = withoutRunShareTextAtEgress(SERVED, RUN);
+    expect(resultSurfaceHits(out)).toEqual([]);
     expect(out.assistant_text).toContain(CHANCE_LINE);
     expect(out.assistant_text.split(CHANCE_LINE)).toHaveLength(2);
     expect(out.blocks[0].win_probabilities).toEqual(SERVED.blocks[0].win_probabilities);
     expect(out.blocks[0].leading_option_id).toBe(SERVED.blocks[0].leading_option_id);
     expect(out.assistant_text).toBe(SERVED.assistant_text);
   });
-  it('a body with no such sentence is returned by reference', () => {
-    const clean = withoutRunShareTextAtEgress(SERVED, { exitPath: 'census' });
-    expect(withoutRunShareTextAtEgress(clean, { exitPath: 'census' })).toBe(clean);
+  it('a body with no such sentence is returned by reference (the V5 route re-finalises only an edited body)', () => {
+    const clean = withoutRunShareTextAtEgress(SERVED, RUN);
+    expect(withoutRunShareTextAtEgress(clean, RUN)).toBe(clean);
   });
 });
 
@@ -87,11 +101,11 @@ describe('census 2 — a constructed Run, every option with a win share, through
     expect(text).toMatch(RUN_SHARE_CENSUS);
     expect(String(fact.result.summary)).toMatch(RUN_SHARE_CENSUS);
   });
-  it('AFTER: the V5 body (assistant_text + analysis_result block) has no match anywhere', async () => {
+  it('AFTER: the builder\'s summary is clean, and the Run turn\'s whole V5 body has no result-surface match', async () => {
     const { text, fact } = await run();
-    const body = { assistant_text: text, blocks: [buildAnalysisResultBlock(fact)] };
-    expect(censusHits(body.blocks)).toEqual([]);
-    expect(censusHits(withoutRunShareTextAtEgress(body, { exitPath: 'census' }))).toEqual([]);
+    const body: Rec = { response_version: 2, assistant_text: text, blocks: [buildAnalysisResultBlock(fact)], suggested_actions: [], insights: [], stage_indicator: 'analyse' };
+    expect(resultSurfaceHits({ blocks: body.blocks })).toEqual([]);
+    expect(resultSurfaceHits(withoutRunShareTextAtEgress(body, RUN))).toEqual([]);
   });
 });
 
@@ -121,13 +135,16 @@ describe('census 3 — every other CEE emitter of the class, before and after th
     expect(withoutRunShareSentences(`${CHANCE_LINE}\n\n• In this model, 88% of runs supported ‘Add one specialist’.\n• Not shown yet; why is under More detail`))
       .toBe(`${CHANCE_LINE}\n\n• Not shown yet; why is under More detail`);
   });
-  it('an assistant_text left empty ships as the filter leaves it, never a Run claim (named residual, F); a chip left without a label is dropped', () => {
+  it('a Run turn whose reply was only a share of runs says the existing locked template (true: it ran); a chip stating one is dropped', () => {
+    expect(RUN_ANALYSIS_LOCKED_TEMPLATES.has(RUN_RESULT_TEMPLATE)).toBe(true);
     const out = withoutRunShareTextAtEgress({ assistant_text: 'Hold was supported by 70% of runs of this model.',
-      suggested_actions: [{ id: 'a', label: 'Why did Hold come out on top?', message: 'x' }, { id: 'b', label: 'Check estimates', message: 'y' }] }, { exitPath: 'census' });
-    expect(out.assistant_text).toBe('');
+      suggested_actions: [{ id: 'a', label: 'Why did Hold come out on top?', message: 'x' }, { id: 'b', label: 'Check estimates', message: 'y' }] }, RUN);
+    expect(out.assistant_text).toBe(RUN_RESULT_TEMPLATE);
     expect(out.suggested_actions.map((c: Rec) => c.id)).toEqual(['b']);
-    // The delta check's repro: a reply that ran nothing is never turned into "Ran analysis on your current scenario."
-    expect(withoutRunShareTextAtEgress({ assistant_text: 'I cannot tell which option comes out ahead.' }, { exitPath: 'census' }).assistant_text).toBe('');
+  });
+  it('the delta check\'s repro on a turn that did NOT run: "I cannot tell which option comes out ahead." ships unchanged — never emptied, never a Run claim', () => {
+    const body = { assistant_text: 'I cannot tell which option comes out ahead.' };
+    expect(withoutRunShareTextAtEgress(body, REASONING)).toBe(body);
   });
   it('CONTRAST: the licensed chance line and its licence words never match', () => {
     for (const text of [CHANCE_LINE,
@@ -136,5 +153,59 @@ describe('census 3 — every other CEE emitter of the class, before and after th
       expect(statesRunShare(text), text).toBe(false);
       expect(withoutRunShareSentences(text)).toBe(text);
     }
+  });
+});
+
+describe('ruling (ii): the REASONING surfaces keep the share of runs as supporting detail', () => {
+  it('"What would change the result?": the tipping-point answer renders its content, byte for byte (by reference)', () => {
+    const tipping = { response_version: 2, stage_indicator: 'analyse', insights: [], suggested_actions: [], blocks: [],
+      assistant_text: '‘Offshore partner’ would still be supported by the most runs even if delivery risk\'s average effect doubled. '
+        + '‘In-house team’ would be the first to be supported by the most runs if hiring time fell below about a quarter.' };
+    expect(statesRunShare(tipping.assistant_text)).toBe(true);
+    const out = withoutRunShareTextAtEgress(tipping, REASONING);
+    expect(out).toBe(tipping);
+    expect(out.assistant_text).toContain('would still be supported by the most runs');
+  });
+  it('a re-shown analysis_result block on a reasoning turn: its summary is still a result surface (cleaned); the reply is kept', () => {
+    const body = { assistant_text: '‘Hold’ would still be supported by the most runs even if price fell.',
+      blocks: [{ type: 'analysis_result', summary: 'Hold was supported by 70% of runs of this model. Margins are thin.' }] };
+    const out = withoutRunShareTextAtEgress(body, REASONING);
+    expect(out.assistant_text).toBe(body.assistant_text);
+    expect((out.blocks[0] as Rec).summary).toBe('Margins are thin.');
+  });
+});
+
+describe('every filtered body passes the strict response schema (never a required field emptied)', () => {
+  const rows: [string, () => Promise<Rec> | Rec, typeof RUN | typeof REASONING][] = [
+    ['score run 4 capacity step 3 (its V5 members)', () => v5(SERVED), RUN],
+    ['the constructed all-options Run envelope', async () => {
+      const plot = { run: vi.fn(async () => structuredClone(HAPPY) as V2RunResponseEnvelope), validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;
+      const handler = createRunAnalysisHandler({ plotClient: plot, scenarioReader: vi.fn(async () => ({
+        graph: { nodes: [{ id: 'g', kind: 'goal' }], edges: [] },
+        options: [{ id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { f: 1 } }, { id: 'opt_b', option_id: 'opt_b', label: 'B', interventions: { f: 0 } }],
+        goal_node_id: 'g',
+      })) as never });
+      const outcome = await handler({
+        context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [], session_id: 'census',
+          request_id: 'census', budgets: { turn_ms: 60_000, llm_narrate_ms: 30_000 }, prior_turns: [], prior_facts: [], persistedGraph: null },
+        payload: makeMessagePayload({ turn_id: 't-census', scenario_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', message: 'Run the analysis.', turn_class: 'decide', stage: 'analyse' } as never),
+        requestId: 'census', signal: new AbortController().signal, orientationText: '',
+      } as unknown as HandlerInvocation);
+      return { response_version: 2, assistant_text: String(outcome.assistant_text), insights: [], suggested_actions: [], stage_indicator: 'analyse',
+        blocks: [buildAnalysisResultBlock(outcome.handler_facts[0] as RunAnalysisHandlerFact)] };
+    }, RUN],
+    ['"I cannot tell which option comes out ahead." alone, on a Run turn', () => ({ response_version: 2, insights: [], suggested_actions: [],
+      stage_indicator: 'analyse', blocks: [], assistant_text: 'I cannot tell which option comes out ahead.' }), RUN],
+    ['"I cannot tell which option comes out ahead." alone, on a reasoning turn', () => ({ response_version: 2, insights: [], suggested_actions: [],
+      stage_indicator: 'analyse', blocks: [], assistant_text: 'I cannot tell which option comes out ahead.' }), REASONING],
+  ];
+  it.each(rows)('%s', async (_name, make, opts) => {
+    const body = await make();
+    expect(OlumiResponseSchema.safeParse(body).success, 'precondition: the body is schema-valid before').toBe(true);
+    const out = withoutRunShareTextAtEgress(body, opts);
+    const parsed = OlumiResponseSchema.safeParse(out);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues ?? [])).toBe(true);
+    expect(String(out.assistant_text).trim()).not.toBe('');
+    expect(resultSurfaceHits(opts.runTurn ? out : { blocks: out.blocks })).toEqual([]);
   });
 });

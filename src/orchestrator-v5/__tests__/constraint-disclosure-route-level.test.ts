@@ -31,6 +31,7 @@
  * shape of #703's inertness, and a test that checked only one of them could
  * not tell the two apart.
  */
+import { RUN_SHARE_CENSUS } from '../compose/run-share-text.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
@@ -881,7 +882,23 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
       plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
-        expect(turn.coaching).toMatch(/explore the most-supported option/i);
+        // Batch E ruling (ii): the Run turn's share-of-runs confirmation paragraph is removed, so the coaching copy is the
+        // reply's only paragraph (the `coaching` slot reads a second one): asserted on the whole reply.
+        expect(turn.assistantText).toMatch(/explore the most-supported option/i);
+      });
+    });
+
+    it('Batch E wire row: a Run turn whose reply the share filter EDITED ships itself, re-finalised — never the egress-violation fallback', () => {
+      // Mutants (RED): drop the route's re-finalise → the hook ships the fallback; drop the Run flag → the share ships.
+      plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
+      return runAnalysisTurn(app).then((turn) => {
+        expect(turn.status).toBe(200);
+        const body = JSON.parse(turn.raw) as { assistant_text: string; blocks: { type: string }[] };
+        expect(body.assistant_text).not.toBe('The server produced a response that failed validation.');
+        expect(body.blocks.map((b) => b.type)).toContain('analysis_result');
+        expect(body.blocks.map((b) => b.type)).not.toContain('error');
+        expect(body.assistant_text).not.toMatch(RUN_SHARE_CENSUS);
+        expect(body.assistant_text).toMatch(/explore the most-supported option/i);
       });
     });
 
@@ -894,8 +911,8 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
       seedPriorRun();
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
-        expect(turn.coaching).not.toMatch(/your first analysis is ready/i);
-        expect(turn.coaching).toContain('Hire Marketing Manager');
+        expect(turn.assistantText).not.toMatch(/your first analysis is ready/i);
+        expect(turn.assistantText).toContain('Hire Marketing Manager');
       });
     });
   });

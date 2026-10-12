@@ -1,19 +1,24 @@
 /**
- * ⭐ RECOVERY BATCH E (DL ruling, 12 Oct; ruling A and Paul's #87: a win share is never the headline; score run 4 C3 FAIL):
- * NO CEE TEXT A RUN EMITS STATES AN OPTION'S SHARE OF RUNS. The share of runs in which an option came out on top
- * (`win_probability`) is not the chance of meeting the goal, and CEE wrote it in many places: the lead ladder
- * ("… gave the highest weekly support capacity in 88% of runs of this model …"), its "(each supported by under 1% of runs)"
- * tail, the objective-contradiction arms, the explanation fallback, the close-call sentence, coaching cards and lenses,
- * the decision review's crowning sentence, and the Agent's own prose.
+ * ⭐ RECOVERY BATCH E (DL ruling (ii), 12 Oct, refining ruling A to Paul's #87 and the guiding principle; score run 4 C3 FAIL):
+ * THE RUN'S RESULT SURFACES NEVER STATE AN OPTION'S SHARE OF RUNS. The share of runs in which an option came out on top
+ * (`win_probability`) is supporting detail, never the headline and never the chance of meeting the goal. Run 4's blocking
+ * sentences were on the result surfaces: the `analysis_result` summary ("… gave the highest weekly support capacity in 88% of
+ * runs of this model …") and the Run turn's reply (the run handler's text on the V5 route, the Agent's prose on its Run turn).
  *
- * One rule, applied LAST on each exit (the V5 route's wire body, the Agent's final and replay egress) and at the one
- * `analysis_result` builder: every sentence that states a share of runs is removed. No word is added. The per-option goal chance and its licence words never match, so they stay
- * untouched. The structured `win_probability` fields are data, not text, and are not edited here.
+ * Removed there, and ONLY there: every sentence that states a share of runs, on
+ *   · every `analysis_result` block's summary, wherever the block is shown (the builder, and each exit as a backstop);
+ *   · the Run turn's reply — `assistant_text`, its `_answer_shape` and its chips — when the caller says the turn RAN.
+ * The REASONING surfaces keep it as supporting detail ("What would change the result?" tipping points, the advice gate,
+ * constraint disclosure, the decision review): they are model-relative findings for reasoning, never called a chance.
+ *
+ * No word is added, except that a result surface left with nothing says the existing locked template, which is true there
+ * (the analysis ran). A chip left without a label is dropped; a shape whose words changed is dropped (the text ships whole).
+ * Nothing it changes can leave a required field empty. The structured `win_probability` fields are data and are not edited.
  *
  * The census pattern is the DL's, verbatim (`RUN_SHARE_CENSUS`); removal also covers the plural and ranking forms CEE
  * writes that it does not spell out ("the most runs", "scored highest", "came out lowest").
  */
-import { summaryWithoutLeadSentence } from '../coaching/analysis-result-headline.js';
+import { RUN_ANALYSIS_LOCKED_TEMPLATES, summaryWithoutLeadSentence } from '../coaching/analysis-result-headline.js';
 import { log } from '../../utils/telemetry.js';
 
 /** The DL's census, verbatim (12 Oct): no CEE text a Run emits may match it. */
@@ -24,10 +29,8 @@ const RUN_SHARE_SENTENCE = new RegExp([
   String.raw`\bscor(?:ed|es) highest\b`, String.raw`\bcame out (?:ahead|lowest|highest|top)\b`, String.raw`\bcomes? out ahead\b`,
 ].join('|'), 'i');
 
-/** Members never edited: the user's model bytes, the Agent's sidecar, diagnostics and identities. */
-const SKIPPED_KEYS: ReadonlySet<string> = new Set(['draft_graph', 'graph', '_agent', '_diagnostic_trace', '_provider_calls', 'id', 'type',
-  'option_id', 'leading_option_id', 'computed_against_hash', 'graph_hash', 'scenario_id', 'turn_id']);
-const MAX_DEPTH = 40;
+/** The existing locked Run template (`RUN_ANALYSIS_LOCKED_TEMPLATES`): said only where the analysis ran, so it is true. */
+export const RUN_RESULT_TEMPLATE = [...RUN_ANALYSIS_LOCKED_TEMPLATES][0]!;
 
 /** `text` without any sentence that states a share of runs; the lead ladder's sentence is read by its own grammar first. */
 export function withoutRunShareSentences(text: string): string {
@@ -43,52 +46,57 @@ export function withoutRunShareSentences(text: string): string {
   return lines.filter((l): l is string => l !== null).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** A result surface's words without a share of runs; never empty (the analysis ran, so the locked template is true). */
+export function runResultWords(text: string): string {
+  const kept = withoutRunShareSentences(text);
+  return typeof text === 'string' && text.trim() !== '' && kept.trim() === '' ? RUN_RESULT_TEMPLATE : kept;
+}
+
 /** True when `text` states a share of runs (the removal rule, wider than the census). */
 export function statesRunShare(text: unknown): boolean {
   return typeof text === 'string' && RUN_SHARE_SENTENCE.test(text);
 }
 
-function edit(value: unknown, path: string, depth: number, changed: string[]): unknown {
-  if (depth > MAX_DEPTH) return value;
-  if (typeof value === 'string') {
-    if (!statesRunShare(value)) return value;
-    changed.push(path);
-    return withoutRunShareSentences(value);
-  }
-  if (Array.isArray(value)) {
-    let out: unknown[] | null = null;
-    value.forEach((item, i) => {
-      const next = edit(item, `${path}[${i}]`, depth + 1, changed);
-      if (next !== item) { out ??= [...value]; out[i] = next; }
-    });
-    return out ?? value;
-  }
-  if (value !== null && typeof value === 'object') {
-    let out: Record<string, unknown> | null = null;
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (SKIPPED_KEYS.has(k)) continue;
-      const next = edit(v, `${path}.${k}`, depth + 1, changed);
-      if (next !== v) { out ??= { ...(value as Record<string, unknown>) }; out[k] = next; }
-    }
-    return out ?? value;
-  }
-  return value;
-}
+type Rec = Record<string, unknown>;
+const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
- * The wire body without any share-of-runs sentence, by reference when there is none. A chip whose label is left empty is
- * dropped. Logs the edited paths, never prose.
+ * The body with its result surfaces free of any share-of-runs sentence, BY REFERENCE when nothing changed (the V5 route
+ * re-finalises only an edited body). `runTurn`: this turn ran the analysis, so its reply is a result surface. Logs the
+ * edited paths, never prose.
  */
-export function withoutRunShareTextAtEgress<T extends object>(body: T, opts: { readonly requestId?: string; readonly exitPath: string }): T {
+export function withoutRunShareTextAtEgress<T extends object>(body: T,
+  opts: { readonly requestId?: string; readonly exitPath: string; readonly runTurn: boolean }): T {
+  const b = body as unknown as Rec;
   const changed: string[] = [];
-  const out = edit(body, '$', 0, changed);
-  if (out === body) return body;
-  const next: Record<string, unknown> = { ...(out as Record<string, unknown>) };
-  if (Array.isArray(next.suggested_actions)) {
-    next.suggested_actions = (next.suggested_actions as unknown[]).filter((c) =>
-      !(c !== null && typeof c === 'object' && typeof (c as { label?: unknown }).label === 'string' && (c as { label: string }).label.trim() === ''));
+  const next: Rec = { ...b };
+  if (Array.isArray(b.blocks)) {
+    let blocks: unknown[] | null = null;
+    b.blocks.forEach((block, i) => {
+      if (!isRec(block) || block.type !== 'analysis_result' || !statesRunShare(block.summary)) return;
+      blocks ??= [...(b.blocks as unknown[])];
+      blocks[i] = { ...block, summary: runResultWords(block.summary as string) };
+      changed.push(`$.blocks[${i}].summary`);
+    });
+    if (blocks !== null) next.blocks = blocks;
   }
-  log.info({ event: 'cee.run_share_text.removed', request_id: opts.requestId, exit_path: opts.exitPath, paths: changed.slice(0, 40), count: changed.length },
-    'egress: a sentence stating a share of runs was removed');
-  return next as T;
+  if (opts.runTurn) {
+    if (statesRunShare(b.assistant_text)) {
+      next.assistant_text = runResultWords(b.assistant_text as string);
+      changed.push('$.assistant_text');
+      // The shape no longer derives the words that ship: the text ships whole (`_answer_shape` is optional).
+      if ('_answer_shape' in next) { delete next._answer_shape; changed.push('$._answer_shape'); }
+    } else if (isRec(b._answer_shape) && statesRunShare(JSON.stringify(b._answer_shape))) {
+      delete next._answer_shape;
+      changed.push('$._answer_shape');
+    }
+    if (Array.isArray(b.suggested_actions) && b.suggested_actions.some((c) => isRec(c) && statesRunShare(c.label))) {
+      next.suggested_actions = b.suggested_actions.filter((c) => !(isRec(c) && statesRunShare(c.label)));
+      changed.push('$.suggested_actions');
+    }
+  }
+  if (changed.length === 0) return body;
+  log.info({ event: 'cee.run_share_text.removed', request_id: opts.requestId, exit_path: opts.exitPath, run_turn: opts.runTurn,
+    paths: changed.slice(0, 40), count: changed.length }, 'egress: a sentence stating a share of runs was removed from a result surface');
+  return next as unknown as T;
 }

@@ -72,9 +72,11 @@ vi.mock('../session/index.js', () => ({
 // 2. ONLY the LLM-call layer is mocked. The REAL
 //    `enrichRunAnalysisWithDecisionReview` runs against this stub. Every
 //    skip / attach branch in the enricher exercises real code.
-const invokeDecisionReviewMock = vi.fn<
+// `vi.hoisted`: the factory below can run while this file's static imports load (compose.ts now reaches the enricher
+// through the result-surface filter), so the mock must exist before them, as vitest requires for any factory variable.
+const invokeDecisionReviewMock = vi.hoisted(() => vi.fn<
   (..._args: unknown[]) => Promise<DecisionReviewInvokeResult>
->();
+>());
 vi.mock('../../cee/decision-review/invoke.js', async () => {
   const actual =
     await vi.importActual<typeof import('../../cee/decision-review/invoke.js')>(

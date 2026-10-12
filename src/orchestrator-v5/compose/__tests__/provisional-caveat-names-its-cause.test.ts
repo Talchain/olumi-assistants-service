@@ -10,6 +10,7 @@
  * Every verdict here is the REAL admission (`resolveAnalysisAdmission`) on one served capture, so the caveat reads the
  * producer's own `reasons[]`, not a hand-written payload.
  */
+import { RUN_RESULT_TEMPLATE, RUN_SHARE_CENSUS } from '../run-share-text.js';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { OlumiResponseSchema, type OlumiResponse } from '@talchain/schemas/boundary';
@@ -126,15 +127,18 @@ describe('the provisional caveat says the admission’s own cause (Canvas #13)',
 
   it('row 1: an all-Olumi model keeps today’s words, on the answer and the summary', () => {
     const t = turn(readinessOf(allOlumi()));
-    for (const surface of [t.text, t.summary]) expect(surface).toBe(`${TODAY} ${SECOND}\n\n${ANSWER}`);
+    expect(t.text).toBe(`${TODAY} ${SECOND}\n\n${ANSWER}`);
+    // Batch E ruling (ii): the analysis_result summary is a RESULT surface — the builder removes the share of runs, and a
+    // summary left with nothing says the locked template; the caveat keeps today's words.
+    expect(t.summary).toBe(`${TODAY} ${SECOND}\n\n${RUN_RESULT_TEMPLATE}`);
+    expect(t.summary).not.toMatch(RUN_SHARE_CENSUS);
   });
 
   it('RED row 2: after the user sets values off the decision’s path, nothing says “machine-authored”', () => {
     const t = turn(readinessOf(userSetOffPath()));
-    for (const surface of [t.text, t.summary]) {
-      expect(surface).toBe(`${AIQ_NOT_MATERIAL} ${SECOND}\n\n${ANSWER}`);
-      expect(surface).not.toMatch(/machine-authored/);
-    }
+    expect(t.text).toBe(`${AIQ_NOT_MATERIAL} ${SECOND}\n\n${ANSWER}`);
+    expect(t.summary).toBe(`${AIQ_NOT_MATERIAL} ${SECOND}\n\n${RUN_RESULT_TEMPLATE}`);
+    for (const surface of [t.text, t.summary]) expect(surface).not.toMatch(/machine-authored/);
   });
 
   it('RED row 3: the cause is re-read every turn and never carried forward', () => {
@@ -143,7 +147,7 @@ describe('the provisional caveat says the admission’s own cause (Canvas #13)',
     expect(conversation[1]!.text, 'turn 2 drops the authorship sentence').not.toMatch(/machine-authored/);
     // Once an estimate IS on the path, the admission licenses the comparison and no caveat is added at all.
     expect(conversation[2]!.text).toBe(ANSWER);
-    expect(conversation[2]!.summary).toBe(ANSWER);
+    expect(conversation[2]!.summary).toBe(RUN_RESULT_TEMPLATE);
   });
 
   it('RED: with no cause on the payload, the caveat is neutral and never names an author', () => {
