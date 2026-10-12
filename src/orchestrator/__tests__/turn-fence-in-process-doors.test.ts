@@ -68,9 +68,10 @@ describe('B8: an in-process graph write is fenced for its own identity', () => {
   });
 });
 
-describe('B8: the Agent route fences exactly its four graph doors', () => {
+describe('B8: the Agent route fences exactly its graph doors', () => {
   const src = readFileSync(new URL('../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-  it.each(['commitOptionLevelsInProcess', 'commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess', 'commitOptionStatusInProcess'])('RED: %s is called only inside runFencedInProcessWrite', (door) => {
+  // B (1) (SYS1, 12 Oct): the goal-targets door commits a graph write, so it is fenced like the limit door.
+  it.each(['commitOptionLevelsInProcess', 'commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess', 'commitOptionStatusInProcess', 'commitGoalTargetsInProcess'])('RED: %s is called only inside runFencedInProcessWrite', (door) => {
     const calls = src.split('\n').filter((l) => l.includes(`${door}(input`));
     expect(calls.length, 'PRECONDITION: the door is wired').toBeGreaterThan(0);
     for (const l of calls) expect(l).toMatch(/runFencedInProcessWrite\(input\.scenario_id, input\.turn_id, \(\) => /);

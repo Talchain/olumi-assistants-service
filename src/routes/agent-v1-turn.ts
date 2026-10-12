@@ -85,7 +85,7 @@ import { withAnalysisReadDeadline } from '../orchestrator-v5/session/analysis-re
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
-import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { commitGoalTargetsInProcess, commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { declinedProposalOf, declineChipIdFor, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
@@ -2859,6 +2859,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           writesDispatched += 1;
           return undoRefusedWrite(() => {
             return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitEditInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          });
+        },
+        commitGoalTargets: async (input) => {
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitGoalTargetsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
           });
         },
         commitOlumiOptionAdoption: async (input) => {
