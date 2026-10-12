@@ -169,7 +169,7 @@ import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/
 import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn, type DecisionReviewRead } from '../orchestrator-v5/agent-lane/decision-review-press.js';
 import { eligibleInterventionFor, ELIGIBLE_INTERVENTION_INSTRUCTION, selectTurnGuidance, guidanceRequestOf, type EligibleIntervention, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { nextStepOffersForTurn, SUGGEST_RISKS_CHIP } from '../orchestrator-v5/agent-lane/next-steps-from-guidance.js';
-import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
+import { guidanceOnAnswer, thinDraftShownWire, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { actionFactsOf, type ActionFacts } from '../orchestrator-v5/agent-lane/actions/state.js';
 import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
 import { actionBarOf } from '../orchestrator-v5/agent-lane/actions/rank.js';
@@ -4475,11 +4475,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     })();
     const thin = thinDraftOffer(readbackGraph, constructionConfirmResolved
       || result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true));
+    let thinShownGuidance: GuidanceWire | undefined;
     if (thin !== null && heldCardOffer.length === 0 && approvals.length === 0 && carriedApproval.length === 0
       && fastPath !== 'method' && (fastPath !== 'approve' || constructionConfirmResolved)) {
       nextStepOffers.offered.splice(0, nextStepOffers.offered.length, ...firstOfEachId([
         ...nextStepOffers.offered.filter(c => c.id === RUN_OFFER_CHIP.id), thin.press, ...nextStepOffers.offered,
       ]).slice(0, 3));
+      // E6: the thin offer IS RC-WIDEN's risks suggestion; record it as shown so the next reply does not say it again.
+      thinShownGuidance = thinDraftShownWire(selectTurnGuidance({ request: 'turn', offeredSpecific: [],
+        licence: leaderLicenceFromState(analysisState, analysisReady), guidance: guidanceHistory,
+        state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated } }));
     }
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     // The same selected Run as the words; the warning owns N. Re-check present sizing and never-reask before offering.
@@ -5293,7 +5298,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * with no id that has an offer to carry writes its answer row under an id minted HERE, at the end —
      * no claim, no replay, no fence, exactly as before for everything else about an unnamed turn.
      */
-    const answerGuidance = guidanceOnAnswer(wireBody.guidance as GuidanceWire | undefined, guidanceHistory, handledGuidancePress);
+    const answerGuidance = guidanceOnAnswer((wireBody.guidance as GuidanceWire | undefined) ?? thinShownGuidance, guidanceHistory, handledGuidancePress);
     const answerOffers = ((wireBody.suggested_actions ?? []) as readonly SuggestedAction[])
       // The migration's cap is 8 offers per row; a ninth would refuse the whole row, so it stays live only.
       .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message }));

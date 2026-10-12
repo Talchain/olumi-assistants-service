@@ -156,7 +156,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
           hits_id: 'hire_engineers', through_id: 'engineer_hires', through_direction: 'positive',
           affects_id: 'features_delivered', direction: 'negative', relies_on: 'both hires joining in time', watch_for: 'offers remain unaccepted' }] }
         : { options: [] }) }));
-    expect(await widenDraft({ admitted, candidate, admit: (c) => admitCandidateModel(c, {}, brief), brief, deadlineAt: Date.now() + 60_000, callStructured, finalGraph })).toBeNull();
+    expect(await widenDraft({ admitted, candidate, admit: (c) => admitCandidateModel(c, {}, brief), brief, deadlineAt: Date.now() + 60_000, callStructured, finalGraph, risksArm: true })).toBeNull();
     expect(widenedGraph, 'the risk must survive admission and reach final graph comparison').toBeDefined();
     for (const node of before.nodes) expect(widenedGraph!.nodes.find(other => other.id === node.id)).toEqual(node);
     expect(widenedGraph!.edges.find(edge => edgeKey(edge) === edgeId)).not.toEqual(before.edges.find(edge => edgeKey(edge) === edgeId));
@@ -192,7 +192,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
           hits_id: 'hire_engineers', through_id: 'engineer_hires', through_direction: 'positive',
           affects_id: 'features_delivered', direction: 'negative', relies_on: 'both hires joining in time', watch_for: 'offers remain unaccepted' }] }
         : { options: [] }) }));
-    const widened = await widenDraft({ admitted, candidate, admit: (c) => admitCandidateModel(c, {}, brief), brief, deadlineAt: Date.now() + 60_000, callStructured });
+    const widened = await widenDraft({ admitted, candidate, admit: (c) => admitCandidateModel(c, {}, brief), brief, deadlineAt: Date.now() + 60_000, callStructured, risksArm: true });
     expect(widened).not.toBeNull();
     expect(callStructured).toHaveBeenCalledTimes(1);
     expect(widened!.counts).toEqual({ options: 0, risks: 1 });
