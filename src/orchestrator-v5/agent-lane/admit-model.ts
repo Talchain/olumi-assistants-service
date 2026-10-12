@@ -3657,7 +3657,7 @@ function admitOnce(
     const quote = f.baseline_evidence?.quote;
     const value = f.baseline_value;
     return typeof quote === 'string' && typeof value === 'number' && Number.isFinite(value)
-      && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value)) && quoteBindsFactorFigure(model, f);
+      && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value)) && quoteBindsFactorFigure(model, f, brief);
   };
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [

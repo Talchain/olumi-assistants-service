@@ -1,8 +1,20 @@
 {
+ "version": "v2",
  "provenance": {
   "verbatim_18": "sys2/verifier-corpus.json sha 7c0cd526 (SYS2 labels)",
   "relabel": "Codex blind relabel",
-  "extension": "Codex 48 new (different model family)"
+  "extension": "Codex 48 new (different model family)",
+  "v2": {
+   "by": "SYS2 (corpus owner, DL 12 Oct)",
+   "at": "2026-10-12T09:33Z",
+   "from": "VERIFIER-CORPUS-v1.json sha256 674cfaf63672ee3cab3b1647c6f4bd44ba9685f87017f94ebcdc405b35f96284",
+   "changes": [
+    "M01 £100,000: label by the BOUND QUANTITY (DL ruling 12 Oct, AIE 0825 §3): as the Budget factor’s own amount it is that quantity’s level; bound to a spend limit it is the limit. No lexical budget rule.",
+    "H06 and M04 ‘3-month sales cycle’: adjudicated other (AIE #94 6120633627); recorded under adjudicate[].resolved.",
+    "labels.effect-rate narrowed (AIE 0825 §5): a per-unit rate is the level of a rate-parameter node OR an incremental effect, as the bound model quantity governs.",
+    "contrasts[]: the one missing semantic contrast (rate-parameter level vs incremental effect), folded in verbatim from the AIE’s unexecuted illustrations (0825 §5), not a second bank."
+   ]
+  }
  },
  "verbatim": {
   "about": "Figure-bearing sentences from Paul's journey briefs and scripted typed turns (live-journey.mjs JOURNEYS: hiring, marketing, capacity), verbatim, for the factor-level verifier fix (#94 V1/V2). External corpus half 1: sentences and labels by the builder session (SYS2). Paraphrase half: a different model family, later. Never from the sealed set or c-acceptance.",
@@ -13,7 +25,7 @@
   },
   "labels": {
    "level": "the speaker's own current level of a quantity (today), including a stated range or a chosen point",
-   "effect-rate": "a per-unit rate or effect size (how much one unit of X changes Y), not a level of either",
+   "effect-rate": "a per-unit rate or effect size: the bound model quantity governs (AIE 0825 §3/§5) — the level of a rate-parameter node (e.g. tickets per week per specialist), or an incremental causal effect of one more unit",
    "target": "what must be reached or not exceeded: a goal, a limit/ceiling or a deadline",
    "hypothetical": "what an option would set, or a count of options/alternatives",
    "past": "a past date or a figure from before today",
@@ -160,14 +172,26 @@
     "journey": "marketing",
     "source_line": 1,
     "sentence": "Our budget for the year is £100,000.",
-    "label": "target",
+    "label": "by-quantity",
     "figures": [
      {
       "text": "£100,000",
-      "label": "target"
+      "label": "by-quantity",
+      "by_quantity": [
+       {
+        "bound": "budget",
+        "label": "level",
+        "reason": "the Budget factor’s own stated amount"
+       },
+       {
+        "bound": "spend",
+        "label": "target",
+        "reason": "bound to spend, £100,000 is the ceiling"
+       }
+      ]
      }
     ],
-    "note": "a ceiling for a period (limit), as H04"
+    "note": "a ceiling for a period (limit), as H04 | v2: label by the bound quantity (DL 12 Oct; AIE 0825 §3)."
    },
    {
     "id": "M02",
@@ -1363,13 +1387,65 @@
    "id": "H06",
    "figure": "25%",
    "sys2": "level",
-   "codex": "other"
+   "codex": "other",
+   "resolved": "other",
+   "by": "AIE #94 6120633627",
+   "detail": "isolated “Let’s go with 25%” is unresolved/other; in its reached hiring context it is a human chosen planning level"
   },
   {
    "id": "M04",
    "figure": "3 (3-month sales cycle)",
    "sys2": "level",
-   "codex": "other"
+   "codex": "other",
+   "resolved": "other",
+   "by": "AIE #94 6120633627",
+   "detail": "a human stated future process-duration parameter starting at launch; not a current baseline, target or effect"
+  }
+ ],
+ "contrasts": [
+  {
+   "id": "A01",
+   "source": "AIE 0825 illustration V2-rate-level (CAPACITY-PROVENANCE-DEVELOPMENT-20261012.json sha256 91b85edbd9d4ee88c090cc95f7d949a3eb3520a90cdf3b33a0052aefb59911f8)",
+   "sentence": "In our current operation, throughput per specialist is about 20 tickets per week, between 10 and 30.",
+   "figures": [
+    {
+     "figure": "20",
+     "label": "level",
+     "range": {
+      "min": 10,
+      "max": 30,
+      "unit": "tickets per week per specialist"
+     },
+     "reason": "current rate-parameter level when the node represents tickets per week per specialist; qualifier about; human estimate"
+    },
+    {
+     "figure": "10",
+     "label": "level",
+     "range": {
+      "min": 10,
+      "max": 30,
+      "unit": "tickets per week per specialist"
+     },
+     "reason": "range end, not the stated point"
+    }
+   ]
+  },
+  {
+   "id": "A02",
+   "source": "AIE 0825 illustration V2-incremental-effect (same file)",
+   "sentence": "Adding one specialist increases our team's capacity by about 20 tickets per week, between 10 and 30.",
+   "figures": [
+    {
+     "figure": "20",
+     "label": "effect-rate",
+     "range": {
+      "min": 10,
+      "max": 30,
+      "unit": "tickets per week per additional specialist"
+     },
+     "reason": "incremental effect per additional specialist; not current team capacity or headcount"
+    }
+   ]
   }
  ]
 }

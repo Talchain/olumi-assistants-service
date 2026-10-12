@@ -183,7 +183,7 @@ function countsItself(unit: unknown): boolean {
   return parts?.kind === 'count' && parts.noun?.length === 1 && COUNT_ITSELF.test(parts.noun[0]!)
     && parts.period === null && !parts.per?.length && !parts.base?.length && !parts.qualifiers?.length;
 }
-function sameFrame(text: string, span: { start: number; end: number }, unit: unknown, amount?: StatedAmount, nounFromLabel = false): boolean {
+function sameFrame(text: string, span: { start: number; end: number }, unit: unknown, amount?: StatedAmount, nounFromLabel = false, implicitPer = false): boolean {
   const literal = amount ?? findStatedAmounts(text).find(n => n.index === span.start);
   const written = literal ?? { index: span.start, matchedText: text.slice(span.start, span.end), kind: 'words' };
   const stated = statedTailParts(text, written); const expected = readUnitParts(unit);
@@ -191,7 +191,7 @@ function sameFrame(text: string, span: { start: number; end: number }, unit: unk
     || stated.scale !== expected.scale || stated.period !== expected.period) return false;
   const same = (x: readonly string[] | null, y: readonly string[] | null): boolean =>
     JSON.stringify(x?.length ? x : null) === JSON.stringify(y?.length ? y : null);
-  return same(stated.per, expected.per) && same(stated.base, expected.base) && same(stated.qualifiers, expected.qualifiers)
+  return (same(stated.per, expected.per) || (implicitPer && !stated.per?.length)) && same(stated.base, expected.base) && same(stated.qualifiers, expected.qualifiers)
     && (expected.noun === null || nounFromLabel || (expected.noun.length > 0
       && expected.noun.every(w => stated.noun?.some(x => sameName(x, w)))));
 }
@@ -477,13 +477,23 @@ function differentGoalBound(model: CandidateModel, factor: Factor, text: string)
  * verifier starts from (`factorLevelSpans`: the figure, the factor's own quantity named beside it, unit/period/role), minus
  * ownership. A quote that merely contains the number ("more than 25% of my time" cited for an experience score of 25)
  * claims nothing about it. No new reader: the spans are the verifier's own.
+ *
+ * ⭐ Recovery Batch B, W (DL GO 12 Oct; AIE 0825 §2–§3): a literal human figure keeps its HUMAN ORIGIN where that binding
+ * cannot attest its role. Given the brief, the drafter's quote must be one located sentence of it (`exactEvidence`) and
+ * write THIS factor's figure in the factor's own typed frame (`sameFrame`: kind, noun, period, base), with the
+ * denominator allowed implicit ("each additional specialist resolves about 20 tickets per week" for tickets per week per
+ * specialist); a different written denominator still refuses. Origin only: a current level is `verifiedFactorLevel`'s.
  */
-export function quoteBindsFactorFigure(model: CandidateModel, factor: Factor): boolean {
+export function quoteBindsFactorFigure(model: CandidateModel, factor: Factor, brief?: string): boolean {
   try {
     const quote = factor.baseline_evidence?.quote;
     const value = factor.baseline_value;
     if (typeof quote !== 'string' || quote.length > MAX_ASSERTION || typeof value !== 'number' || !Number.isFinite(value)) return false;
-    return factorLevelSpans(model, factor, quote, value).length > 0;
+    if (factorLevelSpans(model, factor, quote, value).length > 0) return true;
+    if (typeof brief !== 'string') return false;
+    const a = exactEvidence(brief, quote, assertions(brief));
+    return a !== null && a.text.length <= MAX_ASSERTION && findLinkEffectAmounts(a.text).some(amount => amount.magnitude === Math.abs(value)
+      && sameFrame(a.text, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, false, true));
   } catch {
     return false;
   }
