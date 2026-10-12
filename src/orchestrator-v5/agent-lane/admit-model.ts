@@ -4377,6 +4377,20 @@ function admitOnce(
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
+  // Row5: one third party's range is about ONE quantity. When settings on two factors both fall inside the same quoted
+  // range ("10–20% churn" beside two churn factors), which one it describes is unknown, so it rides beside neither.
+  const quotedFactors = new Map<string, Set<string>>();
+  for (const bundle of interventionsByOption.values()) {
+    for (const [factorId, level] of Object.entries(bundle)) {
+      const quote = level.attributed_range?.source_quote;
+      if (quote !== undefined) quotedFactors.set(quote, (quotedFactors.get(quote) ?? new Set()).add(factorId));
+    }
+  }
+  for (const bundle of interventionsByOption.values()) {
+    for (const level of Object.values(bundle)) {
+      if (level.attributed_range !== undefined && quotedFactors.get(level.attributed_range.source_quote)!.size > 1) delete level.attributed_range;
+    }
+  }
   /**
    * ⛔ AN OPTION THAT CHANGES NOTHING CANNOT BE COMPARED TO ANYTHING.
    *

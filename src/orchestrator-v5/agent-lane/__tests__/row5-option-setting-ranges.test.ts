@@ -64,6 +64,19 @@ describe('the range rides beside the setting it contains, quoted and attributed;
     expect(cellOf(nodes, 'Raise price to £22', 'Monthly price per customer')).not.toHaveProperty('attributed_range');
     expect(cellOf(nodes, 'Raise price to £22', 'One-off research spend')).not.toHaveProperty('attributed_range');
   });
+  it('CONTRAST (design: "10–20% attrition"): words after the figure that do not name the factor are another quantity; none', () => {
+    const nodes = admitted('D3', 'C', 'r1', () => {}, briefOf('D3').replace('10–20% churn', '10–20% attrition'));
+    expect(cellOf(nodes, 'Raise price to £22', 'Price-increase customer churn')).not.toHaveProperty('attributed_range');
+  });
+  it('CONTRAST (design: another option sets "Monthly customer churn" to 12): two factors inside one quote; it rides beside neither', () => {
+    const nodes = admitted('D3', 'C', 'r1', (m) => {
+      m.options.find((o: Rec) => o.label === 'Improve onboarding').interventions.push({ ...m.options.find((o: Rec) => o.label === 'Raise price to £22')
+        .interventions.find((i: Rec) => i.factor_label === 'Price-increase customer churn'), factor_label: 'Monthly customer churn', value: 12 });
+    });
+    expect(cellOf(nodes, 'Improve onboarding', 'Monthly customer churn').raw_value).toBe(12);
+    expect(cellOf(nodes, 'Raise price to £22', 'Price-increase customer churn')).not.toHaveProperty('attributed_range');
+    expect(cellOf(nodes, 'Improve onboarding', 'Monthly customer churn')).not.toHaveProperty('attributed_range');
+  });
   it('label, never withhold: each setting keeps the drafted figure exactly', () => {
     const nodes = admitted('D6', 'C', 'r1');
     expect([cellOf(nodes, 'Add one specialist', 'Specialist capacity contribution').raw_value,
