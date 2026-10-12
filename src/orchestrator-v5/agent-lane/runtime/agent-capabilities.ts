@@ -3552,7 +3552,8 @@ export function createAgentCapabilities(
     };
     const mixed = !reviewsOnly && !placeholderChangesOnly && changedUnsized.length + reviewedUnsized.length > 0;
     const unsizedDisclosure = !mixed ? ''
-      : (reviewedUnsized.length > 0 ? ` ${listed(reviewedUnsized)} ${plural(reviewedUnsized.length, 'has', 'have')} not been sized yet, so ${plural(reviewedUnsized.length, 'its value is', 'their values are')} unchanged.` : '')
+      : (reviewedUnsized.length > 0 ? ` ${plural(reviewedUnsized.length, 'Your review', 'Your reviews')} of ${listed(reviewedUnsized)} ${plural(reviewedUnsized.length, 'is', 'are')} recorded.`
+        + ` ${plural(reviewedUnsized.length, 'It is', 'They are')} not sized yet, so ${plural(reviewedUnsized.length, 'its value is', 'their values are')} unchanged.` : '')
         + ' Give a figure, or ask Olumi to estimate it.';
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
