@@ -413,22 +413,54 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
       deadline: '2027-04-12', reference_date: '2026-10-12', forecast: 7, forecast_origin: 'user_confirmed', forecast_words: PAUL_QUOTE,
       range_origin: 'olumi_estimate', range_rule: 'low_confidence', selection: { by: 'user_press', interpretation: 'olumi', source: PAUL_TEAM, quote: PAUL_QUOTE } });
   });
-  it('B2-c: a range in the words is the existing full-range card, with the source line (never a midpoint); a bound is asked', async () => {
+  /**
+   * ⭐ AI-first Lane 1, the deadline Run (DL 12 Oct, PLAN-AI-FIRST-SUBTRACT; run 5, `recovery/sys2/evidence/run5-deadline-stall.md`):
+   * Paul's exact turn-13 sentence, said THIS turn, was refused `team_time_not_stated` and the Run stayed closed on the team part's
+   * level. Now the Agent's reading is the card, his press is the check, and the Run admits on the level that press wrote.
+   */
+  it('Lane 1 deadline Run: Paul\'s turn-13 sentence → the card (his whole line, his low confidence) → his press → the team part has a level → the Run admits', async () => {
+    const w = world();
+    const team = draftedTeamPartOf(w.graph())!.team.id;
+    // Before: the team part's own level gap closes the Run (the blocker stays the model's real gap until the press).
+    expect(resolveRunAdmission(w.graph()).willProceed).toBe(false);
+    expect(resolveRunAdmission(w.graph()).assessment.blockingIssues.map(i => [i.code, i.factor_id])).toContainEqual(['MISSING_FACTOR_LEVEL', team]);
+    const card = await w.caps.proposeTeamTime!(ctx(PAUL_TEAM) as never, { quote: PAUL_QUOTE, low_months: 7, high_months: 7 }) as Rec;
+    expect(card).toMatchObject({ ok: true, team_time: { forecast_months: 7, low_months: 3.5, high_months: 10.5, range_rule: 'low_confidence',
+      confirmation: { source: PAUL_TEAM, quote: PAUL_QUOTE } } });
+    expect(String(card.public_label).startsWith(`From your message: ‘${PAUL_TEAM}’ Do you want to use 7 months as your forecast`)).toBe(true);
+    expect(resolveRunAdmission(w.graph()).willProceed, 'nothing opens the Run before the press').toBe(false);
+    expect(await approve(w, card.proposal_id)).toMatchObject({ ok: true, applied: true });
+    const g = w.graph();
+    expect(Number.isFinite(draftedTeamPartOf(g)!.team.observed_state.value)).toBe(true);
+    expect(resolveRunAdmission(g).willProceed).toBe(true);
+    expect((buildCanonicalAnalysisReadyFromGraph(g) as Rec).may_run).toBe(true);
+  });
+  it('Lane 1: a range in the words is the full-range card (never a midpoint); a bound is the Agent\'s reading ON the card, its words kept, never refused', async () => {
     const w = world();
     const range = await w.caps.proposeTeamTime!(earlier('The team say it will take 6–9 months, honestly.') as never, { quote: '6–9 months', low_months: 6, high_months: 9 }) as Rec;
     expect(range.public_label).toMatch(/^From your message: ‘The team say it will take 6–9 months, honestly\.’ Use 6–9 months for today's team\? By 12 April 2027 that is about \d+% of next feature launch\.$/);
     expect(range.team_time).not.toHaveProperty('forecast_months');
     for (const [said, q] of [['It’ll take at least 7 months.', '7 months'], ['The team need no more than 8 months.', '8 months'], ['Within 9 months, I think.', '9 months']] as const) {
-      expect(await w.caps.proposeTeamTime!(earlier(said) as never, { quote: q, low_months: Number(q[0]), high_months: Number(q[0]) }), said)
-        .toMatchObject({ ok: false, refusal: 'team_time_not_stated' });
+      const n = Number(q[0]);
+      const card = await w.caps.proposeTeamTime!(earlier(said) as never, { quote: q, low_months: n, high_months: n }) as Rec;
+      expect(card.ok, said).toBe(true);
+      expect(String(card.public_label).startsWith(`From your message: ‘${said}’ Do you want to use ${n} months as your forecast`), said).toBe(true);
     }
   });
-  it('B2-c anti-fabrication: a quote not in the user\'s typed words, or a figure the quote does not state, is refused', async () => {
-    const w = world();
-    for (const [said, q, n] of [['The team say 7 months.', 'the team say 8 months', 8], ['The team say 7 months.', 'the team say 7 months', 8],
-      ['Recruitment is slow.', '7 months', 7]] as const) {
-      expect(await w.caps.proposeTeamTime!(earlier(said) as never, { quote: q, low_months: n, high_months: n }), `${said} | ${q}`)
-        .toMatchObject({ ok: false, refusal: 'team_time_not_stated' });
+  it('Lane 1 provenance: words the user did not type get NO quote line; a figure the quote does not state is still only the Agent\'s card; malformed arguments are refused', async () => {
+    for (const [said, q, n, line] of [['The team say 7 months.', 'the team say 8 months', 8, false], ['The team say 7 months.', 'The team say 7 months', 8, true],
+      ['Recruitment is slow.', '7 months', 7, false]] as const) {
+      const w = world(), before = JSON.stringify(w.graph());
+      const card = await w.caps.proposeTeamTime!(earlier(said) as never, { quote: q, low_months: n, high_months: n }) as Rec;
+      expect(card.ok, `${said} | ${q}`).toBe(true);
+      expect(String(card.public_label).startsWith(line ? `From your message: ‘${said}’ Do you want to use ${n} months` : `Do you want to use ${n} months`), `${said} | ${q}`).toBe(true);
+      expect(w.proposals.get(String(card.proposal_id))?.provenance, `${said} | ${q}`).toMatchObject({ authored_by: 'model_proposed', basis: line ? said : q });
+      expect(await noPress(w, card.proposal_id)).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+      expect(JSON.stringify(w.graph())).toBe(before);
+    }
+    for (const args of [{ quote: '7 months', low_months: 0, high_months: 7 }, { quote: '7 months', low_months: 9, high_months: 7 }, { quote: '7 months', low_months: 'seven', high_months: 7 }]) {
+      expect(await world().caps.proposeTeamTime!(earlier('The team say 7 months.') as never, args as never), JSON.stringify(args))
+        .toMatchObject({ ok: false, mutated: false, refusal: 'team_time_not_stated' });
     }
   });
   /**
@@ -439,12 +471,13 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
    * press). Judged against the corpus's hand-written class, never against what the capability computed:
    *   Q1 a figure is recorded as chosen by the user ONLY by the press on its own card (`user_confirmed` + the selection);
    *   Q2 a typed yes, another card's press, or the same words sent again write nothing (the same words prepare the same card);
-   *   Q3 the card shows the complete most recent source line, verbatim, and never calls it the user's forecast before the press;
-   *   Q4 a fabricated quote, a figure the quote does not state, or a bound gets no card; a range never becomes a point;
+   *   Q3 the card shows the complete most recent source line, verbatim, ONLY where the quote is the user's words (AI-first Lane 1:
+   *      no reader refuses the Agent's reading; words they did not type get no quote line), never "your forecast" before the press;
+   *   Q4 a range never becomes a point;
    *   Q5 the press links the selection to its source and quote; the proposal stays Olumi's reading (`model_proposed`).
    */
   type Said = { readonly said: string; readonly quote: string; readonly low: number; readonly high: number;
-    readonly kind: 'point' | 'range' | 'bound' | 'fabricated' };
+    readonly kind: 'point' | 'range' | 'bound' | 'mismatch' | 'unquoted' };
   const point = (said: string, quote = '7 months'): Said => ({ said, quote, low: 7, high: 7, kind: 'point' });
   const CORPUS: readonly Said[] = [
     ...['Recruitment, the team think, will take 7 months.', 'Procurement (the team say) takes [7 months].',
@@ -458,9 +491,9 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     { said: 'Our lead reckons 5 to 8 months for this.', quote: '5 to 8 months', low: 5, high: 8, kind: 'range' },
     ...['It’ll take at least 7 months.', 'The team need no more than 7 months.', 'Within 7 months, I think.', 'Up to 7 months, they say.',
       'More than 7 months, realistically.'].map((said): Said => ({ ...point(said), kind: 'bound' })),
-    { said: 'The team say 7 months.', quote: 'the team say 8 months', low: 8, high: 8, kind: 'fabricated' },
-    { said: 'The team say 7 months.', quote: 'the team say 7 months', low: 8, high: 8, kind: 'fabricated' },
-    { said: 'Recruitment is slow.', quote: '7 months', low: 7, high: 7, kind: 'fabricated' },
+    { said: 'The team say 7 months.', quote: 'the team say 8 months', low: 8, high: 8, kind: 'unquoted' },
+    { said: 'The team say 7 months.', quote: 'The team say 7 months', low: 8, high: 8, kind: 'mismatch' },
+    { said: 'Recruitment is slow.', quote: '7 months', low: 7, high: 7, kind: 'unquoted' },
   ];
   const PATHS = ['typed yes', 'another card', 'same words again', 'own press'] as const;
   const statedTime = (w: ReturnType<typeof world>): Rec | undefined => draftedTeamPartOf(w.graph())?.team.observed_state?.stated_time as Rec | undefined;
@@ -473,16 +506,13 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
       const args = { quote: s.quote, low_months: s.low, high_months: s.high };
       const card = await w.caps.proposeTeamTime!(c as never, args) as Rec;
       const label = `${s.kind} | ${where} | ${path} | ${s.said} | ${s.quote}`;
-      if (s.kind === 'bound' || s.kind === 'fabricated') {                                                      // Q4
-        expect(card, label).toMatchObject({ ok: false, mutated: false, refusal: 'team_time_not_stated' });
-        expect(JSON.stringify(w.graph()), label).toBe(before);
-        continue;
-      }
+      const typed = s.kind !== 'unquoted';                       // the quote stands verbatim in the user's own words
       expect(card.ok, label).toBe(true);
       cards += 1;
-      expect(String(card.public_label).startsWith(`From your message: ‘${s.said.trim()}’ `), label).toBe(true);   // Q3
+      if (typed) expect(String(card.public_label).startsWith(`From your message: ‘${s.said.trim()}’ `), label).toBe(true);   // Q3
+      else expect(card.public_label, label).not.toContain('From your message');
       expect(card.public_label, label).not.toMatch(/your \d+(?:–\d+)?-month forecast|your team forecast/);
-      expect(w.proposals.get(String(card.proposal_id))?.provenance, label).toMatchObject({ authored_by: 'model_proposed', basis: s.said.trim() }); // Q5
+      expect(w.proposals.get(String(card.proposal_id))?.provenance, label).toMatchObject({ authored_by: 'model_proposed', basis: typed ? s.said.trim() : s.quote }); // Q5
       if (s.kind === 'range') expect(card.team_time, label).not.toHaveProperty('forecast_months');            // Q4
       if (path === 'typed yes') expect(await noPress(w, String(card.proposal_id)), label).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
       if (path === 'another card') expect(await noPress(w, String(card.proposal_id), 'prop_00000000000000000000000000000000'), label)
@@ -500,15 +530,15 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
       expect(await approve(w, String(card.proposal_id)), label).toMatchObject({ ok: true, applied: true });    // Q1
       presses += 1;
       const time = statedTime(w)!;
-      expect(time.selection, label).toEqual({ by: 'user_press', interpretation: 'olumi', source: s.said.trim(), quote: s.quote }); // Q5
-      if (s.kind === 'point') expect(time, label).toMatchObject({ forecast: 7, forecast_origin: 'user_confirmed', forecast_words: s.quote });
+      expect(time.selection, label).toEqual({ by: 'user_press', interpretation: 'olumi', source: typed ? s.said.trim() : '', quote: s.quote }); // Q5
+      if (s.low === s.high) expect(time, label).toMatchObject({ forecast: s.low, forecast_origin: 'user_confirmed', forecast_words: s.quote });
       else expect(time, label).not.toHaveProperty('forecast');
       expect(time.forecast_origin, label).not.toBe('user');
     }
-    // Non-vacuity: every point and range sentence, in both places, reached a card; every own press applied.
-    const reaching = CORPUS.filter((s) => s.kind === 'point' || s.kind === 'range').length;
-    expect(cards).toBe(reaching * 2 * PATHS.length);
-    expect(presses).toBe(reaching * 2);
+    // Non-vacuity: every sentence, in both places, reached a card (no reader refuses the Agent's reading); every own press applied.
+    expect(cards).toBe(CORPUS.length * 2 * PATHS.length);
+    expect(presses).toBe(CORPUS.length * 2);
+    expect(new Set(CORPUS.map((s) => s.kind))).toEqual(new Set(['point', 'range', 'bound', 'mismatch', 'unquoted']));
   });
 });
 

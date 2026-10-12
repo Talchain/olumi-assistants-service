@@ -161,35 +161,35 @@ export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonl
 }
 
 /**
- * ⭐ B2-c CONFIRMATION (DL re-scope, 12 Oct, after the THIRD free-text attribution failure; PL #94 6131809231; AIE #94
- * 6132054663): whose time a sentence states is never parsed. This proves only that the quoted duration exists VERBATIM in one
- * of the user's own typed messages (anti-fabrication), and returns the complete line it stands in, verbatim, for the card.
- * Only the user's press on that card records the figure as their forecast (`teamTimeConfirmationCard`); until then it is a
- * proposed interpretation. A bound in the source ("at least 7 months") is never offered as a point: asked instead.
+ * ⭐ B2-c CONFIRMATION (DL re-scope, 12 Oct; PL #94 6131809231; AIE #94 6132054663), AI-first Lane 1 (DL 12 Oct, PL 6134071898):
+ * whose time a sentence states is never parsed, and no regex refuses the Agent's reading. The Agent's arguments carry the
+ * figure; this finds only the complete line of the user's own typed words that holds the quote VERBATIM, for the card's quote
+ * line (provenance: a quote line is shown only for words the user typed). The card is the check: only the user's press on it
+ * records the figure as their selected forecast (`teamTimeConfirmationCard`); until then it is Olumi's reading.
  */
 /** The team-time use of the one confirmation mechanism (`agent-lane/quote-confirmation.ts`). */
 export type TeamTimeConfirmation = QuoteConfirmation;
-const BOUNDED_DURATION = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:at least|at most|more than|less than|fewer than|no more than|no less than|`
-  + String.raw`under|over|up to|within|minimum(?: of)?|maximum(?: of)?)\s+(?:about\s+|around\s+|roughly\s+)?`
-  + `${TIME_NUMBER}(?:\\s*(?:-|to|and)\\s*${TIME_NUMBER})?\\s+(?:months?|weeks?|years?)(?![\\p{L}\\p{N}])`, 'iu');
 export function quotedTeamTime(texts: { readonly now?: string | null; readonly conversation?: string | null },
   args: { readonly quote?: unknown; readonly low_months?: unknown; readonly high_months?: unknown } | undefined):
   { readonly kind: 'found'; readonly time: BoundTeamTime; readonly confirmation: TeamTimeConfirmation } | { readonly kind: 'refused'; readonly detail: string } {
-  const quoted = typeof args?.quote === 'string' ? args.quote.trim() : '';
-  const quote = plainWords(quoted);
-  // The most recent line of the user's own words that holds the quote, verbatim (anti-fabrication only).
-  const source = quote === '' ? undefined : verbatimSourceLine(texts, quoted);
-  if (source === undefined) return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
   const low = Number(args?.low_months), high = Number(args?.high_months);
-  const stated = Number.isFinite(low) && Number.isFinite(high)
-    ? teamTimesInQuote(quote).find((r) => teamTimeArgumentsMatch(quote, { low_months: low, high_months: high }, r)) : undefined;
-  if (stated === undefined || BOUNDED_DURATION.test(plainWords(source))) return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
-  const confirmation = { source, quote: quoted };
-  // A range in the words is the full-range card; never a manufactured midpoint.
-  if (stated.low_months !== stated.high_months) return { kind: 'found', time: stated, confirmation };
-  const rule: TeamTimeRangeRule = TEAM_TIME_LOW_CONFIDENCE.test(sentencesHolding(plainWords(source), quote)) ? 'low_confidence' : 'default';
-  return { kind: 'found', confirmation, time: { ...widenedTeamTime(stated.low_months, rule),
-    forecast_months: stated.low_months, forecast_words: quoted, range_origin: 'olumi_estimate', range_rule: rule } };
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high < low) return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
+  const quoted = typeof args?.quote === 'string' ? args.quote.trim() : '';
+  const source = quoted === '' ? undefined : verbatimSourceLine(texts, quoted);
+  const confirmation = { source: source ?? '', quote: quoted };
+  return { kind: 'found', confirmation, time: withAssumedTeamRange({ low_months: low, high_months: high }, quoted,
+    source === undefined ? quoted : sentencesHolding(plainWords(source), plainWords(quoted))) };
+}
+/**
+ * AI-first Lane 1 (DL 12 Oct, PLAN-AI-FIRST-SUBTRACT): a single time is the user's forecast with Olumi's assumed range by the
+ * E2 (a) convention, on EVERY path: typed as the whole answer or quoted from their words. A single time is never held alone
+ * as a "most likely" time that keeps the Run closed until the user types a range. A range is kept as given.
+ */
+export function withAssumedTeamRange(stated: BoundTeamTime, words: string, sentence: string): BoundTeamTime {
+  if (stated.low_months !== stated.high_months) return stated;
+  const rule: TeamTimeRangeRule = TEAM_TIME_LOW_CONFIDENCE.test(sentence) ? 'low_confidence' : 'default';
+  return { ...widenedTeamTime(stated.low_months, rule),
+    forecast_months: stated.low_months, forecast_words: words, range_origin: 'olumi_estimate', range_rule: rule };
 }
 
 export interface ApprovedTeamTime {
@@ -290,7 +290,8 @@ export function teamTimeSummary(a: ApprovedTeamTime, unit: string, deliverable: 
  * range is the existing full-range card. The question is the edit fact's summary.
  */
 export function teamTimeConfirmationCardParts(a: ApprovedTeamTime, deliverable: string): { readonly quoteLine: string; readonly question: string; readonly disclosure: string } {
-  const quoteLine = confirmationQuoteLine(a.confirmation ?? { source: '', quote: '' });
+  // A quote line only for words the user typed, verbatim; otherwise the card is Olumi's reading alone.
+  const quoteLine = a.confirmation !== undefined && a.confirmation.source !== '' ? confirmationQuoteLine(a.confirmation) : '';
   if (a.forecast_months === undefined || a.range_origin !== 'olumi_estimate') {
     const { confirmation: _source, ...range } = a;
     const parts = teamTimeCardParts(range, '', deliverable);
@@ -303,7 +304,7 @@ export function teamTimeConfirmationCardParts(a: ApprovedTeamTime, deliverable: 
 }
 export function teamTimeConfirmationCard(a: ApprovedTeamTime, deliverable: string): string {
   const { quoteLine, question, disclosure } = teamTimeConfirmationCardParts(a, deliverable);
-  return `${quoteLine} ${question} ${disclosure}`;
+  return [quoteLine, question, disclosure].filter((t) => t !== '').join(' ');
 }
 export function teamTimeCard(a: ApprovedTeamTime, unit: string, deliverable: string): string {
   const { question, explanation } = teamTimeCardParts(a, unit, deliverable);
