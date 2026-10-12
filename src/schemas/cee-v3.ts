@@ -425,9 +425,9 @@ export const NodeV3 = z.object({
     period_kind: z.enum(['at_end', 'over_period']),
     effect_unit: z.string().min(1).max(120),
     effects_at_period_end: z.boolean(),
-    // Recovery Batch C re-scope (r2 BLOCKING 2): every retained condition is kept — up to 20, each up to 300 characters (a
-    // longer one is cut with "…" by the reader, `goalConditionText`); the reader refuses more, with its reason, never a subset.
-    also_required: z.array(z.string().min(1).max(300)).max(20).optional(),
+    // Recovery Batch C re-scope (r2 BLOCKING 2; re-scope r1 BLOCKING 1): every retained condition is kept byte-for-byte —
+    // up to 20, each up to 500 characters on one line; admission refuses the whole reading otherwise (`goal-target-basis.ts`).
+    also_required: z.array(z.string().min(1).max(500)).max(20).optional(),
     open_question: z.string().min(1).max(300).optional(),
     source: z.literal('olumi_reading'),
   }).strict().optional().catch(undefined),

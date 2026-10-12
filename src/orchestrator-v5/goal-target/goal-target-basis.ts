@@ -33,28 +33,41 @@ const words = (v: unknown, max: number): string | undefined => {
 export const BASIS_TEXT_MAX = 120;
 export const BASIS_QUESTION_MAX = 300;
 /**
- * ⛔ RECOVERY BATCH C RE-SCOPE (DL after independent check r2, BLOCKING 2): ONE RULE — a goal condition the drafter retained
- * is NEVER silently dropped. Up to `BASIS_ALSO_REQUIRED_MAX` are kept, every one (six in → six everywhere); a longer text is
- * kept, cut at `BASIS_CONDITION_MAX` with a visible "…" marker (never filtered); markup characters are removed, never the
- * condition. More conditions than the maximum refuse the whole reading, with that reason said (`'conditions'`).
+ * ⛔ RECOVERY BATCH C RE-SCOPE (DL after independent check r2, BLOCKING 2; re-scope check r1, BLOCKING 1): ONE RULE — a goal
+ * condition the drafter retained is NEVER silently dropped and NEVER changed. Up to `BASIS_ALSO_REQUIRED_MAX` are kept, every
+ * one (six in → six everywhere), each BYTE-FOR-BYTE as drafted from the user's words: its comparison ("> 15%", "<= £200,000",
+ * "= 12"), its figure, its period and its reference are the drafter's own characters, never cut, re-spaced or filtered. A
+ * condition that cannot be kept so — more than one line, or longer than `BASIS_CONDITION_MAX` — refuses the WHOLE reading
+ * with its reason (`'condition_text'`), as more conditions than the maximum do (`'conditions'`).
  */
 export const BASIS_ALSO_REQUIRED_MAX = 20;
-export const BASIS_CONDITION_MAX = 300;
-const CUT_MARKER = '…';
+export const BASIS_CONDITION_MAX = 500;
 
-/** One retained condition, kept whole or cut with a marker; `undefined` only for what is no text at all (a non-string, blank). */
-export function goalConditionText(v: unknown): string | undefined {
-  if (typeof v !== 'string') return undefined;
-  const t = v.replace(/[<>{}]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (t === '') return undefined;
-  return t.length <= BASIS_CONDITION_MAX ? t : `${t.slice(0, BASIS_CONDITION_MAX - CUT_MARKER.length).trimEnd()}${CUT_MARKER}`;
+type ConditionVerdict = { readonly kind: 'blank' } | { readonly kind: 'unkeepable' } | { readonly kind: 'kept'; readonly text: string };
+
+/**
+ * One retained condition's verdict: kept exactly; `blank` (null or whitespace only — no condition at all); or not keepable
+ * faithfully (not text, more than one line, or too long).
+ */
+function conditionVerdict(v: unknown): ConditionVerdict {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return { kind: 'blank' };
+  // eslint-disable-next-line no-control-regex
+  if (typeof v !== 'string' || v.length > BASIS_CONDITION_MAX || /[\u0000-\u001f\u007f\u2028\u2029]/.test(v)) return { kind: 'unkeepable' };
+  return { kind: 'kept', text: v };
 }
 
-const conditionsOf = (v: unknown): string[] => (Array.isArray(v) ? v.map(goalConditionText).filter((x): x is string => x !== undefined) : []);
+/** Every retained condition exactly as drafted, or why the reading cannot keep them all faithfully. */
+function conditionsOf(v: unknown): { readonly kept: string[] } | { readonly refused: 'conditions' | 'condition_text' } {
+  if (!Array.isArray(v)) return { kept: [] };
+  const verdicts = v.map(conditionVerdict).filter((x) => x.kind !== 'blank');
+  if (verdicts.length > BASIS_ALSO_REQUIRED_MAX) return { refused: 'conditions' };
+  const kept = verdicts.flatMap((x) => (x.kind === 'kept' ? [x.text] : []));
+  return kept.length === verdicts.length ? { kept } : { refused: 'condition_text' };
+}
 
-/** The conditions a drafted (or stored) basis retains, each as kept (`goalConditionText`); [] when it retains none. */
-export function goalConditionsOf(basis: unknown): string[] {
-  return isRec(basis) ? conditionsOf(basis.also_required) : [];
+/** How many conditions a drafted (or stored) basis retains (each non-blank text), kept or not. */
+export function goalConditionCount(basis: unknown): number {
+  return isRec(basis) && Array.isArray(basis.also_required) ? basis.also_required.filter((x) => conditionVerdict(x).kind !== 'blank').length : 0;
 }
 
 /** The drafter's statement of the target's semantics (`buildCandidateSchema` `goal.basis`). Every member is required in what is sent. */
@@ -87,7 +100,8 @@ export interface GoalTargetBasis {
   readonly source: 'olumi_reading';
 }
 
-export type GoalTargetBasisRefusal = 'reference' | 'denominator' | 'period' | 'period_conflict' | 'effect_unit' | 'frame' | 'conditions';
+export type GoalTargetBasisRefusal = 'reference' | 'denominator' | 'period' | 'period_conflict' | 'effect_unit' | 'frame' | 'conditions'
+  | 'condition_text';
 
 /**
  * Validate the drafter's basis for a goal target (ruling 11). `null` basis → `{ basis: null }` (no reading; every older
@@ -115,9 +129,10 @@ export function admitGoalTargetBasis(args: {
   if (finite(args.horizonMonths) && args.horizonMonths !== period) return { refused: 'period_conflict' };
   const effectUnit = words(d.effect_unit, BASIS_TEXT_MAX);
   if (effectUnit === undefined) return { refused: 'effect_unit' };
-  // Every retained condition, or the whole reading refused with its reason — never a silent subset.
-  const also = conditionsOf(d.also_required);
-  if (also.length > BASIS_ALSO_REQUIRED_MAX) return { refused: 'conditions' };
+  // Every retained condition, exactly as drafted, or the whole reading refused with its reason — never a subset, never changed.
+  const conditions = conditionsOf(d.also_required);
+  if ('refused' in conditions) return { refused: conditions.refused };
+  const also = conditions.kept;
   const question = words(d.open_question, BASIS_QUESTION_MAX);
   return { basis: {
     quantity_frame: args.quantityFrame,
@@ -145,6 +160,7 @@ export function goalTargetBasisRefusalWords(metric: string, refusal: GoalTargetB
     effect_unit: 'the unit each option\'s effect on it is stated in',
     frame: 'whether the target is a level or a change in the quantity\'s own unit',
     conditions: `the other conditions you set beside it as a list it can keep whole (at most ${BASIS_ALSO_REQUIRED_MAX}), so that none is left out`,
+    condition_text: `each other condition you set beside it kept word for word, on one line of at most ${BASIS_CONDITION_MAX} characters, so that none is changed`,
   }[refusal];
   return `No chance of meeting the target for "${metric}" is shown yet: Olumi needs ${what}, and will not guess it.`;
 }
@@ -159,10 +175,10 @@ export function goalReadingRefusedWords(
   metric: string, verdict: { readonly refused: GoalTargetBasisRefusal } | { readonly basis: unknown }, drafted: unknown,
 ): string | undefined {
   if (!('refused' in verdict)) return undefined;
-  const n = goalConditionsOf(drafted).length;
+  const n = goalConditionCount(drafted);
   if (n === 0) return undefined;
   const why = goalTargetBasisRefusalWords(metric, verdict.refused);
-  return verdict.refused === 'conditions' ? why
+  return verdict.refused === 'conditions' || verdict.refused === 'condition_text' ? why
     : `${why} No chance is shown without the ${n === 1 ? 'condition' : `${n} conditions`} you set beside it.`;
 }
 
@@ -181,8 +197,9 @@ export function goalTargetBasisOf(goal: unknown): GoalTargetBasis | undefined {
   if (effectUnit === undefined || typeof b.effects_at_period_end !== 'boolean') return undefined;
   const denominator = words(b.denominator, BASIS_TEXT_MAX);
   if (targetFrame !== 'level' && denominator === undefined) return undefined;
-  const also = conditionsOf(b.also_required);
-  if (also.length > BASIS_ALSO_REQUIRED_MAX) return undefined;
+  const conditions = conditionsOf(b.also_required);
+  if ('refused' in conditions) return undefined;
+  const also = conditions.kept;
   const question = words(b.open_question, BASIS_QUESTION_MAX);
   return {
     quantity_frame: quantityFrame, target_frame: targetFrame, target_raw: b.target_raw,
