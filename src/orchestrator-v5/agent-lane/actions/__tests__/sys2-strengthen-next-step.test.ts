@@ -54,6 +54,14 @@ describe('SYS2 S1 · Strengthen with nothing to size', () => {
     expect(d.reply).toMatchObject({ reason: 'nothing_in_scope', text: NOTHING });
   });
 
+  it('CONTRAST: a suggested change waiting for a yes keeps the reply unchanged (same gate as the level offer)', () => {
+    const facts = { ...actionFactsOf(ran()), currentLevelQuestion: LEVEL_ASK, approvalWaiting: true };
+    const d = decidePress({ id: 'agent-next-strengthen' }, facts);
+    expect(d.kind).toBe('reply');
+    if (d.kind !== 'reply') return;
+    expect(d.reply.text).not.toContain(LEVEL_ASK);
+  });
+
   it('CONTRAST: a disabled Strengthen (no current analysis) keeps its own reason and words', () => {
     const graph = legacyDoorGraph(D3.graph);
     const pre: ActionRead = { scenarioId: SCENARIO, graph, graphHash: computeAnalysisAffectingGraphHash(graph as never)!, analysisReady: { status: 'ready', may_run: true } };
