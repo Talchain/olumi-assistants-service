@@ -208,7 +208,8 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
 
   it('RED (D1): Olumi\'s band for the unsized prospect → revenue SIZES it as Olumi\'s first estimate, never "kept as it is"', async () => {
     const { result, proposal } = await prepare();
-    expect(proposal.public_label).toBe(`Record this link strength: ${pair} as strong, ${FIRST}`);
+    // D1 (AIE AMEND, 12 Oct): the offer says "an estimate from Olumi that has not yet been applied"; the typed whose stays FIRST.
+    expect(proposal.public_label).toBe(`Record this link strength: ${pair} as strong, an estimate from Olumi that has not yet been applied`);
     expect(result.links).toEqual([expect.objectContaining({ from: fromLabel, to: toLabel, was: { sizing: 'placeholder' },
       becomes: { band: 'strong' }, whose: FIRST, keeps_current_strength: false, sizing_after_approval: 'olumi_accepted' })]);
     expect(result.note).not.toContain('These links aren’t sized in the model yet');
