@@ -968,3 +968,37 @@ describe('(5) a link-oversized first draft: the size retry may drop Olumi\'s pla
     expectKeptFirstRefused(await construct(linkOversized(), retry));
   });
 });
+
+/**
+ * Batch C: independent check C-cee r1 item 5 — A RETRY KEEPS EVERY GOAL CONDITION, BY IDENTITY. The retry schema can pin
+ * `goal.basis.also_required` only by length and vocabulary (the provider grammar has no per-position pin), so `[A, B]` could
+ * come back as `[A, A]`: "spend within £200,000" silently gone from the goal while every count still matched. Adoption now
+ * checks each condition by identity (each once, qualitative ones included); a retry that loses one is not adopted.
+ */
+describe('(6) Batch C r1 item 5: a compaction retry keeps every goal condition by identity', () => {
+  const CODE = 'code quality maintained';
+  const SPEND = 'spend within £200,000';
+  const withConditions = (d: Draft, also: string[]): Draft => ({
+    ...d,
+    goal: { ...d.goal, basis: { reference: 'today', denominator: null, period_months: 3, period_kind: 'at_end', effect_unit: null,
+      effects_at_period_end: false, also_required: also, open_question: null } },
+  }) as unknown as Draft;
+  const first = (): Draft => withConditions(oversized(covered()), [CODE, SPEND]);
+
+  it('PRECONDITION: the pinned retry schema accepts [A, A] for [A, B] (length and vocabulary only) — so the grammar alone cannot keep the conditions', () => {
+    const pinned = new Ajv({ strict: false }).compile(retrySchemaPinningGoal(first().goal as unknown as CandidateModel['goal']));
+    expect(pinned(withConditions(covered(), [CODE, CODE]))).toBe(true);
+  });
+
+  it('RED: a compaction whose conditions come back as [A, A] (one condition lost) is NOT adopted', async () => {
+    expectRefusedNotAdopted(await construct(first(), withConditions(covered(), [CODE, CODE])));
+  });
+
+  it('CONTROL: the same compaction with every condition kept IS adopted, in either order', async () => {
+    for (const also of [[CODE, SPEND], [SPEND, CODE]]) {
+      const out = await construct(first(), withConditions(covered(), also));
+      expect(out.result.ok, JSON.stringify(also)).toBe(true);
+      expect(out.registered).toHaveLength(1);
+    }
+  });
+});

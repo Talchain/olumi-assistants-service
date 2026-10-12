@@ -44,6 +44,8 @@ describe('the Batch C drafter contract', () => {
     expect(pinned.basis.properties.period_months.enum).toEqual([3]);
     expect(pinned.basis.properties.effects_at_period_end.enum).toEqual([true]);
     expect(pinned.basis.properties.also_required).toMatchObject({ minItems: 1, maxItems: 1, items: { enum: ['code quality maintained'] } });
+    // Batch C: ruling r1 item 5 — each condition is named for the retry; identity itself is enforced on adoption.
+    expect(pinned.basis.properties.also_required.description).toBe('Exactly these conditions, each once: "code quality maintained".');
     expect(pinned.basis.properties.open_question).toEqual({ type: 'null' });
     const none = goalOf(retrySchemaPinningGoal({ ...goal, basis: undefined, quantity_frame: undefined } as never) as Rec).properties;
     expect(none.basis).toEqual({ type: 'null' });

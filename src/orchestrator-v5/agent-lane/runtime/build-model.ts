@@ -622,11 +622,33 @@ function pinnedBasis(b: CandidateModel['goal']['basis']): Record<string, unknown
       period_kind: { type: 'string', enum: [b.period_kind === 'over_period' ? 'over_period' : 'at_end'] },
       effect_unit: str(b.effect_unit),
       effects_at_period_end: { type: 'boolean', enum: [b.effects_at_period_end === true] },
+      // ⛔ The grammar pins only the length and the vocabulary ([A, B] admits [A, A]); each condition's identity is named here
+      // and enforced on adoption (`keepsEveryGoalCondition`, independent check C-cee r1 item 5).
       also_required: also === null ? { type: 'null' }
-        : { type: 'array', minItems: also.length, maxItems: also.length, items: also.length === 0 ? { type: 'string' } : { type: 'string', enum: also } },
+        : {
+          type: 'array', minItems: also.length, maxItems: also.length,
+          ...(also.length > 0 ? { description: `Exactly these conditions, each once: ${also.map((a) => JSON.stringify(a)).join(', ')}.` } : {}),
+          items: also.length === 0 ? { type: 'string' } : { type: 'string', enum: also },
+        },
       open_question: str(b.open_question),
     },
   };
+}
+
+/**
+ * ⛔ A RETRY KEEPS EVERY GOAL CONDITION, BY IDENTITY (independent check C-cee r1 item 5). The pinned retry schema can hold
+ * `goal.basis.also_required` only by length and vocabulary, so `[A, B]` may come back `[A, A]`. Each condition the first
+ * draft carried, qualitative ones included, must come back exactly once (order free; spelling by `canonicalLabel`), and
+ * no condition may be added. A retry that fails this is not adopted.
+ */
+export function keepsEveryGoalCondition(first: CandidateModel['goal'], retry: CandidateModel['goal']): boolean {
+  const conditions = (g: CandidateModel['goal']): string[] => {
+    const also = g?.basis?.also_required;
+    return Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string').map(canonicalLabel).sort() : [];
+  };
+  const a = conditions(first);
+  const b = conditions(retry);
+  return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
 export function retrySchemaPinningGoal(
@@ -1927,6 +1949,8 @@ export async function buildModelFromBrief(
         if (
           (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
           keepsUserMaterial && keepsEveryUserNumber(firstCandidate, candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
+          // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
+          keepsEveryGoalCondition(candidate.goal, retryCandidate.goal) &&
           // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
           // gap — but it must never cover LESS, and when coverage is the only reason
           // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
