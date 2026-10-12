@@ -10,7 +10,9 @@ import { guidanceHistoryOf } from '../../../orchestrator-v5/agent-lane/turn-cont
 
 vi.setConfig({ testTimeout: 60_000 });
 const row = (id: string) => policy.rows.find(r => r.policy_id === id)!;
-const why = row('RC-WIDEN').science_basis.summary;
+// SYS2 G1: this fixture's W6 offer sits beside several real options, so its Why? is W6's own reason. RC-WIDEN's science
+// sentence ("a single alternative") holds for W2Z/W2 only; that negative is `sys2-why-matches-variant.test.ts`.
+const why = (row('RC-WIDEN').why_now as Readonly<Record<string, string>>).W6!;
 const message = 'Our churn is 3%. What should we examine next?';
 const reply = 'Our churn is 3%.\n\n- Name another risk.\n- Test it with customer evidence.\n\nWhich risk could change your plan?';
 const response = (text = reply): Obj => ({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }] });
@@ -109,7 +111,7 @@ it.each([['W6', 'RC-WIDEN', 'W6'], ['P4', 'RC-PREMORTEM', null], ['S1', 'RC-STRE
     },
       providerReply: () => { replied = true; return response(); } });
     expect(carriers(w)).toHaveLength(1);
-    expect(object(carriers(w)[0])).toMatchObject({ policy_id: id, variant_id: variant, why: row(id).science_basis.summary });
+    expect(object(carriers(w)[0])).toMatchObject({ policy_id: id, variant_id: variant, why: id === 'RC-WIDEN' ? why : row(id).science_basis.summary });
     const wire = object(object(w.response.guidance).slot1);
     expect(wire.policy_id).toBe(id); expect(wire.variant ?? null).toBe(variant);
     expect(selections(), 'exactly one selection, before the reply').toBe(1);
