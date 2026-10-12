@@ -11,6 +11,10 @@
  * "State" is the policy's own state (the keys of the items it has shown), as for every E6 row. The marketing edit changes
  * an option's value, not a goal-path link or factor, so the Strengthen Why? is not said again after it. A change to a
  * shown item re-arms it once (the contrast at the end).
+ *
+ * ⭐ Technique (c) (AIE 6130197656 §3, DL 12 Oct) supersedes the reply's Why-once: no reply carries the Why?; each row
+ * carries its science basis as its own detail (`guidance.slot1.science`). The replays keep their other claims: items are
+ * still offered, each once, each with its action; the model's context is unchanged.
  */
 import { describe, expect, it } from 'vitest';
 import paul from './fixtures/paul-hiring-4184e877.json';
@@ -21,10 +25,11 @@ import { composeReplyShape } from '../reply/compose-reply.js';
 import { INTERVENTION_WHY_LABEL } from '../reply/eligible-intervention-reply.js';
 import { entryKey } from '../guidance/select.js';
 import { thinDraftOffer } from '../method-turn/widen-turn.js';
+import policy from '../guidance/reasoning-interventions.json';
 
 type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
 type Kind = 'construction' | 'turn' | 'run' | 'edit' | 'press_strengthen' | string;
-type Reply = { turn: number; graph: Graph; policy?: string; variant?: string; item?: string; key?: string; why: number; action: boolean };
+type Reply = { turn: number; graph: Graph; policy?: string; variant?: string; item?: string; key?: string; why: number; action: boolean; science?: string };
 const STRENGTHEN = 'RC-STRENGTHEN-ITEM';
 const REPLY = 'Here is what the model shows so far.';
 
@@ -44,11 +49,12 @@ function replay(turns: readonly { kind: Kind; graph: Graph }[], history: AnswerG
       const row = shown.wire?.slot1;
       const intervention = eligibleInterventionFor(shown.wire);
       const text = intervention === undefined ? REPLY : composeReplyShape({ text: REPLY, eligibleIntervention: intervention,
-        interventionActionLabel: row?.primary_action.label, interventionWhySaid: shown.whySaid }).text;
+        interventionActionLabel: row?.primary_action.label }).text;
       if (row?.policy_id === STRENGTHEN) held = row.item;
       reply = { ...reply, policy: row?.policy_id, variant: row?.variant, item: row?.item, key: row?.state_key_hash,
-        // R3-1 (staging 9bac9729): the Why? is a plain final paragraph, the label and this intervention's own words, byte for byte.
-        why: intervention === undefined ? 0 : text.split(`${INTERVENTION_WHY_LABEL} ${intervention.why}`).length - 1, action: row !== undefined && text.includes(row.primary_action.label) };
+        // Technique (c): the Why? rides the guidance row, never the reply; any "Why? " in the reply text counts.
+        why: text.split(`${INTERVENTION_WHY_LABEL} `).length - 1, action: row !== undefined && text.includes(row.primary_action.label),
+        ...(row?.science === undefined ? {} : { science: row.science }) };
       answer = guidanceOnAnswer(shown.wire, state);
     }
     if (answer !== undefined) history.unshift(answer);
@@ -64,7 +70,9 @@ const graphs = marketing.graphs as unknown as Record<string, Graph>;
 const marketingTurns = marketing.served_answers.map(a => ({ kind: a.kind, graph: graphs[a.graph_hash]! }));
 const [BEFORE_EDIT, AFTER_EDIT] = [...new Set(marketing.served_answers.map(a => a.graph_hash))].map(h => graphs[h]!);
 
-describe('E6 Why-once: Strengthen items are still offered, and the policy\'s Why? is said once per state', () => {
+/** The Strengthen policy's science basis, by identity (`reasoning-interventions.json`). */
+const SCIENCE = policy.rows.find(r => r.policy_id === STRENGTHEN)!.science_basis.summary;
+describe('E6 under technique (c): Strengthen items are still offered; the policy\'s Why? rides each row, never a reply', () => {
   it('IDENTITY (marketing): the replay\'s first Strengthen row IS served turn 2\'s row; served, the Why? rode 7 replies', () => {
     const served = marketing.served_answers.find(a => a.turn === 2)!.row!;
     const first = strengthen(replay(marketingTurns))[0]!;
@@ -81,23 +89,24 @@ describe('E6 Why-once: Strengthen items are still offered, and the policy\'s Why
     for (const s of served) expect(replayed).toContain(s);
   });
 
-  it('hiring (one state): several Strengthen items each carry their action; the Why? is said ONCE, on the first', () => {
+  it('hiring (one state): several Strengthen items each carry their action; no reply carries the Why?; each row carries its science', () => {
     const rows = strengthen(replay(hiringTurns));
     expect(rows.length, `items still offered: ${JSON.stringify(rows.map(r => r.item))}`).toBeGreaterThanOrEqual(2);
     expect(new Set(rows.map(r => r.item)).size, 'each item once').toBe(rows.length);
     expect(rows.every(r => r.action), 'every item carries its action').toBe(true);
-    expect(rows.map(r => r.why)).toEqual([1, ...rows.slice(1).map(() => 0)]);
+    expect(rows.map(r => r.why)).toEqual(rows.map(() => 0));
+    expect(rows.map(r => r.science)).toEqual(rows.map(() => SCIENCE));
   });
 
-  it('marketing, before the edit (one state): several items, each with its action; the Why? ONCE', () => {
+  it('marketing, before the edit (one state): several items, each with its action; no reply carries the Why?', () => {
     const rows = strengthen(replay(marketingTurns)).filter(r => r.graph === BEFORE_EDIT);
     expect(rows.length, `items still offered: ${JSON.stringify(rows.map(r => r.item))}`).toBeGreaterThanOrEqual(2);
     expect(rows.every(r => r.action)).toBe(true);
-    expect(whys(rows)).toBe(1);
-    expect(rows[0]!.why).toBe(1);
+    expect(whys(rows)).toBe(0);
+    expect(rows.every(r => r.science === SCIENCE), 'each row carries its science').toBe(true);
   });
 
-  it('marketing, after the option edit: items are still offered; the edit is not a change of Strengthen\'s state, so no second Why?', () => {
+  it('marketing, after the option edit: items are still offered, each with its action; no reply carries the Why?', () => {
     const edit = marketing.served_answers.find(a => a.kind === 'edit') as { event?: { kind?: string } } | undefined;
     expect(edit?.event?.kind, 'the served edit').toBe('option_intervention_edit');
     const replies = replay(marketingTurns);
@@ -105,10 +114,10 @@ describe('E6 Why-once: Strengthen items are still offered, and the policy\'s Why
     expect(after.length, 'POSITIVE CONTROL: a Strengthen item is offered after the edit').toBeGreaterThanOrEqual(1);
     expect(after.every(r => r.action)).toBe(true);
     expect(whys(after)).toBe(0);
-    expect(whys(replies), 'once across the session').toBe(1);
+    expect(whys(replies), 'none across the session').toBe(0);
   });
 
-  it('CONTRAST (re-arms once): a shown item whose value changes is offered again WITH the Why?, then said once', () => {
+  it('CONTRAST (re-arms): a shown item whose value changes is offered again, with its action and its row\'s science; no reply carries the Why?', () => {
     const history: AnswerGuidance[] = [];
     const before = strengthen(replay(marketingTurns, history));
     const shownLink = before.find(r => r.item?.includes('->'))!;
@@ -116,9 +125,9 @@ describe('E6 Why-once: Strengthen items are still offered, and the policy\'s Why
     const changed: Graph = { ...AFTER_EDIT, edges: AFTER_EDIT.edges.map(e => e.from === from && e.to === to
       ? { ...e, exists_probability: (typeof e.exists_probability === 'number' ? e.exists_probability : 0.9) - 0.05 } : e) };
     const next = replay([{ kind: 'turn', graph: changed }, { kind: 'turn', graph: changed }], history);
-    expect([next[0]!.item, next[0]!.why], 'the changed item again, with its Why?').toEqual([shownLink.item, 1]);
+    expect([next[0]!.item, next[0]!.why, next[0]!.action, next[0]!.science], 'the changed item again, with its action and science').toEqual([shownLink.item, 0, true, SCIENCE]);
     expect(next[0]!.key).not.toBe(shownLink.key);
     expect(next[1]!.policy, 'POSITIVE CONTROL: another Strengthen item follows').toBe(STRENGTHEN);
-    expect(next[1]!.why, 'and only once on the new state').toBe(0);
+    expect(next[1]!.why).toBe(0);
   });
 });
