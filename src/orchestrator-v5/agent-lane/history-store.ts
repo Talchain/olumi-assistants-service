@@ -366,6 +366,23 @@ export function historyFromDurableTurns(
   return items;
 }
 
+/**
+ * The conversation's FIRST message (the brief), read from the same durable rows the seed already read, or undefined
+ * when those rows may not reach the conversation's start (a full read) or hold no answer row with words.
+ *
+ * ⛔ ONLY THE FIRST MESSAGE (SYS2 E1). A durable answer row does not record whether its words were typed or a chip's
+ * (an approve chip's message carries Olumi's figures), so no later reseeded row may enter "the user wrote". The first
+ * Agent answer row is the brief the conversation began with (served hiring journey, 11 Oct: a 300-character brief).
+ */
+export function briefFromDurableTurns(
+  turns: readonly { request_hash?: string | null; user_message?: string | null }[],
+  rowsRead = DURABLE_SEED_ROWS_READ,
+): string | undefined {
+  if (turns.length >= rowsRead) return undefined;
+  const first = [...turns].reverse().find((t) => isAgentAnswerRow(t) && !!t.user_message?.trim());
+  return first?.user_message ?? undefined;
+}
+
 /** Marks a board edit in the Agent's history: the user's own change, already applied — never a request to the Agent. */
 export const BOARD_EDIT_PREFIX = '(Board edit \u2014 the user changed this directly on the canvas and Olumi has already applied it; it is not a request to you.)';
 
@@ -396,6 +413,8 @@ export class HistoryStore {
   private readonly typed = new Map<string, string[]>();
   /** The user's typed words from turns the window has dropped, in the order written (`olderWordsItem`). */
   private readonly older = new Map<string, string[]>();
+  /** A reseeded session's first message (`briefFromDurableTurns`): it qualifies for `older` though this process never saw it typed. */
+  private readonly seededBrief = new Map<string, string>();
 
   constructor(
     private readonly maxSessions = DEFAULT_MAX_SESSIONS,
@@ -426,10 +445,13 @@ export class HistoryStore {
     const cut = items.length - kept.length;
     if (cut > 0) {
       const dropped = items.slice(0, cut);
-      // Only what the user TYPED (`recordTyped`): a chip's words, a board-edit note or a reseeded row never qualify.
+      // Only what the user TYPED (`recordTyped`): a chip's words, a board-edit note or a reseeded row never qualify —
+      // except a reseed's first message, the brief (`seed`).
       const typed = new Set(this.typed.get(sessionId) ?? []);
+      const brief = this.seededBrief.get(sessionId);
+      const briefHeld = brief !== undefined && (this.older.get(sessionId) ?? []).includes(brief);
       const words = dropped.filter(isUserMessage).map(textOf)
-        .filter((t): t is string => t !== undefined && t.trim() !== '' && typed.has(t));
+        .filter((t): t is string => t !== undefined && t.trim() !== '' && (typed.has(t) || (t === brief && !briefHeld)));
       if (words.length > 0) this.older.set(sessionId, [...(this.older.get(sessionId) ?? []), ...words]);
       this.items.set(sessionId, [...pendingProposalPair(dropped), ...kept]);
     } else {
@@ -439,6 +461,28 @@ export class HistoryStore {
       const oldest = this.older.keys().next().value;
       if (oldest !== undefined) this.older.delete(oldest);
     }
+  }
+
+  /**
+   * A cold reseed (restart, redeploy, eviction): the durable answer rows, then whatever is held, exactly as `set`.
+   * ⭐ SYS2 E1: the conversation's first message (`briefFromDurableTurns`) keeps its place in the older-words item, as
+   * it does on a hot turn, whether the window drops it now, later, or the seed's 20-row cap already left it out.
+   * `rows` are the rows the seed read (no new read).
+   */
+  seed(sessionId: string, durable: readonly unknown[], held: readonly unknown[],
+    rows: readonly { request_hash?: string | null; user_message?: string | null }[] = []): void {
+    const brief = briefFromDurableTurns(rows);
+    if (brief !== undefined && brief.trim() !== '') {
+      this.seededBrief.delete(sessionId);
+      if (this.seededBrief.size >= this.maxSessions) {
+        const oldest = this.seededBrief.keys().next().value;
+        if (oldest !== undefined) this.seededBrief.delete(oldest);
+      }
+      this.seededBrief.set(sessionId, brief);
+    }
+    // Past the seed's cap the brief is not among the durable items: put it back first, so the window drops it into older words.
+    const capped = brief !== undefined && brief.trim() !== '' && !durable.some((i) => isUserMessage(i) && textOf(i) === brief);
+    this.set(sessionId, [...(capped ? [{ role: 'user', content: [{ type: 'input_text', text: brief }] }] : []), ...durable, ...held]);
   }
 
   get size(): number {
