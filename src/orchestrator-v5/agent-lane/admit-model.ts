@@ -80,7 +80,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
 const MAX_ID = 100;
@@ -3128,8 +3128,9 @@ export function oneLevelPerFactor(
 }
 
 /** #1840's goal `observed_state` for a level the brief states: `{ value: B, baseline: B, unit?, source, raw_value, cap }`. */
-function briefGoalObservedState(normalised: number, unit: string | null | undefined, raw: number, cap: number): NonNullable<AdmittedNode['observed_state']> {
-  return { value: normalised, baseline: normalised, ...(unit ? { unit } : {}), source: 'brief_extraction', raw_value: raw, cap };
+function briefGoalObservedState(normalised: number, unit: string | null | undefined, raw: number, cap: number, verified = false): NonNullable<AdmittedNode['observed_state']> {
+  // Recovery Batch B (DL 12 Oct): a level V2 verifies (`verifiedGoalLevel`) is typed `explicit`; otherwise as before.
+  return { value: normalised, baseline: normalised, ...(unit ? { unit } : {}), source: 'brief_extraction', ...(verified ? { extractionType: 'explicit' as const } : {}), raw_value: raw, cap };
 }
 
 /**
@@ -3808,7 +3809,7 @@ function admitOnce(
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
-            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap);
+            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap, verifiedGoalLevel(model, brief));
           } else {
             withheld(verdict.reason);
           }
