@@ -120,7 +120,6 @@ import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
-import { withoutRunShareTextAtEgress } from '../orchestrator-v5/compose/run-share-text.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -2589,7 +2588,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
-      return withShapeOnlyIfItDerives(withoutRunShareTextAtEgress(gatedReplay, { requestId: String(req.id), exitPath: 'agent_lane_v1_replay' }));
+      return withShapeOnlyIfItDerives(gatedReplay);
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
@@ -5308,9 +5307,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(composedReply.measure ?? {}),
       }, 'agent-lane: the reply passed the one composer');
     }
-    // ⭐ Recovery Batch E (DL, 12 Oct; ruling A, Paul's #87): no sentence stating an option's share of runs ships, on any
-    // surface of the body, after every other writer (`run-share-text.ts`); the stored answer row is this same text.
-    wireBody = withoutRunShareTextAtEgress(wireBody, { requestId: String(req.id), exitPath: 'agent_lane_v1_final' });
     // History and the durable answer row below remember the same FINAL SENT text, after every gate.
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
     // Every retained Run output becomes a neutral marker; superseded pairs leave with their reasoning as before.

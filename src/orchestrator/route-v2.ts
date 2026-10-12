@@ -182,7 +182,6 @@ import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-cl
 // T1 claim safety, LAYER 3 — armed ONCE at the send point (1.272 E1). It used
 // to be called from inside `sanitiseOlumiResponseForEgress`, which this file
 // re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
-import { withoutRunShareTextAtEgress } from '../orchestrator-v5/compose/run-share-text.js';
 import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
 import { classifyUserVisibleRefusal } from '../orchestrator-v5/compose/user-visible-refusal.js';
@@ -2160,9 +2159,6 @@ async function sendFinalised200(
       wireBody = finaliseV5Response(augmented, finaliserContext);
     }
   }
-  // ⭐ Recovery Batch E (DL, 12 Oct; ruling A, Paul's #87): no sentence stating an option's share of runs ships on this
-  // exit (the run handler's assistant_text included), after every writer and before the one alarm scan.
-  wireBody = withoutRunShareTextAtEgress(wireBody, { requestId, exitPath });
   guardLeadingOptionClaimsAtEgress(wireBody, {
     requestId,
     exitPath,
