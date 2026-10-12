@@ -7,7 +7,8 @@ import { readUnitParts } from '../agent-lane/same-unit.js';
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { sayDate } from './deadline-date.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/projector.js';
-import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
+import { reflectsAHumanAct, valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
+import { forecastSourceOf } from '../../cee/provenance/provenance-of.js';
 import { timeClassOf, unsupportedTimeSentence } from './time-class.js';
 
 type Rec = Record<string, unknown>;
@@ -142,6 +143,48 @@ export function goalStockNetReadingLine(graph: unknown): string | null {
   }
   return held?.netZero && amount !== null
     ? `Olumi read ‘+${amount}’ as the change after any losses.` : null;
+}
+
+/**
+ * ⭐ D4 (c)(2) (post-F; DL 12 Oct): the goal-net carrier whose monthly change is OLUMI'S conversion of the brief's own
+ * no-change forecast (`forecast_source`, D4 (c)(1)), not yet accepted. Its card shows the forecast and Olumi's model of it,
+ * and its Yes accepts that model (identity-confirm-edit). Null for a monthly change a person stated or ratified.
+ */
+export function goalStockForecastOf(graph: unknown) {
+  const held = goalStockAccumulationOf(graph);
+  const source = held === null || held.netZero === null ? undefined : forecastSourceOf(held.inflow);
+  if (held === null || source === undefined || reflectsAHumanAct(valueClassOf(held.inflow.observed_state))) return null;
+  return { ...held, quote: source.quote };
+}
+
+/** ⛔ PENDING AIE SIGN-OFF (#94 6133140173): the model line between the AIE's exact quote line and question (6133027121). */
+export const FORECAST_MODEL_LINE_PENDING_AIE = {
+  rising: "Olumi's model of this forecast: from today's {start}, ‘{quantity}’ rises by {about}{monthly} each month, reaching {forecast} by {period}.",
+  flat: "Olumi's model of this forecast: ‘{quantity}’ stays at today's {start} each month through {period}.",
+} as const;
+
+/**
+ * The forecast card, exactly: the AIE's quote line, Olumi's model of it (today's level, the derived monthly change, the
+ * forecast and the deadline, all as Olumi's), then the AIE's question. The forecast is today + net × months, the figure the
+ * quoted sentence writes (it is bound only on that identity). Null when any part cannot be said.
+ */
+export function goalStockForecastCardWords(graph: unknown): string | null {
+  const held = goalStockForecastOf(graph);
+  if (held === null) return null;
+  const record = readGoalRecord(graph, String(held.goal.id));
+  const unit = record?.target?.unit;
+  const start = rec(held.stock.observed_state)?.raw_value;
+  const net = rec(held.inflow.observed_state)?.raw_value;
+  if (typeof unit !== 'string' || !finite(start) || !finite(net) || net < 0 || typeof held.goal.label !== 'string') return null;
+  const deadline = record?.horizon?.deadline;
+  const period = typeof deadline === 'string' ? sayDate(deadline) : `month ${held.month}`;
+  const say = (v: number): string => sayFigureAsWritten(Number(v.toPrecision(10)), unit);
+  const monthly = Number(net.toPrecision(2));
+  const fill = (words: string): string => words.replace('{start}', say(start)).replace('{quantity}', held.goal.label as string)
+    .replace('{about}', Math.abs(monthly - net) > 1e-9 * Math.max(1, Math.abs(net)) ? 'about ' : '').replace('{monthly}', say(monthly))
+    .replace('{forecast}', say(start + net * held.month)).replace('{period}', period);
+  const model = fill(net === 0 ? FORECAST_MODEL_LINE_PENDING_AIE.flat : FORECAST_MODEL_LINE_PENDING_AIE.rising);
+  return `From your message: ‘${held.quote}’ ${model} Do you want to use Olumi's model of this forecast for ‘${held.goal.label}’ by ${period}?`;
 }
 
 export function goalStockMethodFaceLine(graph: unknown): string | null {

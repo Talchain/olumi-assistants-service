@@ -1,6 +1,6 @@
 import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 import { edgeProvenanceDisplay } from '../../cee/provenance/provenance-of.js';
-import { goalStockAccumulationOf, goalStockNetReadingLine, goalStockOneOffChoice } from '../goal-target/goal-horizon-detail.js';
+import { goalStockAccumulationOf, goalStockForecastCardWords, goalStockNetReadingLine, goalStockOneOffChoice } from '../goal-target/goal-horizon-detail.js';
 import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
 /**
  * ⛔ THE CARD FOR A PRODUCT THE MINT COULD NOT PROVE (DL 5888399097; AIQ 5886967509 step (2); R3 served witness 5888379558).
@@ -157,7 +157,11 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
   if (stock !== null && (stock.identity.stated_in_brief !== true
     || (stock.netZero !== null && (stock.netZero.observed_state as Rec).source !== 'user_confirmed'))) {
     const net = goalStockNetReadingLine(graph);
-    const words = `Olumi reads ‘${String(stock.goal.label)}’ as ‘${String(stock.carrier.label)}’.${net === null ? '' : ` ${net}`} Is that how you work it out?`;
+    // D4 (c)(2): a monthly change that is Olumi's conversion of the brief's own no-change forecast is shown as that: the
+    // user's sentence, Olumi's model of it, and the AIE's question. Over the door's limit, the general reading is offered.
+    const forecast = goalStockForecastCardWords(graph);
+    const words = forecast !== null && forecast.length <= CARD_WORDS_MAX ? forecast
+      : `Olumi reads ‘${String(stock.goal.label)}’ as ‘${String(stock.carrier.label)}’.${net === null ? '' : ` ${net}`} Is that how you work it out?`;
     return words.length > CARD_WORDS_MAX ? null : { outcome_id: String(stock.goal.id), operation: 'sum',
       factor_ids: [String(stock.carrier.id)], words,
       ...(goalStockOneOffChoice(graph) === null ? {} : { one_off_words: goalStockOneOffChoice(graph)! }) };

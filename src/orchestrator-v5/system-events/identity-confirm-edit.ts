@@ -23,7 +23,7 @@
  * is never mutated.
  */
 import { readGoalRecord } from '../goal-target/goal-record.js';
-import { goalStockAccumulationOf, goalStockOneOffChoice } from '../goal-target/goal-horizon-detail.js';
+import { goalStockAccumulationOf, goalStockForecastCardWords, goalStockForecastOf, goalStockOneOffChoice } from '../goal-target/goal-horizon-detail.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -184,11 +184,20 @@ function partLevelsWereAsked(graph: unknown, ids: readonly string[], levels: rea
  * write). ONE predicate for the writer and every door that offers the card, so the card is never offered where its Yes
  * would be refused. By label, in factor order. Pure.
  */
+/** D4 (c)(2): the card offered on the stored graph is the forecast card (its words exactly), so its Yes accepts Olumi's model. */
+function forecastCardOffered(graph: unknown): boolean {
+  const words = goalStockForecastCardWords(graph);
+  return words !== null && goalStockForecastOf(graph) !== null && proposeProductIdentity(graph)?.words === words;
+}
+
 export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: readonly string[]): { readonly id: string; readonly label: string; readonly kind: string }[] {
   if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes)) return [];
   const stock = goalStockAccumulationOf(persistedGraph);
   if (stock !== null && factorIds.length === 1 && factorIds[0] === stock.carrier.id) {
-    return identityPartsWithoutLevel(persistedGraph, [String(stock.stock.id), String(stock.inflow.id),
+    // D4 (c)(2): on the FORECAST card, the monthly change is Olumi's model of the user's own forecast, which that card shows
+    // and its Yes accepts: it is the level the card asks about, not a missing one. Every other card asks as before.
+    const forecastCard = forecastCardOffered(persistedGraph);
+    return identityPartsWithoutLevel(persistedGraph, [String(stock.stock.id), ...(forecastCard ? [] : [String(stock.inflow.id)]),
       ...(stock.netZero === null ? [String(stock.rate.id)] : [])]);
   }
   const out: { id: string; label: string; kind: string }[] = [];
@@ -378,6 +387,15 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   if (stockCard !== null && stock?.netZero !== null && stock?.netZero !== undefined) {
     const zero = graph.nodes.find((n): n is Rec => isRec(n) && n.id === stock.netZero!.id)!;
     zero.observed_state = { ...(zero.observed_state as Rec), source: 'user_confirmed' };
+    // D4 (c)(2): the forecast card's Yes accepts Olumi's model of the forecast. The monthly change stays OLUMI'S figure,
+    // accepted (`user_confirmed`, never a human figure; its quote stays as its source), and the carrier is licensed by
+    // admission's own rule on the postimage: every input now reflects a human act.
+    if (forecastCardOffered(params.persistedGraph)) {
+      const inflow = graph.nodes.find((n): n is Rec => isRec(n) && n.id === stock.inflow.id)!;
+      inflow.observed_state = { ...(inflow.observed_state as Rec), source: 'user_confirmed' };
+      const held = graph.nodes.find((n): n is Rec => isRec(n) && n.id === stock.carrier.id)!;
+      held.nonlinear_identity = { ...(held.nonlinear_identity as Rec), stated_in_brief: true };
+    }
   }
   outcome.nonlinear_identity = carrier;
   for (const id of factorOrder) {
@@ -438,6 +456,16 @@ export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: u
     const prior = stock.netZero.observed_state as Rec;
     if (zero === undefined || !isDeepStrictEqual(zero.observed_state, { ...prior, source: 'user_confirmed' })) return false;
     zero.observed_state = structuredClone(prior);
+    // D4 (c)(2): the forecast card's whole postimage, exactly: the accepted monthly change and the licensed carrier.
+    if (forecastCardOffered(before)) {
+      const inflow = restored.nodes.find((n): n is Rec => isRec(n) && n.id === stock.inflow.id);
+      const held = restored.nodes.find((n): n is Rec => isRec(n) && n.id === stock.carrier.id);
+      const [priorFlow, priorHeld] = [stock.inflow.observed_state as Rec, stock.carrier.nonlinear_identity as Rec];
+      if (inflow === undefined || held === undefined || !isDeepStrictEqual(inflow.observed_state, { ...priorFlow, source: 'user_confirmed' })
+        || !isDeepStrictEqual(held.nonlinear_identity, { ...priorHeld, stated_in_brief: true })) return false;
+      inflow.observed_state = structuredClone(priorFlow);
+      held.nonlinear_identity = structuredClone(priorHeld);
+    }
   }
   const at = restored.nodes.findIndex((n) => isRec(n) && n.id === outcomeId);
   const was = (before.nodes as unknown[]).find((n) => isRec(n) && n.id === outcomeId);
