@@ -40,6 +40,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { resolveMagnitudeFrame, sizeLink } from '../../../cee/magnitude/link-effect.js';
 import { magnitudeNodes, percentLevelIds } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { refitFramesForOlumiEstimates } from '../refit-frames.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
@@ -247,7 +248,13 @@ describe('marketing L20 → press → the revised draft (DL question 3: do the n
       drafted_goal_link: (() => { const m = magnitudeNodes(g.nodes as Rec[], percentLevelIds(g));
         const r = sizeLink({ direction: 'positive', effect_amount: 2, effect_per_source_change: 1, user_stated: false },
           m.get('conversion_rate')!, m.get('new_customers')!);
-        return { outcome: r.outcome, mean: r.mean, problem: r.problem ?? null, stated_strength: r.stated_strength ?? null, set_aside: r.set_aside ?? null }; })(),
+        // Construction's Olumi-estimate refit (`refitFramesForOlumiEstimates`, build-model after admission), replayed on the
+        // stored frames with this link's fit candidate restored: where, and why, it declines to move a frame.
+        const replay = structuredClone(g);
+        (replay.edges as Rec[]).find(e => e.from === 'conversion_rate' && e.to === 'new_customers')!.provenance.olumi_fit_candidate = r.fit_candidate;
+        const refit = refitFramesForOlumiEstimates(replay);
+        return { outcome: r.outcome, mean: r.mean, problem: r.problem ?? null, stated_strength: r.stated_strength ?? null, set_aside: r.set_aside ?? null,
+          fit_candidate: r.fit_candidate ?? null, refit_fitted: refit.fitted, refit_refused: refit.refused }; })(),
     };
     if (process.env.SYS1_EVIDENCE) writeFileSync(`${process.env.SYS1_EVIDENCE}/l20-revised-draft-sizes.json`, JSON.stringify(reading, null, 2));
     expect(reading.incoming.length).toBeGreaterThan(0);
