@@ -1,5 +1,5 @@
 {
-  "source_sha": "0022d022169de8df70849dd6a98f62fe0638469c",
+  "source_sha": "3af9670af9f3e81d58b288b7c103e349a2844eac",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -186,7 +186,7 @@
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/orchestrator-v5/signals/coaching-signals.ts": 1,
       "src/orchestrator-v5/tools/handlers/add-constraint.ts": 5,
-      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 10,
+      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 8,
       "src/orchestrator-v5/tools/handlers/run-input-residual.ts": 2,
       "src/orchestrator-v5/tools/handlers/run-input-snapshot.ts": 7,
       "src/orchestrator-v5/tools/registry.ts": 1,
@@ -817,7 +817,7 @@
     "goalUnitOf": 5,
     "goal_constraints": 450,
     "goal_deadline_as_stated": 11,
-    "goal_direction": 101,
+    "goal_direction": 99,
     "goal_horizon": 52,
     "goal_horizon_months": 43,
     "goal_level_reading": 19,
@@ -844,7 +844,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2462,
+  "total_references": 2460,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
