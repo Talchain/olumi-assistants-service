@@ -154,7 +154,7 @@ describe('the deadline door on Paul\'s marketing turns', () => {
     const r = await d.caps.proposeGoalDeadline!(saying(TURN_A), { deadline_words: A_WORDS, rationale: TURN_A }) as Rec;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'deadline_not_placed' }));
     expect(String(r.detail)).toContain('which date "last friday"');
-    expect(String(r.detail)).toContain('call propose_goal_deadline again with these same deadline_words');
+    expect(String(r.detail)).toContain('Ask which date the user means. Once they explicitly date that weekday, call propose_goal_deadline with the original deadline_words. Never invent or offer a start date.');
     // CONTROL: the same turn on a Monday draft places it directly (this week's Friday is still ahead).
     const monday = door('2026-10-12T10:00:00Z');
     const m = await monday.caps.proposeGoalDeadline!(saying(TURN_A), { deadline_words: A_WORDS, rationale: TURN_A }) as Rec;
