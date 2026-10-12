@@ -56,7 +56,7 @@ describe('an operand holding an EXACT copy of the user’s figure is read at tod
   });
 
   it('CONTROL: two user-levelled causes (which is today’s?) — no today sentence; the card asks the reading alone (Science §(e) add.)', () => {
-    { const card = proposeProductIdentity(g((x) => { node(x, 'monthly_new_subscribers').observed_state.source = 'brief_extraction'; })); // Science §(e) addendum (8 Oct): SUPERSEDED — the card asks the reading alone
+    { const card = proposeProductIdentity(g((x) => { { node(x, 'monthly_new_subscribers').observed_state.source = 'brief_extraction'; delete node(x, 'monthly_new_subscribers').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ } })); // Science §(e) addendum (8 Oct): SUPERSEDED — the card asks the reading alone
     expect(card?.words).toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Paying subscribers at 12 months’. Is that how you work it out?'); expect(card?.words).not.toMatch(/Today|your/); }
   });
 });

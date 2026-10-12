@@ -295,9 +295,10 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const g = graphNow();
     const node = (id: string) => g.nodes.find((x) => x.id === id)!;
     // R11 × #2235: two figures, so the pairing was CONFIRMED on the card — the node keeps how it became the user's.
+    // The typed door verified each figure, so it writes the attestation beside the stamp (`explicit`, DL 12 Oct).
     const confirmedPairing = { reviewed_by_user: { intent: 'confirm_pairing', quote: FIG_MSG } };
-    expect(node(senior)['observed_state']).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, ...confirmedPairing });
-    expect(node(junior)['observed_state']).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, ...confirmedPairing });
+    expect(node(senior)['observed_state']).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, extractionType: 'explicit', ...confirmedPairing });
+    expect(node(junior)['observed_state']).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, extractionType: 'explicit', ...confirmedPairing });
     // …and it survives the save and a reload: a JSONB round trip, then the persisted-graph parse.
     const { GraphV3 } = await import('../../../schemas/cee-v3.js');
     const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(g))) as unknown as G;

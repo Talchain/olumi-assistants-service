@@ -48,6 +48,7 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
+import { edgeProvenanceDisplay, hasUserStatedSize, settingDisplayOf } from "../provenance/provenance-of.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 import { statedEffectQuoteMatches, statedEffectSpansInText, statedSwitchEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
 import { readUnitParts, sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
@@ -1383,7 +1384,7 @@ function collectSourceBoundInterventionCandidates(
     }
     const target = targetMatch as Record<string, unknown>;
     if (
-      intervention.source !== "brief_extraction" ||
+      settingDisplayOf(intervention) !== "from_brief" ||
       (intervention.value_confidence !== undefined &&
         intervention.value_confidence !== null &&
         intervention.value_confidence !== "high") ||
@@ -1505,15 +1506,16 @@ function collectBriefNaturalEffectCandidates(
     // the SAME one-span C3 binding as every other user_stated edge (Science ruling #87 6003878735, citing RT-6 B4 5998132756):
     // the user repeating their brief figure to size a link must not leave "What I was given" saying it is missing.
     // An Olumi estimate never counts.
-    if (p.magnitude !== "user_stated") continue;
+    if (!hasUserStatedSize(edge)) continue;
     // ⛔ ...but WHO STAMPED IT decides how much the stamp alone proves (Codex r1 on #2610, P1). Construction's label door
     // (`admit-model.ts` userSizeEarned) stamps a size when its amount is written about EITHER endpoint, so "Monthly
     // revenue is £75,000 a month" earns a £75,000-per-switch effect on an inferred Campaign → Revenue link the user never
     // sized. An INFERRED link (any source but the two below) is therefore credited only through a brief sentence that
     // verifies its WHOLE effect: MC P0's Fi receipt (`source_quote`) or a records `quote`. A link the brief itself states
     // (`brief_extraction`) keeps #2601's quote-less one-span rule; a size said in chat (`user_specified`) keeps Science's.
-    const chatSized = p.source === "user_specified";
-    const quoteLessWarrant = chatSized || p.source === "brief_extraction";
+    // ONE PROVENANCE AUTHORITY: who DREW the link (`edgeProvenanceDisplay`): said in chat (`user_set`) or by the brief.
+    const chatSized = edgeProvenanceDisplay(p.source) === "user_set";
+    const quoteLessWarrant = chatSized || edgeProvenanceDisplay(p.source) === "from_brief";
     const effect = p.natural_effect;
     if (effect === null || typeof effect !== "object" || Array.isArray(effect)) continue;
     const natural = effect as Record<string, unknown>;
@@ -1766,8 +1768,8 @@ function splitSurfaces(graph: Record<string, unknown>, briefText: string): Surfa
     }
     if (typeof node === "object") {
       const object = node as Record<string, unknown>;
-      const naturalEffectProvenance = object.source === "brief_extraction"
-        && object.magnitude === "user_stated"
+      const naturalEffectProvenance = edgeProvenanceDisplay(object.source) === "from_brief"
+        && hasUserStatedSize({ provenance: object })
         && object.natural_effect !== null
         && typeof object.natural_effect === "object";
       for (const [k, v] of Object.entries(object)) {

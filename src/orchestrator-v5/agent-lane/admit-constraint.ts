@@ -72,6 +72,11 @@ export interface CandidateConstraint {
    * quantity's own unit, or a percentage change from today. `delta` is the pre-R1 drafter's word for a change from today.
    */
   readonly frame?: 'level' | 'change_abs' | 'change_rel' | 'delta';
+  /**
+   * Recovery Batch C (ruling 15): `target` = one of the goal's success targets the user named beside the goal's own
+   * ("conversion over 15% AND 20 new customers"); `limit` (or absent, every older candidate) = a limit, exactly as before.
+   */
+  readonly role?: 'limit' | 'target' | null;
 }
 
 export interface AdmittedConstraint {
@@ -85,6 +90,8 @@ export interface AdmittedConstraint {
   unit?: string;
   /** `GoalConstraintSchema.value_frame`. ISL refuses a limit without it (`frame_not_stamped`); never guessed here. */
   value_frame?: GoalThresholdFrameType;
+  /** Recovery Batch C: `GoalConstraintSchema.role` — one of the goal's targets (`goal-targets-joint.ts`); absent = a limit. */
+  role?: 'goal_target';
   /**
    * Canonical authorship marker — `GoalConstraintSchema.provenance`
    * (`src/schemas/assist.ts:418`), values `explicit | inferred | proxy`.
@@ -474,7 +481,7 @@ function isUserAuthored(candidateProvenance: string): boolean {
   return candidateProvenance === 'explicit';
 }
 
-function canonicalProvenance(candidateProvenance: string): 'explicit' | 'inferred' {
+export function canonicalProvenance(candidateProvenance: string): 'explicit' | 'inferred' {
   return isUserAuthored(candidateProvenance) ? 'explicit' : 'inferred';
 }
 

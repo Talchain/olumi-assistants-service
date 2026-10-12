@@ -3,7 +3,7 @@
  * (`target-testability.ts`), the licence's walk (`reachedGoalPaths`) and the Run's reading tail (`goal-reading-disclosure.ts`),
  * so none of them can disagree about which product the Run worked out.
  */
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -35,7 +35,7 @@ export function identityCanCarryExactLinks(nodes: readonly Rec[], identity: unkn
   return identity.factor_ids.every((id) => {
     const node = nodes.find((n) => n.id === id);
     const state = node !== undefined && isRec(node.observed_state) ? node.observed_state : undefined;
-    const source = classifyValueSource(state?.source);
+    const source = valueClassOf(state);
     return source === 'user_stated' || source === 'user_ratified';
   });
 }

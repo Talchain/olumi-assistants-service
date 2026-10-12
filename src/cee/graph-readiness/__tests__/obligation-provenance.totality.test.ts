@@ -187,15 +187,18 @@ describe('the interventions ladder is total: ratification is not "nobody stamped
     interventions: { fac_1: { source, value: 1 } },
   });
 
-  it('a ratified-only option is `user_ratified`, and DIFFERS from the unstamped control', () => {
-    const ratified = structureProvenance(optionStampedOnlyWith('user_confirmed'));
+  // ⭐ ONE PROVENANCE AUTHORITY (Recovery Batch C, DL 12 Oct): a cell's class is `settingClassOf` — `provenanceOf` for the
+  // setting. The ratification ruling (20 Sep) stands for a VALUE (`user_confirmed` / `user_assumption` → `user_ratified`,
+  // asserted below). A person's VALUE literal stamped on an option CELL is outside the cell's contract
+  // (`InterventionV3.source`) and no writer produces it: under the three-state rule it is unestablished, never human —
+  // `unattributed`, the same answer the census and the Check-estimates panel give for that cell.
+  it('ratification is not "nobody stamped it" for a VALUE; an off-contract person literal on a CELL is unestablished', () => {
     const unstamped = structureProvenance({ id: 'opt_x', kind: 'option', interventions: {} });
     expect(unstamped).toBe('unattributed');
-    // Before the fix both of these were `unattributed` — a WIRE counter meaning
-    // "nobody stamped it", which is false about a value a human acted on.
-    expect(ratified).not.toBe(unstamped);
-    expect(ratified).toBe('user_ratified');
-    expect(structureProvenance(optionStampedOnlyWith('user_assumption'))).toBe('user_ratified');
+    expect(structureProvenance({ id: 'fac_x', kind: 'factor', observed_state: { source: 'user_confirmed', value: 1 } })).toBe('user_ratified');
+    expect(structureProvenance({ id: 'fac_x', kind: 'factor', observed_state: { source: 'user_assumption', value: 1 } })).toBe('user_ratified');
+    expect(structureProvenance(optionStampedOnlyWith('user_confirmed'))).toBe('unattributed');
+    expect(structureProvenance(optionStampedOnlyWith('user_assumption'))).toBe('unattributed');
   });
 
   it('CONTROLS: the user-specified and hypothesis arms are unchanged', () => {
@@ -203,7 +206,7 @@ describe('the interventions ladder is total: ratification is not "nobody stamped
     expect(structureProvenance(optionStampedOnlyWith('cee_hypothesis'))).toBe('ai_drafted');
   });
 
-  it('the STRONGEST stated effect wins, and ratification outranks a hypothesis', () => {
+  it('the STRONGEST stated effect wins: a hypothesis outranks an unestablished cell; a user stamp outranks both', () => {
     const mixed = {
       id: 'opt_x',
       kind: 'option',
@@ -212,8 +215,7 @@ describe('the interventions ladder is total: ratification is not "nobody stamped
         fac_2: { source: 'user_confirmed', value: 2 },
       },
     };
-    expect(structureProvenance(mixed)).toBe('user_ratified');
-    // …and a genuine authorship stamp still outranks ratification.
+    expect(structureProvenance(mixed)).toBe('ai_drafted');
     expect(
       structureProvenance({
         id: 'opt_x',

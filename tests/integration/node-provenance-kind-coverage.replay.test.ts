@@ -665,6 +665,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "goal_stated_as",
       // NOT value-bearing: goal_stock_reading mirrors goal_level_reading, a confirmed reading whose figures remain on their value-bearing fields.
       "goal_stock_reading",
+      // Batch C (ruling 4), 12 Oct — THE VALUE-BEARING DECISION: `goal_target_basis` is NOT value-bearing and joins neither
+      // `carriesValue` nor `NODE_QUANTITY_FIELDS`. It is Olumi's reading of WHAT the target is measured against (reference,
+      // denominator in words, period, effect unit); its `target_raw` is a staleness key copied from `goal_threshold_raw`
+      // and `period_months` says WHEN. The target's figure stays on `goal_threshold_raw` / `goal_threshold`.
+      "goal_target_basis",
       "goal_threshold",
       "goal_threshold_cap",
       "goal_threshold_cap_provenance",

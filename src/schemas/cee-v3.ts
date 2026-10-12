@@ -406,6 +406,32 @@ export const NodeV3 = z.object({
     bound: z.enum(['<=', '<', '>=', '>']).optional(),
   }).optional().catch(undefined),
   /**
+   * ⭐ RECOVERY BATCH C — WHAT THE GOAL'S TARGET IS MEASURED AGAINST (goal nodes only; Batch 0 change-goal decision rulings
+   * 1–14, amendments 1–7). Olumi's validated reading of the drafter's stated semantics (`goal-target-basis.ts`): the
+   * reference (today / launch), the denominator of a percentage change, the period (at its end / over it), the unit every
+   * option's effect on the goal is stated in, whether those effects are their size at the period's end (amendment 2),
+   * the other conditions this target leaves out (amendment 4), and an open question when the target reads more than one
+   * way (amendment 3). `quantity_frame`, `target_frame` and `target_raw` are the staleness key: once the target is edited the
+   * reading is never applied. Written ONLY by construction; CEE-owned (`field-safety.ts`); out of the analysis hash (it
+   * changes what may be SAID about a Run, never what the engine computes); a malformed value is absence (`.catch`).
+   */
+  goal_target_basis: z.object({
+    quantity_frame: z.enum(['level', 'change']),
+    target_frame: z.enum(['level', 'change_abs', 'change_rel']),
+    target_raw: z.number().finite(),
+    reference: z.enum(['today', 'launch']),
+    denominator: z.string().min(1).max(120).optional(),
+    period_months: z.number().int().min(1).max(120),
+    period_kind: z.enum(['at_end', 'over_period']),
+    effect_unit: z.string().min(1).max(120),
+    effects_at_period_end: z.boolean(),
+    // Recovery Batch C re-scope (r2 BLOCKING 2; re-scope r1 BLOCKING 1): every retained condition is kept byte-for-byte —
+    // up to 20, each up to 500 characters on one line; admission refuses the whole reading otherwise (`goal-target-basis.ts`).
+    also_required: z.array(z.string().min(1).max(500)).max(20).optional(),
+    open_question: z.string().min(1).max(300).optional(),
+    source: z.literal('olumi_reading'),
+  }).strict().optional().catch(undefined),
+  /**
    * ⛔ THE SAVED-EXAMPLE STAMPS (the UI's register writes them on the nodes of a loaded saved example).
    *
    * THIS DECLARATION IS LOAD-BEARING, for the same reason as `threshold_source` above. The UI registers

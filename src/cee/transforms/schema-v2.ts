@@ -248,6 +248,8 @@ export interface V2ObservedState {
   baseline?: number;
   unit?: string;
   source?: string;
+  /** The extraction type, carried (never discarded): `explicit` attests the person's figure, `inferred` is Olumi's. */
+  extractionType?: string;
   range?: { min: number; max: number };
   /** Derived uncertainty (standard deviation) for the value */
   value_std?: number;
@@ -417,11 +419,15 @@ export function transformNodeToV2(node: V1Node): V2Node {
         : undefined
     );
 
+    // ⛔ DL 12 Oct (last check BLOCKING 2): the extraction type is never discarded — an `inferred` value is Olumi's
+    // (`cee_inference`, as V3 maps it), and `explicit` attests the person's figure. With none, the brief stamp is the
+    // person's by its stamp alone (`stampOnly`): the chance discloses it as unverified.
     const observedState: V2ObservedState = {
       value: node.data.value,
       baseline: node.data.baseline,
       unit: node.data.unit,
-      source: "brief_extraction",
+      source: node.data.extractionType === "inferred" ? "cee_inference" : "brief_extraction",
+      ...(node.data.extractionType !== undefined ? { extractionType: node.data.extractionType } : {}),
       range,
     };
 

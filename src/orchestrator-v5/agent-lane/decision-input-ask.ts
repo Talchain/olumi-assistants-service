@@ -244,8 +244,9 @@ export function statedTargetWords(graph: unknown): string | null {
  * whether any chance form is licensed. Event-by-date chances already model time and never owe this clause.
  */
 export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean; normalizationOnly?: boolean }): string | null {
+  // Batch C (amendment 2): an at-horizon basis is the timing assumption said beside the chance; this line would deny it.
   if (goalKindOf(graph) === 'share_by_date' || (!opts?.normalizationOnly
-    && goalHorizonVerdict(graph) === 'computed_at_h')) return null;
+    && (goalHorizonVerdict(graph) === 'computed_at_h' || goalHorizonVerdict(graph) === 'basis_at_h'))) return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const prefix = UNTESTED_HORIZON_PREFIXES[opts?.plural ? 1 : 0];

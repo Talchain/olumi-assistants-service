@@ -90,6 +90,13 @@ for (const name of ['w9b-2', 'w9b-3']) {
 }
 rows['licensed-leader B: whole adapter, fallback and settlement remain byte-identical'] = () => {
   const c: Read = load('w9b/B').j;
+  // ONE PROVENANCE AUTHORITY (DL ruling; AIE 6119326092; CHANGED-ANSWERS 25): an absent-type `cee_inference` is Olumi's
+  // estimate on every reader; this control was recorded on 591cc1a0's F1 'unknown' reading, so it is held on the same
+  // capture with those stamps unrecognised (origin UNESTABLISHED), as `premortem-near-tie-path` holds W9b.
+  for (const n of c.graph.nodes as { observed_state?: Record<string, unknown> }[]) {
+    const os = n.observed_state;
+    if (os?.source === 'cee_inference' && os.extractionType === undefined && os.user_material_unverified !== true) os.source = 'unrecognised_stamp';
+  }
   const actual = turn(c);
   const base = load('w9c/base-controls').leader as RunMethodTurn;
   assert.equal(JSON.stringify(actual), JSON.stringify(base));

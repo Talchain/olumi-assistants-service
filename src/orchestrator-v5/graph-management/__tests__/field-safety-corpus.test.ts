@@ -127,6 +127,8 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       'goal_scope',
       'goal_sense_reading',
       'goal_stock_reading',
+      // Batch C: ruling 4 — the target's stated basis (reference, denominator, period, effect unit) — construction only.
+      'goal_target_basis',
       // S4 §(ad): the horizon basis stamps are CEE-owned.
       'horizon_basis',
       'horizon_basis_months',
@@ -188,6 +190,8 @@ const SMUGGLE_NAMES = [
   'horizon_basis_months',
   // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
   'goal_level_reading',
+  // Batch C: ruling 4 — the target's stated basis, written only by construction (`admitGoalTargetBasis`).
+  'goal_target_basis',
   // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority (proposed_by / option_status / participation).
   'proposed_by',
   'option_status',
@@ -415,6 +419,10 @@ describe('S4 temporal authority cannot be forged by an AI mutation', () => {
       ['goal_stock_reading', 'one_off'],
       ['goal_horizon_reference_date', '2020-01-01'],
       ['goal_horizon_stated_months', 99],
+      // Batch C: ruling 4 — a forged target basis would license a change goal's chance; only construction writes it.
+      ['goal_target_basis', { quantity_frame: 'change', target_frame: 'change_abs', target_raw: 10, reference: 'today',
+        denominator: 'forged', period_months: 3, period_kind: 'at_end', effect_unit: '%', effects_at_period_end: true,
+        source: 'olumi_reading' }],
     ] as const) {
       expect(addNode({ [field]: value }).blocker?.code, `${field} add`).toBe(PIPELINE_OWNED_FIELD);
       expect(nodeUpdate(field, value).blocker?.code, `${field} patch`).toBe(PIPELINE_OWNED_FIELD);

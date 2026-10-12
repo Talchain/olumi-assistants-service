@@ -204,6 +204,8 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'goal_direction',
   'goal_sense_reading',
   'goal_level_reading',
+  // Recovery Batch C: Olumi's validated reading of the target's semantics; written only by construction (`goal-target-basis.ts`).
+  'goal_target_basis',
   'goal_scope',
   'goal_horizon_months',
   // The S4 deadline door and the one-off door are the only writers of these pipeline-owned fields.

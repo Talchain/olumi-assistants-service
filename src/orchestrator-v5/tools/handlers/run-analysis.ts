@@ -213,8 +213,8 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
-import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
-import { sentGoalThresholdOf, withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
+import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../../goal-target/goal-chance-licence.js';
 import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -302,25 +302,30 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
 export const PLOT_BRIEF_MAX_CHARS = 10_000;
 
 /**
- * ⭐ A2 (DL #72 5861407189): THE ENGINE GETS THE HELD OPERATOR ONLY. A stored limit may carry
- * `operator_as_stated` ("<" beside "<=", `GoalConstraintSchema`) so CEE can SAY "less than 4%"; PLoT and ISL are
- * unchanged and receive `operator` alone, so the field is withheld from this wire copy. The stored row is never
- * touched: a row that carries it is copied without it, and an array with none is returned as the SAME reference.
+ * ⭐ A2 (DL #72 5861407189) → RECOVERY BATCH C (ruling 16, amendment 5): THE ENGINE GETS THE COMPARATOR THE USER STATED.
+ * A stored limit or target keeps `operator` (`>=` / `<=`) with `operator_as_stated` (`>` / `<`) beside it, so every
+ * surface can SAY "above 15%" / "less than 4%". Until Batch C this wire copy sent the held, inclusive operator only. PLoT
+ * (#448) and ISL (recovery/batchC-isl) now score `>` / `<` exactly, ties included, so the stated strict comparator is
+ * what the engine receives: "above 15%" is never scored as "at least 15%". `operator_as_stated` itself never travels.
  *
- * ⚠ NOT MODELLED: over continuous draws P(X < 4) = P(X <= 4). A level PINNED exactly at the threshold is the one case
- * the engine scores differently from the words ("exactly 4%" meets "<= 4"). The wire stays "<=" for it too (R4 in
- * `limit-operator-as-stated.test.ts`); CEE withholds that option's result for that limit instead
- * (`strictLimitsPinnedAtThreshold` → `deriveConstraintVerdict`; `strict-limit-pinned-at-threshold.test.ts`).
+ * Only a CONSISTENT pair goes strict (`>` beside `>=`, `<` beside `<=`); any other stated value is dropped and the held,
+ * inclusive bound is sent (fail closed: a ceiling is never turned into a floor). The stored rows are never touched; an
+ * array with nothing to change is returned as the SAME reference.
+ *
+ * The pinned-at-threshold withhold (`strictLimitsPinnedAtThreshold` → `deriveConstraintVerdict`) is kept: it now only
+ * withholds a figure the engine scores correctly (conservative), never one it scores wrongly.
  */
-function withholdStatedOperator<C>(goalConstraints: C): C {
+export function wireGoalConstraints<C>(goalConstraints: C): C {
   if (!Array.isArray(goalConstraints)) return goalConstraints;
-  const carries = (c: unknown): c is Record<string, unknown> =>
-    c !== null && typeof c === 'object' && Object.prototype.hasOwnProperty.call(c, 'operator_as_stated');
+  // `role` (Batch C: a goal target, `goal-targets-joint.ts`) is CEE's own metadata and never travels either.
+  const carries = (c: unknown): c is Record<string, unknown> => c !== null && typeof c === 'object'
+    && (Object.prototype.hasOwnProperty.call(c, 'operator_as_stated') || Object.prototype.hasOwnProperty.call(c, 'role'));
   if (!goalConstraints.some(carries)) return goalConstraints;
   return goalConstraints.map((c: unknown) => {
     if (!carries(c)) return c;
-    const { operator_as_stated: _stated, ...engine } = c;
-    return engine;
+    const { operator_as_stated: stated, role: _role, ...engine } = c;
+    const strict = (stated === '>' && engine.operator === '>=') || (stated === '<' && engine.operator === '<=');
+    return strict ? { ...engine, operator: stated } : engine;
   }) as C;
 }
 
@@ -1203,7 +1208,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.goal_constraints !== undefined) {
       // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
       // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
-      plotPayload.goal_constraints = withholdStatedOperator(withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints));
+      plotPayload.goal_constraints = wireGoalConstraints(withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints));
       const frameWithheld = unprovablePercentFrameIds(graphForAnalysis, snapshot.goal_constraints);
       if (frameWithheld.length > 0) {
         log.info(
@@ -2204,6 +2209,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
+    // ⭐ Recovery Batch C (amendment 3): a target read more than one way is not tested until the user says which.
+    response = withholdForOpenTargetQuestion(response, graphForAnalysis, snapshot.goal_node_id);
+    // ⛔ AMEND item 2 (kept, DL 12 Oct): a level chance on Olumi's own estimate of the goal's level is refused by the licence;
+    // the Run says why, with the next step (confirm the estimate, or give today's level) — never a silent gap.
+    response = withholdForOlumiGoalLevel(response, graphForAnalysis, snapshot.goal_node_id);
+
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
     // stated": PLoT's GOAL_DIRECTION_UNATTESTED is taken off the run it would mislabel, before the headline and the store.
     response = withoutDirectionUnattestedOnHeldFloor(response, heldGoalPointsUp(graphForAnalysis, snapshot.goal_node_id));
@@ -2867,7 +2878,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance),
-      snapshot.rawPersistedGraph ?? graphForAnalysis);
+      snapshot.rawPersistedGraph ?? graphForAnalysis,
+      // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
+      // so a several-targets joint names exactly the conditions ISL counted on each draw.
+      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);

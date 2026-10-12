@@ -1,4 +1,3 @@
-import { isUnverifiedUserMaterial } from '../transforms/provenance-display.js';
 /**
  * ⭐ THE MAGNITUDE CONTRACT — a causal link's size, read on its TARGET's own frame.
  *
@@ -36,6 +35,7 @@ import { readCurrencyUnitWithQualifiers } from '../provenance/stated-amounts.js'
 import { recoverScaleFrame } from '../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 import { isPercentOfPopulation, isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
 import { sayFigure } from '../../orchestrator-v5/agent-lane/say-figure.js';
+import { isUsersLevelOrApproved } from '../provenance/provenance-of.js';
 
 /** Who sized a link (D9). Declared once, on `EdgeProvenanceV3.magnitude`. */
 export type MagnitudeAuthor = NonNullable<EdgeProvenanceV3T['magnitude']>;
@@ -59,6 +59,12 @@ export interface MagnitudeNode {
   };
   readonly goal_threshold_cap?: unknown;
   readonly goal_threshold_unit?: unknown;
+  /**
+   * Recovery Batch C (gap 1): a goal measured AS a change (`quantity_frame: 'change'`, e.g. "+10% productivity" on its own
+   * 0–100 change scale). Its '%' is a change of today's level, not a percentage LEVEL, so a size into it is said in the
+   * goal's own unit, never "percentage points" (`targetUnitWords`).
+   */
+  readonly quantity_frame?: unknown;
   /**
    * A GOAL's distance to its target in its own natural unit (£9,000 for "cut £45k by 20%"), when admission can read it.
    * Only ever used to refuse an Olumi estimate sized FROM the target (`target_sized`, R3 #72 5899493499).
@@ -146,7 +152,8 @@ export function levelDomain(unit: string | undefined, frame: number, percentLeve
  */
 export function knownBaseline(node: MagnitudeNode): number | undefined {
   const os = node.observed_state;
-  if (os === undefined || isUnverifiedUserMaterial(os) || os.source === 'cee_inference' || os.extractionType === 'inferred') return undefined;
+  // ONE PROVENANCE AUTHORITY: a known baseline is the person's verified figure or Olumi's estimate they accepted.
+  if (os === undefined || !isUsersLevelOrApproved(os)) return undefined;
   if (finite(os.baseline)) return os.baseline;
   return finite(os.value) ? os.value : undefined;
 }
@@ -400,7 +407,8 @@ const round6 = (x: number): number => Number(x.toPrecision(6));
 
 /** The unit words the natural size is said in: points for a percentage level, "switch" for a yes/no. */
 export const targetUnitWords = (t: MagnitudeNode, frame: number | undefined): string =>
-  isPercentLevel(t, frame) ? 'percentage points' : (unitOf(t) ?? '');
+  // Batch C gap 1: a change quantity's '%' is a % of today's level; "percentage points" would say a different quantity.
+  t.quantity_frame !== 'change' && isPercentLevel(t, frame) ? 'percentage points' : (unitOf(t) ?? '');
 
 /**
  * The unit words THIS sizer says a link's natural size in, for the node it points at (`naturalEffectOf`'s

@@ -100,6 +100,11 @@ const REGISTERED_STAMPERS = [
   // postimage from its own graph AND brief). An absolute amount on that quantity's own scale, so it stamps 'level'
   // only; it has no branch that can produce a delta.
   'orchestrator-v5/agent-lane/ceiling-stock.ts',
+  // Batch C: ruling 15 (several targets; DL scope decision 2) — the goal's OWN stated target written as its row beside the
+  // other targets (`withGoalTargetRows`), so the Run's same-draw joint covers it. It is written ONLY when the goal's held
+  // `goal_threshold_frame` is 'level' and its raw is the stored `goal_threshold_raw` (the goal panel's raw + row pair), so
+  // it stamps 'level' only and has no branch that can produce a delta.
+  'orchestrator-v5/agent-lane/admit-model.ts',
 ] as const;
 
 /**

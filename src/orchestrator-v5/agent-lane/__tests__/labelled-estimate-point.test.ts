@@ -103,6 +103,9 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
   });
   it('the Run stores RC4 attribution with its licence and reload reads the same count', () => {
     const g = graph();
+    // ⛔ RE-SCOPE 2 (R5-5 (b), DL ruling) — CHANGED FIXTURE: a goal stating £20,000 / month with NO threshold sent (no
+    // `goal_threshold`, no cap) is never licensed. This Run sends the threshold it scores: £20,000 on a £25,000 frame.
+    Object.assign(g.nodes[0], { goal_threshold: 0.8, goal_threshold_cap: 25000 });
     const run = withGoalChanceLicence({ option_comparison: [
       { option_id: 'raise', probability_of_goal: 0.67 }, { option_id: 'hold', probability_of_goal: 0.43 },
     ] }, g, 'mrr');
@@ -112,8 +115,12 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
     });
     // A stored Run's attribution is producer-owned; the renderer cannot recalculate it on a later graph.
     const changed = structuredClone(g); changed.edges[0].provenance = { magnitude: 'user_stated' };
+    // Batch C: ruling r1 item 6 (amendment 7) — the producer now also counts Olumi's inferred starting value (‘Pro plan price’
+    // £49, extractionType inferred) on the goal path; still producer-owned, so the changed graph cannot recount it.
+    const withValue = (label: string, pct: number): string =>
+      `‘${label}’: about ${pct}% chance of meeting your goal, in this model, using Olumi's estimates for 1 starting value and 1 relationship (see Check estimates).`;
     expect(goalChanceScreenLinesForAgent(run, changed, true).map(l => l.chance)).toEqual([
-      wanted('Raise to £59', 67), wanted('Keep £49', 43),
+      withValue('Raise to £59', 67), withValue('Keep £49', 43),
     ]);
   });
   it.each(['Raise to £59 has a 67% chance of meeting your goal.', 'MRR reaches its target in 67% of model runs.',

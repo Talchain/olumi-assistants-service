@@ -7,7 +7,23 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.82.0.tgz` ← **THE CURRENT PIN** (event_risk.v1 pilot; DL 0fd71f, 7 Oct)
+### `talchain-schemas-0.83.0.tgz`: THE CURRENT PIN (recovery Batch C: strict goal comparators, joint goal chance and precision; DL, 12 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.83.0/f3930713b0cac6d86264d895020a112643ac0293`. Registry gitHead
+`1e451c55536776cdd1d1ae1fd1f9a3c3a3fadf03` = tag `v0.83.0` (olumi-schemas `main`, schemas #96, DL publish 12 Oct 01:58Z). **874,038 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  f3930713b0cac6d86264d895020a112643ac0293   (the registry download id)
+integrity (sha512) sha512-2yK1A9GDHfeLV1mm9bjF3omNCzsnKBLBWZ7Pb/HfpVhnH7G7xOlJ2L42leYd2eQaKTsJs0829mLrd9ifZnLMZg==
+sha256             69e11b74af105b5f89a40a3d992cd889945c3458cd4cedb32529e323534f11ce   (the .sha256 sidecar)
+```
+
+0.83.0 adds the strict goal comparators (`>`/`<` beside `>=`/`<=`), `probability_of_joint_goal` with `probability_of_joint_goal_precision`,
+`constraint_probabilities_precision[constraint_id]` and `constraint_results[].probability_precision` (PLoT's wire names), all optional. ORDER:
+readers (UI/PLoT 0.82.0, C step 1) were promoted before this writer contract.
+
+### `talchain-schemas-0.82.0.tgz` (historical — no longer vendored as of 0.83.0) (event_risk.v1 pilot; DL 0fd71f, 7 Oct)
 
 **Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
 `https://npm.pkg.github.com/download/@talchain/schemas/0.82.0/3c18c6453ba15df76cd309058aff06fef885d12d`; registry gitHead

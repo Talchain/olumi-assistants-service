@@ -381,7 +381,8 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
   });
   it.each(['olumi', 'second-flow', 'per-time-level', 'mismatched-unit', 'zero-inflow'])('no structural offer: %s; existing honest line', async why => {
     const g = draft();
-    if (why === 'olumi') node(g, 'monthly_additions').observed_state.source = 'cee_inference';
+    // ONE PROVENANCE AUTHORITY: Olumi's figure carries its AI marker, not the brief's `explicit` beside the stamp.
+    if (why === 'olumi') Object.assign(node(g, 'monthly_additions').observed_state, { source: 'cee_inference', extractionType: 'inferred' });
     if (why === 'per-time-level') node(g, 'current_cash').observed_state.unit = 'GBP/week';
     if (why === 'mismatched-unit') node(g, 'monthly_additions').observed_state.unit = 'USD/month';
     if (why === 'zero-inflow') node(g, 'monthly_additions').observed_state.raw_value = 0;

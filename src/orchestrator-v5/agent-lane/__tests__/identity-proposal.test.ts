@@ -133,7 +133,7 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
   // The carrier card itself (5892754930 (3)), bound on the same bytes with the £1,500 as the USER's figure.
   it('RED: the card on the CARRIER, its own two factors, the user\'s arithmetic against the goal\'s £75,000', () => {
     const g = beside();
-    node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction';
+    { node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction'; delete node(g, 'other_plan_mrr').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
     const label = (id: string): string => node(g, id).label;
     expect(proposeProductIdentity(g)).toStrictEqual({
       outcome_id: 'pro_plan_mrr',
@@ -146,13 +146,13 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
   });
   // AIQ 5892754930 (3): whose figure the other parent is; "that gives" only when the figures add up to the goal (5%).
   it.each<[string, (g: Json) => void, string]>([
-    ['the other parent is the user\'s figure', (g) => { node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction'; }, '; with “Other-plan MRR” (your figure, £1,500) that gives your £75,000 “MRR”.'],
+    ['the other parent is the user\'s figure', (g) => { { node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction'; delete node(g, 'other_plan_mrr').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ } }, '; with “Other-plan MRR” (your figure, £1,500) that gives your £75,000 “MRR”.'],
     // AIQ 5894530998 condition 2: with no unit nothing says it is money in the goal's terms, so the goal DEPENDS ON it.
     ['the other parent has no figure (and so no unit)', (g) => { delete node(g, 'other_plan_mrr').observed_state; }, ', close to your £75,000 “MRR”, which also depends on “Other-plan MRR” (no figure yet).'],
     ['the other parent has no figure yet, in the goal\'s own terms (£/month)', (g) => { node(g, 'other_plan_mrr').observed_state = { unit: '£/month' }; }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (no figure yet).'],
     ['the figures do not add up to the goal (£10,000 beside £73,500)', (g) => { node(g, 'other_plan_mrr').observed_state.raw_value = 10000; }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate, £10,000).'],
     // The £1,500 made the USER's (not AIQ 5905919190's gap plug), so the row still binds the "(and 1 more)" wording.
-    ['two other parents', (g) => { node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction'; g.edges.push({ ...g.edges.find((e: Json) => e.from === 'other_plan_mrr' && e.to === 'mrr'), id: 'churn_to_mrr', from: 'monthly_churn_rate' }); }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (your figure, £1,500) (and 1 more).'],
+    ['two other parents', (g) => { { node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction'; delete node(g, 'other_plan_mrr').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ } g.edges.push({ ...g.edges.find((e: Json) => e.from === 'other_plan_mrr' && e.to === 'mrr'), id: 'churn_to_mrr', from: 'monthly_churn_rate' }); }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (your figure, £1,500) (and 1 more).'],
   ])('WORDS: %s', (_why, change, clause) => {
     const g = beside();
     change(g);
@@ -194,7 +194,7 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
   ])('CONTROL — the same period, so the sum is said: %s', (_why, unit) => {
     const g = beside();
     // The USER's £1,500 (Olumi's would be AIQ 5905919190's gap plug: no card), so the row still binds the period reading.
-    node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction';
+    { node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction'; delete node(g, 'other_plan_mrr').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
     node(g, 'other_plan_mrr').observed_state.unit = unit;
     expect(proposeProductIdentity(g)?.words).toContain('£49 × 1,500 = £73,500; with “Other-plan MRR” (your figure, £1,500) that gives your £75,000 “MRR”. If yes,');
   });

@@ -260,7 +260,8 @@ function beforeAiLevelTypes(nodes: Record<string, any>[], candidate: CandidateMo
     if (!ids.includes(n.id)) return n;
     const { extractionType: _type, ...os } = n.observed_state;
     // The same old stored numeric bytes, without the new marker, still have UNKNOWN authorship.
-    expect(valueAuthorshipOf(os), n.id).toBe('unknown');
+    // ONE PROVENANCE AUTHORITY (DL 12 Oct): the absent-type carrier reads by its stamp — Olumi's (S7's 'unknown' reversed; flagged).
+    expect(valueAuthorshipOf(os), n.id).toBe('olumi_estimate');
     return { ...n, observed_state: os };
   });
 }

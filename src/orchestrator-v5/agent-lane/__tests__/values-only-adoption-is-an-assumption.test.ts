@@ -159,7 +159,8 @@ describe('an accepted Olumi figure keeps Olumi as its origin and records the acc
     expect(valueSourceAuthorship(node.observed_state?.source)).toEqual({ source: 'user', provenance: 'user_set' });
     const seen = projectEntity(node as never);
     expect(seen.provenance).toBe('ai_inferred');
-    expect(seen.value_provenance).toEqual({ source: 'user_assumption', reviewed_by_user: 'confirm' });
+    // ONE PROVENANCE AUTHORITY: the Agent is also told whose it is — Olumi's, accepted — never left to read the stamps.
+    expect(seen.value_provenance).toEqual({ source: 'user_assumption', reviewed_by_user: 'confirm', whose: 'olumi_accepted' });
   });
 
   it('TWIN: a figure the user then TYPES is theirs — user_override, user_set, and the acceptance review is cleared', async () => {

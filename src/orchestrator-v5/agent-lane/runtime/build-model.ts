@@ -205,6 +205,22 @@ export function buildCandidateSchema(): Record<string, unknown> {
         stated_in_brief: { type: 'boolean', description: 'True only when the brief itself says which.' },
       }, ['modelled', 'alternative', 'stated_in_brief'])], description:
         'Null unless the goal metric could mean one part (a plan, product, segment or region) or the whole.' },
+      // ⭐ RECOVERY BATCH C (rulings 1–2, 11; amendments 2–5). PROMPT HUNK — science sign-off required before ship.
+      // Optional in the candidate contract (a recorded candidate validates unchanged); required in what is sent
+      // (`strictForTheDrafter`). Admission validates them (`goal-target-basis.ts`); nothing is inferred from their absence.
+      quantity_frame: { type: 'string', enum: ['level', 'change'], description:
+        '"change" ONLY when the goal metric is itself measured as a change from today (see the CHANGE QUANTITIES rule); otherwise "level".' },
+      basis: { anyOf: [{ type: 'null' }, obj({
+        reference: { type: 'string', enum: ['today', 'launch'] },
+        denominator: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        period_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+        period_kind: { type: 'string', enum: ['at_end', 'over_period'] },
+        effect_unit: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        effects_at_period_end: { type: 'boolean' },
+        also_required: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
+        open_question: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      }, ['reference', 'denominator', 'period_months', 'period_kind', 'effect_unit', 'effects_at_period_end', 'also_required', 'open_question'])],
+      description: 'What the target is measured against (see the TARGET SEMANTICS rule). null when the goal states no target.' },
     }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'frame', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
@@ -213,6 +229,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // R1 (`@talchain/schemas` 0.61.0, `limit-frame.ts`): the contract's three writable frames. Legacy `delta` (a change
       // from the MODEL'S ORIGIN) gets no new writers.
       frame: { type: 'string', enum: ['level', 'change_abs', 'change_rel'] },
+      // ⭐ RECOVERY BATCH C (ruling 15) — PROMPT HUNK, science sign-off required. Optional in the contract.
+      role: { type: 'string', enum: ['limit', 'target'], description:
+        '"target" ONLY for one of SEVERAL success targets the user names beside the goal\u2019s own (see the SEVERAL TARGETS rule); a budget, time or other limit is "limit".' },
     }, ['metric', 'operator', 'value', 'unit', 'provenance', 'frame']) },
     /**
      * ⛔ NO `maxItems` ON ANYTHING THAT CAN HOLD USER MATERIAL. Removed after an
@@ -289,7 +308,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // \u2b50 THE MAGNITUDE CONTRACT (D1). A size in NATURAL units, read on each end's own frame by admission
       // (`cee/magnitude/link-effect.ts`). REQUIRED so strict output must say "not known" (null) rather than omit it.
       effect_amount: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
-        'The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage target, in points: 4% to 3% is -1. null when you cannot give a defensible size.' },
+        'The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage-level target, use percentage points: 4% to 3% is -1. For a goal measured as percentage change from today\'s level, use % of today\'s level as specified in CHANGE QUANTITIES, not percentage points. null when you cannot give a defensible size.' },
       effect_per_source_change: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
         'The change in the SOURCE\u2019s own unit that causes `effect_amount`: 1 for switching a yes/no on, 10 for a GBP 10 price rise. null when `effect_amount` is null.' },
       effect_provenance: { anyOf: [provenance, { type: 'null' }], description:
@@ -444,7 +463,7 @@ export const BUILD_INSTRUCTIONS = [
   + 'Only when you genuinely cannot say which way a link runs, set its direction to "unknown" AND add a question to `unknowns` asking the user which way it runs. An "unknown" link is withheld from the model and never counts as a path, so every option must still reach the goal through links whose direction you can state.',
   // ⭐ THE MAGNITUDE CONTRACT (D1): ONE sentence. Admission reads the size on each end's own frame and never
   // lets it run a bounded quantity out of its range (served T3: a frame-blind 0.5 moved churn by about 50 points).
-  'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), negative whenever the link’s direction is negative, and `basis` one short line on why that size and direction hold, with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
+  'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in percentage points when the target is a percentage level, so 4% to 3% is -1; for a goal measured as percentage change from today\'s level, use % of today\'s level as specified in CHANGE QUANTITIES, not percentage points) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), negative whenever the link’s direction is negative, and `basis` one short line on why that size and direction hold, with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
   // ⛔ A4 (R3 #75 5918453000; AIQ 5918516441 / 5918523203; R3 5918513716; DL 5918542181): Paul's brief states investment
   // firms "do deals between £1-2m", and no node or link carried it, so every £ figure into his goal was Olumi's
   // default. The size is per DEAL, never per conversation (that would claim every conversation brings £1m). One general
@@ -460,6 +479,12 @@ export const BUILD_INSTRUCTIONS = [
   // ("keep a risk only for a separate harm … otherwise leave it out") also dropped separate harms: risks 23 → 10 (lsD).
   'A LIMIT CAN ONLY BE CHECKED THROUGH SIZED LINKS. NO LINK MAY POINT FROM A RISK TO A QUANTITY IN `constraints`: a risk has no unit, so that link cannot be sized and the user’s limit cannot be checked. Instead, link every factor an option changes that moves the limited quantity STRAIGHT to it and give that link its size. That sized link already carries the limited quantity moving the wrong way, so do not size that loss a second time: keep that risk as a node, linked to the goal metric with all three size fields null. Every OTHER risk stays exactly as you would draw it, linked to the goal metric or to the quantity it threatens.',
   'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
+  // ⭐⭐ RECOVERY BATCH C — THE PROMPT HUNK FOR SCIENCE SIGN-OFF (rulings 1–5, 11, 15; amendments 2–5). ONE instruction.
+  // AIE C drafter changeset (12 Oct), three clauses verbatim: the additive hiring assumption is disclosed, effect timing
+  // matches period_kind, and each secondary target keeps its own frame/reference/period (unsupported ones are retained).
+  'CHANGE QUANTITIES. When the goal is a percentage change of a quantity that has no unit of its own in the brief and whose level today the brief does not give ("increase productivity by at least 10%"), measure the goal AS that change: goal.quantity_frame "change", goal.frame "change_abs", goal.unit "%", goal.value the signed percentage (10), and the metric named for the quantity ("Productivity"). Every link into that goal then states effect_amount in % of today\u2019s level of it, per effect_per_source_change of its source, as the size AT the end of the goal\u2019s period, including recruitment, notice and ramp-up \u2014 never a steady-state size. For the provisional hiring calculation, use additive per-person effects at that horizon; this assumes no diminishing returns or additional onboarding interaction beyond the stated per-person estimate. Keep that assumption explicit rather than presenting linear scaling as a fact. A quantity with a unit of its own (money, customers, a rate in %) keeps goal.quantity_frame "level" and the frames above. '
+  + 'TARGET SEMANTICS. Whenever the goal states a target, give goal.basis: reference "today", or "launch" when the targets are measured from a launch; denominator, for a change, what 100% is, in words (for example "today\u2019s monthly development capacity"), null for a level target; period_months, the months at which or over which the target is measured; period_kind "at_end" for the level or change AT that month, "over_period" for a rate or a count over the first period_months; effect_unit, the unit every link into the goal states its effect in; effects_at_period_end is true only when every incoming effect is sized for the selected period_kind: the effect at that month for at_end, or the cumulative count/period rate over the stated window for over_period, including relevant recruitment and ramp-up. Otherwise false. A deadline or period label alone does not establish the timing basis. also_required, the other conditions the user says the goal needs that this target does not include, in their words (for example "code quality maintained", "spend within \u00a3200,000"), else null; open_question, when the user\u2019s own words let the target be read more than one way (for example productivity described as a share of time, so "+10%" could mean 10% more than today or 10 more percentage points), the ONE question that asks which \u2014 never pick a reading \u2014 else null. With no stated target, basis is null. '
+  + 'SEVERAL TARGETS. When the user names several success targets, keep one as the goal and each other as a constraint with role target. Give each its stated comparator and target frame by the same level/change rules; never force a change target into level. For the conversion/new-customer example both are level targets over the same first three months after launch, conversion>15% and new customers>=20. Preserve any distinct reference or period the user states; where this contract cannot represent or support it, retain the condition in also_required/unknowns with a focused clarification, rather than inventing a shared period or claiming the full conjunction. Budget, time and other constraints keep role limit. A period count is the cumulative total from that period\'s start, and a period conversion rate is the conversion rate over that window, never a month-end snapshot.',
   'Labels are NAMES, not sentences.',
   'Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.',
   'Output only the schema.',
@@ -582,6 +607,50 @@ export async function findConstructionVersion(
  * the model links to it by its exact label; the unchanged identity check still
  * refuses anything else.
  */
+/** Recovery Batch C: the drafted basis pinned value by value (strict output must return it unchanged), or `null`. */
+function pinnedBasis(b: CandidateModel['goal']['basis']): Record<string, unknown> {
+  if (b === null || b === undefined || typeof b !== 'object') return { type: 'null' };
+  const str = (v: unknown): Record<string, unknown> => (typeof v === 'string' ? { type: 'string', enum: [v] } : { type: 'null' });
+  const also = Array.isArray(b.also_required) ? b.also_required.filter((x): x is string => typeof x === 'string') : null;
+  return {
+    type: 'object', additionalProperties: false,
+    required: ['reference', 'denominator', 'period_months', 'period_kind', 'effect_unit', 'effects_at_period_end', 'also_required', 'open_question'],
+    properties: {
+      reference: { type: 'string', enum: [b.reference === 'launch' ? 'launch' : 'today'] },
+      denominator: str(b.denominator),
+      period_months: typeof b.period_months === 'number' ? { type: 'integer', enum: [b.period_months] } : { type: 'null' },
+      period_kind: { type: 'string', enum: [b.period_kind === 'over_period' ? 'over_period' : 'at_end'] },
+      effect_unit: str(b.effect_unit),
+      effects_at_period_end: { type: 'boolean', enum: [b.effects_at_period_end === true] },
+      // ⛔ The grammar pins only the length and the vocabulary ([A, B] admits [A, A]); each condition's identity is named here
+      // and enforced on adoption (`keepsEveryGoalCondition`, independent check C-cee r1 item 5).
+      also_required: also === null ? { type: 'null' }
+        : {
+          type: 'array', minItems: also.length, maxItems: also.length,
+          ...(also.length > 0 ? { description: `Exactly these conditions, each once: ${also.map((a) => JSON.stringify(a)).join(', ')}.` } : {}),
+          items: also.length === 0 ? { type: 'string' } : { type: 'string', enum: also },
+        },
+      open_question: str(b.open_question),
+    },
+  };
+}
+
+/**
+ * ⛔ A RETRY KEEPS EVERY GOAL CONDITION, BY IDENTITY (independent check C-cee r1 item 5). The pinned retry schema can hold
+ * `goal.basis.also_required` only by length and vocabulary, so `[A, B]` may come back `[A, A]`. Each condition the first
+ * draft carried, qualitative ones included, must come back exactly once (order free; spelling by `canonicalLabel`), and
+ * no condition may be added. A retry that fails this is not adopted.
+ */
+export function keepsEveryGoalCondition(first: CandidateModel['goal'], retry: CandidateModel['goal']): boolean {
+  const conditions = (g: CandidateModel['goal']): string[] => {
+    const also = g?.basis?.also_required;
+    return Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string').map(canonicalLabel).sort() : [];
+  };
+  const a = conditions(first);
+  const b = conditions(retry);
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
 export function retrySchemaPinningGoal(
   goal: CandidateModel['goal'],
   /**
@@ -599,6 +668,12 @@ export function retrySchemaPinningGoal(
   const goalSchema = properties['goal'];
   if (goalSchema === undefined) return schema;
   goalSchema['properties'] = {
+    // Recovery Batch C (AIE request check, 12 Oct): an EVENT goal's kind and deliverable are part of the goal, so a pinned
+    // retry keeps them (else the retry could not say "event_by_date" and the event reading was lost); a quantity goal pins
+    // both to null, so no event attestation is ever added to a quantity brief.
+    kind: goal.kind === 'event_by_date' ? { type: 'string', enum: ['event_by_date'] } : { type: 'null' },
+    deliverable: typeof goal.deliverable === 'string' && goal.deliverable.trim() !== ''
+      ? { type: 'string', enum: [goal.deliverable] } : { type: 'null' },
     metric: { type: 'string', enum: [goal.metric] },
     operator: { type: 'string', enum: [goal.operator] },
     // A pinned `null` must stay expressible: `{type:'number', enum:[null]}` is
@@ -621,6 +696,10 @@ export function retrySchemaPinningGoal(
       ? { type: 'number', enum: [goal.baseline_value] }
       : { type: 'null' },
     baseline_provenance: { type: 'string', enum: [goal.baseline_provenance ?? goal.provenance] },
+    // Recovery Batch C: the quantity's frame and the target's semantics are part of the goal, so a compaction cannot drop
+    // or change them. Absent (a candidate from before the fields) pins to "level" and "none" (null).
+    quantity_frame: { type: 'string', enum: [goal.quantity_frame === 'change' ? 'change' : 'level'] },
+    basis: pinnedBasis(goal.basis),
     // C46: the scope is part of the goal, so a compaction cannot switch readings or drop the
     // question. An absent scope (a candidate from before the field) pins to "none" (null).
     scope: goal.scope === null || goal.scope === undefined || typeof goal.scope !== 'object'
@@ -1870,6 +1949,8 @@ export async function buildModelFromBrief(
         if (
           (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
           keepsUserMaterial && keepsEveryUserNumber(firstCandidate, candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
+          // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
+          keepsEveryGoalCondition(candidate.goal, retryCandidate.goal) &&
           // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
           // gap — but it must never cover LESS, and when coverage is the only reason
           // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
@@ -2132,6 +2213,9 @@ export async function buildModelFromBrief(
     }
     const declaredAccumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
     const accumulated = inTimeClass ? admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges) : declaredAccumulated;
+    // ⭐ Recovery Batch C (adjudication (c), served c85817f2): the goal's OWN target row no longer refuses the fit
+    // (`goalOwnRows`, as F4's retirement passes it): it holds the raw figure, and the widen rescales the goal's threshold,
+    // level and spread with every link it touches, so the user's size fits and nothing moves in natural units.
     const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
@@ -2140,7 +2224,7 @@ export async function buildModelFromBrief(
       ...(admitted.goal_constraints.length > 0
         ? { goal_constraints: admitted.goal_constraints }
         : {}),
-    } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
+    } as Record<string, any>, { goalOwnRows: true }).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
     const olumiFit = refitFramesForOlumiEstimates(statedFitGraph);
     const prePersistGraph = olumiFit.graph as typeof statedFitGraph;
     // Retire every obsolete disclosure for fitted endpoint identities at their one source of truth.

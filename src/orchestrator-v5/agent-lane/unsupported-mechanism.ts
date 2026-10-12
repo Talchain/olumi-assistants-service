@@ -19,6 +19,7 @@
  * Construction only, on the candidate (labels), before admission. Pure.
  */
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
+import { hasUserStatedSize } from '../../cee/provenance/provenance-of.js';
 import { sameWord, wordsOf } from './stated-by-user.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { PERIOD_ADVERB_SPELLINGS, PERIOD_NOUN_SPELLINGS } from '../../utils/unit-alphabet.js';
@@ -390,7 +391,7 @@ export function drawsChainAsTheUsers(
   const before = new Set(first.links.filter((l) => k(l.from) === k(c.from)).map((l) => k(l.to)));
   const newOutOfSourceAreTheUsers = retry.links.filter((l) => k(l.from) === k(c.from) && !before.has(k(l.to))).every((l) => {
     const e = registered.edges.find((x) => x.from === idOf.get(k(l.from)) && x.to === idOf.get(k(l.to)));
-    return e !== undefined && prov(e).magnitude === 'user_stated';
+    return e !== undefined && hasUserStatedSize(e);
   });
   return c.sentences.every((s) => quotes.has(s)) && !carriesProduct && throughGone && newOutOfSourceAreTheUsers;
 }

@@ -55,6 +55,7 @@ import { formatFactorValue } from '../compose/format-factor-value.js';
 import { parseEdgeTargetPath } from '../graph-management/adapters/edit-graph-producer.js';
 import { SAFETY_FORBIDDEN_TOKENS } from '../compose/proposed-change.js';
 import { isSwitch, resolveMagnitudeFrame, switchStateWords, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
+import { settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
 
 /** Structural view of a patch operation — enough to name its subject. */
 export interface ChangesetOpLike {
@@ -265,7 +266,10 @@ function optionLevelsClause(
     if (figure === undefined || figure === null) continue;
     const label = resolveNode(factorId, graph, batchAdds).label;
     const name = label !== null ? `'${label}'` : 'a factor not yet named';
-    const estimate = entry.source === 'cee_hypothesis' ? ' (Olumi\u2019s estimate)' : '';
+    // ONE PROVENANCE AUTHORITY: said as Olumi's only where the setting's origin is Olumi's (`provenanceOf`).
+    const target = (Array.isArray(asRecord(graph).nodes) ? asRecord(graph).nodes as unknown[] : []).find(n => asRecord(n).id === factorId);
+    const setBy = settingProvenanceOf(entry, target);
+    const estimate = setBy.origin === 'ai' && !setBy.structural ? ' (Olumi\u2019s estimate)' : '';
     const level = finiteNumber(entry.value);
     const state = level !== undefined && isSwitchAfter(factorId, level, graph, switchIds) ? switchStateWords(level) : undefined;
     if (state !== undefined) {

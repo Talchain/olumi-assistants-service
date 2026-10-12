@@ -13,7 +13,8 @@
  * one of them removed is not here to gate.
  */
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
-import { GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_PROBABILITY_UNUSABLE, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_TARGET_NOT_TESTABLE, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import { CONDITIONS_NOT_KEPT, goalTargetBasisOf } from './goal-target-basis.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { resolveGoalDirection } from './goal-direction.js';
 
@@ -179,4 +180,37 @@ export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goal
     out = { ...out, inference_warnings: [...warnings, { code: GOAL_FIT_UNUSABLE, message: MESSAGE, severity: 'warning', goal_fit_cause: fitCause }] };
   }
   return out as E;
+}
+
+/**
+ * ⭐ RECOVERY BATCH C, amendment 3: a target that can be read more than one way ("+10%": 10% more than today's capacity, or
+ * 10 more percentage points?) is never resolved by picking. While the goal's stated basis carries that question, every
+ * option's claims AGAINST the target are withheld (the ordering stays, as for any untestable target), and the question is
+ * the reason the user reads. Returns `envelope` itself when there is no open question. Pure.
+ */
+export function withholdForOpenTargetQuestion<E>(envelope: E, graph: unknown, goalId: unknown): E {
+  if (!isRec(envelope)) return envelope;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const question = goal === undefined ? undefined : goalTargetBasisOf(goal)?.open_question;
+  if (question === undefined) return envelope;
+  const scored = [...new Set(readOptionResultSources(envelope).flat().flatMap((r) => {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    return id === undefined ? [] : [id];
+  }))];
+  if (scored.length === 0) return envelope;
+  // ⛔ RE-SCOPE 2 (R5-5 (a); DL ruling): the reading refused because its conditions cannot all be kept is said as exactly that —
+  // never as a target that "can be read more than one way", never as a question to answer. Identified by its one constant.
+  // `detail.reason` is CEE-local (not in @talchain/schemas 0.83; the UI renders `message`, goalIdentityWithheld.ts).
+  const conditions = question === CONDITIONS_NOT_KEPT;
+  const message = conditions ? `Not shown. ${CONDITIONS_NOT_KEPT}` : `Not shown. Your target can be read more than one way. ${question}`;
+  const out = withholdOptionGoalFigures(envelope, new Set(scored), {
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message, say: question,
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: conditions ? 'conditions_not_kept' : 'target_reading_open' },
+  }, { keepOutcome: true, keepOrdering: true });
+  // ⛔ R5-5 (DL ruling): the conditions reason WINS. Sizing a link (the placeholder path's ask for today's level) cannot bring
+  // this chance back while the reading is refused, so that ask is not offered as the reason here; the links stay unsized in
+  // the model and their own readers are unchanged. (The UI and the canonical view already prefer this code over that one.)
+  if (!conditions || !isRec(out) || !Array.isArray(out.inference_warnings)) return out;
+  return { ...out, inference_warnings: out.inference_warnings.filter((w) => !(isRec(w) && w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) } as E;
 }

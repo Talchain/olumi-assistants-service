@@ -233,7 +233,8 @@ const exactlyTheAiCase = (g: SGraph, candidate: CandidateModel, key: string): vo
     expect(valueAuthorshipOf(os), id).toBe('olumi_estimate');
     expect(nodeProvenanceDisplay((os as { extractionType?: unknown }).extractionType, os), id).toBe('ai_inferred');
     const { extractionType: _type, ...legacy } = os as Record<string, unknown>;
-    expect(valueAuthorshipOf(legacy), id).toBe('unknown');
+    // ONE PROVENANCE AUTHORITY (DL 12 Oct): the absent-type carrier reads by its stamp — Olumi's (S7's 'unknown' reversed; flagged).
+    expect(valueAuthorshipOf(legacy), id).toBe('olumi_estimate');
   }
 };
 const exactlyTheVerifiedCase = (g: SGraph, key: string): void => {

@@ -174,6 +174,9 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
   });
   it('forms hiding per-option point lines never carry a note', () => {
     const g = graph(); g.edges = [];
+    // Batch C: ruling r1 item 3 — a declared status quo has no figure, so no every-option form is said beside it; the
+    // 'highest' form is reached with ‘Keep pricing as it is’ as an ordinary option.
+    delete g.nodes.find((n: Json) => n.id === SQ).is_baseline;
     const rs = trigger(); rs.forEach(r => { delete r.probability_of_goal_precision; });
     const l = licence(rs, delta, g);
     expect(l.form).toBe('highest'); noNote(l);
@@ -213,6 +216,19 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
   });
   const shortfallScreenFixture = (): { g: Json; result: Json; lines: ReturnType<typeof goalChanceScreenLinesForAgent> } => {
     const g = graph(); goal(g).goal_threshold = 0.8;
+    // ⛔ RE-SCOPE 2 (R5-1/R5-2, DL AMEND: three provenance states) — CHANGED FIXTURE: the 86ccaf3 capture's three 0-today levels
+    // are stamped `cee_inference` with no extraction type — Olumi's starting values now (e58b8dbd read them `unknown` and said
+    // nothing). These rows pin the spread/shortfall DISPLAY contract, so they are attested here as the person's to keep that
+    // contract isolated; their attribution is pinned where it is the subject (goal-chance-screen-lines, b2-zero-spread).
+    for (const n of g.nodes as Json[]) {
+      if (n.observed_state?.source === 'cee_inference' && n.observed_state.extractionType === undefined) {
+        Object.assign(n.observed_state, { source: 'brief_extraction', extractionType: 'explicit' });
+      }
+    }
+    // Batch C: ruling r1 item 3 (amendment 1, every frame) — a DECLARED status quo is "no change, by assumption" and never
+    // carries a figure or a shortfall line, so these display-contract rows use ‘Keep pricing as it is’ as an ordinary option
+    // (delta frame: no status quo is read). The declared case is pinned in batch-c-goal-chance-licence / shortfall-line.
+    delete g.nodes.find((n: Json) => n.id === SQ).is_baseline;
     const result = withGoalChanceLicence({ option_comparison: trigger() }, g, GOAL, earned, delta) as Json;
     const label = (id: string): string => g.nodes.find((n: Json) => n.id === id).label;
     // Authored licence strings isolate the downstream display/movement contract from the producer's numerical rows.

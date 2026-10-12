@@ -70,7 +70,7 @@
  */
 
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
-import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
+import { earnsAuthorshipCredit, settingClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { sameUnit } from '../routing/native-quantity-operation.js';
 
 /** A graph NODE, at the shape this decision needs. Used only to resolve the target factor. */
@@ -220,7 +220,7 @@ export function decideOptionCostAsk(input: {
       // this ask, the limit could never become checkable. Whose figure it is comes from the ONE authority rule (d)
       // reads (`constraint-feasibility.ts` `collectLeaderEstimatedTargetIds`), never a second list here. The native is
       // NOT gated anywhere else: it is the factor's own figure, and PLoT needs it whoever wrote it.
-      && earnsAuthorshipCredit(classifyValueSource(cell.source));
+      && earnsAuthorshipCredit(settingClassOf(cell));
     if (alreadyAnswered) continue;
 
     return {
