@@ -1003,9 +1003,11 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
     // shown yet; why is under More detail" with the answer under it: capacity 1 and 3b; hiring 7b's "Nothing you entered
     // changed."). Added after the optional E/W demotion, so every existing face line stays exactly as it was. Typed lines,
     // other questions (D-12) and a restated withheld cause still fold. Label, never withhold.
+    // Score run 3 (DL 12 Oct, R4): so does a turn that neither ran nor explained a Run and only sits beside one (hiring
+    // 11/12, marketing 6 took the Run face for a conversational question, and only the first sentence was visible).
     // A typed finding that owns the next step (the guided invitation, R3 GP) IS the answer: its face stays as designed.
     const answerOnFace = nextStepFinding === undefined && ((!horizonBesideChance && (input.chanceCells ?? []).some((cell) => cell.kind === 'withheld'))
-      || input.notRecorded === true);
+      || input.notRecorded === true || input.notRunOrExplain === true);
     if (answerOnFace) {
       // The narrator's own words only: every typed line keeps the place its producer gave it (a withheld reason stays where
       // the marker says "why is under More detail"; a progress receipt and a status line stay as the route typed them).
