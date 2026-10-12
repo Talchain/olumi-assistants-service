@@ -167,7 +167,7 @@ import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, struc
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn, type DecisionReviewRead } from '../orchestrator-v5/agent-lane/decision-review-press.js';
-import { eligibleInterventionFor, ELIGIBLE_INTERVENTION_INSTRUCTION, selectTurnGuidance, guidanceRequestOf, type EligibleIntervention, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
+import { eligibleInterventionFor, ELIGIBLE_INTERVENTION_INSTRUCTION, selectTurnGuidance, selectTurnGuidanceShown, guidanceRequestOf, type EligibleIntervention, type GuidanceWire, type TurnGuidanceSelection } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { nextStepOffersForTurn, SUGGEST_RISKS_CHIP } from '../orchestrator-v5/agent-lane/next-steps-from-guidance.js';
 import { guidanceOnAnswer, thinDraftShownWire, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { actionFactsOf, type ActionFacts } from '../orchestrator-v5/agent-lane/actions/state.js';
@@ -2999,18 +2999,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
       }
     };
-    let preReplySelection: { wire: GuidanceWire | undefined } | undefined;
+    let preReplySelection: TurnGuidanceSelection | undefined;
     let eligibleIntervention: EligibleIntervention | undefined;
     // Converse and Explain carry the same selection from the same canonical read.
     const interventionForModel = async (read: Awaited<ReturnType<typeof readBackState>>, request: ReturnType<typeof guidanceRequestOf>) => {
       await readTurnGuidanceHistory();
-      preReplySelection = { wire: selectTurnGuidance({
+      preReplySelection = selectTurnGuidanceShown({
         request,
         offeredSpecific: executableWaitingProposalIds(scenarioId, userId, read.graphHash, read.graph).map(id => ({ id: approvalChipIdFor(id) })),
         licence: leaderLicenceFromState(read.analysisState, read.analysisReady), guidance: guidanceHistory,
         runKey: runExplanationChip(scenarioId, read)?.id.slice(RUN_EXPLANATION_PREFIX.length),
         state: read,
-      }) };
+      });
       eligibleIntervention = eligibleInterventionFor(preReplySelection.wire);
       return eligibleIntervention === undefined ? {} : { eligible_intervention: eligibleIntervention };
     };
@@ -5220,7 +5220,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult,
         text: reply,
         // A host-only answer did not consume the carrier and keeps its existing bytes.
-        ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label }),
+        ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label,
+          interventionWhySaid: preReplySelection?.whySaid === true }),
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
         ...(widenReceipt === null ? {} : { widenedLine: widenReceipt }),

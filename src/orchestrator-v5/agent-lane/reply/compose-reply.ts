@@ -149,6 +149,8 @@ export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope
 export interface ReplyComposeInput {
   readonly eligibleIntervention?: EligibleIntervention;
   readonly interventionActionLabel?: string;
+  /** E6 Why-once: the policy's Why? was already said on this state (`selectTurnGuidanceShown`); the action stays. */
+  readonly interventionWhySaid?: boolean;
   /** The final prose, after every gate: exactly what would ship without the composer. */
   readonly text: string;
   /** Only a typed Draft mutation or Run/Explain turn opts into the H/W/E/N face contract. */
@@ -627,10 +629,11 @@ function expectedSentences(text: string, dropped: readonly string[]): string[] |
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const composed = composeNormalReplyShape(input);
   if (input.eligibleIntervention !== undefined && composed.reason === 'proposal') {
-    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, false, true);
+    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, false, true, input.interventionWhySaid === true);
   }
   if (input.eligibleIntervention !== undefined && (input.profile ?? 'coaching') === 'coaching') {
-    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, input.faceContract !== undefined);
+    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, input.faceContract !== undefined,
+      false, input.interventionWhySaid === true);
   }
   return composed;
 }
