@@ -102,7 +102,7 @@ function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledg
         graph_identity_hash: computeGraphIdentityHash(graph as never) } };
     }
     if (path === `/assist/v1/scenarios/${SID}/graph/register`) {
-      const b = body as { graph: Rec; expected_graph_identity_hash?: unknown; operation_id?: string };
+      const b = body as { graph: Rec; expected_graph_hash?: unknown; expected_graph_identity_hash?: unknown; operation_id?: string };
       const stored = GraphV3.parse(b.graph) as Rec;
       const bytes = JSON.stringify(stored);
       const turn = registrationTurnId(SID, b.operation_id);
@@ -111,7 +111,9 @@ function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledg
         return prior.bytes === bytes ? { status: 200, json: { registered: true, replayed: true } }
           : { status: 409, json: { details: { code: 'OPERATION_ID_REUSED' } } };
       }
-      if (b.expected_graph_identity_hash !== identity()) return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
+      // Both of the route's CAS checks: the analysis-space hash and the identity.
+      if (b.expected_graph_hash !== computeAnalysisAffectingGraphHash(graph as never)
+        || b.expected_graph_identity_hash !== identity()) return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
       graph = stored;
       commits.push({ turn_id: turn, bytes });
       ledger.write_turn_ids.push(turn);
