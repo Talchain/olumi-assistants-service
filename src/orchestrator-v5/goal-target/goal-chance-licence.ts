@@ -46,7 +46,7 @@ import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { goalOwnConstraintChanceRecords, sentRunPairsChange, sentRunScoresHeldChange, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
-import { periodEndAssumptionNote, statedPartialOrLateEffect } from './period-end-assumption.js';
+import { periodEndAssumptionNote, statedEffectTiming } from './period-end-assumption.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
@@ -399,7 +399,8 @@ export function goalChanceLicenceOf(
   // ⛔ Ruling 12 / amendment 2: a change's "at three months" needs its effects stated at that month; never steady state.
   // D3: where the basis holds they are NOT stated, the Run says why (`withholdForPeriodEndEffects`), never a silent gap.
   // ⭐ G (AIE #94 6128697025; amendments 6131950992): except the CONDITIONAL reading on a static model — this very Run scored the
-  // held target, the brief was read and states no partial or late effect by the period — said with Olumi's assumption.
+  // held target, the brief was read and states no timing of the effects at all beyond the goal's own period (fail safe, G r2)
+  // — said with Olumi's assumption.
   const conditional = changeFrame !== undefined && basis !== undefined && !basis.effects_at_period_end
     ? periodEndConditionalOf(envelope, graph, goalId, constraints) : undefined;
   if ((changeFrame !== undefined && (basis === undefined || (!basis.effects_at_period_end && conditional === undefined)))
@@ -1542,7 +1543,9 @@ export function periodEndEffectsUnstatedOf(graph: unknown, goalId: unknown): { r
  *   · (a) THE Run: what CEE sent for this Run scored the held quantity, target, frame, unit, reference, comparator and period
  *     (`sentRunScoresHeldChange`); a `probability_of_goal` on the wire alone licenses nothing;
  *   · (d) the retained source was read: a brief that is absent or unreadable is never "no contradiction";
- *   · (c) it states no partial or late EFFECT by the period (`statedPartialOrLateEffect`); a later start alone does not count;
+ *   · (c) FAIL SAFE (DL G r2, CHECK-f46cd7c5 BLOCKING): it states NOTHING about when, how fast or how much of the effects
+ *     arrive beyond the goal's own period phrase, excused by identity with the held basis (`statedEffectTiming`): a start,
+ *     onboarding, ramp, delay, month, share in place or pace — any of them withholds, a later start alone included;
  *   · (e) the target's own words can be said ("‘productivity’ being at least 10% higher than today at three months"), so a
  *     chance of this target alone is never worded as the chance of the whole goal (its other conditions stay in the notes).
  * The other guards (target, permission, currentness, condition) are the licence's own and run unchanged around this.
@@ -1561,7 +1564,7 @@ export function periodEndConditionalOf(
   if (comparator === undefined || !sentRunScoresHeldChange(inputs.sentRun, graph, goalId, comparator)) return undefined;
   const brief = inputs.brief;
   if (typeof brief !== 'string' || brief.trim() === '') return undefined;
-  if (statedPartialOrLateEffect(brief, held.basis, held.record.label) !== undefined) return undefined;
+  if (statedEffectTiming(brief, held.basis) !== undefined) return undefined;
   // Through the ONE goal record (S5): the label and the stated target the licence's words are formed from.
   const label = held.record.label.trim() !== '' && !/[\r\n]/.test(held.record.label) ? held.record.label.trim() : undefined;
   const frame = target?.frame === 'change_abs' || target?.frame === 'change_rel' ? target.frame : undefined;

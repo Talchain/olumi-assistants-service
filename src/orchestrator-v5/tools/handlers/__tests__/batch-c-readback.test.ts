@@ -423,7 +423,7 @@ describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "
 
   it.each((JSON.parse(readFileSync('tests/fixtures/batch-g/AIE-G-TIMING-PHRASES-20261012.json', 'utf8')) as {
     cases: { id: string; text: string; expected: string }[] }).cases.map((c) => [c.id, c] as const))(
-    'G corpus (AIE #94 6133027121), through the real Run handler: %s', async (_id, c) => {
+    'G corpus (AIE #94 6133027121), through the real Run handler — every case states timing, so all withhold (DL G r2, fail safe): %s', async (_id, c) => {
       const g = JSON.parse(store(hiringSized())) as Rec;
       const goal = (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
       goal.goal_target_basis = { ...(goal.goal_target_basis as Rec), effects_at_period_end: false };
@@ -434,7 +434,8 @@ describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "
       const licence = goalChanceLicenceForAgent(view);
       const verdict = withheld && licence === undefined ? 'CONTRADICTS'
         : !withheld && licence?.period_end_assumption?.origin === 'olumi' ? 'NOT_A_CONTRADICTION' : 'OTHER';
-      expect(verdict, c.text).toBe(c.expected);
+      // The AIE's NOT_A_CONTRADICTION cases (GT05–GT10) state timing too, so they now withhold (listed in the G r2 handback).
+      expect(verdict, `${c.id} (AIE: ${c.expected})`).toBe('CONTRADICTS');
     });
 
   it('RED (amendment 7, per option): an option whose OWN setting is Olumi\'s says so on its result only — never on another option\'s', async () => {

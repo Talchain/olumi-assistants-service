@@ -15,7 +15,7 @@ import {
   goalChanceLicenceForAgent, goalChanceLicenceOf, periodEndConditionalOf, sentGoalThresholdOf, withGoalChanceLicence,
   withholdForPeriodEndEffects,
 } from '../goal-chance-licence.js';
-import { PERIOD_END_ASSUMPTION_NOTE_TEMPLATE, statedPartialOrLateEffect } from '../period-end-assumption.js';
+import { PERIOD_END_ASSUMPTION_NOTE_TEMPLATE, statedEffectTiming } from '../period-end-assumption.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../../agent-lane/goal-chance-screen-lines.js';
 import { toOutboundGraph } from '../outbound-graph.js';
@@ -254,10 +254,10 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} We won't see the full gain until month 6.` }), 'late');
   });
 
-  it('CONTRAST (c): a later START alone is not a contradiction — still licensed, with the note', () => {
-    const run = runAsTheHandlerDoes({ brief: `${FX.brief} The hires start in month 2.` });
-    expect(goalChanceLicenceForAgent(run.view)!.notes).toContain(NOTE);
-    expect([...goalChanceCellFacesForAgent(run.view, FX.graph, true)]).toEqual(Object.entries(FACE));
+  it('NEGATIVE (c, fail safe — DL G r2): ANY stated start withholds with E\'s sentence, before the period or after it', () => {
+    // Round 1 licensed a start alone (AIE amendment (c)); CHECK-f46cd7c5 showed a later start escaping that way. Any timing withholds.
+    expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} The hires start in month 2.` }), 'start, month 2');
+    expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} The hires start in month four.` }), 'start, month four (the check)');
   });
 
   it('NEGATIVE (a): a Run whose sent threshold, frame, unit or period is not the held target withholds with E\'s sentence', () => {
@@ -300,34 +300,67 @@ function verdictOf(run: { envelope: Rec; view: Rec }): 'CONTRADICTS' | 'NOT_A_CO
   return !withheld && licence?.notes?.includes(NOTE) === true ? 'NOT_A_CONTRADICTION' : 'OTHER';
 }
 
+/**
+ * DL G r2 (fail safe): every corpus case states timing of the effects (a start, a share by a month, a duration, an upper bound,
+ * a past programme's or another quantity's timing), so every case now WITHHOLDS. The AIE's NOT_A_CONTRADICTION positives that
+ * now withhold are named here by id (listed in the handback for the AIE; the corpus file is unchanged and the rule is not tuned to it).
+ */
+const CORPUS_POSITIVES_NOW_WITHHELD = ['GT05', 'GT06', 'GT07', 'GT08', 'GT09', 'GT10'];
 describe('G: the AIE timing corpus through the served run-4 Run (the brief as persisted, plus the case)', () => {
-  it('the corpus is the AIE\'s ten cases', () => { expect(CORPUS.cases.map((c) => c.id)).toEqual(['GT01', 'GT02', 'GT03', 'GT04', 'GT05', 'GT06', 'GT07', 'GT08', 'GT09', 'GT10']); });
+  it('the corpus is the AIE\'s ten cases, and its positives are exactly the ones listed as now withheld', () => {
+    expect(CORPUS.cases.map((c) => c.id)).toEqual(['GT01', 'GT02', 'GT03', 'GT04', 'GT05', 'GT06', 'GT07', 'GT08', 'GT09', 'GT10']);
+    expect(CORPUS.cases.filter((c) => c.expected === 'NOT_A_CONTRADICTION').map((c) => c.id)).toEqual(CORPUS_POSITIVES_NOW_WITHHELD);
+  });
   it.each(CORPUS.cases.map((c) => [c.id, c] as const))('%s', (_id, c) => {
     const run = runAsTheHandlerDoes({ brief: `${FX.brief} ${c.text}` });
-    expect(verdictOf(run), c.text).toBe(c.expected);
-    // NOT_A_CONTRADICTION never attests arrival: the assumption stays Olumi's, said in its note, and the basis is never written.
-    if (c.expected === 'NOT_A_CONTRADICTION') expect(goalChanceLicenceForAgent(run.view)!.period_end_assumption?.origin).toBe('olumi');
+    // Every case states timing: E's sentence, no licence, no note (the AIE's CONTRADICTS cases unchanged; its positives now withhold).
+    expect(statedEffectTiming(`${FX.brief} ${c.text}`, goalOf(FX.graph).goal_target_basis), c.text).toBeDefined();
+    expect(verdictOf(run), c.text).toBe('CONTRADICTS');
     expect(goalOf(FX.graph).goal_target_basis.effects_at_period_end).toBe(false);
   });
 });
 
-describe('G: the partial/late-effect grammar (bound to the basis\' own period; a start alone never counts)', () => {
-  const at3 = { period_months: 3 };
+describe('G r2: the timing class (fail safe) — any stated timing withholds; only the goal\'s own period phrase is excused, by identity', () => {
+  const at3 = { period_months: 3, reference: 'today' as const, target_raw: 10, effect_unit: '% of today\'s productivity' };
   it.each([
-    ['We expect only half the productivity gain by month 3.', 'only half the productivity gain by month 3'],
-    ['Realistically just 50% of the improvement by the end of month three.', 'just 50% of the improvement by the end of month three'],
-    ['There will be a partial effect within three months.', 'partial effect within three months'],
-    ['We won’t see the full gain until month 6.', 'full gain until month 6'],
-    ['The full benefit only arrives after month 3.', 'full benefit only arrives after month 3'],
-    ['New developers won’t be fully productive by month 3.', 'won’t be fully productive by month 3'],
-  ])('contradiction: %s', (brief, words) => { expect(statedPartialOrLateEffect(brief, at3, 'productivity')).toBe(words); });
-
-  it.each([
+    // Round 1's contradictions, still withheld.
+    'We expect only half the productivity gain by month 3.',
+    'Realistically just 50% of the improvement by the end of month three.',
+    'There will be a partial effect within three months.',
+    'We won’t see the full gain until month 6.',
+    'The full benefit only arrives after month 3.',
+    'New developers won’t be fully productive by month 3.',
+    // Round 1's "no contradiction" rows: each states timing, so each now withholds.
     'The hires start in month 2.',
-    'Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months.',
-    'We want a 10% productivity increase by month 3.',
     'Half the team is remote, and we need the full gain by month 3.',
     'We would see half the gain by month 2.',
     'Developers won’t be fully productive until month 2.',
-  ])('no contradiction: %s', (brief) => { expect(statedPartialOrLateEffect(brief, at3, 'productivity')).toBeUndefined(); });
+    // The check's sentence (CHECK-f46cd7c5 BLOCKING); the period phrase negated, or beside another figure, in its own clause.
+    'The hires start in month four.',
+    'The hires will not be productive by month 3.',
+    'The developers deliver a 5% gain in the next three months.',
+  ])('timing: %s', (brief) => { expect(statedEffectTiming(brief, at3)).toBeDefined(); });
+
+  it('the goal\'s own period phrase alone is excused — the served brief, the readback brief, a "by month 3" goal', () => {
+    for (const brief of [FX.brief as string, 'Should we hire a tech lead or two developers to raise productivity by at least 10% within three months?',
+      'We want a 10% productivity increase by month 3.']) expect(statedEffectTiming(brief, at3), brief).toBeUndefined();
+  });
+
+  it('IDENTITY, not text: the same words are excused only for the held basis\' own period and reference, and only once', () => {
+    // The served brief's "in the next three months" is the goal's period for a 3-month basis, never for a 6-month one.
+    expect(statedEffectTiming(FX.brief, at3)).toBeUndefined();
+    expect(statedEffectTiming(FX.brief, { ...at3, period_months: 6 })).toBeDefined();
+    // "within three months of launch" is a launch-referenced period, not today's.
+    expect(statedEffectTiming('Raise productivity 10% within three months of launch.', { ...at3, reference: 'launch' })).toBeUndefined();
+    expect(statedEffectTiming('Raise productivity 10% within three months of launch.', at3)).toBeDefined();
+    // "a year" is the period for a 12-month basis only.
+    expect(statedEffectTiming('Raise productivity 10% within a year.', { ...at3, period_months: 12 })).toBeUndefined();
+    expect(statedEffectTiming('Raise productivity 10% within a year.', at3)).toBeDefined();
+    // Beside a figure, only the held target's own: "at least 10% within three months" is the goal for a 10% target, not a 12% one.
+    const goal = 'Should we hire a tech lead or two developers to raise productivity by at least 10% within three months?';
+    expect(statedEffectTiming(goal, at3)).toBeUndefined();
+    expect(statedEffectTiming(goal, { ...at3, target_raw: 12 })).toBeDefined();
+    // Two phrases with the period's value: neither is excused (which one is the goal's cannot be told).
+    expect(statedEffectTiming('Raise productivity 10% in 3 months. The hires help within three months.', at3)).toBeDefined();
+  });
 });

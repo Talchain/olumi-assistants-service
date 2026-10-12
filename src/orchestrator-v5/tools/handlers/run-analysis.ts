@@ -2218,7 +2218,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ D3 (AIE #94 6128697025; recovery Batch D): a change target whose effects are not stated at the period's end (ruling
     // 12) is refused by the licence; the Run says why — never an invisible null. No next step is promised.
     // ⭐ G (AIE amendments 6131950992): unless the licence reads it CONDITIONALLY — this Run's sent target is the held one and
-    // the persisted brief, read, states no partial or late effect by the period (the licence below reads the same inputs).
+    // the persisted brief, read, states no timing of the effects beyond the goal's own period (G r2; the licence below agrees).
     const periodEndInputs = { sentRun: plotPayload, brief: snapshot.briefText ?? null };
     const withholdForPeriodEnd = <E,>(run: E, graph: unknown, goalId: unknown): E => withholdForPeriodEndEffects(run, graph, goalId, periodEndInputs);
     response = [withholdForOlumiGoalLevel, withholdForPeriodEnd]
