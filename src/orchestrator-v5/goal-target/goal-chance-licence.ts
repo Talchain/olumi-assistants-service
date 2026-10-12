@@ -277,9 +277,12 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
 }
 
 /**
- * The checked facts decide; the Run's status-quo row only CHECKS them. On the same-draw reference a constant level meets a
- * fixed target on every draw or on none, at the reference itself: a share strictly between, a spread, or a centre away from
- * the reference is a disagreement. A row that shows none of these (no outcome, or its spread already withheld) agrees.
+ * The checked facts decide; the Run's status-quo row only CHECKS them, and never stands in for them (DL re-scope after
+ * independent check r2, BLOCKING 3: no "no change" from summary statistics — the equal-decile / zero-spread reading is not
+ * used here at all). On the same-draw reference every draw IS the reference, so the row disagrees on ANY sign otherwise:
+ * a share strictly between 0 and 1; ANY positive std (equal deciles never excuse it: std 3 with p10 = p90 = 75 is a spread);
+ * deciles apart; or any recorded centre or decile away from the reference (beyond float representation, 1e-9 relative).
+ * A row that records none of these (no outcome, or its spread already withheld) agrees.
  */
 function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | undefined }): StatusQuoReading {
   if (!a.paired) return a.forecast ? 'projection' : 'unknown';
@@ -289,10 +292,11 @@ function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: bo
   if (typeof p === 'number' && p !== 0 && p !== 1) return 'moved';
   const o = isRec(row.outcome) ? row.outcome : undefined;
   if (o === undefined) return 'assumed';
-  if (['p10', 'p90', 'std'].some((k) => finite(o[k])) && !zeroSpread(row)) return 'moved';
-  const centre = finite(o.p50) ? o.p50 : finite(o.mean) ? o.mean : undefined;
-  return centre !== undefined && a.reference !== undefined
-    && Math.abs(centre - a.reference) > 1e-6 * Math.max(1, Math.abs(a.reference)) ? 'moved' : 'assumed';
+  if (finite(o.std) && o.std > 0) return 'moved';
+  if (finite(o.p10) && finite(o.p90) && o.p10 !== o.p90) return 'moved';
+  const ref = a.reference;
+  const away = (v: unknown): boolean => finite(v) && ref !== undefined && Math.abs(v - ref) > 1e-9 * Math.max(1, Math.abs(ref));
+  return ['p10', 'p50', 'p90', 'mean'].some((k) => away(o[k])) ? 'moved' : 'assumed';
 }
 
 function zeroSpreadReasons(

@@ -713,6 +713,22 @@ describe('AIE status-quo disposition — the same-draw reference is decided by t
   });
 
   it.each([
+    ['std 3 with p10 = p90 = 75 at the reference 75 (independent check r2 BLOCKING 3)', { mean: 75, std: 3, p10: 75, p50: 75, p90: 75 }],
+    ['any positive std, however small', { mean: 75, std: 1e-12, p10: 75, p50: 75, p90: 75 }],
+    ['a decile away from the reference, the centre on it', { mean: 75, std: 0, p10: 74, p50: 75, p90: 75 }],
+  ])('RED on 2ecbae5 (re-scope 3): never "no change" from summary statistics — %s is a spread, withheld as reference_moved', (_name, outcome) => {
+    const g = capacityGraph();
+    const run = capacityWith({ outcome });
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
+    expect(l.status_quo).toBeUndefined();
+    expect(JSON.stringify(l)).not.toMatch(/by assumption|carrying on as now leaves/);
+    expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'reference_moved', line: MOVED('Development capacity') } });
+    // Its uncertainty is never removed: the row stays exactly as the Run sent it.
+    const env = withGoalChanceLicence(run, g, 'capacity', () => false, undefined, g, {}) as Rec;
+    expect((env.option_comparison as Rec[])[2]).toEqual((run.option_comparison as Rec[])[2]);
+  });
+
+  it.each([
     ['a ROOT goal (no link reaches it)', (g: Rec) => { g.edges = (g.edges as Rec[]).filter((e) => e.to !== 'capacity'); }],
     ['a goal an option SETS directly', (g: Rec) => { ((g.nodes as Rec[])[2]!.interventions as Rec).capacity = { value: 0.8, raw_value: 80, source: 'brief_extraction' }; }],
     ['a goal read from a LAUNCH, not today', (g: Rec) => { (g.nodes as Rec[])[0]!.goal_target_basis = { quantity_frame: 'level', target_frame: 'level', target_raw: 85,
