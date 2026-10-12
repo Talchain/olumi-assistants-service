@@ -679,6 +679,23 @@ export function briefAttributedLevelRange(factor: Factor, brief: string | undefi
   return undefined;
 }
 
+/**
+ * ⛔ B2 (DL 12 Oct; C's independent check r2, BLOCKING 1): a figure that is a TERM of a sum the user builds is a part, never
+ * the goal's level. Served capacity: "Total weekly support capacity is defined as the existing 80 tickets per week plus the
+ * additional specialist capacity." The 80 is the existing team's capacity, a term of the user's sum, even while the other
+ * term is 0 today; "90 tickets per week today: the existing 80 … plus 10 … outsourced" likewise. A total stated with its
+ * breakdown is still the total ("Our clinic completes 920 appointments each month: 800 booked plus 120 walk-ins."), and a
+ * sentence writing the quantity's own level ("Weekly support capacity is 80 tickets per week.") is the user's figure for
+ * THAT quantity, whatever the drafter tagged it. Read in the figure's own clause (to the nearest ":" ";" "—").
+ */
+const SUM_OPERATOR_BEFORE = /\b(?:plus|minus|defined\s+as|sum\s+of|made\s+up\s+of|consists?\s+of|compris(?:es|ing)|together\s+with|in\s+addition\s+to|on\s+top\s+of|added\s+to|combined\s+with)\b|[+=−]/iu;
+const SUM_OPERATOR_AFTER = /\b(?:plus|minus|together\s+with|in\s+addition\s+to|on\s+top\s+of|added\s+to|combined\s+with)\b|[+−]/iu;
+function figureIsAPart(text: string, amount: StatedAmount): boolean {
+  const before = text.slice(0, amount.index).split(/[:;—]/u).at(-1) ?? '';
+  const after = text.slice(amount.index + amount.matchedText.length).split(/[:;—]/u)[0] ?? '';
+  return SUM_OPERATOR_BEFORE.test(before) || SUM_OPERATOR_AFTER.test(after);
+}
+
 /** The goal's level read as a factor of the same name: the brief's sentences writing it in the goal's typed frame. */
 function goalLevelWrites(model: CandidateModel, brief: string | undefined): { asFactor: Factor; unit: NonNullable<ReturnType<typeof readUnitParts>>; writes: { text: string; amount: StatedAmount }[] } | null {
   const goal = model.goal; const value = goal.baseline_value;
@@ -686,7 +703,7 @@ function goalLevelWrites(model: CandidateModel, brief: string | undefined): { as
   const unit = readUnitParts(goal.unit);
   if (unit === null) return null;
   const asFactor = { label: goal.metric, baseline_value: value, unit: goal.unit, provenance: 'explicit', baseline_known: true } as Factor;
-  const writes = sentencesWritingFigure(asFactor, brief);
+  const writes = sentencesWritingFigure(asFactor, brief).filter(({ text, amount }) => !figureIsAPart(text, amount));
   return writes.length === 0 ? null : { asFactor, unit, writes };
 }
 
