@@ -28,6 +28,7 @@
 import { z } from 'zod';
 
 import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
+import { provenanceOf } from '../../cee/provenance/provenance-of.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../graph-management/types.js';
@@ -240,7 +241,9 @@ export function isStatedLevelRange(range: unknown, os: Readonly<Record<string, u
   const parsed = StoredInterventionRange.safeParse(range);
   if (!parsed.success) return false;
   const r = parsed.data;
-  if (r.meaning !== 'min_max' || r.source !== USER_TODAY_SOURCE || typeof r.source_quote !== 'string' || r.source_quote.trim() === '' || r.source_quote.length > USER_TODAY_QUOTE_MAX) return false;
+  // The user's own, attested range, asked of the one provenance authority (C): never a brief's type-less stamp.
+  const author = provenanceOf({ value: r });
+  if (r.meaning !== 'min_max' || author.origin !== 'human' || author.role !== 'verified' || author.stampOnly === true || typeof r.source_quote !== 'string' || r.source_quote.trim() === '' || r.source_quote.length > USER_TODAY_QUOTE_MAX) return false;
   const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
   return typeof figure === 'number' && Number.isFinite(figure) && r.low <= figure && figure <= r.high;
 }
@@ -255,7 +258,7 @@ export function levelRangePointBasis(os: Readonly<Record<string, unknown>>): 'st
   if (!parsed.success) return undefined;
   if (isStatedLevelRange(os.range, os)) return 'stated_figure';
   const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
-  const olumis = os.source === 'cee_inference' && os.user_material_unverified !== true;
+  const olumis = provenanceOf({ value: os }).origin === 'ai';
   return olumis && figure === rangePointEstimate({ min: parsed.data.low, max: parsed.data.high }) ? 'midpoint' : undefined;
 }
 

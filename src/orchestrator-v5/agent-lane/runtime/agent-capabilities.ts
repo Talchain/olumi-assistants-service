@@ -292,7 +292,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
-import { heldFigureOwnerOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { heldFigureOwnerOf, provenanceOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
@@ -1359,9 +1359,11 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             // the user's own, or Olumi's midpoint of that range (`levelRangePointBasis`), never the user's figure.
             ...((): Record<string, unknown> => {
               const r = os.range as { low?: unknown; high?: unknown; source?: unknown; source_quote?: unknown } | undefined;
-              // The author is the range's own `source`: the user's (L6) or a third party's in the brief (Row5); else none.
-              if (r === undefined || !num(r.low) || !num(r.high) || (r.source !== USER_TODAY_SOURCE && r.source !== 'brief_extraction')) return {};
-              const users = r.source === USER_TODAY_SOURCE;
+              // The author, asked of the one provenance authority (C): the user's own range (L6) is attested; a type-less brief
+              // stamp is the person's by its stamp alone, a third party's figure the brief quotes (Row5); anything else, none.
+              const author = r === undefined ? undefined : provenanceOf({ value: r });
+              if (r === undefined || !num(r.low) || !num(r.high) || author?.origin !== 'human') return {};
+              const users = author.stampOnly !== true;
               const point = levelRangePointBasis(os);
               return { stated_range: { low: r.low, high: r.high, stated_by: users ? 'user' : 'third_party_unverified',
                 ...(!users && str(r.source_quote) ? { quote: r.source_quote } : {}),

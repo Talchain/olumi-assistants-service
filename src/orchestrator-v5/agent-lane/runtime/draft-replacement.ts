@@ -23,12 +23,8 @@
  */
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { constructionOperationId } from './build-model.js';
-import {
-  classifyValueSource,
-  edgeReviewedByUser,
-  edgeStrengthProvenance,
-  reflectsAHumanAct,
-} from '../../../cee/graph-readiness/obligation-provenance.js';
+import { edgeReviewedByUser, edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { provenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
@@ -72,7 +68,7 @@ export function humanMaterialAfterTheDraft(raw: unknown): string[] {
       else if (source === undefined) {
         if (holdsAValue(os) && !isTodayDefinition(os)) found.push(`a value for ${named(n, 'a factor')} whose author is not recorded`);
       } else if (!(typeof source === 'string' && DRAFT_VALUE_SOURCES.has(source))) {
-        found.push(reflectsAHumanAct(classifyValueSource(source))
+        found.push(provenanceOf({ value: os }).origin === 'human'
           ? `your figure for ${named(n, 'a factor')}` : `a value for ${named(n, 'a factor')} whose author is not recorded`);
       }
     }
@@ -84,7 +80,7 @@ export function humanMaterialAfterTheDraft(raw: unknown): string[] {
     for (const [factorId, level] of Object.entries(levels ?? {})) {
       const source = rec(level)?.source;
       if (typeof source === 'string' && DRAFT_LEVEL_SOURCES.has(source)) continue;
-      found.push(source === 'user_specified'
+      found.push(provenanceOf({ setting: level, target: byId.get(factorId) }).origin === 'human'
         ? `your level for ${named(n, 'an option')} on ${named(byId.get(factorId), 'a factor')}`
         : `a level for ${named(n, 'an option')} whose author is not recorded`);
     }
@@ -97,7 +93,7 @@ export function humanMaterialAfterTheDraft(raw: unknown): string[] {
     const sizing = linkSizing(e);
     if (edgeReviewedByUser(e) || sizing === 'olumi_accepted') found.push(`your review of the link ${link}`);
     else if (!(typeof source === 'string' && DRAFT_LINK_SOURCES.has(source))) {
-      found.push(source === 'user_specified' ? `your link ${link}` : `a link ${link} whose author is not recorded`);
+      found.push(provenanceOf({ link: e }).origin === 'human' ? `your link ${link}` : `a link ${link} whose author is not recorded`);
     } else if (source !== 'brief_extraction' && (sizing === 'user' || edgeStrengthProvenance(e) === 'user_stated')) {
       found.push(`your size for the link ${link}`);
     }
