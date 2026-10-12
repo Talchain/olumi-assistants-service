@@ -15,6 +15,9 @@ import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB9-unseen1-df15c8c-readback-pre-challenge.json', import.meta.url), 'utf8')) as { j: Json }).j;
 const SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c1b';
+// One scenario per row: the agent session is keyed by scenario, so a shared id carried an earlier row's replies into the
+// next row's Explain history (U2-1 made CONTROL's true line visible there, and the twin read it as its own).
+let scenario = SCENARIO;
 const UNSCOPED = /can.{1,8}t yet test them against your target/u;
 const CONTROL_RESULT = ((): Json => {
   const r = structuredClone(READ.analysis_result) as Json;
@@ -64,17 +67,17 @@ describe('S2l: the model is not sent the unscoped not-testable message beside a 
     app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: READ.graph, graph_hash: READ.graph_hash, analysis_state: READ.analysis_state,
       analysis_ready: READ.analysis_ready, analysis_result: result,
-    }, SCENARIO));
+    }, scenario));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); sent.length = 0; result = READ.analysis_result; });
+  beforeEach(() => { rows.clear(); sent.length = 0; result = READ.analysis_result; scenario = randomUUID(); });
 
   /** Run, then press the real Explain control; returns the model bodies the Explain turn sent. */
   const runThenExplain = async (): Promise<string[]> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
+      kind: 'message', scenario_id: scenario, message: 'Run analysis.', source: 'chip_click',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
     } });
     expect(r.statusCode, r.body).toBe(200);
@@ -83,7 +86,7 @@ describe('S2l: the model is not sent the unscoped not-testable message beside a 
     const chip = first.suggested_actions.find((c: { id: string }) => c.id.startsWith('agent-explain-run:'));
     expect(chip, r.body).toBeDefined();
     const e = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      scenario_id: SCENARIO, agent_session_id: first._agent.session_id, turn_id: randomUUID(), message: RUN_EXPLANATION_MESSAGE, chip: { id: chip.id },
+      scenario_id: scenario, agent_session_id: first._agent.session_id, turn_id: randomUUID(), message: RUN_EXPLANATION_MESSAGE, chip: { id: chip.id },
     } });
     expect(e.statusCode, e.body).toBe(200);
     expect((e.json() as { _diagnostic_trace: { fast_path: string } })._diagnostic_trace.fast_path).toBe('explain');

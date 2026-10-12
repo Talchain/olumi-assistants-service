@@ -32,7 +32,7 @@ const STATUS_QUO_FACE = 'No change, by assumption';
  * src/components/results/utils/goalIdentityWithheld.ts @ the same commit.
  * Copy selection only: it does not decide a cell's kind or licence.
  */
-function goalIdentityWithheldMessage(result: unknown, option_id: string): string | undefined {
+function goalIdentityWithheldMessage(result: unknown, option_id: string, besideRange = false): string | undefined {
   const block = rec(result);
   const codes = ['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_USER_EFFECT_CLAMPED',
     'GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_PRODUCT_NOT_READ',
@@ -44,9 +44,14 @@ function goalIdentityWithheldMessage(result: unknown, option_id: string): string
     .filter(warning => !Object.hasOwn(warning, 'option_ids')
       || (Array.isArray(warning.option_ids)
         && warning.option_ids.some(id => typeof id === 'string' && id === option_id)));
-  if (matched.length === 0) return undefined;
-  const hasTargetRequirement = matched.some(warning => warning.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
-  const reasons = hasTargetRequirement ? matched.filter(warning => warning.code !== 'GOAL_FIGURES_PLACEHOLDER_PATH') : matched;
+  // ⛔ S2l at the cell (U2-1 says this line on the reply's face): beside a range the screen TESTS the target for the
+  // ranged options, so the target record's unscoped `message` ("can't yet test them against your target") is false of
+  // this Run. Only its scoped `say` speaks, as the Agent's reader (decision-sensitivity.ts `warningsForAgent`) allows.
+  const scoped = besideRange ? matched.flatMap(warning => warning.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE' ? [warning]
+    : typeof warning.say === 'string' && warning.say.trim() !== '' ? [{ ...warning, message: warning.say }] : []) : matched;
+  if (scoped.length === 0) return undefined;
+  const hasTargetRequirement = scoped.some(warning => warning.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+  const reasons = hasTargetRequirement ? scoped.filter(warning => warning.code !== 'GOAL_FIGURES_PLACEHOLDER_PATH') : scoped;
   // R2 C3: a display-safe specific reason ("This comparison turns on the links from …") takes the "Not shown." prefix
   // instead of being dropped for the generic line. Empty or unsafe words still fall back.
   // D3 (AIE #94 6128697025; DL 12 Oct): ruling 12's sentence already says the chance "isn’t shown", so it is said as written,
@@ -174,8 +179,9 @@ export function projectCanonicalAnalysisCells(
     ...(facts.goal_chance_licence?.option_ids ?? []),
     ...Object.keys(facts.goal_chance_range_display ?? {}),
   ])];
+  const besideRange = Object.keys(facts.goal_chance_range_display ?? {}).length > 0;
   return optionIds.map(option_id => {
-    const identityMessage = goalIdentityWithheldMessage(result, option_id);
+    const identityMessage = goalIdentityWithheldMessage(result, option_id, besideRange);
     const range = Object.hasOwn(facts.goal_chance_range_display ?? {}, option_id)
       ? facts.goal_chance_range_display?.[option_id] : undefined;
     const display = Object.hasOwn(facts.goal_chance_display ?? {}, option_id)
@@ -188,8 +194,11 @@ export function projectCanonicalAnalysisCells(
       ? rec(reasonByOption[option_id])?.line : undefined;
     const reasonLine = typeof carriedLine === 'string' && carriedLine.trim() !== '' ? carriedLine : undefined;
     // MOVED c6 licence line: DGAI analysis-hero/goalChanceCopy.ts:135, same commit.
-    const licenceLine = licence?.withheld_option_ids?.includes(option_id) && label !== undefined
-      ? `‘${label}’: ${OPTION_CHANCE_WITHHELD}` : undefined;
+    const labelledLine = label !== undefined ? `‘${label}’: ${OPTION_CHANCE_WITHHELD}` : undefined;
+    const licenceLine = licence?.withheld_option_ids?.includes(option_id) ? labelledLine : undefined;
+    // The target's unscoped words dropped beside a range (above) leave this option's own licensed line, named.
+    const targetWordsDropped = besideRange && identityMessage === undefined
+      && reasons.some(reason => reason.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
     // DGAI RunView:125 precedence, applied only to the existing withheld cell.
     const horizonReason = reasons.find(reason => reason.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
     // Recovery Batch C: the status quo of a change target (or of several targets) is no change, by assumption (amendment 1);
@@ -197,7 +206,7 @@ export function projectCanonicalAnalysisCells(
     const byAssumption = reasons.find(reason => reason.code === STATUS_QUO_BY_ASSUMPTION);
     const batchCReason = byAssumption ?? reasons.find(reason => reason.code === 'goal_joint_not_shown');
     const withheldWhy = horizonReason?.message ?? identityMessage ?? certainty.get(option_id) ?? reasonLine
-      ?? batchCReason?.message ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
+      ?? batchCReason?.message ?? licenceLine ?? (targetWordsDropped ? labelledLine : undefined) ?? OPTION_CHANCE_WITHHELD;
     const face = faces.get(option_id);
     const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
       : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }

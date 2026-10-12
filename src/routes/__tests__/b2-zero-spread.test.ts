@@ -109,6 +109,17 @@ const licenceRecord = (enrichment: Rec): Rec | undefined => enrichment.inference
   .find((warning: Rec) => warning.code === GOAL_CHANCE_LICENSED);
 const keepCell = (view: Rec): Rec => view.options.find((row: Rec) => row.option_id === KEEP).cell;
 const otherwise = (view: Rec): Rec => ({ ...view, options: view.options.filter((row: Rec) => row.option_id !== KEEP) });
+/**
+ * U2-1 × S2l (R4, DL 12 Oct): beside Starter's range, Raise's cell says its target record's scoped `say`; staging's cell
+ * said the record's unscoped `message` ("can't yet test them against your target"), false beside a range. Exactly that
+ * why moves; it is read from the stored record, never typed here.
+ */
+const RAISE_TARGET = (sourceBlock.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!;
+const withScopedRaiseWhy = (view: Rec): void => {
+  const raise = view.options.find((row: Rec) => row.option_id === 'raise_prices_10').cell;
+  expect([RAISE_TARGET.option_ids, raise.why]).toEqual([['raise_prices_10'], RAISE_TARGET.message]);
+  raise.why = `Not shown. ${RAISE_TARGET.say}`;
+};
 const expectNoGenericCellCopy = (view: Rec): void => {
   for (const { cell } of view.options) {
     for (const field of ['face', 'why']) {
@@ -168,6 +179,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     // Batch C: condition 6 / r1 item 6 (DL, 12 Oct) — that range rests on Olumi's inputs and says so; nothing else moves.
     const view = structuredClone(STAGING_CONTROL.canonical_view) as Rec;
     view.options.find((row: Rec) => row.option_id === STARTER).cell.face = STARTER_RANGE;
+    withScopedRaiseWhy(view);
     expect(JSON.stringify(otherwise(output.canonical_view))).toBe(JSON.stringify(otherwise(view)));
     expect(JSON.stringify(output)).not.toMatch(/Each option’s chance|has the highest|have similar chances|more likely to miss/);
     const forAgent = analysisResultForAgent({ ...sourceBlock, enrichment: output.public_enrichment }, READ.graph) as Rec;
@@ -224,6 +236,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expect(licenceRecord(output.enrichment)!.withheld_reason_by_option).toEqual({ [KEEP]: keepReason });
     const view = structuredClone(STAGING_CONTROL.canonical_view) as Rec;
     view.options.find((row: Rec) => row.option_id === STARTER).cell.face = STARTER_RANGE;
+    withScopedRaiseWhy(view);
     expect(JSON.stringify(otherwise(output.canonical_view))).toBe(JSON.stringify(otherwise(view)));
     expectKeepZeroSpread(output.canonical_view);
   });
