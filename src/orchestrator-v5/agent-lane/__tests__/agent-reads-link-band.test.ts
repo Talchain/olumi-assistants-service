@@ -40,8 +40,11 @@ describe('get_canonical_state: every link carries its band, on the canvas\'s tab
     // so it projects NO band (nobody sized it); `v` still carries "strong" on the same table.
     expect(bandOf).toEqual({ lead: undefined, cap: 'slight', coord: 'very strong', ramp: 'moderate', v: 'strong' });
     expect(Object.values(bandOf)).not.toContain('weak');
-    // The number is still there beside the word: the band is added, nothing is taken away.
-    expect(links.find((l) => l.to === 'lead')?.strength?.mean).toBe(0.5);
+    // The number is still there beside the word for a sized link: the band is added, nothing is taken away.
+    expect(links.find((l) => l.to === 'v')?.strength?.mean).toBe(0.4);
+    // D1 ECHO GUARD (DL ruling 12 Oct, Batch D): the placeholder's 0.5 is nobody's size, so it is not projected either;
+    // read, the Agent echoed its band back as Olumi's estimate (run 3 hiring, "strong" on a 0.5 default).
+    expect(links.find((l) => l.to === 'lead')).not.toHaveProperty('strength');
   });
 
   it('CONTRAST: a link with no numeric strength carries no band (nothing is guessed on the way in either)', async () => {

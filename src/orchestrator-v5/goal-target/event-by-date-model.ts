@@ -4,7 +4,7 @@ import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js';
 import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
 import { readStatedDeadline, sayDate, timeBetween } from './deadline-date.js';
-import { extraShareMoments, teamShareMoments } from './event-by-date-share.js';
+import { extraShareLinkMoments, hirePaceIsOlumisOwn, teamShareMoments } from './event-by-date-share.js';
 import { denormalisedMagnitude, findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { CURRENCY_WORD_TO_CODE } from '../../utils/currency-alphabet.js';
 import { figureTheUserWroteForSpan } from '../agent-lane/stated-by-user.js';
@@ -405,10 +405,15 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
       stated_time: { ...stated, deadline } });
   }
   for (const edge of out.edges.filter((e: Rec) => e.to === goal.id && e.from !== team.id)) {
-    const c = out.nodes.find((n: Rec) => n.id === edge.from)?.observed_state?.extra_share_by_date;
+    const node = out.nodes.find((n: Rec) => n.id === edge.from), c = node?.observed_state?.extra_share_by_date;
     if (!c) continue;
     Object.assign(c, { deadline, reference_date: c.reference_date ?? reference });
-    const m = extraShareMoments(c.monthly_share / 100, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high);
+    const m = extraShareLinkMoments(c.monthly_share / 100, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high,
+      hirePaceIsOlumisOwn(node));
+    // E-tail (b), AIE 6130197656 §2: beside the unchanged pace, start times and reference, the carrier keeps the raw mean and
+    // spread and marks the limit as Olumi's assumption (absent when nothing was limited).
+    if (m.raw !== undefined) c.link_limit = { raw_mean: m.raw.mean, raw_sd: m.raw.sd, entered_mean: m.mean, entered_sd: m.sd, origin: 'olumi_assumption' };
+    else delete c.link_limit;
     edge.strength = { mean: m.mean, std: m.sd };
     delete edge.defaulted;
     edge.provenance.natural_effect = { amount: m.mean * 100, amount_unit: unit, per_source_change: 1,

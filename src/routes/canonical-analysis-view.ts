@@ -6,7 +6,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
 import { isAnalysisRefusalFact } from '../orchestrator-v5/context/analysis-refusal-continuity.js';
 import { leaderLicenceFromState, type LeaderLicence } from '../orchestrator-v5/compose/leader-licence.js';
-import { goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
+import { goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent, PERIOD_END_EFFECTS_UNSTATED } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { goalChanceCellFacesForAgent } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { readStoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import {
@@ -49,11 +49,16 @@ function goalIdentityWithheldMessage(result: unknown, option_id: string): string
   const reasons = hasTargetRequirement ? matched.filter(warning => warning.code !== 'GOAL_FIGURES_PLACEHOLDER_PATH') : matched;
   // R2 C3: a display-safe specific reason ("This comparison turns on the links from …") takes the "Not shown." prefix
   // instead of being dropped for the generic line. Empty or unsafe words still fall back.
-  const words = reasons.map(warning => typeof warning.message === 'string' ? warning.message.trim() : '')
-    .map(raw => raw === '' || raw.startsWith('Not shown.') ? raw : `Not shown. ${raw}`);
+  // D3 (AIE #94 6128697025; DL 12 Oct): ruling 12's sentence already says the chance "isn’t shown", so it is said as written,
+  // never "Not shown. The chance … isn’t shown".
+  const words = reasons.map(warning => {
+    const itself = rec(warning.detail)?.reason === PERIOD_END_EFFECTS_UNSTATED;
+    const raw = typeof warning.message === 'string' ? warning.message.trim() : '';
+    return { itself, raw: raw === '' || itself || raw.startsWith('Not shown.') ? raw : `Not shown. ${raw}` };
+  });
   const notDisplaySafe = /\b[a-z0-9]+_[a-z0-9_]+\b|[{}[\]<>]/;
-  const allSafe = words.every(raw => raw.startsWith('Not shown.') && raw.length <= 400 && !notDisplaySafe.test(raw));
-  return allSafe ? [...new Set(words)].join(' ')
+  const allSafe = words.every(({ itself, raw }) => (itself ? raw !== '' : raw.startsWith('Not shown.')) && raw.length <= 400 && !notDisplaySafe.test(raw));
+  return allSafe ? [...new Set(words.map(({ raw }) => raw))].join(' ')
     : "Not shown. Olumi can't give each option's figures for this goal from this run.";
 }
 

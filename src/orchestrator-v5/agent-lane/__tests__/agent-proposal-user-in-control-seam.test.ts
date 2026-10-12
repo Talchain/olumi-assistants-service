@@ -769,6 +769,9 @@ describe('S-D slice 2 Agent proposals', () => {
 
   it('R-reviewed-link-field: a user-stated confirm_current Hours link stays an editable estimate', async () => {
     seed(); const words = 'I think Hours has a strong effect on Revenue.';
+    // D1 (DL ruling 12 Oct, Batch D): a 0.5 placeholder has no band to keep, so naming "strong" for it now SIZES it as the
+    // user's. A review needs a link that is sized: Olumi's estimate, in the band the user names.
+    Object.assign(graphNow().edges.find((e) => e.from === 'fac_hours' && e.to === 'goal_x')!, { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } });
     script = [() => fnCall('propose_link_strengths', { links: [{ from_label: 'Hours', to_label: 'Revenue', strength: 'strong', from_words: words }] }), () => say('Review this link.')];
     const b = await turn({ message: words }); const p = shown(b);
     const agentProposals = proposalsForApp;
