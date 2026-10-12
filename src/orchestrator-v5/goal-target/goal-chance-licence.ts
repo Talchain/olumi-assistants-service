@@ -735,14 +735,21 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     return typeof p === 'number' && p !== 0 && p !== 1 ? 'moved' : 'assumed';
   };
   const targetRows = sent.filter((r) => stored.some((x) => x.constraint_id === r.constraint_id && x.role === GOAL_TARGET_ROLE));
-  const readings = new Map(targetRows.map((r) => [r.constraint_id as string, conditionReading(r)]));
-  const assumedIds = new Set([...readings].filter(([, r]) => r === 'assumed').map(([id]) => id));
-  const movedIds = new Set([...readings].filter(([, r]) => r === 'moved').map(([id]) => id));
-  const allAssumed = targetRows.length > 0 && assumedIds.size === targetRows.length;
+  // ⛔ RE-SCOPE 2 (R5-3; AIE open 1): the JOINT is every condition the Run sent — each target AND each included limit
+  // (`goalTargetsBlockOf` names them all) — so the status quo's place in it reads every one of those references, never the
+  // target rows alone: fixed targets do not make an uncertain budget limit fixed, and a paired limit whose share disagrees
+  // with its own reference withholds the status quo's joint with that reason. Each MARGINAL keeps its own target's reading.
+  const jointRows = sent.filter((r) => typeof r.constraint_id === 'string');
+  const readings = new Map(jointRows.map((r) => [r.constraint_id as string, conditionReading(r)]));
+  const targetIds = new Set(targetRows.map((r) => r.constraint_id as string));
+  const assumedIds = new Set([...readings].filter(([id, r]) => r === 'assumed' && targetIds.has(id)).map(([id]) => id));
+  const movedIds = new Set([...readings].filter(([id, r]) => r === 'moved' && targetIds.has(id)).map(([id]) => id));
+  const jointMovedIds = new Set([...readings].filter(([, r]) => r === 'moved').map(([id]) => id));
+  const allAssumed = targetRows.length > 0 && jointRows.length > 0 && [...readings.values()].every((r) => r === 'assumed');
   let block = goalTargetsBlockOf({
     envelope: c.envelope, graph: c.graph, storedConstraints: c.constraints.storedConstraints,
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
-    ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint: allAssumed || movedIds.size > 0, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
+    ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint: allAssumed || jointMovedIds.size > 0, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
     ...(c.basis !== undefined ? { basis: c.basis } : {}),
   });
   if (block === null) return l;
@@ -771,7 +778,9 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     ...block!.conditions.filter((x) => x.role === 'target' && ids.has(x.constraint_id)).map((x) => x.label),
   ];
   const assumedNames = namedWhere(assumedIds, 'assumed');
-  const movedNames = namedWhere(movedIds, 'moved');
+  // R5-3: a moved LIMIT is named too — it is why the status quo's joint is withheld.
+  const movedNames = [...namedWhere(movedIds, 'moved'),
+    ...block.conditions.filter((x) => x.role === 'limit' && jointMovedIds.has(x.constraint_id)).map((x) => x.label)];
   const notes: string[] = [];
   let assumptionSaid = false;
   for (const n of l.notes ?? []) {
@@ -790,8 +799,9 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   if (covers !== undefined && targetNames.length > 0) notes.push(covers);
   // The status quo's own line is said only where EVERY target's reference is the same-draw one (never universal by default);
   // a status quo whose own share disagrees with that reference is withheld with that reason.
-  const targetLabels = targetNames.map((x) => `‘${x}’`);
-  const statusQuo = sqId !== undefined && allAssumed && targetLabels.length > 0
+  // R5-3: "no change" only where EVERY condition of the joint is on the same-draw reference — and then it names every one.
+  const targetLabels = block.conditions.map((x) => `‘${x.label}’`);
+  const statusQuo = sqId !== undefined && allAssumed && targetNames.length > 0 && targetLabels.length > 0
     ? { status_quo: { option_id: sqId,
       line: `Doing nothing: no change to ${targetLabels.length === 1 ? targetLabels[0] : `${targetLabels.slice(0, -1).join(', ')} or ${targetLabels[targetLabels.length - 1]}`} in this model, by assumption.` } }
     : {};

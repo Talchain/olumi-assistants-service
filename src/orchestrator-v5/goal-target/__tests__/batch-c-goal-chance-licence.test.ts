@@ -970,6 +970,59 @@ describe('AIE status-quo disposition — AND: the joint and its marginals keep e
   });
 });
 
+// ── RE-SCOPE 2 (R5-3; AIE open 1, 6117911325 / 6118159163): the status quo's JOINT reads every condition the Run sent ──────
+// `fromJoint` / the universal line read the actual joint's named targets AND limits; each marginal keeps its own target.
+const SPEND_ROW = { constraint_id: 'limit:annual_spend', node_id: 'annual_spend', operator: '<=', value: 50000, unit: 'GBP', value_frame: 'level' };
+/** Both targets on the same-draw reference, plus the included spend limit: anchored at £40,000 and reached from ‘Pricing’. */
+const pairedWithLimit = (setDirectly: boolean): Rec => {
+  const g = pairedPair();
+  (g.goal_constraints as Rec[]).push({ ...SPEND_ROW });
+  const nodes = g.nodes as Rec[];
+  nodes.find((n) => n.id === 'annual_spend')!.observed_state = { value: 0.4, raw_value: 40000, cap: 100000, unit: 'GBP', source: 'brief_extraction', extractionType: 'explicit' };
+  nodes.push({ id: 'pricing', kind: 'factor', label: 'Pricing', observed_state: { value: 0.3, raw_value: 30, cap: 100, unit: 'points', source: 'brief_extraction', extractionType: 'explicit' } });
+  (g.edges as Rec[]).push({ from: 'pricing', to: 'annual_spend' });
+  // An uncertain budget: the options set it directly, so carrying on's own spend is not established as unchanged.
+  if (setDirectly) nodes.find((n) => n.id === 'hire_manager')!.interventions = { annual_spend: { value: 0.45, raw_value: 45000, source: 'brief_extraction' } };
+  return g;
+};
+const sqWith = (limitP: number, joint: number): Rec => withSqRow(marketingRun(), { probability_of_joint_goal: joint,
+  constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0, 'limit:annual_spend': limitP } });
+
+describe('RE-SCOPE 2 (R5-3): the status quo\'s joint reads every condition the Run sent — targets AND limits', () => {
+  it('RED on e58b8dbd (fixed targets + an uncertain budget limit): the status quo keeps its varying joint; no universal "no change"', () => {
+    const l = licenceFor(sqWith(0.4, 0), pairedWithLimit(true))!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    // Its joint figure is the Run's own (the budget varies on carrying on): quoted, never withheld "by assumption".
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48, carry_on: 0 });
+    expect(l.status_quo).toBeUndefined();
+    expect(l.withheld_option_ids ?? []).not.toContain('carry_on');
+    // Each target's own marginal still keeps its own same-draw reference (no figure for the status quo there).
+    for (const t of l.targets!.per_target) expect(t.pct_by_option).not.toHaveProperty('carry_on');
+    expect(l.notes).toContain('This assumes carrying on as now leaves ‘New customers’ and ‘Conversion rate’ unchanged through month three; each option is measured against that.');
+  });
+
+  it('RED on e58b8dbd (limit-reference mismatch): a paired limit whose status-quo share disagrees with today — withheld from the joint, the limit named', () => {
+    const l = licenceFor(sqWith(0.3, 0), pairedWithLimit(false))!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect(l.status_quo).toBeUndefined();
+    expect(l.withheld_option_ids).toContain('carry_on');
+    expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'reference_moved', line: MOVED('Annual spend') } });
+    expect(JSON.stringify(l)).not.toMatch(/Doing nothing: no change/);
+  });
+
+  it('RED on e58b8dbd: every condition — both targets and the paired limit — on the same-draw reference: the line names all three, no figure', () => {
+    const l = licenceFor(sqWith(1, 0), pairedWithLimit(false))!;
+    expect(l.status_quo).toEqual({ option_id: 'carry_on',
+      line: 'Doing nothing: no change to ‘New customers’, ‘Conversion rate’ or ‘Annual spend’ in this model, by assumption.' });
+    expect(Object.keys(l.pct_by_option)).toEqual(['hire_manager', 'ai_plus_ads']);
+  });
+
+  it('CONTROL (unchanged): with no limit sent, both targets on the same-draw reference — the line names both, as before', () => {
+    const l = licenceFor(withSqRow(marketingRun(), { constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0 } }), pairedPair())!;
+    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'Doing nothing: no change to ‘New customers’ or ‘Conversion rate’ in this model, by assumption.' });
+  });
+});
+
 // ── Re-scope (DL after independent check r2, BLOCKING 4): estimate attribution over EVERY target in the event ────────────
 // The marketing joint rests on every input feeding ANY of its targets. Each target has its own lever: ‘Outreach’ feeds ‘New
 // customers’ (Hire a marketing manager), ‘Ad quality’ feeds ‘Conversion rate’ (AI planning plus advertising). Every input is
