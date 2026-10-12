@@ -2875,8 +2875,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ISL src/services/robustness_analyzer_v2.py:1053-1055,1090, read at 3cfadcfc:
     // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
-    // Recovery Batch B (b1, AIE 6125204695): what CEE SENT binds a deadline goal's engine-read chance, per option.
-    const sentRun = { graph: plotPayload.graph, goal_direction: plotPayload.goal_direction, goal_threshold_strict: plotPayload.goal_threshold_strict };
+    // Recovery Batch B (b1, AIE 6125204695): what CEE SENT binds a deadline goal's engine-read chance, per option. The payload
+    // itself (its graph, direction and strictness), never a copy: nothing edits it after the PLoT call above.
+    const sentRun = plotPayload;
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, sentRun),
       snapshot.rawPersistedGraph ?? graphForAnalysis,
