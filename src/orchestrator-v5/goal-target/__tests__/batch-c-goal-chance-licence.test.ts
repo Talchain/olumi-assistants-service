@@ -747,6 +747,30 @@ describe('AIE status-quo disposition — the same-draw reference is decided by t
     expect(JSON.stringify(flat)).not.toMatch(/by assumption/);
   });
 
+  it('RED (projection, real horizon): a Run whose evaluated carrier computed the held month keeps carrying on\'s varying forecast', () => {
+    // The stored-horizon shape (stored-goal-chance-horizon-read): the goal is price × stock at month 12, the stock an evaluated
+    // accumulation carrier (ISL's per_draw_baseline path) — a status quo whose month-12 level varies is a forecast, not "no change".
+    const g = capacityGraph({ goal: { goal_horizon_months: 12,
+      nonlinear_identity: { operation: 'product', factor_ids: ['price', 'stock_at_h'], stated_in_brief: true } } });
+    (g.nodes as Rec[]).push(
+      { id: 'stock_at_h', kind: 'factor', label: 'Stock at month 12', nonlinear_identity: {
+        operation: 'accumulation', factor_ids: ['today', 'leave', 'adds'], horizon_months: 12, rate_scale: 0.01, stated_in_brief: true } },
+      ...['price', 'today', 'leave', 'adds'].map((id) => ({ id, kind: 'factor', label: id, observed_state: { value: 0.5, raw_value: 1, source: 'user_confirmed' } })));
+    const run = capacityWith({ probability_of_goal: 0.12, probability_of_goal_precision: wilson(0.12, 1200), outcome: { mean: 79, std: 4, p10: 74, p50: 79, p90: 84 } });
+    run.identity_evaluations = (g.nodes as Rec[]).filter((n) => n.nonlinear_identity).map((n) => ({ node_id: n.id, evaluated: true, ...(n.nonlinear_identity as Rec) }));
+    expect(goalHorizonVerdict(g, run)).toBe('computed_at_h');
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
+    expect(l.pct_by_option).toMatchObject({ carry_on: 12 });
+    expect(l.status_quo).toBeUndefined();
+    expect(l.notes).toContain('‘Carry on as now’ is this model’s projection for carrying on as now, with its own uncertainty — not an assumption that nothing changes.');
+    expect(JSON.stringify(l)).not.toMatch(/by assumption|carrying on as now leaves|reference_moved/);
+    // CONTROL: the same graph with the carrier NOT evaluated is a held month the Run did not carry — no claim either way.
+    const uncarried = { ...run, identity_evaluations: [] };
+    expect(goalHorizonVerdict(g, uncarried)).toBe('withhold');
+    const u = goalChanceLicenceOf(uncarried, g, 'capacity', () => false, undefined, g, {})!;
+    expect(JSON.stringify(u)).not.toMatch(/by assumption|projection for carrying on|reference_moved/);
+  });
+
   it('CONTROL (assumed): ordinary anchored capacity and hiring\'s change quantity keep the assumption line, with no interval', () => {
     expect(capacityLicence()!.status_quo?.line).toBe('Doing nothing: no change to ‘Development capacity’ in this model, by assumption.');
     const g = hiringGraph();
