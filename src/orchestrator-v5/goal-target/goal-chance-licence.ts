@@ -43,7 +43,8 @@ import { readGoalRecord } from './goal-record.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
-import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
+import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
+import type { SentRunInputs } from './goal-own-constraint-chance.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
@@ -219,6 +220,8 @@ export interface GoalChanceLicence {
 export interface GoalChanceConstraintInputs {
   readonly storedConstraints?: unknown;
   readonly sentConstraints?: unknown;
+  /** What CEE sent PLoT for this Run: binds a deadline goal's engine-read chance (`goal-own-constraint-chance.ts`). */
+  readonly sentRun?: SentRunInputs;
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -423,7 +426,6 @@ export function goalChanceLicenceOf(
   const recordOf = new Map<string, Rec>();
   const precisionOf = new Map<string, GoalChancePrecision>();
   const rounding: Record<string, GoalChanceDisplayRounding> = {};
-  const exactExtremes = new Set<string>();
   const zeroSpreadSide: Record<string, 'meets' | 'falls_short'> = {};
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
@@ -433,9 +435,10 @@ export function goalChanceLicenceOf(
     option_ids.push(id);
     const precision = goalChancePrecisionOf(r);
     const step = precision === null ? 'whole' : displayRoundingFor(precisionHalfWidthPoints(precision));
-    const shareGate = share !== null && share.goal.id === goalId
-      ? shareGateForOption(graph, id, typeof p === 'number' ? p : undefined, step) : undefined;
-    if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
+    // ⭐ AIE 6125204695 (b1), 12 Oct: a deadline chance is the engine's own approximate point, said with its attribution; never
+    // an old-law range, exact figure or exact-extreme override (`gate`/`exactChance` are mathematical references only). An
+    // option whose parts CEE cannot state (so its attribution cannot be said) is withheld; the range record says why.
+    if (share !== null && share.goal.id === goalId && sharePartsForOption(graph, id) === null) { withheld.push(id); continue; }
     // ⭐ Amendment 1: on the same-draw reference the status quo is measured against itself — no change, by assumption, never
     // a finding. One whose row disagrees with that reference is withheld with that reason, never relabelled.
     if ((sqByAssumption || sqReading === 'moved') && id === statusQuoId) { withheld.push(id); continue; }
@@ -453,11 +456,7 @@ export function goalChanceLicenceOf(
       precisionOf.set(id, precision);
       rounding[id] = step;
     }
-    // The licence is the sole producer of the exact-extreme display; the raw Run evidence stays intact.
-    if (shareGate?.form === 'point' && shareGate.exact_extreme !== undefined) {
-      pct[id] = shareGate.exact_extreme * 100;
-      exactExtremes.add(id);
-    } else pct[id] = displayedPctAt(p, step);
+    pct[id] = displayedPctAt(p, step);
   }
   // The status quo's own line is a said row (amendment 1): with nothing else licensed it still reaches the user, as its typed
   // zero-spread reason did before (never a figure; the licence's message stays empty) — but only where the Run's own status-quo
@@ -499,7 +498,6 @@ export function goalChanceLicenceOf(
   const noDrivers: Record<string, GoalChanceNoDriverReason> = {};
   if (licensed.some((id) => recordOf.get(id)!.probability_of_goal_drivers !== undefined)) {
     for (const id of licensed) {
-      if (exactExtremes.has(id)) { noDrivers[id] = 'none'; continue; } // drivers are moot at a ruled extreme
       const claim = goalChanceDriverOf(recordOf.get(id)!, id, graph, envelope);
       if ('driver' in claim) drivers[id] = claim.driver;
       else noDrivers[id] = claim.no_driver;
@@ -559,7 +557,7 @@ export function goalChanceLicenceOf(
     ...(Object.keys(drivers).length > 0 ? { driver_by_option: drivers } : {}),
     ...(Object.keys(noDrivers).length > 0 ? { no_driver_by_option: noDrivers } : {}),
   };
-  return withBatchCWords(single, {
+  const worded = withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
     sqByAssumption, sqReading, timingOrdinary: timing.ordinary,
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
@@ -569,6 +567,10 @@ export function goalChanceLicenceOf(
     constraints, option_ids,
     estimates, jointEstimates,
   });
+  // ⭐ AIE 6125204695 (3): beside a deadline chance on Olumi's range assumed from the user's single forecast, the input time
+  // range is said once (the input, never a probability interval), on the licence's own notes.
+  const assumedRange = share !== null && share.goal.id === goalId && licensed.length > 0 ? olumiAssumedTeamRange(graph) : null;
+  return assumedRange === null ? worded : { ...worded, notes: [...(worded.notes ?? []), olumiAssumedRangeLine(assumedRange)] };
 }
 
 /**
@@ -907,9 +909,9 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
 
 /** One Run-input candidate must agree with every licensed option; ambiguity records nothing. */
 export function sentGoalThresholdOf(
-  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
+  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean, sentRun?: SentRunInputs,
 ): SentGoalThreshold | undefined {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned);
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, undefined, graph, sentRun === undefined ? {} : { sentRun });
   if (licence === null || Object.keys(licence.pct_by_option).length === 0) return undefined;
   const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');

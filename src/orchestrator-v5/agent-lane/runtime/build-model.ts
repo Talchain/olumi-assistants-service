@@ -1,4 +1,4 @@
-import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -81,6 +81,7 @@ import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, ty
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
+import { preparingDraftReplacementFor } from './draft-replacement-context.js';
 
 /**
  * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
@@ -2224,6 +2225,9 @@ export async function buildModelFromBrief(
       ...(admitted.goal_constraints.length > 0
         ? { goal_constraints: admitted.goal_constraints }
         : {}),
+    // The goal's OWN target row rescales with its frame (AIE 0418: "the constructor's own raw target row may be rescaled
+    // together with its frame through existing goalOwnRows"), as the Olumi pass below already does. Capacity A′: the user's
+    // 20 tickets a week per specialist was cut at β 1.6 because the goal's own ≥100 row refused the widen.
     } as Record<string, any>, { goalOwnRows: true }).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
     const olumiFit = refitFramesForOlumiEstimates(statedFitGraph);
     const prePersistGraph = olumiFit.graph as typeof statedFitGraph;
@@ -2441,6 +2445,10 @@ export async function buildModelFromBrief(
    * throwing away a build we have already paid for because a READ failed would
    * cost the user their turn for no gain.
    */
+  // ⭐ B RESTATED GOAL (`draft-replacement-context.ts`): a revised draft of an unreviewed scaffold is PREPARED, never
+  // written here. The caller offers these exact bytes as one card and registers them on approval, with compare-and-set
+  // on the base it read; so the empty-model guard and the create-only registration below are not this call's.
+  if (preparingDraftReplacementFor(scenarioId)) return { ok: true, mutated: false, prepared_graph: graph };
   // `fresh`: this read exists to see OTHER writers, so the turn's read cache must not answer it (turn-read-cache.ts).
   const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
   if (stillEmpty.status === 200) {
@@ -2585,6 +2593,9 @@ export async function buildModelFromBrief(
     ...(admitted.loss.some((l) => /\.event_risk$/.test(l.field_path)) ? {
       event_risk_disclosures: admitted.loss.filter((l) => /\.event_risk$/.test(l.field_path)).map((l) => l.reason),
     } : {}),
+    // ⭐ EBD E4 (DL GO): what the deadline model set aside from the brief, said ONCE on the build turn in the reply's detail
+    // (the same composer channel). Not in open_questions: there it was counted as "1 more question remains unresolved".
+    ...(eventSetAsideLine(admitted) !== null ? { event_forecast_disclosures: [eventSetAsideLine(admitted)!] } : {}),
     not_represented: [
       // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as

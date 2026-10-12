@@ -82,6 +82,10 @@ describe('F5 D1: Paul\'s "aiming to double that" is a target card — a decision
     ['a base the user never wrote (£150,000)', { value: 300000, derived_from: { base: 150000, multiplier: 2 } }, 'target_not_stated'],
     ['no derivation and a figure the user never wrote', { value: 200000 }, 'target_not_stated'],
     ['an unreadable derivation', { value: 200000, derived_from: { base: 100000, multiplier: 'twice' } }, 'unreadable_derivation'],
+    // An empty or identity derivation is no derivation (marketing L20, DL 12 Oct): the figure itself must be the user's.
+    ['an identity derivation of a figure the user never wrote (1 × £300,000)', { value: 300000, derived_from: { base: 300000, multiplier: 1 } }, 'target_not_stated'],
+    ['an empty derivation and a figure the user never wrote', { value: 300000, derived_from: {} }, 'target_not_stated'],
+    ['a base with no multiplier', { value: 200000, derived_from: { base: 100000 } }, 'unreadable_derivation'],
   ])('CONTROL: %s → refused, nothing prepared', async (_n, args, refusal) => {
     const p = await propose(S2, [S1], { constraint_type: 'at_least', ...args });
     expect(p).toEqual(expect.objectContaining({ ok: false, refusal }));

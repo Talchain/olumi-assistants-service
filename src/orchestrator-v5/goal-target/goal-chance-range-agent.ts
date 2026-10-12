@@ -81,7 +81,13 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
       && typeof stated.high === 'number' && Number.isFinite(stated.high) && stated.high >= stated.low;
     const estimateUnit = time ? ' months' : typeof stated?.unit === 'string'
       ? `${stated.unit.startsWith('%') ? '' : ' '}${stated.unit}` : ' per month';
-    const estimate = hasEstimate
+    // EBD E2 (AIE 6122738619): a range Olumi assumed from the user's single forecast is named as Olumi's (the card's words), never
+    // as "your …" figures.
+    const assumed = hasEstimate && time && stated.range_origin === 'olumi_estimate' && typeof stated.forecast === 'number'
+      && Number.isFinite(stated.forecast);
+    const estimate = assumed
+      ? `Olumi’s provisional ${(stated.low as number).toLocaleString('en-GB')}–${(stated.high as number).toLocaleString('en-GB')}-month range`
+      : hasEstimate
       ? `${(stated.low as number).toLocaleString('en-GB')}–${(stated.high as number).toLocaleString('en-GB')}${estimateUnit}`
       : time ? 'time estimate' : 'pace estimate';
     Object.defineProperty(out, optionId, { enumerable: true, configurable: true, value: {

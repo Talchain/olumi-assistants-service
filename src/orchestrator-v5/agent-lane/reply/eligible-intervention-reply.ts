@@ -5,17 +5,21 @@ import type { ReplyComposition } from './compose-reply.js';
 export const INTERVENTION_WHY_LABEL = 'Why?';
 const words = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length;
 
-/** Append Science's exact disclosure; coaching also retains RC's selected action. */
+/**
+ * Append Science's exact disclosure; coaching also retains RC's selected action. E6 Why-once: when the policy's Why? was
+ * already said on this state (`whySaid`), the action is still carried and only the repeated disclosure is left out.
+ */
 export function composeEligibleIntervention(composed: ReplyComposition, intervention: EligibleIntervention,
-  actionLabel: string | undefined, faceContract: boolean, wholeProposal = false): ReplyComposition {
+  actionLabel: string | undefined, faceContract: boolean, wholeProposal = false, whySaid = false): ReplyComposition {
   // R2 N2r (friction audit N2): a whole proposal ships unshaped, so a <details> suffix reached the user as raw markup
   // ("<details> <summary>Why?</summary>…", hiring step 5, deadline step 3). It keeps every byte and carries no Why.
   if (wholeProposal) return composed;
   // R3-1: the UI escapes HTML, so "<details>…" reached the user as tags (run 2: hiring 10–14, marketing 2–6). The same
   // label and Science's words, byte for byte, ship as a plain final paragraph the chat renders.
-  const disclosure = `${INTERVENTION_WHY_LABEL} ${intervention.why}`;
+  const disclosure = whySaid ? '' : `${INTERVENTION_WHY_LABEL} ${intervention.why}`;
   // Run/Draft H/W/E/N belongs to the existing composer, byte for byte.
   if (faceContract) {
+    if (whySaid) return composed;
     if (composed.shape === null) return { ...composed, text: `${composed.text}\n\n${disclosure}` };
     const shape = { ...composed.shape, detail: [composed.shape.detail, disclosure].filter(Boolean).join('\n\n') };
     return { ...composed, shape, text: deriveAnswerTextFromShape(shape) };
@@ -25,7 +29,7 @@ export function composeEligibleIntervention(composed: ReplyComposition, interven
   const shape: AnswerShape = composed.shape ?? { headline: lines[first] ?? composed.text, bullets: [],
     detail: lines.slice(first + 1).join('\n').trim() };
   if (words(shape.headline) > 80 && actionLabel !== undefined) {
-    const result = { headline: actionLabel, bullets: [], detail: [composed.text, disclosure].join('\n\n') };
+    const result = { headline: actionLabel, bullets: [], detail: whySaid ? composed.text : [composed.text, disclosure].join('\n\n') };
     return { ...composed, text: deriveAnswerTextFromShape(result), shape: result, outcome: 'shaped' };
   }
   const bullets = [...(shape.bullets ?? [])];

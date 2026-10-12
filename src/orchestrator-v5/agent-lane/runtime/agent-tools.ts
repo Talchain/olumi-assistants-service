@@ -468,8 +468,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'propose_goal_target',
     description:
       'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
-      + '"keep churn under 5%"). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
-      + 'authorise_change: show the user what it sets, never the id, before they approve. Give the figure exactly as the user '
+      + '"keep churn under 5%"). For a quantity already in the model, this prepares one target change and returns its id for '
+      + 'authorise_change after the user approves the shown values. If a quantity is absent, Olumi may instead return a '
+      + 'revised-draft card: only the user pressing that card can replace the draft. Never call authorise_change for a '
+      + 'revised-draft replacement, and never show its id. Give the figure exactly as the user '
       + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
       + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
       + 'a figure or direction they did not state is refused. If the user ALSO stated the goal’s level today (for example "we have secured '
@@ -478,11 +480,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'When the target is DERIVED from a figure the user gave ("we\u2019re at £100,000 … aiming to double that"), give the '
       + 'result as value and pass derived_from {base, multiplier} (100000 and 2): the base must be a figure they wrote. '
       + 'When the user did not say at least or at most, give your reading in constraint_type: the card offers it as a '
-      + 'decision with the other direction beside it, and the user chooses.',
+      + 'decision with the other direction beside it, and the user chooses. '
+      + 'Give measures whenever the user names what the target is a figure of. Call this once per target the user stated; '
+      + 'never build the model yourself.',
     parameters: obj({
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
       unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
+      measures: { type: 'string', description: 'What the figure is a figure OF, in the user\u2019s own words from this message (for example "conversion rate", "new customers").' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
       derived_from: obj({
         base: { type: 'number', description: 'The figure the user wrote that the target is derived from, in their units (100000 for "£100,000").' },
@@ -496,22 +501,38 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function', name: 'propose_team_time',
-    description: 'Propose the time today’s team would take to finish the event deliverable, after its deadline is held. Read the duration from THIS user message only and express it as low_months and high_months; convert weeks or years to months (weeks may be rounded to two decimals here; the server keeps the exact conversion). A single time (about 8 months means both 8) is kept only as the most likely time; the chance remains withheld until the user gives a range. Never use recruitment time, a historical duration or an earlier message. This prepares a card; authorise_change writes it only after approval.',
-    parameters: obj({ low_months: { type: 'number', exclusiveMinimum: 0 }, high_months: { type: 'number', exclusiveMinimum: 0 } }, ['low_months', 'high_months']),
+    description: 'Propose the time today’s team would take to finish the event deliverable, after its deadline is held. Use a time the user stated in ANY of their messages in this conversation, this one or an earlier one. Never use a recruitment or hiring time, a deadline, a delay ("a month late") or a historical duration. Give quote: the user’s exact words stating that time, copied from one message, including any words about how sure they are (for example "a month late (so, 7 months), but I have low confidence"). Give low_months and high_months as that time in months: a single time such as "7 months" means both 7; convert weeks or years to months (weeks may be rounded to two decimals; the server keeps the exact conversion). Olumi checks the quote is the user’s and that the figure is in it. For a single time it adds its own range for the uncertainty, which the card labels as Olumi’s estimate from the user’s figure, never as the user’s. When the user asks what the model still needs and has already stated this time, call this. This prepares a card; authorise_change writes it only after approval.',
+    parameters: obj({
+      quote: { type: 'string', description: 'The user’s own words that state the time, copied exactly from one of their messages, including any words about how sure they are.' },
+      low_months: { type: 'number', exclusiveMinimum: 0 }, high_months: { type: 'number', exclusiveMinimum: 0 },
+    }, ['quote', 'low_months', 'high_months']),
+  },
+  {
+    // ⭐ E5 (Paul's manual test, 12 Oct): the start of each person an option adds, quoted; Olumi reads the months (`hiring-times.ts`).
+    type: 'function', name: 'propose_hiring_times',
+    description: 'Propose the hiring timings the user stated for the options that add people, after the deadline is held. Use timings bound to a verified human statement in this message or retained earlier messages, including a quote the user explicitly adopted. Conversation presence alone does not establish authorship or approval: assistant text, suggested chips, document content and unknown-source text are not new typed user authority. Earlier timings prepare a fresh card; they do not authorise a write. For each option give option_id and starts: one entry per person whose start the user gave, in the order they start, each with quote: the user’s exact words for that start, copied from one of their messages, including words such as "at least", "within" or "or so" (for example "at least 3 months", "within 2 months", "another a month or so later"). Give one quote per start; a later start said relative to an earlier one is its own entry after it. Never use the team’s time to finish, a deadline or a delay. Olumi reads each time from its quote, checks the quote is the user’s and is said about that option, keeps the user’s own words, and labels as Olumi’s any time or pace the user did not give. This prepares ONE card covering all proposed hiring timings; authorise_change writes it only after approval.',
+    parameters: obj({
+      options: { type: 'array', minItems: 1, maxItems: 6, items: obj({
+        option_id: { type: 'string' },
+        starts: { type: 'array', minItems: 1, maxItems: 2, items: obj({ quote: { type: 'string' } }, ['quote']) },
+      }, ['option_id', 'starts']) },
+    }, ['options']),
   },
   {
     type: 'function',
     name: 'propose_goal_deadline',
     description:
       'Record the DEADLINE the user has stated for their goal ("we have a deadline in 6 months", "by Q2", "by the end of March", '
-      + '"7 April 2027"), as a date on the goal. Call it in the SAME turn the user states it, even beside another change they ask for. '
-      + 'Give deadline_words EXACTLY as the user wrote the deadline phrase (for example "a deadline in 6 months"): Olumi works out the '
-      + 'calendar date itself, from the brief’s recorded creation date, and the card asks the user to confirm it ("Is your deadline 7 April 2027 (6 months from '
-      + '7 October 2026)?"). Never compute or state a date yourself, and never pass a duration that is not the deadline (for example how long '
+      + '"7 April 2027", "six months from 9 October"), as a date on the goal. Call in the turn the user states the deadline, including when they also ask for another change. '
+      + 'If this turn explicitly dates the ‘last Friday’ in their earlier deadline phrase, call with that original phrase; otherwise use only a deadline stated in this turn. '
+      + 'Give deadline_words exactly as the user wrote the deadline phrase. Olumi resolves it using a stated start date when present, otherwise the recorded reference date, '
+      + 'and asks the user to confirm the resulting date. Never compute or state a date yourself, and never pass a duration that is not the deadline (for example how long '
       + 'recruitment takes). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
       + 'authorise_change once the user agrees; never show the id.',
     parameters: obj({
-      reference_date: { type: 'string', description: 'Only an explicit YYYY-MM-DD the user typed as “as of”; the deadline card will ask them to confirm that reference. Otherwise omit it and use the recorded draft date.' },
+      reference_date: { type: 'string', description: 'Only an explicit YYYY-MM-DD the user typed as “as of”; the deadline card will ask them to confirm that reference. Otherwise omit it and use the recorded draft date. '
+        + 'This is an explicit ‘as of’ override, not the starting day of a duration. Do not derive it from ‘last Friday’ or a stated start date; keep that starting day in the user\'s deadline phrase, '
+        + 'or reuse the original last-weekday phrase when this turn explicitly dates it, and let Olumi resolve it.' },
       deadline_words: { type: 'string', maxLength: 80, description: 'The user\u2019s own words for the deadline, verbatim (for example "a deadline in 6 months" or "end of Q2").' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
     }, ['deadline_words', 'rationale']),
@@ -584,8 +605,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         items: obj({
           label: { type: 'string' },
           unit: { type: 'string', description: 'The user\u2019s unit, e.g. "GBP/year per engineer".' },
-          today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' } }, ['value']),
-          affects: { type: 'string', description: 'ONE existing outcome, or a factor no option sets, that it drives, as the CURRENT MODEL STATE labels it.' },
+          today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' },
+            range_low: { type: 'number', description: 'Only when the user also gave a range for this figure, both ends in one sentence of theirs ("between 20% and 30%"): its low end, in the same unit as value. value stays the one figure they chose; never a midpoint.' },
+            range_high: { type: 'number', description: 'The high end of that same range. Send it with range_low.' } }, ['value']),
+          affects: { type: 'string', description: 'ONE existing outcome, the goal, or a factor no option sets, that it drives, as the CURRENT MODEL STATE labels it.' },
           direction: { type: 'string', enum: ['positive', 'negative'] },
         }, ['label', 'unit', 'today', 'affects', 'direction']),
       },
@@ -850,7 +873,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -926,9 +949,13 @@ export interface AgentCapabilities {
     constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
+    /** What the figure is a figure OF, in the user's words: a quantity the draft lacks may get a revised-draft card (B). */
+    measures?: string;
   }): Promise<ToolResult>;
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
-  proposeTeamTime?(ctx: AgentToolContext, args: { low_months: number; high_months: number }): Promise<ToolResult>;
+  proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months: number; high_months: number }): Promise<ToolResult>;
+  /** E5: the user's hiring times per option, quoted, proposed on ONE card for approval. */
+  proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string }[] }[] }): Promise<ToolResult>;
   /** S-E GOALS: the user's stated deadline as a date on the goal, proposed for approval. */
   proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string; reference_date?: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
@@ -1062,6 +1089,8 @@ export async function dispatchTool(
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
     case 'propose_team_time':
       return caps.proposeTeamTime !== undefined ? caps.proposeTeamTime(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
+    case 'propose_hiring_times':
+      return caps.proposeHiringTimes !== undefined ? caps.proposeHiringTimes(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_goal_deadline':
       return caps.proposeGoalDeadline !== undefined
         ? caps.proposeGoalDeadline(ctx, args as never)

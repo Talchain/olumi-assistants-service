@@ -1,0 +1,1451 @@
+{
+ "version": "v2",
+ "provenance": {
+  "verbatim_18": "sys2/verifier-corpus.json sha 7c0cd526 (SYS2 labels)",
+  "relabel": "Codex blind relabel",
+  "extension": "Codex 48 new (different model family)",
+  "v2": {
+   "by": "SYS2 (corpus owner, DL 12 Oct)",
+   "at": "2026-10-12T09:33Z",
+   "from": "VERIFIER-CORPUS-v1.json sha256 674cfaf63672ee3cab3b1647c6f4bd44ba9685f87017f94ebcdc405b35f96284",
+   "changes": [
+    "M01 £100,000: label by the BOUND QUANTITY (DL ruling 12 Oct, AIE 0825 §3): as the Budget factor’s own amount it is that quantity’s level; bound to a spend limit it is the limit. No lexical budget rule.",
+    "H06 and M04 ‘3-month sales cycle’: adjudicated other (AIE #94 6120633627); recorded under adjudicate[].resolved.",
+    "labels.effect-rate narrowed (AIE 0825 §5): a per-unit rate is the level of a rate-parameter node OR an incremental effect, as the bound model quantity governs.",
+    "contrasts[]: the one missing semantic contrast (rate-parameter level vs incremental effect), folded in verbatim from the AIE’s unexecuted illustrations (0825 §5), not a second bank."
+   ]
+  }
+ },
+ "verbatim": {
+  "about": "Figure-bearing sentences from Paul's journey briefs and scripted typed turns (live-journey.mjs JOURNEYS: hiring, marketing, capacity), verbatim, for the factor-level verifier fix (#94 V1/V2). External corpus half 1: sentences and labels by the builder session (SYS2). Paraphrase half: a different model family, later. Never from the sealed set or c-acceptance.",
+  "prepared": {
+   "by": "SYS2 (Claude Code)",
+   "at": "2026-10-12T07:57:51Z",
+   "status": "PREPARED, not used by any test or build"
+  },
+  "labels": {
+   "level": "the speaker's own current level of a quantity (today), including a stated range or a chosen point",
+   "effect-rate": "a per-unit rate or effect size: the bound model quantity governs (AIE 0825 §3/§5) — the level of a rate-parameter node (e.g. tickets per week per specialist), or an incremental causal effect of one more unit",
+   "target": "what must be reached or not exceeded: a goal, a limit/ceiling or a deadline",
+   "hypothetical": "what an option would set, or a count of options/alternatives",
+   "past": "a past date or a figure from before today",
+   "other-party": "a figure attributed to someone else (a competitor, supplier, report): NONE in these sources"
+  },
+  "scope": "Only the lines live-journey.mjs scripts as Paul's typed turns (the transcripts carry no speaker marks) plus J1 LEVEL_BRIEF; no Olumi text. Sentences without a figure are left out (e.g. H L1 \"Should I hire…\", C \"Use the exact goal label…\", \"This target is an absolute level, with no deadline.\").",
+  "sources": {
+   "hiring": {
+    "file": "/Users/paulslee/olumi-work/third-party-review/test1-hiring-transcript.txt",
+    "sha256": "7f77f00e71a6500c98e4c982cebf2310507ddf01c0d027eafd3194359ce99738",
+    "lines": [
+     1,
+     164,
+     210
+    ]
+   },
+   "marketing": {
+    "file": "/Users/paulslee/olumi-work/third-party-review/test2-marketing-transcript.txt",
+    "sha256": "615984f9f698504130c2c0fe757f3f85adf55ad7bc24d66598bc64a3aebc41a6",
+    "lines": [
+     1,
+     20,
+     36,
+     41,
+     56
+    ]
+   },
+   "capacity": {
+    "file": "DecisionGuideAI e2e/core/journey/J1-whole-poc.journey.spec.ts (CAPACITY_FACTS + LEVEL_BRIEF)",
+    "commit": "40c7b914bd2336fc417d094cffe83ac6e9418a23",
+    "lines": [
+     1198,
+     1204
+    ]
+   }
+  },
+  "counts": {
+   "sentences": 18,
+   "by_label": {
+    "target": 8,
+    "level": 5,
+    "past": 1,
+    "hypothetical": 3,
+    "effect-rate": 1
+   }
+  },
+  "gaps": [
+   "no other-party sentence",
+   "one past date only (M05)",
+   "one effect-rate only (C05)",
+   "hypothetical only as option settings (C01, C03, C04)"
+  ],
+  "sentences": [
+   {
+    "id": "H01",
+    "journey": "hiring",
+    "source_line": 1,
+    "sentence": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality?",
+    "label": "target",
+    "figures": [
+     {
+      "text": "at least 10%",
+      "label": "target"
+     },
+     {
+      "text": "two developers",
+      "label": "hypothetical"
+     }
+    ],
+    "note": "a goal stated as a change (+10%); \"two developers\" is an option, not a level"
+   },
+   {
+    "id": "H02",
+    "journey": "hiring",
+    "source_line": 1,
+    "sentence": "We have an urgent launch date in the next three months.",
+    "label": "target",
+    "figures": [
+     {
+      "text": "the next three months",
+      "label": "target"
+     }
+    ],
+    "note": "a deadline (horizon), not a quantity level"
+   },
+   {
+    "id": "H03",
+    "journey": "hiring",
+    "source_line": 1,
+    "sentence": "We currently have six mid-weight developers, so we're lacking leadership.",
+    "label": "level",
+    "figures": [
+     {
+      "text": "six mid-weight developers",
+      "label": "level"
+     }
+    ],
+    "note": "first person + \"currently\"; the count is written in words"
+   },
+   {
+    "id": "H04",
+    "journey": "hiring",
+    "source_line": 1,
+    "sentence": "Our budget is £200,000, but we'd like to spend less.",
+    "label": "target",
+    "figures": [
+     {
+      "text": "£200,000",
+      "label": "target"
+     }
+    ],
+    "note": "a ceiling (limit), read by the product as a constraint; a reader could call it the current budget level; \"spend less\" is a preference with no figure"
+   },
+   {
+    "id": "H05",
+    "journey": "hiring",
+    "source_line": 164,
+    "sentence": "If we think of our development team's monthly capacity, currently they spend between 20% and 30% of their time on non-development tasks (e.g., meetings, admin, and other distractions that are not writing code).",
+    "label": "level",
+    "figures": [
+     {
+      "text": "between 20% and 30%",
+      "label": "level"
+     }
+    ],
+    "note": "a current level stated as a range; \"If we think of\" frames the quantity, it is not a hypothetical; third-person subject (\"they\") for the user's own team"
+   },
+   {
+    "id": "H06",
+    "journey": "hiring",
+    "source_line": 210,
+    "sentence": "Let's go with 25%.",
+    "label": "level",
+    "figures": [
+     {
+      "text": "25%",
+      "label": "level"
+     }
+    ],
+    "note": "the chosen point inside the H05 range, stated one message later (\"I was defining it as a capacity.\" precedes it)"
+   },
+   {
+    "id": "M01",
+    "journey": "marketing",
+    "source_line": 1,
+    "sentence": "Our budget for the year is £100,000.",
+    "label": "by-quantity",
+    "figures": [
+     {
+      "text": "£100,000",
+      "label": "by-quantity",
+      "by_quantity": [
+       {
+        "bound": "budget",
+        "label": "level",
+        "reason": "the Budget factor’s own stated amount"
+       },
+       {
+        "bound": "spend",
+        "label": "target",
+        "reason": "bound to spend, £100,000 is the ceiling"
+       }
+      ]
+     }
+    ],
+    "note": "a ceiling for a period (limit), as H04 | v2: label by the bound quantity (DL 12 Oct; AIE 0825 §3)."
+   },
+   {
+    "id": "M02",
+    "journey": "marketing",
+    "source_line": 1,
+    "sentence": "I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+    "label": "target",
+    "figures": [
+     {
+      "text": "more than 25% of my time",
+      "label": "target"
+     }
+    ],
+    "note": "an upper limit (\"can't spend more than\"), not a current level"
+   },
+   {
+    "id": "M03",
+    "journey": "marketing",
+    "source_line": 20,
+    "sentence": "I have two goals: For our new feature launch to be successful, we need to have a conversion rate of over 15% and secure 20 new customers within the first 3 months.",
+    "label": "target",
+    "figures": [
+     {
+      "text": "over 15%",
+      "label": "target"
+     },
+     {
+      "text": "20 new customers",
+      "label": "target"
+     },
+     {
+      "text": "within the first 3 months",
+      "label": "target"
+     }
+    ],
+    "note": "two targets joined (AND) with one horizon; \"two goals\" counts them"
+   },
+   {
+    "id": "M04",
+    "journey": "marketing",
+    "source_line": [
+     36,
+     41
+    ],
+    "sentence": "We have 6 months to launch our new features from last Friday, and that's when the initial 3-month sales cycle starts.",
+    "label": "target",
+    "figures": [
+     {
+      "text": "6 months",
+      "label": "target"
+     },
+     {
+      "text": "last Friday",
+      "label": "past"
+     },
+     {
+      "text": "3-month sales cycle",
+      "label": "level"
+     }
+    ],
+    "note": "a deadline counted from a past day; the sales-cycle length is a stated fact of their process (L41 resends L36 verbatim)"
+   },
+   {
+    "id": "M05",
+    "journey": "marketing",
+    "source_line": 56,
+    "sentence": "Last Friday was the 9th of October.",
+    "label": "past",
+    "figures": [
+     {
+      "text": "the 9th of October",
+      "label": "past"
+     }
+    ],
+    "note": "a date that anchors M04, not a quantity"
+   },
+   {
+    "id": "C01",
+    "journey": "capacity",
+    "source_line": 1198,
+    "sentence": "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\".",
+    "label": "hypothetical",
+    "figures": [
+     {
+      "text": "two staffing options",
+      "label": "hypothetical"
+     }
+    ],
+    "note": "counts the options; the quoted labels hold \"one\" but state no figure; this sentence's quote marks trigger the V1 directContext refusal for every later sentence"
+   },
+   {
+    "id": "C02",
+    "journey": "capacity",
+    "source_line": 1199,
+    "sentence": "Our existing team resolves 80 tickets per week.",
+    "label": "level",
+    "figures": [
+     {
+      "text": "80 tickets per week",
+      "label": "level"
+     }
+    ],
+    "note": "first person (\"Our\"), present tense; verb \"resolves\""
+   },
+   {
+    "id": "C03",
+    "journey": "capacity",
+    "source_line": 1200,
+    "sentence": "Keep current staffing adds no specialist.",
+    "label": "hypothetical",
+    "figures": [
+     {
+      "text": "no specialist",
+      "label": "hypothetical"
+     }
+    ],
+    "note": "what an option sets (zero, in words)"
+   },
+   {
+    "id": "C04",
+    "journey": "capacity",
+    "source_line": 1200,
+    "sentence": "Add one specialist adds one specialist.",
+    "label": "hypothetical",
+    "figures": [
+     {
+      "text": "adds one specialist",
+      "label": "hypothetical"
+     }
+    ],
+    "note": "what an option sets (one, in words)"
+   },
+   {
+    "id": "C05",
+    "journey": "capacity",
+    "source_line": 1201,
+    "sentence": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+    "label": "effect-rate",
+    "figures": [
+     {
+      "text": "about 20 tickets per week",
+      "label": "effect-rate"
+     },
+     {
+      "text": "between 10 and 30",
+      "label": "effect-rate"
+     }
+    ],
+    "note": "a per-unit rate with a stated range around an approximate point; no first-person subject"
+   },
+   {
+    "id": "C06",
+    "journey": "capacity",
+    "source_line": 1202,
+    "sentence": "Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.",
+    "label": "level",
+    "figures": [
+     {
+      "text": "the existing 80 tickets per week",
+      "label": "level"
+     }
+    ],
+    "note": "a definition that restates C02's level; not a second claim"
+   },
+   {
+    "id": "C07",
+    "journey": "capacity",
+    "source_line": 1204,
+    "sentence": "Goal: weekly support capacity of at least 100 tickets per week.",
+    "label": "target",
+    "figures": [
+     {
+      "text": "at least 100 tickets per week",
+      "label": "target"
+     }
+    ],
+    "note": "a level target (absolute)"
+   }
+  ]
+ },
+ "codex_relabel": [
+  {
+   "id": "H01",
+   "figures": [
+    {
+     "figure": "two",
+     "label": "other",
+     "range": null,
+     "reason": "Count of developers in a proposed hiring option."
+    },
+    {
+     "figure": "10%",
+     "label": "target",
+     "range": null,
+     "reason": "Minimum desired productivity improvement."
+    }
+   ]
+  },
+  {
+   "id": "H02",
+   "figures": [
+    {
+     "figure": "three",
+     "label": "target",
+     "range": null,
+     "reason": "The launch must happen within this many months."
+    }
+   ]
+  },
+  {
+   "id": "H03",
+   "figures": [
+    {
+     "figure": "six",
+     "label": "level",
+     "range": null,
+     "reason": "Explicitly states the organisation's current developer headcount."
+    }
+   ]
+  },
+  {
+   "id": "H04",
+   "figures": [
+    {
+     "figure": "£200,000",
+     "label": "target",
+     "range": null,
+     "reason": "Available budget establishes a spending limit."
+    }
+   ]
+  },
+  {
+   "id": "H05",
+   "figures": [
+    {
+     "figure": "20%",
+     "label": "level",
+     "range": {
+      "min": 20,
+      "max": 30,
+      "unit": "%"
+     },
+     "reason": "Lower bound of the team's stated current non-development time share."
+    },
+    {
+     "figure": "30%",
+     "label": "level",
+     "range": {
+      "min": 20,
+      "max": 30,
+      "unit": "%"
+     },
+     "reason": "Upper bound of the team's stated current non-development time share."
+    }
+   ]
+  },
+  {
+   "id": "H06",
+   "figures": [
+    {
+     "figure": "25%",
+     "label": "other",
+     "range": null,
+     "reason": "A selected percentage whose quantity and temporal role are unspecified in this sentence."
+    }
+   ]
+  },
+  {
+   "id": "M01",
+   "figures": [
+    {
+     "figure": "£100,000",
+     "label": "target",
+     "range": null,
+     "reason": "Annual budget establishes the permitted spending envelope."
+    }
+   ]
+  },
+  {
+   "id": "M02",
+   "figures": [
+    {
+     "figure": "25%",
+     "label": "target",
+     "range": null,
+     "reason": "Explicit maximum share of the user's time available for this work."
+    }
+   ]
+  },
+  {
+   "id": "M03",
+   "figures": [
+    {
+     "figure": "two",
+     "label": "other",
+     "range": null,
+     "reason": "Count of the goals being enumerated."
+    },
+    {
+     "figure": "15%",
+     "label": "target",
+     "range": null,
+     "reason": "Conversion rate must exceed this threshold."
+    },
+    {
+     "figure": "20",
+     "label": "target",
+     "range": null,
+     "reason": "Desired number of new customers to secure."
+    },
+    {
+     "figure": "3",
+     "label": "target",
+     "range": null,
+     "reason": "Deadline in months for achieving the launch goals."
+    }
+   ]
+  },
+  {
+   "id": "M04",
+   "figures": [
+    {
+     "figure": "6",
+     "label": "target",
+     "range": null,
+     "reason": "Time limit in months for launching the features."
+    },
+    {
+     "figure": "3",
+     "label": "other",
+     "range": null,
+     "reason": "Descriptive duration in months of the future sales cycle, without a stated goal or condition."
+    }
+   ]
+  },
+  {
+   "id": "M05",
+   "figures": [
+    {
+     "figure": "9th",
+     "label": "other",
+     "range": null,
+     "reason": "Calendar day identifying a date, rather than a past operational value."
+    }
+   ]
+  },
+  {
+   "id": "C01",
+   "figures": [
+    {
+     "figure": "two",
+     "label": "other",
+     "range": null,
+     "reason": "Count of alternatives under comparison."
+    },
+    {
+     "figure": "one",
+     "label": "other",
+     "range": null,
+     "reason": "Number embedded in the quoted staffing-option label."
+    }
+   ]
+  },
+  {
+   "id": "C02",
+   "figures": [
+    {
+     "figure": "80",
+     "label": "level",
+     "range": null,
+     "reason": "States the existing team's weekly ticket throughput."
+    }
+   ]
+  },
+  {
+   "id": "C03",
+   "figures": [
+    {
+     "figure": "no",
+     "label": "other",
+     "range": null,
+     "reason": "Expresses a zero additional-headcount count defining the staffing option."
+    }
+   ]
+  },
+  {
+   "id": "C04",
+   "figures": [
+    {
+     "figure": "one",
+     "label": "other",
+     "range": null,
+     "reason": "First occurrence is part of the staffing-option name."
+    },
+    {
+     "figure": "one",
+     "label": "other",
+     "range": null,
+     "reason": "Second occurrence specifies the option's additional-headcount count."
+    }
+   ]
+  },
+  {
+   "id": "C05",
+   "figures": [
+    {
+     "figure": "20",
+     "label": "effect-rate",
+     "range": {
+      "min": 10,
+      "max": 30,
+      "unit": "tickets per week per additional specialist"
+     },
+     "reason": "Central estimate of the weekly throughput contributed by each additional specialist."
+    },
+    {
+     "figure": "10",
+     "label": "effect-rate",
+     "range": {
+      "min": 10,
+      "max": 30,
+      "unit": "tickets per week per additional specialist"
+     },
+     "reason": "Lower bound of the additional specialist's weekly throughput contribution."
+    },
+    {
+     "figure": "30",
+     "label": "effect-rate",
+     "range": {
+      "min": 10,
+      "max": 30,
+      "unit": "tickets per week per additional specialist"
+     },
+     "reason": "Upper bound of the additional specialist's weekly throughput contribution."
+    }
+   ]
+  },
+  {
+   "id": "C06",
+   "figures": [
+    {
+     "figure": "80",
+     "label": "level",
+     "range": null,
+     "reason": "Explicitly identifies existing weekly capacity within the total-capacity definition."
+    }
+   ]
+  },
+  {
+   "id": "C07",
+   "figures": [
+    {
+     "figure": "100",
+     "label": "target",
+     "range": null,
+     "reason": "Explicit minimum weekly support-capacity goal."
+    }
+   ]
+  }
+ ],
+ "extension": [
+  {
+   "id": "X01",
+   "sentence": "Our help desk is at 92 tickets resolved a day, labelled \"steady state\" on the dashboard.",
+   "figures": [
+    {
+     "figure": "92",
+     "label": "level",
+     "range": null,
+     "reason": "States the help desk's current daily throughput; the quotation is a descriptive label."
+    }
+   ]
+  },
+  {
+   "id": "X02",
+   "sentence": "The dashboard calls it \"throughput\": we're processing 1,400 claims per week right now.",
+   "figures": [
+    {
+     "figure": "1,400",
+     "label": "level",
+     "range": null,
+     "reason": "Explicitly states the organisation's current weekly claims volume."
+    }
+   ]
+  },
+  {
+   "id": "X03",
+   "sentence": "Our clinic currently sees 36 patients a day (the sheet labels that \"baseline\").",
+   "figures": [
+    {
+     "figure": "36",
+     "label": "level",
+     "range": null,
+     "reason": "Current patient volume is the user's own figure despite the quoted label."
+    }
+   ]
+  },
+  {
+   "id": "X04",
+   "sentence": "We're shipping 620 parcels daily from our Ohio warehouse; \"actuals\" is the column heading.",
+   "figures": [
+    {
+     "figure": "620",
+     "label": "level",
+     "range": null,
+     "reason": "States actual current daily shipments from the user's warehouse."
+    }
+   ]
+  },
+  {
+   "id": "X05",
+   "sentence": "Our press is runnning at 74% utilisation, with maintenance already included.",
+   "figures": [
+    {
+     "figure": "74%",
+     "label": "level",
+     "range": null,
+     "reason": "Describes current utilisation of the organisation's press."
+    }
+   ]
+  },
+  {
+   "id": "X06",
+   "sentence": "Between 180 and 220 orders are handled daily by our fulfilment team at present.",
+   "figures": [
+    {
+     "figure": "180",
+     "label": "level",
+     "range": {
+      "min": 180,
+      "max": 220,
+      "unit": "orders per day"
+     },
+     "reason": "Lower bound of the team's present daily order volume."
+    },
+    {
+     "figure": "220",
+     "label": "level",
+     "range": {
+      "min": 180,
+      "max": 220,
+      "unit": "orders per day"
+     },
+     "reason": "Upper bound of the team's present daily order volume."
+    }
+   ]
+  },
+  {
+   "id": "X07",
+   "sentence": "Each extra caseworker clears about 14 more applications per week.",
+   "figures": [
+    {
+     "figure": "14",
+     "label": "effect-rate",
+     "range": null,
+     "reason": "Incremental weekly applications cleared per additional caseworker."
+    }
+   ]
+  },
+  {
+   "id": "X08",
+   "sentence": "Every additional checkout lane lets us handle another 45 shoppers an hour.",
+   "figures": [
+    {
+     "figure": "45",
+     "label": "effect-rate",
+     "range": null,
+     "reason": "Additional hourly shopper capacity per added checkout lane."
+    }
+   ]
+  },
+  {
+   "id": "X09",
+   "sentence": "About 8 minutes of admin are saved per appointment by the new intake form.",
+   "figures": [
+    {
+     "figure": "8",
+     "label": "effect-rate",
+     "range": null,
+     "reason": "Time saving caused by the form per appointment."
+    }
+   ]
+  },
+  {
+   "id": "X10",
+   "sentence": "Each extra kiln batch adds between 70 and 90 saleable mugs to our weekly output.",
+   "figures": [
+    {
+     "figure": "70",
+     "label": "effect-rate",
+     "range": {
+      "min": 70,
+      "max": 90,
+      "unit": "additional mugs per extra kiln batch"
+     },
+     "reason": "Lower bound of the additional output per extra batch."
+    },
+    {
+     "figure": "90",
+     "label": "effect-rate",
+     "range": {
+      "min": 70,
+      "max": 90,
+      "unit": "additional mugs per extra kiln batch"
+     },
+     "reason": "Upper bound of the additional output per extra batch."
+    }
+   ]
+  },
+  {
+   "id": "X11",
+   "sentence": "For every extra referral partner we activate, we close roughly 3 more mortgages a month.",
+   "figures": [
+    {
+     "figure": "3",
+     "label": "effect-rate",
+     "range": null,
+     "reason": "Incremental monthly mortgage closures per activated referral partner."
+    }
+   ]
+  },
+  {
+   "id": "X12",
+   "sentence": "Adding an overnight charging slot increases our usable fleet range by 110 miles per slot.",
+   "figures": [
+    {
+     "figure": "110",
+     "label": "effect-rate",
+     "range": null,
+     "reason": "Additional usable range contributed by each charging slot."
+    }
+   ]
+  },
+  {
+   "id": "X13",
+   "sentence": "The board wants us running at 85% occupancy; that's the goal, not a reading of today's hotel.",
+   "figures": [
+    {
+     "figure": "85%",
+     "label": "target",
+     "range": null,
+     "reason": "Desired occupancy is explicitly identified as a goal."
+    }
+   ]
+  },
+  {
+   "id": "X14",
+   "sentence": "Put \"we're at 500 orders a day\" on the ambition slide, because that's where we want the bakery to get.",
+   "figures": [
+    {
+     "figure": "500",
+     "label": "target",
+     "range": null,
+     "reason": "Present-tense wording appears in an ambition statement describing desired future output."
+    }
+   ]
+  },
+  {
+   "id": "X15",
+   "sentence": "Our planning sheet says the queue sits at 12 cases, but that cell is the required end-state.",
+   "figures": [
+    {
+     "figure": "12",
+     "label": "target",
+     "range": null,
+     "reason": "The apparently current queue size is explicitly a required end-state."
+    }
+   ]
+  },
+  {
+   "id": "X16",
+   "sentence": "We need a service that averages 4 minutes per call to win this contract.",
+   "figures": [
+    {
+     "figure": "4",
+     "label": "target",
+     "range": null,
+     "reason": "Required call duration for winning the contract, rather than measured performance."
+    }
+   ]
+  },
+  {
+   "id": "X17",
+   "sentence": "Budget for the lab refit: £75k max, including VAT.",
+   "figures": [
+    {
+     "figure": "£75k",
+     "label": "target",
+     "range": null,
+     "reason": "Explicit maximum permitted refit expenditure."
+    }
+   ]
+  },
+  {
+   "id": "X18",
+   "sentence": "Keep our scrap rate between 2% and 4% during the trial.",
+   "figures": [
+    {
+     "figure": "2%",
+     "label": "target",
+     "range": {
+      "min": 2,
+      "max": 4,
+      "unit": "%"
+     },
+     "reason": "Lower bound of the instructed scrap-rate band."
+    },
+    {
+     "figure": "4%",
+     "label": "target",
+     "range": {
+      "min": 2,
+      "max": 4,
+      "unit": "%"
+     },
+     "reason": "Upper bound of the instructed scrap-rate band."
+    }
+   ]
+  },
+  {
+   "id": "X19",
+   "sentence": "If we opened the airport kiosk, we'd handle 260 transactions a day.",
+   "figures": [
+    {
+     "figure": "260",
+     "label": "hypothetical",
+     "range": null,
+     "reason": "Daily transactions are conditional on opening the kiosk."
+    }
+   ]
+  },
+  {
+   "id": "X20",
+   "sentence": "Assume our plant is running at 90% utilisation for this scenario.",
+   "figures": [
+    {
+     "figure": "90%",
+     "label": "hypothetical",
+     "range": null,
+     "reason": "Utilisation is an explicit scenario assumption."
+    }
+   ]
+  },
+  {
+   "id": "X21",
+   "sentence": "In the imagined fully automated setup, our team resolves 700 tickets a week.",
+   "figures": [
+    {
+     "figure": "700",
+     "label": "hypothetical",
+     "range": null,
+     "reason": "Present-tense throughput describes an explicitly imagined setup."
+    }
+   ]
+  },
+  {
+   "id": "X22",
+   "sentence": "Say we're at 18 advisers after the merger; what would the office need?",
+   "figures": [
+    {
+     "figure": "18",
+     "label": "hypothetical",
+     "range": null,
+     "reason": "Adviser headcount is proposed as a scenario assumption."
+    }
+   ]
+  },
+  {
+   "id": "X23",
+   "sentence": "With the proposed rota, 48 patients would be seen per afternoon.",
+   "figures": [
+    {
+     "figure": "48",
+     "label": "hypothetical",
+     "range": null,
+     "reason": "Patient volume is conditional on adopting the proposed rota."
+    }
+   ]
+  },
+  {
+   "id": "X24",
+   "sentence": "If the distributor took us on, we'd ship between 900 and 1,100 cartons a month.",
+   "figures": [
+    {
+     "figure": "900",
+     "label": "hypothetical",
+     "range": {
+      "min": 900,
+      "max": 1100,
+      "unit": "cartons per month"
+     },
+     "reason": "Lower bound of shipments conditional on distributor acceptance."
+    },
+    {
+     "figure": "1,100",
+     "label": "hypothetical",
+     "range": {
+      "min": 900,
+      "max": 1100,
+      "unit": "cartons per month"
+     },
+     "reason": "Upper bound of shipments conditional on distributor acceptance."
+    }
+   ]
+  },
+  {
+   "id": "X25",
+   "sentence": "Last year our agency closed 310 property sales.",
+   "figures": [
+    {
+     "figure": "310",
+     "label": "past",
+     "range": null,
+     "reason": "Completed sales are explicitly located in the previous year."
+    }
+   ]
+  },
+  {
+   "id": "X26",
+   "sentence": "Back in February, we were processing 65 insurance claims a day.",
+   "figures": [
+    {
+     "figure": "65",
+     "label": "past",
+     "range": null,
+     "reason": "Daily claims volume is explicitly attributed to a past month."
+    }
+   ]
+  },
+  {
+   "id": "X27",
+   "sentence": "Our renewal rate sat at 81% before the pricing change last spring.",
+   "figures": [
+    {
+     "figure": "81%",
+     "label": "past",
+     "range": null,
+     "reason": "Renewal rate refers to the period before last spring's change."
+    }
+   ]
+  },
+  {
+   "id": "X28",
+   "sentence": "During last winter's rush, 2,400 meals were shipped weekly from our kitchen.",
+   "figures": [
+    {
+     "figure": "2,400",
+     "label": "past",
+     "range": null,
+     "reason": "Weekly shipments are explicitly tied to last winter."
+    }
+   ]
+  },
+  {
+   "id": "X29",
+   "sentence": "Our branch handled between 40 and 55 walk-ins a day last summer.",
+   "figures": [
+    {
+     "figure": "40",
+     "label": "past",
+     "range": {
+      "min": 40,
+      "max": 55,
+      "unit": "walk-ins per day"
+     },
+     "reason": "Lower bound of daily walk-ins during last summer."
+    },
+    {
+     "figure": "55",
+     "label": "past",
+     "range": {
+      "min": 40,
+      "max": 55,
+      "unit": "walk-ins per day"
+     },
+     "reason": "Upper bound of daily walk-ins during last summer."
+    }
+   ]
+  },
+  {
+   "id": "X30",
+   "sentence": "As of yesterday's close, our backlog stood at 127 repairs.",
+   "figures": [
+    {
+     "figure": "127",
+     "label": "past",
+     "range": null,
+     "reason": "Backlog size is explicitly stated for yesterday's close."
+    }
+   ]
+  },
+  {
+   "id": "X31",
+   "sentence": "The software vendor claims 99.95% uptime for its hosted service.",
+   "figures": [
+    {
+     "figure": "99.95%",
+     "label": "other-party",
+     "range": null,
+     "reason": "Uptime is a claim made by the external vendor."
+    }
+   ]
+  },
+  {
+   "id": "X32",
+   "sentence": "Our competitor says its warehouse ships 8,000 parcels daily.",
+   "figures": [
+    {
+     "figure": "8,000",
+     "label": "other-party",
+     "range": null,
+     "reason": "Shipment volume belongs to the competitor."
+    }
+   ]
+  },
+  {
+   "id": "X33",
+   "sentence": "The trade association report puts the sector's average rejection rate at 6%.",
+   "figures": [
+    {
+     "figure": "6%",
+     "label": "other-party",
+     "range": null,
+     "reason": "Rejection rate is a sector figure attributed to an external report."
+    }
+   ]
+  },
+  {
+   "id": "X34",
+   "sentence": "The courier told us, \"We handle 12,000 deliveries a day across the region.\"",
+   "figures": [
+    {
+     "figure": "12,000",
+     "label": "other-party",
+     "range": null,
+     "reason": "The quoted speaker is the external courier describing its own throughput."
+    }
+   ]
+  },
+  {
+   "id": "X35",
+   "sentence": "According to the neighboring practice, their dentists see 28 patients per day.",
+   "figures": [
+    {
+     "figure": "28",
+     "label": "other-party",
+     "range": null,
+     "reason": "Patient volume belongs to the neighbouring practice."
+    }
+   ]
+  },
+  {
+   "id": "X36",
+   "sentence": "The supplier quotes a failure rate between 0.5% and 1.2% for its sensors.",
+   "figures": [
+    {
+     "figure": "0.5%",
+     "label": "other-party",
+     "range": {
+      "min": 0.5,
+      "max": 1.2,
+      "unit": "%"
+     },
+     "reason": "Lower bound of the failure-rate range quoted by the supplier."
+    },
+    {
+     "figure": "1.2%",
+     "label": "other-party",
+     "range": {
+      "min": 0.5,
+      "max": 1.2,
+      "unit": "%"
+     },
+     "reason": "Upper bound of the failure-rate range quoted by the supplier."
+    }
+   ]
+  },
+  {
+   "id": "X37",
+   "sentence": "Please file this discussion under project 407 so finance can find it.",
+   "figures": [
+    {
+     "figure": "407",
+     "label": "other",
+     "range": null,
+     "reason": "Project identifier rather than a measured or desired quantity."
+    }
+   ]
+  },
+  {
+   "id": "X38",
+   "sentence": "The draft is dated 14 June; that is just its document date.",
+   "figures": [
+    {
+     "figure": "14",
+     "label": "other",
+     "range": null,
+     "reason": "Calendar day in a document date."
+    }
+   ]
+  },
+  {
+   "id": "X39",
+   "sentence": "I've labelled the expansion idea \"Option 7\" for the workshop.",
+   "figures": [
+    {
+     "figure": "7",
+     "label": "other",
+     "range": null,
+     "reason": "Identifier embedded in an option label."
+    }
+   ]
+  },
+  {
+   "id": "X40",
+   "sentence": "There are three questions in this brief: location, ownership and timing.",
+   "figures": [
+    {
+     "figure": "three",
+     "label": "other",
+     "range": null,
+     "reason": "Count of questions in the text rather than an operational quantity."
+    }
+   ]
+  },
+  {
+   "id": "X41",
+   "sentence": "See section 4 for the assumptions behind the franchise idea.",
+   "figures": [
+    {
+     "figure": "4",
+     "label": "other",
+     "range": null,
+     "reason": "Document section number."
+    }
+   ]
+  },
+  {
+   "id": "X42",
+   "sentence": "Use template version 2.6 for the investment discussion.",
+   "figures": [
+    {
+     "figure": "2.6",
+     "label": "other",
+     "range": null,
+     "reason": "Template version identifier rather than a numeric operating value."
+    }
+   ]
+  },
+  {
+   "id": "X43",
+   "sentence": "Our depot now averages between 300 and 340 deliveries daily; we need at least 400.",
+   "figures": [
+    {
+     "figure": "300",
+     "label": "level",
+     "range": {
+      "min": 300,
+      "max": 340,
+      "unit": "deliveries per day"
+     },
+     "reason": "Lower bound of the depot's stated current daily delivery average."
+    },
+    {
+     "figure": "340",
+     "label": "level",
+     "range": {
+      "min": 300,
+      "max": 340,
+      "unit": "deliveries per day"
+     },
+     "reason": "Upper bound of the depot's stated current daily delivery average."
+    },
+    {
+     "figure": "400",
+     "label": "target",
+     "range": null,
+     "reason": "Required minimum daily delivery volume."
+    }
+   ]
+  },
+  {
+   "id": "X44",
+   "sentence": "Each extra installer completes 5 more jobs a week, so if we hired two we'd finish 35 jobs weekly in total.",
+   "figures": [
+    {
+     "figure": "5",
+     "label": "effect-rate",
+     "range": null,
+     "reason": "Additional weekly jobs completed per extra installer."
+    },
+    {
+     "figure": "two",
+     "label": "hypothetical",
+     "range": null,
+     "reason": "Number of installers hired in the explicit conditional scenario."
+    },
+    {
+     "figure": "35",
+     "label": "hypothetical",
+     "range": null,
+     "reason": "Total weekly jobs predicted under the conditional hiring scenario."
+    }
+   ]
+  },
+  {
+   "id": "X45",
+   "sentence": "Last quarter our studio closed 17 contracts, while our competitor currently reports 24 per quarter.",
+   "figures": [
+    {
+     "figure": "17",
+     "label": "past",
+     "range": null,
+     "reason": "The studio's completed contracts are explicitly tied to last quarter."
+    },
+    {
+     "figure": "24",
+     "label": "other-party",
+     "range": null,
+     "reason": "Quarterly contract volume is reported by the competitor about itself."
+    }
+   ]
+  },
+  {
+   "id": "X46",
+   "sentence": "Our current ops list reads: calls handled daily 460; bookings processed daily 120; note labelled \"2\" explains the split.",
+   "figures": [
+    {
+     "figure": "460",
+     "label": "level",
+     "range": null,
+     "reason": "Current daily calls handled by the organisation."
+    },
+    {
+     "figure": "120",
+     "label": "level",
+     "range": null,
+     "reason": "Current daily bookings processed by the organisation."
+    },
+    {
+     "figure": "2",
+     "label": "other",
+     "range": null,
+     "reason": "Quoted note identifier rather than an operating quantity."
+    }
+   ]
+  },
+  {
+   "id": "X47",
+   "sentence": "Need our brewery's water use below 4 litres per litre of beer; in a closed-loop scenario it would sit at 2.8.",
+   "figures": [
+    {
+     "figure": "4",
+     "label": "target",
+     "range": null,
+     "reason": "Required upper threshold for water use per litre of beer."
+    },
+    {
+     "figure": "2.8",
+     "label": "hypothetical",
+     "range": null,
+     "reason": "Water-use ratio is conditional on the imagined closed-loop setup."
+    }
+   ]
+  },
+  {
+   "id": "X48",
+   "sentence": "We're at 68% room occupancy now (labelled \"actual\"), versus 61% last autumn; each extra tour-group booking lifts occupancy by about 2 percentage points.",
+   "figures": [
+    {
+     "figure": "68%",
+     "label": "level",
+     "range": null,
+     "reason": "Explicitly states current occupancy for the user's organisation."
+    },
+    {
+     "figure": "61%",
+     "label": "past",
+     "range": null,
+     "reason": "Occupancy is explicitly attributed to last autumn."
+    },
+    {
+     "figure": "2",
+     "label": "effect-rate",
+     "range": null,
+     "reason": "Occupancy increase in percentage points per additional tour-group booking."
+    }
+   ]
+  }
+ ],
+ "adjudicate": [
+  {
+   "id": "H06",
+   "figure": "25%",
+   "sys2": "level",
+   "codex": "other",
+   "resolved": "other",
+   "by": "AIE #94 6120633627",
+   "detail": "isolated “Let’s go with 25%” is unresolved/other; in its reached hiring context it is a human chosen planning level"
+  },
+  {
+   "id": "M04",
+   "figure": "3 (3-month sales cycle)",
+   "sys2": "level",
+   "codex": "other",
+   "resolved": "other",
+   "by": "AIE #94 6120633627",
+   "detail": "a human stated future process-duration parameter starting at launch; not a current baseline, target or effect"
+  }
+ ],
+ "contrasts": [
+  {
+   "id": "A01",
+   "source": "AIE 0825 illustration V2-rate-level (CAPACITY-PROVENANCE-DEVELOPMENT-20261012.json sha256 91b85edbd9d4ee88c090cc95f7d949a3eb3520a90cdf3b33a0052aefb59911f8)",
+   "sentence": "In our current operation, throughput per specialist is about 20 tickets per week, between 10 and 30.",
+   "figures": [
+    {
+     "figure": "20",
+     "label": "level",
+     "range": {
+      "min": 10,
+      "max": 30,
+      "unit": "tickets per week per specialist"
+     },
+     "reason": "current rate-parameter level when the node represents tickets per week per specialist; qualifier about; human estimate"
+    },
+    {
+     "figure": "10",
+     "label": "level",
+     "range": {
+      "min": 10,
+      "max": 30,
+      "unit": "tickets per week per specialist"
+     },
+     "reason": "range end, not the stated point"
+    }
+   ]
+  },
+  {
+   "id": "A02",
+   "source": "AIE 0825 illustration V2-incremental-effect (same file)",
+   "sentence": "Adding one specialist increases our team's capacity by about 20 tickets per week, between 10 and 30.",
+   "figures": [
+    {
+     "figure": "20",
+     "label": "effect-rate",
+     "range": {
+      "min": 10,
+      "max": 30,
+      "unit": "tickets per week per additional specialist"
+     },
+     "reason": "incremental effect per additional specialist; not current team capacity or headcount"
+    }
+   ]
+  }
+ ]
+}

@@ -139,7 +139,7 @@ describe('S2b draft -> canonical forecast parts', () => {
     expect(schema.properties.options.items.properties.added_capacity.anyOf[1].required)
       .toEqual(['monthly_share_pct', 'lead_months_low', 'lead_months_high']);
     expect(BUILD_INSTRUCTIONS).toContain('QUANTITY with a deadline');
-    expect(AGENT_TOOLS.find(t => t.name === 'propose_team_time')?.parameters.required).toEqual(['low_months', 'high_months']);
+    expect(AGENT_TOOLS.find(t => t.name === 'propose_team_time')?.parameters.required).toEqual(['quote', 'low_months', 'high_months']);
   });
   it('served brief + stubbed event drafter: persisted skeleton, then exactly the held canonical sum', async () => {
     const g = await build();
@@ -241,14 +241,17 @@ describe('S2b team-time door', () => {
     expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, applied: true, mutated: false });
     expect(w.rows).toHaveLength(1);
   });
-  it('stale approval and stale writer refuse; no earlier message can supply the figures', async () => {
+  // EBD (DL, field-scoped precondition): a change outside what the card read (a capacity link) no longer stales the card;
+  // a changed team part does; the writer itself stays CAS-fenced; an earlier message supplies figures only by quote.
+  it('stale approval and stale writer refuse; no earlier message supplies the figures without a quote', async () => {
     const w = world();
     const prior = { ...ctx('Yes'), user_text: 'It takes 6–10 months. Yes.' };
     expect((await w.caps.proposeTeamTime!(prior as never, { low_months: 6, high_months: 10 }) as Rec).ok).toBe(false);
     const r = await w.caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
     const g = w.graph(); g.edges.find((e: Rec) => e.from === 'event_capacity_1' && e.to === 'event_goal').strength.mean = 0.4; w.replace(g);
-    expect((await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: r.proposal_id } as never, { proposal_id: r.proposal_id }) as Rec).ok).toBe(false);
     expect(applyTeamShareEdit(g, approved(g), r.base_revision)).toEqual({ kind: 'refused', reason: 'stale_graph' });
+    const t = part(g).team; g.nodes.find((n: Rec) => n.id === t.id).label = 'Renamed team share'; w.replace(g);
+    expect((await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: r.proposal_id } as never, { proposal_id: r.proposal_id }) as Rec).ok).toBe(false);
     expect(w.rows).toHaveLength(0);
   });
   it('S1 deadline approval materialises dates before the team-time door can fire', async () => {
@@ -398,15 +401,14 @@ describe('R2 identity-bound regression rows', () => {
       { option_id: 'event_option_3', probability_of_goal: 0.0199 },
     ] }, write.mutatedGraph, 'event_goal');
     const lines = goalChanceScreenLinesForAgent({ enrichment: withGoalChanceLicence(raw, write.mutatedGraph, 'event_goal') }, write.mutatedGraph, true);
-    expect(lines.find(l => l.option_id === 'event_option_2')?.chance).toContain("using Olumi's estimates of hiring time (3–5 months) and the new team's pace (10% of the feature launch a month)");
-    expect(lines.find(l => l.option_id === 'event_option_1')?.chance).toContain("using Olumi's estimates of hiring time (3–5 months) and the new team's pace (7% of the feature launch a month)");
+    expect(lines.find(l => l.option_id === 'event_option_2')?.chance).toContain("using Olumi’s estimates of hiring time (3–5 months) and of the additional progress from the hires (10% of the feature launch per month)");
+    expect(lines.find(l => l.option_id === 'event_option_1')?.chance).toContain("using Olumi’s estimates of hiring time (3–5 months) and of the additional progress from the hires (7% of the feature launch per month)");
     const carry = lines.find(l => l.option_id === 'event_option_3')?.chance;
     expect(carry).not.toContain('hiring time');
-    expect(carry).not.toContain("new team's pace");
-    // The Tech lead's existing P40 range keeps its named estimates; only the two licensed POINTS carry k.
-    for (const optionId of ['event_option_2', 'event_option_3']) expect(lines.find(l => l.option_id === optionId)?.chance)
+    expect(carry).not.toContain('additional progress from the hires');
+    // AIE 6125204695 (b1): the Tech lead is a point too (no old-law P40 range), so every licensed POINT carries k.
+    for (const optionId of ['event_option_1', 'event_option_2', 'event_option_3']) expect(lines.find(l => l.option_id === optionId)?.chance)
       .toContain(", using Olumi's estimates for 2 relationships (see Check estimates).");
-    expect(lines.find(l => l.option_id === 'event_option_1')?.chance).not.toContain('(see Check estimates)');
   });
   it('WORDS share range names the deliverable and date in screen and chat', () => {
     const graph = { nodes: [{ id: 'o', kind: 'option', label: 'Carry on as now' },
@@ -535,9 +537,16 @@ describe('R3 identity-bound RED rows', () => {
       team.observed_state = { ...team.observed_state, value: mean, std: sd, raw_value: mean * 100,
         stated_time: { quantity, low, high, unit: `${UNIT} per month`, deadline: DATE, reference_date: REF } };
     }
+    // AIE 6125204695 (b1): a new Run makes no stated-time range; the record below is the STORED shape a Run before it wrote,
+    // which the reader still validates (its negatives are kept).
     const out = withShareByDateChanceGate({ option_comparison: [{ option_id: 'event_option_3', probability_of_goal: 0.4 }] }, g, 'event_goal') as Rec;
-    const record = out.inference_warnings.find((w: Rec) => w.code === 'GOAL_CHANCE_RANGE');
+    expect((out.inference_warnings ?? []).some((w: Rec) => w.code === 'GOAL_CHANCE_RANGE')).toBe(false);
     const stated = team.observed_state.stated_time;
+    const record: Rec = { code: 'GOAL_CHANCE_RANGE', severity: 'info', option_ids: ['event_option_3'], message: 'Stored range.',
+      target: { comparator: 'at_least', value: 100, unit: UNIT, by_date: DATE },
+      range_by_option: { event_option_3: { low_pct: 20, high_pct: 60, low_rounding: 'whole', high_rounding: 'whole', kind: 'stated_time',
+        basis: 'stated_time', stated_estimate: { low: stated.low, high: stated.high, unit: stated.unit }, quantity: stated.quantity,
+        low: 0.2, high: 0.6, from: 'event_team', to: 'event_goal', among: 'all' } } };
     expect(record.range_by_option.event_option_3.stated_estimate).toEqual({ low: stated.low, high: stated.high, unit: stated.unit });
     expect(goalChanceRangeRecordOf(record)).toBeDefined();
     const broken = structuredClone(record); delete broken.range_by_option.event_option_3.stated_estimate;
@@ -660,7 +669,7 @@ describe('DL accepted root rows and controls', () => {
     const notStated = await world().caps.proposeTeamTime!(ctx('soon') as never, { low_months: 6, high_months: 10 }) as Rec;
     const noDate = await world(admitted()).caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
     const passed = await world(dated(), false, '2028-01-01').caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
-    for (const r of [notStated, noDate, passed]) { expect(r.ok).toBe(false); expect(r.detail).toMatch(/Type|type/); }
+    for (const r of [notStated, noDate, passed]) { expect(r.ok).toBe(false); expect(r.detail).toMatch(/Type|type|^No team-time change was prepared because the deadline is not confirmed|^No change was prepared\. Re-read the verified human messages/); }
     expect((await world().caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec).ok).toBe(true);
   });
   it('P2-one-team-proposal-and-change-words with separate deadline control', async () => {

@@ -9,13 +9,12 @@ import {
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
 import { isEventShareForecast, missingEventCapacityOptionIds, unresolvedEventOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
-import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption, sharePartsForOption } from './share-by-date-run.js';
+import { shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
 import { licenceUnsizedLink, type PlaceholderGoalPath } from '../agent-lane/goal-certainty.js';
-import { byIslRank, displayRoundingFor, goalChancePrecisionOf, groupPct, linkEnds, precisionHalfWidthPoints,
-  runEdge, topDriverRow, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
+import { byIslRank, groupPct, linkEnds, runEdge, topDriverRow, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -176,55 +175,28 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
       code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id], message: failure,
     }, { keepOutcome: true, keepOrdering: true });
   }
+  // ⭐ AIE 6125204695 (b1), 12 Oct: the served chance is the engine's own approximate point, licensed per option with its
+  // attribution (`goal-chance-licence.ts`). The uniform law's slow-to-fast ranges, exact figures and exact-extreme overrides
+  // (`gate`, `exactChance`, `normalChance`) are mathematical references for the later exact-law work, never this Run's result,
+  // so no range is made here. One withhold remains, with its actual reason and E5's next step: an option whose parts CEE cannot
+  // state, because it holds more ranged hiring starts than Olumi uses (so its attribution cannot be said).
   const records = readOptionResultSources(inputScopedEnvelope).find(s => s.length > 0) ?? [];
   const warnings = Array.isArray(inputScopedEnvelope.inference_warnings) ? inputScopedEnvelope.inference_warnings.filter(isRec) : [];
-  const ranges: Record<string, GoalChanceRange> = {};
-  const withheld = new Set<string>();
-  const addedCapacity = new Set<string>();
+  const nodes = (graph as Rec & { nodes: Rec[] }).nodes;
+  let out = inputScopedEnvelope;
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
-    if (id === undefined || withheld.has(id) || !chance(r.probability_of_goal)) continue;
-    // Existing gates have precedence even if a malformed upstream response kept its point.
+    const option = id === undefined ? undefined : nodes.find(n => n.id === id && n.kind === 'option');
+    if (id === undefined || option === undefined || sharePartsForOption(graph, id) !== null) continue;
+    // Existing gates have precedence: an option already withheld keeps its own reason.
     if (warnings.some(w => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
       && (!Array.isArray(w.option_ids) || w.option_ids.length === 0 || w.option_ids.includes(id)))) continue;
-    const precision = goalChancePrecisionOf(r);
-    const decision = shareGateForOption(graph, id, r.probability_of_goal,
-      precision === null ? 'whole' : displayRoundingFor(precisionHalfWidthPoints(precision)));
-    if (decision?.form === 'point') continue;
-    withheld.add(id);
-    if (sharePartsForOption(graph, id)?.extra !== undefined) addedCapacity.add(id);
-    if (decision === null) continue; // unsupported parts: no manufactured range
-    const lowPct = Math.round(decision.low * 100), highPct = Math.round(decision.high * 100);
-    if (lowPct === highPct) continue; // a displayed point is not a readable range
-    const g = graph as Rec;
-    const nodes = g.nodes as Rec[];
-    const team = nodes.find(n => n.id === share.team_part_id)!;
-    const os = team.observed_state as Rec;
-    const stated = os.stated_time as Rec;
-    ranges[id] = { low_pct: lowPct, high_pct: highPct,
-      low_rounding: 'whole', high_rounding: 'whole', kind: 'stated_time', basis: 'stated_time',
-      stated_estimate: { low: stated.low as number, high: stated.high as number, unit: stated.unit as string },
-      quantity: stated.quantity as 'months_to_finish' | 'share_per_month', low: decision.low, high: decision.high,
-      from: share.team_part_id, to: goalId as string, among: 'all' };
-  }
-  if (withheld.size === 0) return inputScopedEnvelope;
-  let out = inputScopedEnvelope;
-  for (const shownAsRange of [false, true]) for (const usesAddedCapacity of [false, true]) {
-    const ids = [...withheld].filter(id => Object.hasOwn(ranges, id) === shownAsRange && addedCapacity.has(id) === usesAddedCapacity);
-    if (ids.length === 0) continue;
-    out = withholdOptionGoalFigures(out, new Set(ids), {
-      code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ids,
-      message: 'Not shown as a single figure. The approximation of '
-        + (usesAddedCapacity ? "your team's time together with Olumi's hiring-time range and pace estimate"
-          : "your team's stated time or pace range")
-        + ' does not support one figure here, '
-        + (shownAsRange ? 'so this chance is shown as a range.' : 'so this chance is not shown.'),
+    const label = typeof option.label === 'string' && option.label.trim() !== '' && !/[\r\n]/.test(option.label) ? option.label.trim() : 'this option';
+    out = withholdOptionGoalFigures(out, new Set([id]), {
+      code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id],
+      // AIE 6128697025, verbatim (it counts RANGED starts; fixed starts stay as context, never deleted).
+      message: `Not shown. This forecast can use at most two uncertain hiring starts for ‘${label}’ at once. Say which two it should model.`,
     }, { keepOutcome: true, keepOrdering: true });
   }
-  if (Object.keys(ranges).length > 0) out = appendInferenceWarning(out, {
-    code: GOAL_CHANCE_RANGE, severity: 'info', option_ids: Object.keys(ranges), range_by_option: ranges,
-    message: 'Each chance runs from the slow end of your time estimate to the fast end.',
-    target: { comparator: 'at_least', value: share.threshold_raw, unit: share.goal.goal_threshold_unit, by_date: share.deadline },
-  });
   return out;
 }

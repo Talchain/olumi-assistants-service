@@ -17,13 +17,17 @@ import { transformNodeToV3 } from '../../../cee/transforms/schema-v3.js';
 import { GraphV3, NodeV3 } from '../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { analysisAdmissionFrom } from '../../admission/analysis-admission.js';
+import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 
 const cases = [
   { label: 'Net monthly clearance', value: 250, unit: 'jobs/month', quote: 'After new intake is counted, we work off a net 250 jobs a month.', third: 'Our competitor works off a net 250 jobs a month.' },
   { label: 'Additional assessors', value: 2, unit: 'assessors', quote: 'We could bring in two extra assessors at £2,900 a month each.', third: 'Our competitor could bring in two extra assessors at £2,900 a month each.' },
   { label: 'Completed appointments', value: 920, unit: 'appointments/month', quote: 'Our clinic completes 920 appointments each month.', third: 'Our competitor completes 920 appointments each month.' },
 ];
-type Mutable<T> = T extends readonly (infer U)[] ? Mutable<U>[] : T extends object ? { -readonly [K in keyof T]: Mutable<T[K]> } : T;
+/** A brief that names the quantity but writes no figure: the drafter's tag alone decides (#2942's receipt gate). */
+const UNWRITTEN = 'Our clinic completes appointments every month.';
+type Mutable<T> =T extends readonly (infer U)[] ? Mutable<U>[] : T extends object ? { -readonly [K in keyof T]: Mutable<T[K]> } : T;
 function model(row = cases[2]!): Mutable<CandidateModel> & { unknowns: string[] } {
   const intervention = { factor_label: row.label, value: row.value + 1, value_kind: 'absolute', unit: row.unit, provenance: 'ai_proposed' };
   return {
@@ -37,10 +41,13 @@ function model(row = cases[2]!): Mutable<CandidateModel> & { unknowns: string[] 
 const verify = (m: CandidateModel, brief: string): boolean => verifiedFactorLevel(m, m.factors[0]!, brief);
 
 describe('typed current-level sentence authority', () => {
-  for (const provenance of ['explicit', 'from_brief', 'ai_proposed', 'inferred']) {
-    it(`three states: refused ${provenance} material retains its true author and level ask`, async () => {
+  // S4 V2 origin (DL ruling (b), 12 Oct): a figure the brief WRITES in the factor's frame is the user's, role unverified,
+  // whatever the drafter tagged; #2942's receipt gate still holds where the brief does not write it (Olumi's estimate).
+  for (const provenance of ['explicit', 'from_brief', 'ai_proposed', 'inferred']) for (const written of [true, false]) {
+    it(`three states: refused ${provenance} material retains its true author and level ask (the brief ${written ? 'writes' : 'does not write'} the figure)`, async () => {
       const m = model(); const label = m.factors[0]!.label;
-      const claimed = provenance === 'explicit' || provenance === 'from_brief';
+      const claimed = provenance === 'explicit' || provenance === 'from_brief' || written;
+      const brief = written ? cases[2]!.quote : UNWRITTEN;
       m.factors[0]!.provenance = provenance; m.factors[0]!.baseline_evidence = null;
       m.factors[0]!.baseline_known = provenance === 'explicit' || provenance === 'from_brief';
       m.options = m.options.map(o => ({ ...o, changes: [], interventions: [] }));
@@ -51,7 +58,7 @@ describe('typed current-level sentence authority', () => {
         return { status: 200, json: { registered: true, graph: { nodes: [], edges: [] } } };
       };
       const call: CallStructuredModel = async () => ({ text: JSON.stringify(m) });
-      const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', cases[2]!.quote, dispatch, call);
+      const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, dispatch, call);
       expect(out.ok, JSON.stringify(out)).toBe(true);
       const n = graph.nodes.find((n: any) => n.kind === 'factor' && n.label === label);
       const os = n.observed_state;
@@ -91,30 +98,52 @@ describe('typed current-level sentence authority', () => {
       }
     });
   }
-  it('an ai_proposed known starting point is Olumi-produced, never unverified user material', () => {
+  it('an ai_proposed known starting point the brief does not write is Olumi-produced, never unverified user material', () => {
     const m = model(); m.factors[0]!.provenance = 'ai_proposed'; m.factors[0]!.baseline_evidence = null;
-    const n = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
+    const n = admitCandidateModel(m, {}, UNWRITTEN).nodes.find(n => n.kind === 'factor')!;
     expect(n.observed_state?.source).toBe('cee_inference');
     expect(n.observed_state?.user_material_unverified).toBeUndefined();
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
     expect(n.observed_state?.extractionType).toBe('inferred');
     expect(valueAuthorshipOf(n.observed_state)).toBe('olumi_estimate');
   });
-  it('an inferred known starting point is an AI estimate without explicit marker leakage', () => {
+  it('an inferred known starting point the brief does not write is an AI estimate without explicit marker leakage', () => {
     const m = model(); m.factors[0]!.provenance = 'inferred'; m.factors[0]!.baseline_evidence = null;
-    const n = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
+    const n = admitCandidateModel(m, {}, UNWRITTEN).nodes.find(n => n.kind === 'factor')!;
     expect(n.observed_state).toMatchObject({ source: 'cee_inference', extractionType: 'inferred', raw_value: 920, unit: 'appointments/month' });
     expect(n.observed_state?.user_material_unverified).toBeUndefined();
     expect(valueAuthorshipOf(n.observed_state)).toBe('olumi_estimate');
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
   });
-  it('a human-named entity with an unknown baseline retains an AI-estimated level', () => {
+  it('a human-named entity with an unknown baseline the brief does not write retains an AI-estimated level', () => {
     const m = model(); m.factors[0]!.baseline_known = false; m.factors[0]!.baseline_evidence = null;
-    const n = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
+    const n = admitCandidateModel(m, {}, UNWRITTEN).nodes.find(n => n.kind === 'factor')!;
     expect(n.observed_state).toMatchObject({ source: 'cee_inference', extractionType: 'inferred', raw_value: 920, unit: 'appointments/month' });
     expect(n.observed_state?.user_material_unverified).toBeUndefined();
     expect(valueAuthorshipOf(n.observed_state)).toBe('olumi_estimate');
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('ai_inferred');
+  });
+  // S4 V2 origin (DL ruling (b)): the SAME three uncited drafts, but the brief writes "920 appointments each month". The
+  // figure is the user's, role unverified, written by the SAME admission writer as an uncited explicit claim (no new stamp).
+  for (const [name, tag] of [['ai_proposed known starting point', { provenance: 'ai_proposed' }],
+    ['inferred known starting point', { provenance: 'inferred' }], ['human-named entity with an unknown baseline', { baseline_known: false }]] as const) {
+    it(`a ${name} the brief WRITES is the user's, role unverified, through the existing unverified-claim writer`, () => {
+      const m = model(); Object.assign(m.factors[0]!, tag); m.factors[0]!.baseline_evidence = null;
+      const n = admitCandidateModel(m, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
+      expect(n.observed_state?.user_material_unverified).toBe(true);
+      expect(valueAuthorshipOf(n.observed_state)).toBe('unknown');
+      expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('unverified_brief');
+      const claim = model(); claim.factors[0]!.baseline_evidence = null;
+      const claimed = admitCandidateModel(claim, {}, cases[2]!.quote).nodes.find(n => n.kind === 'factor')!;
+      expect(n.observed_state, 'same writer, same bytes as an uncited explicit claim').toEqual(claimed.observed_state);
+    });
+  }
+  it('the same number in ANOTHER quantity stays Olumi\'s: "920 visits" or "920" as a share is not this factor\'s figure', () => {
+    for (const brief of ['Our clinic completes 920 home visits each month.', 'Our clinic fills 920 of its rota slots.']) {
+      const m = model(); m.factors[0]!.provenance = 'ai_proposed'; m.factors[0]!.baseline_evidence = null;
+      const n = admitCandidateModel(m, {}, brief).nodes.find(n => n.kind === 'factor')!;
+      expect(valueAuthorshipOf(n.observed_state), brief).toBe('olumi_estimate');
+    }
   });
   // ⭐ ONE PROVENANCE AUTHORITY (DL 12 Oct, the census's three-state rule): with NO extraction type the recognised stamp decides —
   // absent-type cee_inference is Olumi's, absent-type brief_extraction the brief's. ⚠ This reverses S7's pinned F1 'unknown'
@@ -260,8 +289,15 @@ describe('typed current-level sentence authority', () => {
     const validate = new Ajv({ strict: false }).compile((strictForTheDrafter(schema, { providerBoundary: false }) as any).properties.factors.items);
     expect(validate(old.factors[0]), JSON.stringify(validate.errors)).toBe(true);
   });
+  // S4 V2 origin (DL ruling (b)): with no receipt, a brief that WRITES the figure makes it the user's, role unverified; a
+  // brief that does not leaves the drafter's estimate Olumi's (#2942's gate). Neither ever upgrades the candidate.
   it('real buildModelFromBrief: valid receipts credit; missing receipts never upgrade estimates', async () => {
-    for (const row of cases) for (const hasQuote of [true, false]) {
+    for (const row of cases) {
+    // Paul (DL 13:0xZ): no change may add a refusal or an ask. The origin rule relabels; it never blocks or asks more.
+    const seen: Partial<Record<'quote' | 'written' | 'unwritten', { asks: number; mode: string; analysable: boolean }>> = {};
+    for (const receipt of ['quote', 'written', 'unwritten'] as const) {
+      const hasQuote = receipt === 'quote';
+      const brief = receipt === 'unwritten' ? 'We track this every month.' : row.quote;
       const m = model(row); m.factors[0]!.baseline_known = false; m.factors[0]!.provenance = 'inferred';
       if (!hasQuote) m.factors[0]!.baseline_evidence = null;
       m.constraints = [{ metric: row.label, operator: '>=', value: row.value - 1, unit: row.unit, provenance: 'explicit', frame: 'level' }];
@@ -273,7 +309,7 @@ describe('typed current-level sentence authority', () => {
         return { status: 200, json: { registered: true, graph: { nodes: [], edges: [] } } };
       };
       const call: CallStructuredModel = async () => ({ text: JSON.stringify(m) });
-      const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', row.quote, dispatch, call, undefined, undefined, undefined, snapshot => { observed = snapshot.candidate; });
+      const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, dispatch, call, undefined, undefined, undefined, snapshot => { observed = snapshot.candidate; });
       expect(out.ok, JSON.stringify(out)).toBe(true);
       // A matching number without a receipt must not upgrade the candidate before admission either.
       if (!hasQuote) {
@@ -283,11 +319,20 @@ describe('typed current-level sentence authority', () => {
       graph = GraphV3.parse(projectGraphForPersistence(graph));
       const factor = graph.nodes.find((n: any) => n.kind === 'factor' && n.label === row.label);
       expect(factor.observed_state.source).toBe(hasQuote ? 'brief_extraction' : 'cee_inference');
+      expect(factor.observed_state.user_material_unverified, `${row.label} ${receipt}`).toBe(receipt === 'written' ? true : undefined);
       expect(factor.observed_state.raw_value).toBe(row.value);
       expect(JSON.stringify(graph)).not.toContain('baseline_evidence');
       const questions = (out as { open_questions?: string[] }).open_questions ?? [];
-      if (!hasQuote) expect(questions.some(q => q.startsWith(`What is "${row.label}" today?`) && q.includes("Olumi's estimate"))).toBe(true);
+      if (receipt === 'unwritten') expect(questions.some(q => q.startsWith(`What is "${row.label}" today?`) && q.includes("Olumi's estimate"))).toBe(true);
+      else if (receipt === 'written') expect(questions, row.label).toContain(`What is "${row.label}" today? Not confirmed from your brief`);
       else expect(questions.some(q => q.startsWith(`What is "${row.label}" today?`))).toBe(false);
+      const verdict = analysisAdmissionFrom(resolveRunAdmission(graph), graph);
+      seen[receipt] = { asks: questions.filter(q => q.includes(row.label)).length, mode: verdict.permitted_analysis_mode,
+        analysable: verdict.structurally_analysable };
+    }
+    expect(seen.written, `${row.label}: the user's unverified figure asks no more and blocks no more than Olumi's estimate`).toEqual(seen.unwritten);
+    expect(seen.written?.asks, row.label).toBe(1);
+    expect(seen.quote?.asks, `CONTRAST: a receipted figure is not asked about (${row.label})`).toBe(0);
     }
   });
 });

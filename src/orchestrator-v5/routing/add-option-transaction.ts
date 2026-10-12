@@ -507,8 +507,12 @@ const NewFactorsSchema = z
   .min(1)
   .refine((specs) => new Set(specs.map((f) => f.key)).size === specs.length, { message: 'duplicate key' });
 
-/** What a new factor may point at: what served agent-lane graphs link a factor to (never an option/decision, never a lever). */
-function isAffectsTarget(node: { kind: string; category?: string } | undefined): boolean {
+/**
+ * What a new factor may point at: what served agent-lane graphs link a factor to (never an option/decision, never a lever).
+ * ⭐ Recovery Batch B (B1): the ONE new-factor target rule — the add-factor door derives its own from this
+ * (`isNewFactorTarget`, add-factor-transaction.ts), so the two doors cannot drift apart on the goal again.
+ */
+export function isAffectsTarget(node: { kind: string; category?: string } | undefined): boolean {
   if (node === undefined) return false;
   if (node.kind === 'goal' || node.kind === 'outcome' || node.kind === 'risk') return true;
   return node.kind === 'factor' && (node.category === 'observable' || node.category === 'external');

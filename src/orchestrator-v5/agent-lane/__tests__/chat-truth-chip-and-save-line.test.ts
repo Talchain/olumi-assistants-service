@@ -155,7 +155,9 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(store.get(String(r.proposal_id))!.operations, 'control: one stored proposal of three figures').toHaveLength(3);
     const [approve] = chipsFor(store, [{ name: 'propose_starting_point', result: r }]);
-    expect([approve!.id, approve!.label, approve!.message]).toEqual([approvalChipIdFor(String(r.proposal_id)), 'Use these 3 starting figures', 'Yes, use those.']);
+    // DL ruling (X8, 12 Oct): the £5,000 recruitment fee is the user's (they wrote it), so it is recorded, never one of
+    // three "starting figures"; the two levels stay Olumi's and are counted as such.
+    expect([approve!.id, approve!.label, approve!.message]).toEqual([approvalChipIdFor(String(r.proposal_id)), 'Record 3 figures (2 Olumi estimates)', 'Yes, use those.']);
   });
 
   it('RED: a per-period money unit reads as money per period', async () => {
@@ -201,7 +203,9 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const b = await t.caps.proposeAssumptions({ ...ctx, user_text: 'We get about 60 new Pro subscriptions a month.' },
       { assumptions: [{ factor_label: tiny, value: 60, unit: 'subscriptions/month', basis: 'x' }] });
     expect(b.ok, JSON.stringify(b)).toBe(true);
-    expect(chipsFor(t.store, [{ name: 'propose_assumptions', result: b }])[0]!.label).toBe('Use as starting assumptions');
+    // DL ruling (X8, 12 Oct): "We get about 60 …" is the user's first figure for this factor, so the label the cut falls
+    // back to is the one that records it as theirs, never "starting assumptions".
+    expect(chipsFor(t.store, [{ name: 'propose_assumptions', result: b }])[0]!.label).toBe('Record your figure');
   });
 
   it('FALLBACK: a figure that cannot be shown exactly as stored, a link, and a revision of several values keep today’s label', async () => {

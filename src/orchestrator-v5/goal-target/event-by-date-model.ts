@@ -2,7 +2,7 @@
 import { REPAIR_CODES } from '@talchain/schemas';
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js';
-import { goalDeadlineFromRecord, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
+import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
 import { readStatedDeadline, sayDate, timeBetween } from './deadline-date.js';
 import { extraShareMoments, teamShareMoments } from './event-by-date-share.js';
 import { denormalisedMagnitude, findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
@@ -71,7 +71,7 @@ function eventDateSpans(brief: string): { start: number; end: number }[] {
         const end = word.index + word[0].length;
         if (end > 80) break;
         // The reference only recognises a date phrase; no date is written or inferred here.
-        if (readStatedDeadline(tail.slice(0, end), '1900-01-01')) {
+        if (readStatedDeadline(tail.slice(0, end), '1900-01-01', { leadWordsOnly: true })) {
           spans.push({ start: part.start + lead.index, end: part.start + lead.index + end });
         }
       }
@@ -167,6 +167,43 @@ export function withEventNumberLoss(model: AdmittedModel, brief: string): Admitt
   return { ...model, loss: [...model.loss.filter(l => !/^brief\[\d+\]\.event_forecast_not_modelled$/.test(l.field_path)), ...loss] };
 }
 
+/**
+ * ⭐ EBD E4 — WHAT THE DEADLINE MODEL SET ASIDE FROM THE BRIEF, SAID ONCE WHERE THE USER SEES IT (DL GO, 12 Oct). The brief's own
+ * factors kept as reasoning context (`retained_excluded`) and its figures this forecast does not model reached only
+ * `not_represented`, which only the Agent reads: they were dropped silently for the user. ONE sentence, from admission's own
+ * loss ledger (the event_context nodes it set aside, then the brief's unmodelled figures), carried by the build result as
+ * `event_forecast_disclosures` into the reply's detail on the build turn (`disclosure.ts`), never as an open question. AIE 6122738619's
+ * words for what the saved model keeps as context; the real limit for what it does not hold. `null` when nothing was set aside.
+ */
+export function eventSetAsideLine(model: Pick<AdmittedModel, 'nodes' | 'loss'>): string | null {
+  const retained: string[] = [], dropped: string[] = [], inQuestion: string[] = [];
+  const add = (into: string[], words: unknown): void => {
+    if (typeof words !== 'string' || words.trim() === '' || words.length > 120) return;
+    const quoted = `"${words.trim()}"`;
+    if (![...retained, ...dropped, ...inQuestion].includes(quoted)) into.push(quoted);
+  };
+  // Kept in the saved model as reasoning context: "remain" is true of these (the saved graph holds the node).
+  for (const n of model.nodes) {
+    if (n.id.startsWith('event_context_') && n.analysis_participation === 'retained_excluded'
+      && model.loss.some(l => l.field_path === `nodes[${n.id}].event_forecast_not_modelled` && l.after === 'retained_excluded')) add(retained, n.label);
+  }
+  // The brief's figures this forecast does not model: never "remain". Said as the real limit: kept only in the words of the
+  // saved decision question when its label holds them, otherwise not held by the model at all.
+  const question = model.nodes.find(n => n.kind === 'decision')?.label;
+  for (const l of model.loss) if (/^brief\[\d+\]\.event_forecast_not_modelled$/.test(l.field_path)) {
+    add(typeof question === 'string' && typeof l.before === 'string' && question.includes(l.before.trim()) ? inQuestion : dropped, l.before);
+  }
+  const list = (q: string[]): string => q.length === 1 ? q[0]! : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
+  const lines = [
+    // AIE 6122738619, verbatim (the pronoun agrees with the count).
+    ...(retained.length > 0 ? [`This forecast does not yet use ${list(retained)} from your brief; ${retained.length === 1 ? 'it remains' : 'they remain'} as context for the wider productivity question.`] : []),
+    // The real retention limit (AIE: "otherwise state the real retention limit"); new words, for AIE ACK.
+    ...(inQuestion.length > 0 ? [`This forecast does not yet use ${list(inQuestion)} from your brief; the model keeps ${inQuestion.length === 1 ? 'it' : 'them'} only in the wording of your decision question.`] : []),
+    ...(dropped.length > 0 ? [`This forecast does not yet use ${list(dropped)} from your brief, and the model does not hold ${dropped.length === 1 ? 'it' : 'them'}.`] : []),
+  ];
+  return lines.length === 0 ? null : lines.join(' ');
+}
+
 /** Persisted provenance is passthrough at every graph boundary, unlike node labels. */
 export function eventShareCarrierOf(graph: unknown): Rec | null {
   const goal = soleGoalOf(graph);
@@ -227,6 +264,19 @@ export function teamTimeAsk(graph: unknown): string | null {
   return Number.isFinite(eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time?.most_likely)
     ? 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?'
     : `How long would ${part.deliverable} take with the team you have now?`;
+}
+
+/**
+ * ⭐ EBD E1 — THE EVENT MODEL'S ONE QUESTION (Paul's hiring test, 12 Oct, scenario 4184e877). Its team part takes a value
+ * only from the team's time, and only once the deadline is held, so the question is the deadline first, then that time.
+ * Readiness asked "What is "Share today's team finishes by the deadline" today, before any option changes it? … treat it
+ * as zero" instead: a level this part can never be given. The readiness blocker (`analysis-ready-helper.ts`), the coach
+ * (`decision-input-ask.ts`) and so the UI all say THIS sentence. `null` when the model has no drafted event team part.
+ */
+export function eventModelAsk(graph: unknown): string | null {
+  const part = draftedTeamPartOf(graph);
+  if (part === null) return null;
+  return goalDeadlineFromRecord(graph, part.goal.id) === undefined ? chanceGoalDeadlineAsk(part.deliverable) : teamTimeAsk(graph);
 }
 
 export const EVENT_BY_DATE_REFUSALS = [

@@ -459,8 +459,8 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     // as the vocabulary owner now words it. The fixture itself stays as captured.
     const captured = JSON.parse(readFileSync(baselineUrl, 'utf8'));
     expect(captured.guidance.slot1.copy.why).toBe("There is no 'carry on as now' option to compare with.");
-    captured.guidance.slot1.copy.why = 'A baseline separates the effect of changing course from what would happen anyway.';
-    expect(JSON.stringify(captured), 'the capture is compact JSON').toBe(readFileSync(baselineUrl, 'utf8').trimEnd().replace("There is no 'carry on as now' option to compare with.", 'A baseline separates the effect of changing course from what would happen anyway.'));
+    captured.guidance.slot1.copy.why = 'Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.';
+    expect(JSON.stringify(captured), 'the capture is compact JSON').toBe(readFileSync(baselineUrl, 'utf8').trimEnd().replace("There is no 'carry on as now' option to compare with.", 'Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.'));
     expect(withoutModelGap(bytes)).toBe(JSON.stringify(captured));
   });
   it('an analysis-bearing turn gates the same fresh issue at the leader wire gate too', async () => {

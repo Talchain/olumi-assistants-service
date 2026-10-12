@@ -9,6 +9,8 @@ import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } fro
 import { findLinkEffectAmounts } from './link-effect-figures.js';
 import { figureTheUserWroteForSpan, isChangeWord } from './stated-by-user.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
+import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
+import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
 
 type Option = CandidateModel['options'][number];
@@ -38,14 +40,45 @@ function exactEvidence(brief: string, quote: unknown, sentences: Assertion[]): A
   const located = sentences.filter(a => a.text === q);
   return located.length === 1 ? located[0]! : null;
 }
-/** Refuse enclosing quotes and source headings. No document-name exceptions. */
+/** Refuse source headings. No document-name exceptions. Quotations are read on the bound figure (`insideQuotation`). */
 function directContext(brief: string, a: Assertion): boolean {
-  const context = brief.slice(0, a.end);
-  if (/["“”«»]|(?:^|[\s:(])['‘]|['’](?=$|[\s.!?,;:])/mu.test(context)) return false;
-  return context.split('\n').every(line => {
+  return brief.slice(0, a.end).split('\n').every(line => {
     const s = line.trim();
     return !s.endsWith(':') && !/^\[(?:Page|Paragraph) [0-9]{1,12}\]/u.test(s);
   });
+}
+/**
+ * Recovery Batch B, V1 (DL #94; AIE 6120633627: scope the check to the bound claim, not every earlier quoted label).
+ * A quotation refuses credit only when the credited figure itself lies inside it, so a quoted option label earlier in
+ * the brief ("labelled exactly "Keep current staffing"") no longer blocks every later figure. Regions are read on the
+ * whole normalised brief, so a quotation opened in an earlier sentence still encloses the figure. Fail closed: an
+ * unclosed double quote, or an opening single quote never closed, runs to the end of the brief. A lone closing single
+ * quote is an apostrophe ("our developers' time") and opens nothing.
+ */
+function quotedRegions(text: string): { start: number; end: number }[] {
+  const regions: { start: number; end: number }[] = [];
+  let double: number | null = null; let single: number | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!; const before = text[i - 1]; const after = text[i + 1];
+    if (/["“”«»]/u.test(c)) {
+      if (double === null) double = i; else { regions.push({ start: double, end: i + 1 }); double = null; }
+    } else if (c === '\'' || c === '‘' || c === '’') {
+      const opens = c !== '’' && (before === undefined || /[\s:(“"«]/u.test(before)) && after !== undefined && !/\s/u.test(after);
+      const closes = c !== '‘' && before !== undefined && !/\s/u.test(before) && (after === undefined || /[\s.!?,;:)”"»]/u.test(after));
+      if (single === null && opens) single = i;
+      else if (single !== null && closes) { regions.push({ start: single, end: i + 1 }); single = null; }
+    }
+  }
+  if (double !== null) regions.push({ start: double, end: text.length });
+  if (single !== null) regions.push({ start: single, end: text.length });
+  return regions;
+}
+/** `span` is in the located sentence's own (normalised) text; exactEvidence found that sentence once in the brief. */
+function insideQuotation(brief: string, a: Assertion, span: { start: number; end: number }): boolean {
+  const whole = canonical(brief);
+  const at = whole.indexOf(a.text);
+  if (at < 0 || at !== whole.lastIndexOf(a.text)) return true;
+  return quotedRegions(whole).some(r => r.start < at + span.end && at + span.start < r.end);
 }
 const words = (s: string): string[] => s.toLowerCase().match(/[\p{L}\p{N}]{1,64}/gu) ?? [];
 const sameName = (a: string, b: string): boolean => singular(a) === singular(b);
@@ -152,7 +185,7 @@ function countsItself(unit: unknown): boolean {
   return parts?.kind === 'count' && parts.noun?.length === 1 && COUNT_ITSELF.test(parts.noun[0]!)
     && parts.period === null && !parts.per?.length && !parts.base?.length && !parts.qualifiers?.length;
 }
-function sameFrame(text: string, span: { start: number; end: number }, unit: unknown, amount?: StatedAmount, nounFromLabel = false): boolean {
+function sameFrame(text: string, span: { start: number; end: number }, unit: unknown, amount?: StatedAmount, nounFromLabel = false, implicitPer = false): boolean {
   const literal = amount ?? findStatedAmounts(text).find(n => n.index === span.start);
   const written = literal ?? { index: span.start, matchedText: text.slice(span.start, span.end), kind: 'words' };
   const stated = statedTailParts(text, written); const expected = readUnitParts(unit);
@@ -160,7 +193,7 @@ function sameFrame(text: string, span: { start: number; end: number }, unit: unk
     || stated.scale !== expected.scale || stated.period !== expected.period) return false;
   const same = (x: readonly string[] | null, y: readonly string[] | null): boolean =>
     JSON.stringify(x?.length ? x : null) === JSON.stringify(y?.length ? y : null);
-  return same(stated.per, expected.per) && same(stated.base, expected.base) && same(stated.qualifiers, expected.qualifiers)
+  return (same(stated.per, expected.per) || (implicitPer && !stated.per?.length)) && same(stated.base, expected.base) && same(stated.qualifiers, expected.qualifiers)
     && (expected.noun === null || nounFromLabel || (expected.noun.length > 0
       && expected.noun.every(w => stated.noun?.some(x => sameName(x, w)))));
 }
@@ -233,7 +266,7 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
     && !others.some(label => words(label).some(w => words(factor.label).some(t => sameName(w, t))));
   const span = figureTheUserWroteForSpan(intervention.value, factor.unit, a.text,
     { target: [factor.label], others, ...(!unitNamesFactor ? { strict: true as const, requireNamed: true as const } : {}) });
-  if (span === null) return false;
+  if (span === null || insideQuotation(brief, a, span)) return false;
   const clause = settingClause(a, span.start);
   if (clause === null || !namedOption(model, option, clause.text, intervention.value)
     || !onlySiblingArms(model, option, clause.others, intervention.value)) return false;
@@ -324,9 +357,92 @@ function currentLevelWords(text: string): string[] {
     (all, period: string) => periodNoun(period.toLowerCase()) === null ? all : '');
   return words(local.replace(/([\p{L}]+)-up\b/giu, '$1'));
 }
-function currentLevelRole(text: string): boolean {
-  return !FOREIGN_LEVEL.test(text) && !currentLevelWords(text).some(w => BOUNDS.has(w)
+/** A past anchor dates the claim ("6 months … from last Friday", "two years ago"): it does not attest today's level
+ * (AIE 0825 §2, "current versus past"). The figure stays the user's unverified claim. "Over the last year we …" is a
+ * historical period scoping a current rate and is stripped first (`currentLevelWords`). */
+const PAST_ANCHOR = new Set(['last', 'previous', 'ago', 'yesterday']);
+/** V2: the credited figure's own unit, written right after it, is the quantity, not an attribution: "processing 1,400
+ * claims per week" reports no claim, while "The insurer claims: …" still does. */
+function currentLevelRole(text: string, frame?: { span: { start: number; end: number }; unit: unknown }): boolean {
+  let attributed = text;
+  if (frame !== undefined) {
+    const unitWords = words(typeof frame.unit === 'string' ? frame.unit : '');
+    const tail = text.slice(frame.span.end).match(/^(?:[\s/]*[\p{L}]{1,64})*/u)?.[0] ?? '';
+    const run = [...tail.matchAll(/[\p{L}]{1,64}/gu)];
+    const stop = run.findIndex(m => !unitWords.some(u => sameName(u, m[0].toLowerCase())) && !grammar(m[0].toLowerCase()));
+    const end = frame.span.end + (stop < 0 ? tail.length : run[stop]!.index!);
+    attributed = text.slice(0, frame.span.start) + text.slice(end);
+  }
+  return !FOREIGN_LEVEL.test(attributed) && !currentLevelWords(text).some(w => BOUNDS.has(w) || PAST_ANCHOR.has(w)
     || ['goal', 'target', 'limit', 'plan', 'forecast', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w));
+}
+
+/**
+ * ⭐ Recovery Batch B, S4 V2 (AIE 0825 §2; #94 6122028727): POSITIVE ownership and currentness, with no verb list.
+ * "Our existing team resolves 80 tickets per week" names its owner and says the level is current, yet `ownsFactorLevel`
+ * reads only its finite STATE_VERBS, so Paul's 80 was withheld on every served capacity draft (9/9, 11–12 Oct). Here:
+ *   - WHO: the figure's own clause (after any ':' or ';') opens on the first person ("we", "our");
+ *   - between that owner and the figure stand only the factor's own words, frame grammar and the markers below, plus ONE
+ *     word in the predicate slot just before the figure ("resolves", "processing"); any other word names another entity
+ *     ("Our pub sales share" is not the taproom's) and a fronted frame ("In the imagined setup, our team…") refuses;
+ *   - CURRENT, positively: a present-state marker of the shared readers in that clause, `cee/signals/brief-signals.ts`
+ *     STATE_VERBS ("currently", "existing", "right now", "we're at" …) or the occurrence reader's present-state governor
+ *     (`occurrenceRoleOf`: "is", "running at", "now" …), and that reader finds no aim, past or conditional governing it.
+ * Quantity, unit and period stay `factorLevelSpans`'s; role words, quotation and neighbours stay the existing gates.
+ */
+const STATE_MARK = STATE_MARKERS.map(p => new RegExp(`(?<![\\p{L}\\p{N}'])${p.split(' ').join('\\s+')}(?![\\p{L}\\p{N}])`, 'iu'));
+const STATE_WORDS = new Set(STATE_MARKERS.flatMap(p => words(p)));
+const COPULA = new Set(['is', 'are', 'am', 're', 's']);
+const plainQuotes = (text: string): string => text.replace(/[’‘]/gu, '\'');
+function ownCurrentClause(text: string, span: { start: number; end: number }, factor: Factor): boolean {
+  const plain = plainQuotes(text);
+  const start = Math.max(plain.lastIndexOf(':', span.start), plain.lastIndexOf(';', span.start)) + 1;
+  const tail = plain.slice(span.end).search(/[;:]/u);
+  const clause = plain.slice(start, tail < 0 ? plain.length : span.end + tail);
+  const lead = words(plain.slice(start, span.start));
+  if (lead[0] !== 'we' && lead[0] !== 'our') return false;
+  const own = [...words(factor.label), ...words(typeof factor.unit === 'string' ? factor.unit : '')];
+  const body = lead.slice(1);
+  // The predicate slot: the last word before the figure, past any copula, "at" or approximation ("is at about 80").
+  let slot = body.length - 1;
+  while (slot >= 0 && (CLAUSE.has(body[slot]!) || body[slot] === 'at' || COPULA.has(body[slot]!))) slot -= 1;
+  const named = (w: string): boolean => grammar(w) || OWN_ORGANISATION.has(w) || CLAUSE.has(w) || STATE_WORDS.has(w)
+    || COPULA.has(w) || own.some(v => sameName(v, w));
+  // Every other word names the factor's own subject: "Our pub sales share" is not the taproom's (b5 rival entity).
+  if (!body.every((w, i) => i === slot || named(w))) return false;
+  // A regular past predicate ("resolved 80") is history, whatever marker the subject carries.
+  const predicate = body[slot] ?? '';
+  if (/ed$/u.test(predicate) && !STATE_WORDS.has(predicate)) return false;
+  const role = occurrenceRoleOf(plain, span.start);
+  return role !== 'aim' && role !== 'past' && role !== 'conditional'
+    && (role === 'current' || STATE_MARK.some(r => r.test(clause)));
+}
+/** V2: "… defined as the existing 80 tickets per week …" — the credited figure once, in the factor's own frame and naming
+ * nothing but the factor's own words ("1,500 other subscribers" is another quantity: typed-level-span RUN8), with a shared
+ * present-state marker right before it and no aim, past or conditional governing it: the same current claim said again,
+ * so it neither rivals nor qualifies the owned statement. */
+function restatesLevel(text: string, factor: Factor, value: number): boolean {
+  const plain = plainQuotes(text);
+  const amounts = findLinkEffectAmounts(plain).filter(n => n.magnitude === Math.abs(value));
+  if (amounts.length !== 1 || words(plain).filter(w => figure(w) === Math.abs(value)).length > 1) return false;
+  const amount = amounts[0]!;
+  const own = [...words(factor.label), ...words(typeof factor.unit === 'string' ? factor.unit : '')];
+  if (!(statedTailParts(plain, amount)?.noun ?? []).every(w => own.some(v => sameName(v, w)))) return false;
+  const role = occurrenceRoleOf(plain, amount.index);
+  return role !== 'aim' && role !== 'past' && role !== 'conditional'
+    && STATE_MARK.some(r => new RegExp(`${r.source}\\s+$`, 'iu').test(plain.slice(0, amount.index)))
+    && sameFrame(plain, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount);
+}
+/** V2: "Keep current staffing adds no specialist." — every qualifier quantifies ANOTHER factor's own noun (the next word
+ * names it) and nothing in the sentence names the credited factor: an independent claim, not a bound on this figure. */
+function qualifiesOtherQuantity(model: CandidateModel, factor: Factor, text: string): boolean {
+  const ws = words(text);
+  const mine = [...words(factor.label), ...(readUnitParts(factor.unit)?.noun ?? [])].filter(w => !grammar(w));
+  if (ws.some(w => mine.some(m => sameName(m, w)))) return false;
+  const nouns = model.factors.filter(f => f !== factor)
+    .flatMap(f => [...(readUnitParts(f.unit)?.noun ?? []), labelHead(f.label) ?? '']).filter(n => n !== '');
+  const qualifiers = ws.flatMap((w, i) => NOT_POINT.has(w) ? [i] : []);
+  return qualifiers.length > 0 && qualifiers.every(i => nouns.some(n => sameName(n, ws[i + 1] ?? '')));
 }
 
 /** Set aside a rival only on the located amount's complete typed frame, never on its name alone. */
@@ -442,13 +558,148 @@ function differentGoalBound(model: CandidateModel, factor: Factor, text: string)
  * verifier starts from (`factorLevelSpans`: the figure, the factor's own quantity named beside it, unit/period/role), minus
  * ownership. A quote that merely contains the number ("more than 25% of my time" cited for an experience score of 25)
  * claims nothing about it. No new reader: the spans are the verifier's own.
+ *
+ * ⭐ Recovery Batch B, W (DL GO 12 Oct; AIE 0825 §2–§3): a literal human figure keeps its HUMAN ORIGIN where that binding
+ * cannot attest its role. Given the brief, the drafter's quote must be one located sentence of it (`exactEvidence`) and
+ * write THIS factor's figure in the factor's own typed frame (`sameFrame`: kind, noun, period, base), with the
+ * denominator allowed implicit ("each additional specialist resolves about 20 tickets per week" for tickets per week per
+ * specialist); a different written denominator still refuses. Origin only: a current level is `verifiedFactorLevel`'s.
  */
-export function quoteBindsFactorFigure(model: CandidateModel, factor: Factor): boolean {
+export function quoteBindsFactorFigure(model: CandidateModel, factor: Factor, brief?: string): boolean {
   try {
     const quote = factor.baseline_evidence?.quote;
     const value = factor.baseline_value;
     if (typeof quote !== 'string' || quote.length > MAX_ASSERTION || typeof value !== 'number' || !Number.isFinite(value)) return false;
-    return factorLevelSpans(model, factor, quote, value).length > 0;
+    if (factorLevelSpans(model, factor, quote, value).length > 0) return true;
+    if (typeof brief !== 'string') return false;
+    const a = exactEvidence(brief, quote, assertions(brief));
+    return a !== null && a.text.length <= MAX_ASSERTION && findLinkEffectAmounts(a.text).some(amount => amount.magnitude === Math.abs(value)
+      && sameFrame(a.text, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, false, true));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ⭐ Recovery Batch B, S4 V2 origin (DL ruling (b), 12 Oct; AIE 0825 §2: "do not reattribute a literal human number to an AI
+ * estimate simply because role verification failed"): a literal human figure keeps its HUMAN ORIGIN when the drafter cites
+ * nothing. Served capacity draft b33bf531 (11 Oct) drafted "Each additional specialist resolves about 20 tickets per week,
+ * between 10 and 30" as `Specialist capacity` = 20, `ai_proposed`, no quote, so Paul's 20 was stored as Olumi's estimate.
+ * CEE locates the receipt itself: a direct sentence of the brief names the factor (a word of its label) and writes THIS
+ * figure in the factor's own typed frame (`sameFrame`, the denominator allowed implicit, as W), and the occurrence reader
+ * does not read it as an aim or bound ("at least 100" is the target, never a supplied level). Quotation marks do not
+ * disown a supplied figure (AIE 0825 §1). ORIGIN ONLY: the role stays unverified; a current level is `verifiedFactorLevel`'s.
+ * #2942's receipt gate still holds wherever the brief writes no such figure: a drafter's claim alone never upgrades anything.
+ */
+export function briefWritesFactorFigure(factor: Factor, brief: string | undefined): boolean {
+  try {
+    return sentencesWritingFigure(factor, brief).length > 0;
+  } catch {
+    return false;
+  }
+}
+/** The brief's direct sentences that write THIS factor's figure in its typed frame, naming it, not as an aim or bound. */
+function sentencesWritingFigure(factor: Factor, brief: string | undefined): { text: string; amount: StatedAmount }[] {
+  const value = factor.baseline_value;
+  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value)) return [];
+  const named = words(factor.label).filter(w => !grammar(w));
+  return assertions(brief).filter(a => a.text.length <= MAX_ASSERTION && directContext(brief, a)
+    && words(a.text).some(w => named.some(n => sameName(n, w)))).flatMap(a => findLinkEffectAmounts(a.text)
+    .filter(amount => amount.magnitude === Math.abs(value)
+      && occurrenceRoleOf(plainQuotes(a.text), amount.index) !== 'aim'
+      && sameFrame(a.text, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, false, true))
+    .map(amount => ({ text: a.text, amount })));
+}
+
+/**
+ * ⭐ Recovery Batch B, Row5 (DL 12 Oct): a RANGE the brief states for a factor, read at construction for L6's carrier
+ * (`observed_state.range`). Paul's "Each additional specialist resolves about 20 tickets per week, between 10 and 30." was
+ * admitted on 9 of 9 served drafts with the 20 and without the 10–30. A pair is "between X and Y", "X–Y" or "X to Y"; ends
+ * written with their own unit must be in the factor's frame (bare ends take the figure's, so a range with no figure beside
+ * it must write its unit).
+ */
+function statedRangePair(text: string, unit: unknown, figure?: StatedAmount): { low: number; high: number } | undefined {
+  const ends = findLinkEffectAmounts(text).filter(a => a.index !== figure?.index);
+  for (let i = 0; i + 1 < ends.length; i++) {
+    const lo = ends[i]!, hi = ends[i + 1]!;
+    const gap = text.slice(lo.index + lo.matchedText.length, hi.index);
+    const paired = (/\bbetween\s+$/iu.test(text.slice(0, lo.index)) && /^\s+and\s+$/iu.test(gap)) || /^\s*(?:[-–—]|to)\s*$/iu.test(gap);
+    if (!paired || !(lo.magnitude < hi.magnitude)) continue;
+    const after = text.slice(hi.index + hi.matchedText.length).match(/^[^,;.!?)]*/u)?.[0] ?? '';
+    const bare = !/[\p{L}%£$€]/u.test(after) && !/[%£$€]/u.test(hi.matchedText);
+    if (bare ? figure === undefined : !sameFrame(text, { start: hi.index, end: hi.index + hi.matchedText.length }, unit, hi, false, true)) continue;
+    return { low: lo.magnitude, high: hi.magnitude };
+  }
+  return undefined;
+}
+/**
+ * The USER's own range for a figure they wrote: both ends in the ONE sentence that writes it (`sentencesWritingFigure`),
+ * never a third party's sentence (`FOREIGN_LEVEL`). Stored only as L6's validator admits it (`isStatedLevelRange`: the
+ * figure inside, the user's own sentence).
+ */
+export function briefStatedLevelRange(factor: Factor, brief: string | undefined): { low: number; high: number; quote: string } | undefined {
+  try {
+    for (const { text, amount } of sentencesWritingFigure(factor, brief)) {
+      if (FOREIGN_LEVEL.test(text) || ATTRIBUTED_EVIDENCE.test(text)) continue;
+      const pair = statedRangePair(text, factor.unit, amount);
+      if (pair !== undefined) return { ...pair, quote: text };
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+/** "Customer interviews suggest …": evidence the user reports from a source, not a figure of their own. */
+const ATTRIBUTED_EVIDENCE = /\b(?:suggests?|interviews?|survey|surveys)\b/iu;
+/**
+ * Row5 RULING (DL 12 Oct 13:1xZ; AIE 0825 "retain the supplied claim and its uncertainty/source", 0418): a range a THIRD
+ * PARTY states in the brief ("A supplier says a specialist can contribute 10–30 features per week; I have not verified
+ * that claim.") is carried with its attribution — the sentence that names that party — role unverified: a label, never
+ * withheld, never the user's range. The sentence must name the factor and write both ends with the factor's frame.
+ */
+export function briefAttributedLevelRange(factor: Factor, brief: string | undefined): { low: number; high: number; quote: string } | undefined {
+  try {
+    if (typeof brief !== 'string') return undefined;
+    const attributed = (text: string): boolean => FOREIGN_LEVEL.test(text) || ATTRIBUTED_EVIDENCE.test(text);
+    // A sentence that also writes the figure anchors bare ends ("… about 20 tickets per week, between 10 and 30").
+    for (const { text, amount } of sentencesWritingFigure(factor, brief)) {
+      const pair = attributed(text) ? statedRangePair(text, factor.unit, amount) : undefined;
+      if (pair !== undefined) return { ...pair, quote: text };
+    }
+    const named = words(factor.label).filter(w => !grammar(w));
+    for (const a of assertions(brief)) {
+      if (a.text.length > MAX_ASSERTION || !directContext(brief, a) || !attributed(a.text)) continue;
+      if (!words(a.text).some(w => named.some(n => sameName(n, w)))) continue;
+      const pair = statedRangePair(a.text, factor.unit);
+      if (pair !== undefined) return { ...pair, quote: a.text };
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * ⭐ Recovery Batch B (DL 12 Oct 13:3xZ): the GOAL's stated current level, through V2's verification, positive
+ * attestation only and no new parser. Admission wrote it as `brief_extraction` with no extractionType and no user-text
+ * check, so C reads Paul's typed figure as unverified. Verified when BOTH hold:
+ *   - ORIGIN: a direct sentence of the brief names the goal and writes this figure in the goal's typed frame, not as an
+ *     aim or bound (`sentencesWritingFigure`, the origin rule's reader): "Total weekly support capacity is defined as the
+ *     existing 80 tickets per week …";
+ *   - ROLE: the same figure, in the goal's typed unit, is V2's VERIFIED current level of a factor of this model
+ *     (`verifiedFactorLevel`): "Our existing team resolves 80 tickets per week."
+ * Anything else stays exactly as written before. The typed-unit equality is defence in depth: V2's neighbour rule
+ * already withholds a factor whose figure the goal's sentence writes as another quantity.
+ */
+export function verifiedGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
+  try {
+    const goal = model.goal; const value = goal.baseline_value;
+    if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+    const unit = readUnitParts(goal.unit);
+    if (unit === null) return false;
+    if (sentencesWritingFigure({ label: goal.metric, baseline_value: value, unit: goal.unit } as Factor, brief).length === 0) return false;
+    return model.factors.some(f => f.baseline_value === value && JSON.stringify(readUnitParts(f.unit)) === JSON.stringify(unit)
+      && verifiedFactorLevel(model, f, brief));
   } catch {
     return false;
   }
@@ -472,9 +723,11 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     const matches = factorLevelSpans(model, factor, a.text);
     if (matches.length !== 1) return false;
     const span = matches[0]!;
-    if (!ownsFactorLevel(a.text.slice(0, span.start), factor)
-      || !currentLevelRole(a.text)) return false;
+    if (insideQuotation(brief, a, span)) return false;
+    if (!(ownsFactorLevel(a.text.slice(0, span.start), factor) || ownCurrentClause(a.text, span, factor))
+      || !currentLevelRole(a.text, { span, unit: factor.unit })) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {
+      if (text.length <= MAX_ASSERTION && restatesLevel(text, factor, value)) return true;
       // An elliptical bound, correction, retraction or attributed sentence remains ambiguous.
       if (text.length > MAX_ASSERTION || !currentLevelRole(text) || words(text).some(w => NOT_POINT.has(w))) return false;
       const amounts = findLinkEffectAmounts(text);
@@ -488,7 +741,7 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
         && currentQuantityLabel(claims[0]!.label) !== currentQuantityLabel(factor.label)
         && readUnitParts(claims[0]!.unit) !== null
         && JSON.stringify(readUnitParts(claims[0]!.unit)) !== JSON.stringify(readUnitParts(factor.unit));
-    }, text => differentGoalBound(model, factor, text));
+    }, text => differentGoalBound(model, factor, text) || qualifiesOtherQuantity(model, factor, text));
   } catch (err) {
     log.warn({ event: 'agent_lane.stated_level_unverifiable', err: err instanceof Error ? err.message : String(err) },
       'agent-lane: a stated factor level could not be verified on a malformed draft; credit is withheld');

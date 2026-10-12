@@ -92,7 +92,7 @@ import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt, PLAIN_APPROVAL_SUPERSEDED } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
 import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
-import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
+import { readinessSentence, readinessSentenceOnce, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import { strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { widenedLine, widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../orchestrator-v5/agent-lane/runtime/widen-draft.js';
@@ -167,7 +167,7 @@ import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, struc
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn, type DecisionReviewRead } from '../orchestrator-v5/agent-lane/decision-review-press.js';
-import { eligibleInterventionFor, ELIGIBLE_INTERVENTION_INSTRUCTION, selectTurnGuidance, guidanceRequestOf, type EligibleIntervention, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
+import { eligibleInterventionFor, ELIGIBLE_INTERVENTION_INSTRUCTION, selectTurnGuidance, selectTurnGuidanceShown, guidanceRequestOf, type EligibleIntervention, type GuidanceWire, type TurnGuidanceSelection } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { nextStepOffersForTurn, SUGGEST_RISKS_CHIP } from '../orchestrator-v5/agent-lane/next-steps-from-guidance.js';
 import { guidanceOnAnswer, thinDraftShownWire, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { actionFactsOf, type ActionFacts } from '../orchestrator-v5/agent-lane/actions/state.js';
@@ -1035,18 +1035,22 @@ export function knownNotRunnable(analysisReady: unknown): boolean {
  * ⛔ SAID ONLY WHEN IT AGREES WITH THIS TURN'S RUN CONTROL (`admitsRunOffer` / `knownNotRunnable` over the same
  * readback's `analysis_ready`). A sentence contradicting the button is worse than none, and an unchecked verdict
  * says nothing rather than implying "nothing is blocking".
+ *
+ * EBD (DL, 12 Oct): with `alreadySaid`, an ask this reply already says is not said again (`readinessSentenceOnce`).
  */
-export function postWriteReadinessLine(graph: unknown, analysisReady: unknown, guided?: GuidedSizingDraft): string | null {
+export function postWriteReadinessLine(graph: unknown, analysisReady: unknown, guided?: GuidedSizingDraft,
+  alreadySaid?: { readonly text: string; readonly refusalSaid: boolean }): string | null {
   const view = readinessViewOf(graph);
+  const say = (v: typeof view): string | null => alreadySaid === undefined ? readinessSentence(v) : readinessSentenceOnce(v, alreadySaid.text, alreadySaid.refusalSaid);
   if (!view.checked) return null;
   if (view.may_run === true && !admitsRunOffer(analysisReady)) return null;
   if (view.may_run === false && !knownNotRunnable(analysisReady)) return null;
-  if (guided === undefined) return readinessSentence(view);
+  if (guided === undefined) return say(view);
   // The bound presses already ask about these pairs; keep every other target cause in its existing words.
   const filtered = targetVerdictWithoutGuidedLinks(graph, guided.target_verdict ?? targetTestabilityOf(graph), guided);
   const targetWords = filtered === null ? null : notTargetTestableSentence(graph, filtered);
   const { target_not_testable: _sizingAsk, ...withoutTarget } = view;
-  return readinessSentence({ ...withoutTarget, ...(targetWords === null ? {} : { target_not_testable: targetWords }) });
+  return say({ ...withoutTarget, ...(targetWords === null ? {} : { target_not_testable: targetWords }) });
 }
 
 /**
@@ -2822,6 +2826,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           if (typeof store.readStatedObjectionFactsFor !== 'function') throw new Error('stated_objections_reader_unavailable');
           return projectStatedObjections(await store.readStatedObjectionFactsFor(sid, STATED_OBJECTION_FACT_ROWS_READ, STATED_OBJECTIONS_CAP));
         },
+        // B restated goal: the committed turn ledger, read only to offer or apply a revised draft (`draft-replacement.ts`).
+        // A store without the read leaves it absent, which the gate treats as unknown: no revised draft is offered.
+        ...(typeof store.readCommittedTurnLedger === 'function'
+          ? { readCommittedTurnLedger: (sid: string) => store.readCommittedTurnLedger!(sid) }
+          : {}),
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid, { validation: 'strict' }) }
@@ -2902,7 +2911,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const durable = historyFromDurableTurns(durableSeedRows);
         if (durable.length > 0) {
           // Seeding reuses already-saved rows and held history; it is not an effect of this turn.
-          histories.set(sessionId, [...durable, ...held]);
+          histories.seed(sessionId, durable, held, durableSeedRows);
         }
         earlierWordsKnown = true;
       } catch (err) {
@@ -3022,18 +3031,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
       }
     };
-    let preReplySelection: { wire: GuidanceWire | undefined } | undefined;
+    let preReplySelection: TurnGuidanceSelection | undefined;
     let eligibleIntervention: EligibleIntervention | undefined;
     // Converse and Explain carry the same selection from the same canonical read.
     const interventionForModel = async (read: Awaited<ReturnType<typeof readBackState>>, request: ReturnType<typeof guidanceRequestOf>) => {
       await readTurnGuidanceHistory();
-      preReplySelection = { wire: selectTurnGuidance({
+      preReplySelection = selectTurnGuidanceShown({
         request,
         offeredSpecific: executableWaitingProposalIds(scenarioId, userId, read.graphHash, read.graph).map(id => ({ id: approvalChipIdFor(id) })),
         licence: leaderLicenceFromState(read.analysisState, read.analysisReady), guidance: guidanceHistory,
         runKey: runExplanationChip(scenarioId, read)?.id.slice(RUN_EXPLANATION_PREFIX.length),
         state: read,
-      }) };
+      });
       eligibleIntervention = eligibleInterventionFor(preReplySelection.wire);
       return eligibleIntervention === undefined ? {} : { eligible_intervention: eligibleIntervention };
     };
@@ -4671,6 +4680,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // GOAL-REACH 3b: the arithmetic dedupe is for the legacy copy only; a carried reason (Science §(g)) is always said.
     const goalLine = fa?.ran === true && fastPath !== 'run'
       && (!targetStatedByArithmetic || thresholdReasonLine(readbackGraph, analysisResult) !== null) ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
+    // ⭐ EBD (DL, 12 Oct): EACH ASK ONCE PER REPLY. What the reply says before the status line (the Agent's words, then the owed
+    // lines: the first analysis's blocked line is readiness's own ask). The build line and the readiness line below never
+    // restate a question in it, and the questions toggle list leaves it out. Paul's first reply said the deadline ask three times.
+    const saidBeforeStatus = [text, ...owed].join('\n');
     // ⭐ S5t-W (e7 #87 6011176086): an approval's text is the capability's OWN receipt (server-authored, already through
     // `withoutAgentDirections` above), never model prose, so the completion-claim stripper — which exists for the model's
     // words — never runs over it. It dropped "Recorded your figure … as you confirmed: "…" Olumi rescaled ‘…’ so your
@@ -4683,7 +4696,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               // A specific partial follow-up is already the narrator's authoritative status.
               text: result.tool_results.some(r => r.mutated === true && r.applied === false
                 && typeof r.outcome === 'string' && r.follow_up === text) ? '' : text })
-        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null }, exactlyOneCardWaits);
+        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null, alreadySaid: saidBeforeStatus }, exactlyOneCardWaits);
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.
@@ -4691,8 +4704,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
     // An authorised revision says what it did to the result on screen, from this turn's typed readback (R&C 5842738466).
     const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
+    // EBD: when the first analysis's blocked line already said the analysis could not run, an all-said readiness line is dropped.
+    const firstAnalysisRefusalSaid = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
+      && firstAnalysisSaid !== null && owed.includes(firstAnalysisSaid);
     const postWriteReadiness = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady,
-      guidedActions.length > 0 ? guidedDraft : undefined) : null;
+      guidedActions.length > 0 ? guidedDraft : undefined, { text: saidBeforeStatus, refusalSaid: firstAnalysisRefusalSaid }) : null;
     const askLine = wroteThisTurn ? postWriteAskLine(readbackGraph, analysisReady) : null;
     // "Run it again" already says a run is permitted; the readiness sentence would repeat it. And on the build turn whose
     // automatic first pass already RAN, "The analysis can run now" sits beside that result with no Run chip (the route
@@ -5245,7 +5261,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult,
         text: reply,
         // A host-only answer did not consume the carrier and keeps its existing bytes.
-        ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label }),
+        ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label,
+          interventionWhySaid: preReplySelection?.whySaid === true }),
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
         ...(widenReceipt === null ? {} : { widenedLine: widenReceipt }),
@@ -5638,7 +5655,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ AX2: the reply shows two of the build's open questions; the whole list, in the producer's order, is here.
         ...(() => {
           const at = result.tool_calls.findIndex((c) => c.name === 'build_model_from_brief');
-          const qs = at >= 0 ? openQuestionsForReply(result.tool_results[at] as Parameters<typeof openQuestionsForReply>[0]) : [];
+          // EBD (DL, 12 Oct): a question the reply already said before its status line is not restated in the toggle list.
+          const qs = (at >= 0 ? openQuestionsForReply(result.tool_results[at] as Parameters<typeof openQuestionsForReply>[0]) : [])
+            .filter((q) => !saidBeforeStatus.includes(q));
           return qs.length > 0 ? { open_questions: qs } : {};
         })(),
         /**

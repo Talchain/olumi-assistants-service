@@ -1,7 +1,7 @@
 import { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
 export { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
 import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
-import { shareOptionEstimateWords } from '../goal-target/share-by-date-run.js';
+import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareOptionEstimateWords } from '../goal-target/share-by-date-run.js';
 /**
  * ⭐ S4c (Wave B4/B5, 7 Oct): THE SCREEN'S CHANCE LINES ARE SAID BY OLUMI.
  *
@@ -134,14 +134,19 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
       const words = stated.deliverable !== undefined && stated.by_date !== undefined
         ? shareGoalChanceWords(stated.deliverable, stated.by_date)
         : `chance of meeting your goal${stated.by_date === undefined ? '' : ` by ${sayDate(stated.by_date)}`}`;
-      const estimates = shareOptionEstimateWords(graph, id);
+      // EBD E2 (AIE 6122738619): a range Olumi assumed from the user's single forecast is said in its own sentence, never as "your".
+      const assumed = olumiAssumedTeamRange(graph);
+      const estimates = shareOptionEstimateWords(graph, id, { withoutTeam: assumed !== null });
       const tail = `in this model${estimates === '' ? '' : `, ${estimates}`}`;
       const extremeEndpoints = d.range === 'between less than 1% and more than 99%'
         && stated.slow_time !== undefined && stated.fast_time !== undefined;
       return [{ option_id: id, label, figure: d.range,
         chance: extremeEndpoints
           ? `${prefix}less than 1% ${words} if it takes ${stated.slow_time}, and more than 99% if it takes ${stated.fast_time}, ${tail}.`
-          : `${prefix}${d.range} ${words}, ${tail}, from the slow end of your ${stated.estimate} to the fast end.`,
+            + (assumed !== null ? ` ${olumiAssumedRangeLine(assumed)}` : '')
+          : assumed !== null
+            ? `${prefix}${d.range} ${words}, ${tail}, from the slow end of the range to the fast end. ${olumiAssumedRangeLine(assumed)}`
+            : `${prefix}${d.range} ${words}, ${tail}, from the slow end of your ${stated.estimate} to the fast end.`,
         depends: '' }];
     }
     const lead = d.depends_on.among === 'unsized_links' ? 'Of the links not sized yet, it depends most on' : 'It depends most on';

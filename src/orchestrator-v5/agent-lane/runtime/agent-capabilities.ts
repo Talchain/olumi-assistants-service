@@ -2,8 +2,10 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
+import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
+  planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
 /**
@@ -163,6 +165,11 @@ const NOT_A_FACTOR_NOTE =
   'NOT in this proposal. Tell the user plainly, before they approve, that each was left out and why; describe its ' +
   'effect through the factors it acts on instead. Never present the starting point as complete while any is listed here.';
 
+/** E5: the hiring-times op (its union member and `record.ts` entry are EBD's one-writer edits to `proposal.ts`; DL, 12 Oct). */
+const SET_HIRING_TIMES: StructuredProposal['operations'][number]['op'] = 'set_hiring_times';
+/** E5: the applied hiring-times card's follow-up (DL ACK of SYS1-E5-STRINGS §3 pending). */
+const HIRING_TIMES_APPLIED = "These hiring assumptions are saved, with your inputs and Olumi's estimates distinguished. Run the analysis so it uses them; do not state a chance before it returns.";
+
 /** The approval-facing disclosure of what was left out (empty when nothing was). */
 function leftOutClause(notAFactor: readonly { label: string; kind: string }[]): string {
   if (notAFactor.length === 0) return '';
@@ -215,7 +222,7 @@ import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 import { preconditionRiskIds } from '../../../graph/inert-risk.js';
-import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
+import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, isStatedLevelRange, levelRangePointBasis, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_QUOTE_MAX, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
@@ -239,7 +246,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -252,8 +259,8 @@ import { meetsLimit } from '../limit-operator-words.js';
 import { levelLimitNodeDecision, thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
 import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participation-guard.js';
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
-import { goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
-import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
+import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
+import { lastWeekdayNamedIn, readStatedDeadline, readStatedWeekdayDate, sayDate, sayDeadlineFromToday, todayInLondon, weekdayDatedIn, type Weekday } from '../../goal-target/deadline-date.js';
 import { draftReferenceDate } from '../../goal-target/draft-reference.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
@@ -264,6 +271,11 @@ import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysi
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
+import { goalTargetBasisOf } from '../../goal-target/goal-target-basis.js';
+import { runPreparingDraftReplacement } from './draft-replacement-context.js';
+import { canonicalLabel } from '../model-primitives.js';
+import { approvedGraphHeld, humanMaterialAfterTheDraft, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, writesBesidesTheConstruction } from './draft-replacement.js';
+import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
@@ -280,7 +292,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
-import { heldFigureOwnerOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { heldFigureOwnerOf, provenanceOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
@@ -1341,6 +1353,22 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             ...(Object.keys(valueProvenance).length === 0
               ? {}
               : { value_provenance: valueProvenance }),
+            // ⭐ Recovery Batch B, Row5 (DL 12 Oct): the range stated for this level, as stored (`observed_state.range`), with
+            // its author, so the Agent can say "you gave 10–30" or "a supplier's 10–30 (unverified)". The user's own range
+            // sits beside their figure; a third party's is quoted, role unverified. `point` says which figure sits beside it:
+            // the user's own, or Olumi's midpoint of that range (`levelRangePointBasis`), never the user's figure.
+            ...((): Record<string, unknown> => {
+              const r = os.range as { low?: unknown; high?: unknown; source?: unknown; source_quote?: unknown } | undefined;
+              // The author, asked of the one provenance authority (C): the user's own range (L6) is attested; a type-less brief
+              // stamp is the person's by its stamp alone, a third party's figure the brief quotes (Row5); anything else, none.
+              const author = r === undefined ? undefined : provenanceOf({ value: r });
+              if (r === undefined || !num(r.low) || !num(r.high) || author?.origin !== 'human') return {};
+              const users = author.stampOnly !== true;
+              const point = levelRangePointBasis(os);
+              return { stated_range: { low: r.low, high: r.high, stated_by: users ? 'user' : 'third_party_unverified',
+                ...(!users && str(r.source_quote) ? { quote: r.source_quote } : {}),
+                ...(point === 'stated_figure' ? { point: 'user_figure' } : point === 'midpoint' ? { point: 'olumi_midpoint' } : {}) } };
+            })(),
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
             ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
             ...(n.kind === 'option' && (n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded')
@@ -1495,9 +1523,12 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       ...(str(e.origin) ? { origin: e.origin } : {}),
     };
   });
+  // ⭐ E5: each option's start times and pace as the model holds them, with whose each figure is (`hiring-times.ts`).
+  const hiringTimes = goals.length === 1 && isEventShareForecast(g.raw) ? hiringTimesSummaryOf(g.raw, goals[0]!.id) : [];
   return {
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
+    ...(hiringTimes.length === 0 ? {} : { hiring_times: { use: HIRING_TIMES_USE, options: hiringTimes } }),
     links,
     ...(leftOut.length === 0 ? {} : { left_out_of_run: leftOut }),
     readiness: readinessViewOf(g.raw),
@@ -1911,6 +1942,25 @@ type Resolution =
   | { readonly kind: 'other'; readonly node: GraphRead['nodes'][number] }
   | { readonly kind: 'none' };
 
+/**
+ * DL ruling 12 Oct (Paul's test: never a dead end) and AIE 6128697025 (row 10): the canvas step, the canvas edit of the goal to
+ * the targets the user gave, is said ONLY when every target's quantity is already on the canvas. Otherwise this route cannot
+ * add the missing quantities or conditions without replacing the saved work: the AIE's words, verbatim, then what is missing,
+ * named from the actual request. The revised-draft card is not offered in its place: it could not truthfully say the user's
+ * work survives (its edits are not carried, and a guest has no earlier version to go back to).
+ */
+export function draftGateDetail(found: readonly string[], stage: 'offered' | 'replaced',
+  targets: readonly { readonly words: string; readonly onCanvas: boolean }[]): string {
+  if (targets.length > 0 && targets.every((t) => t.onCanvas)) {
+    return `Olumi found ${found.join('; ')}, so a revised draft was not ${stage}: replacing the draft could discard your work, `
+      + 'and nothing was changed. Tell the user that plainly, that their goal is not yet in the model, and give the one step that '
+      + `works today: edit the goal on the canvas to ${targets.map((t) => t.words).join(' and ')}. Never rebuild part of it.`;
+  }
+  const missing = targets.filter((t) => !t.onCanvas).map((t) => t.words);
+  return 'This goal change was not applied. The model needs quantities or conditions it does not yet hold, and this route cannot '
+    + `add them without replacing your saved work.${missing.length > 0 ? ` Missing: ${missing.join(' and ')}.` : ''}`;
+}
+
 function resolveNamed(
   g: Pick<GraphRead, 'nodes'>,
   requested: string,
@@ -1943,6 +1993,21 @@ function resolveLinkEffectEnds(g: GraphRead, ctx: AgentToolContext, fromName: st
 type AmbiguousTarget = { readonly requested: string; readonly candidates: readonly Record<string, unknown>[] };
 
 /** One ambiguous request, with what tells its candidates apart — the SAME projection as every other tool. */
+/**
+ * Recovery Batch B (SYS3 TRACE L6): the ONE sentence of the user's own words that states BOTH ends of a range ("currently
+ * they spend between 20% and 30% of their time on non-development tasks …"), whole and trimmed, or `null`. Sentences end
+ * where `quoteOfFigure`'s do (. ! ? before a space, or a new line); each end must be a figure `quoteOfFigure` finds in
+ * that sentence, in the figure's unit. Longer than a hold quote may be: `null` (asked, never cut).
+ */
+function sentenceStatingBoth(low: number, high: number, unit: string, userText: string): string | null {
+  for (const raw of userText.split(/(?<=[.!?])(?=\s)|\n/)) {
+    const sentence = raw.trim();
+    if (sentence === '' || sentence.length > USER_TODAY_QUOTE_MAX) continue;
+    if (quoteOfFigure(low, unit, sentence) !== null && quoteOfFigure(high, unit, sentence) !== null) return sentence;
+  }
+  return null;
+}
+
 function describeAmbiguity(g: Pick<GraphRead, 'nodes' | 'edges'>, requested: string, candidates: GraphRead['nodes']): AmbiguousTarget {
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label]));
   return {
@@ -2176,6 +2241,8 @@ export function createAgentCapabilities(
      * finding wins, at most 3, verbatim). Absent or throwing ⇒ none; the canonical state is then byte-identical to before.
      */
     readonly readStatedObjections?: (scenarioId: string, requestId: string) => Promise<readonly StatedObjection[]>;
+    /** B restated goal: the scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`), read only to offer or apply a revised draft. */
+    readonly readCommittedTurnLedger?: (scenarioId: string) => Promise<CommittedTurnLedger>;
     /**
      * ⭐ ONE approved batch of option levels — each with the option → factor link it needs — as ONE atomic commit
      * (ChatGPT #70 5847200462): the product's own level writer, reached in-process (`commitOptionLevelsInProcess`).
@@ -3339,6 +3406,263 @@ export function createAgentCapabilities(
       ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
   };
 
+  /**
+   * ⭐ E5: the pressed hiring-times card. It stands while its own fields do (`hiringTimesStillApply`: the parts it was
+   * offered against, unchanged, under the same deadline); the postimage is built from THIS read and registered whole with
+   * compare-and-set on both of this read's hashes, under an operation id of that base and this card (a retry replays; a
+   * conflict writes nothing). Set only when the stored model holds every planned start, figure and link strength.
+   */
+  const applyHiringTimes = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const pid = parent.proposal_id, a = parent.operations[0]!.value as ApprovedHiringTimes;
+    const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
+    if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'These hiring timings are set only by pressing their own card, so nothing was changed.');
+    if (hiringTimesHeld(before.raw, a)) {
+      proposals.markApplied(pid, []);
+      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: HIRING_TIMES_APPLIED };
+    }
+    if (!hiringTimesStillApply(a, before.raw)) {
+      return notApplied('superseded', 'The hiring timings in the model changed after this card was offered, so nothing was set. Offer it again only if it still applies.');
+    }
+    const postimage = withHiringTimes(before.raw, a) as Record<string, unknown>;
+    const operationId = constructionOperationId(ctx.scenario_id, `hiring_times:${before.graph_identity_hash}:${pid}`);
+    const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+      graph: { ...postimage },
+      expected_graph_hash: before.graph_hash, expected_graph_identity_hash: before.graph_identity_hash, operation_id: operationId,
+    });
+    const code = reg.status === 200 ? '' : String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+    if (/STALE/.test(code)) {
+      return notApplied('superseded', 'The model changed just before the hiring timings were written, so nothing was set. Offer it again only if it still applies.');
+    }
+    // ⛔ CONFIRMED FROM STATE — also after an ambiguous failure, which does NOT prove no save (AIE 6122431786 §4): every option
+    // holds exactly its planned starts, figures and recomputed link strengths, or the outcome is unknown, never "not set".
+    const after = await readGraph(ctx.scenario_id);
+    if (after === null || !hiringTimesHeld(after.raw, a)) {
+      return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+        detail: 'The hiring timings were sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+          + 'offer to check the model again, and never say they were set or that they were not.' };
+    }
+    const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+    const receipts: ReceiptSummary[] = mv !== undefined && mv !== null && typeof mv.version_id === 'string'
+      ? [{ version: Number(mv.version_number), version_id: mv.version_id, mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '',
+        source_turn_id: registrationTurnId(ctx.scenario_id, operationId) }]
+      : [];
+    proposals.markApplied(pid, receipts);
+    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts, follow_up: HIRING_TIMES_APPLIED };
+  };
+
+  /**
+   * ⭐ B RESTATED GOAL (`draft-replacement.ts`; DL ruling (B), PL 6116779075, AIE 0244): the three gates over ONE read, at
+   * the offer and again at the approval. `allowed` = the message turns the offer already bound (none at the offer; the
+   * typed goal's turn at the approval). What was found, in plain words; empty = an unreviewed draft whose only human
+   * material is the brief's own. A record that cannot be read is listed too: unknown authority never permits replacement.
+   */
+  const unreviewedDraftGate = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, allowed: readonly string[],
+  ): Promise<string[]> => {
+    const brief = typeof g.brief_text === 'string' ? g.brief_text.trim() : '';
+    if (brief === '') return ['no saved brief that this draft was built from'];
+    const found = humanMaterialAfterTheDraft(g.raw);
+    try {
+      if (opts.readCommittedTurnLedger === undefined) throw new Error('turn_ledger_unavailable');
+      const ledger = await opts.readCommittedTurnLedger(ctx.scenario_id);
+      found.push(...writesBesidesTheConstruction(ledger, ctx.scenario_id, brief), ...messagesBesidesTheBrief(ledger, brief, allowed, ctx.turn_id));
+    } catch {
+      found.push('a saved history that could not be read');
+    }
+    try {
+      if (opts.readStatedObjections === undefined) throw new Error('stated_objections_reader_unavailable');
+      const objections = await opts.readStatedObjections(ctx.scenario_id, ctx.request_id);
+      if (objections.length > 0) found.push(`${objections.length} objection${objections.length === 1 ? '' : 's'} you recorded`);
+    } catch {
+      found.push('recorded objections that could not be read');
+    }
+    return found;
+  };
+  const DRAFT_GATE_REFUSAL = 'draft_holds_your_work';
+  const TARGET_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>': 'above', '>=': 'at least', '<': 'below', '<=': 'at most' };
+  /** The targets in the user's terms: ‘Quantity’ at least 20 (one target, or several joined by "and"). */
+  const targetsInWords = (raw: unknown, targets: readonly { node_id: string; comparator: string; value: number; unit: string }[]): string =>
+    targets.map((t) => {
+      const n = ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []).find((x) => x?.id === t.node_id);
+      return `\u2018${typeof n?.label === 'string' ? n.label : t.node_id}\u2019 ${TARGET_COMPARATOR_WORDS[t.comparator] ?? t.comparator} ${targetFigure(t.value, t.unit)}`;
+    }).join(' and ');
+
+  /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
+  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> }
+    | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
+  const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
+
+  /**
+   * Prepare the revised draft with C's own construction from the stored brief and THIS turn's typed goal
+   * (`runPreparingDraftReplacement`: nothing is written), check it keeps every limit the draft holds, and offer it as
+   * ONE card whose words are the candidate's own: what replaces the goal, what is kept, and what is not carried.
+   */
+  const prepareRevisedDraft = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
+  ): Promise<RevisedDraft> => {
+    const notOffered = (refusal: string, detail: string): RevisedDraft => ({ refused: { ok: false, mutated: false, refusal, detail } });
+    const found = await unreviewedDraftGate(ctx, g, []);
+    if (found.length > 0) return { refused: { ok: false, mutated: false, refusal: DRAFT_GATE_REFUSAL, detail: '' }, found };
+    const typedGoal = (ctx.user_turn_text ?? '').trim();
+    if (callStructured === undefined || ctx.turn_id === undefined || g.graph_identity_hash === '' || typedGoal === '') {
+      return notOffered('revised_draft_unavailable', 'A revised draft cannot be prepared here, so nothing was offered and the model is unchanged. Tell the user plainly that their goal is not yet in the model.');
+    }
+    const sid = ctx.scenario_id;
+    const input = revisedDraftBrief(g.brief_text as string, typedGoal);
+    let out: ToolResult;
+    try {
+      out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
+        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, callStructured)));
+    } catch {
+      out = { ok: false, mutated: false };
+    }
+    const candidate = (out as { prepared_graph?: unknown }).prepared_graph as Record<string, unknown> | undefined;
+    if (out.ok !== true || out.mutated !== false || candidate === undefined || candidate === null || typeof candidate !== 'object') {
+      return notOffered('revised_draft_not_prepared', 'Olumi could not prepare a revised draft, so nothing was offered and the model is unchanged. Tell the user plainly that their goal is not yet in the model.');
+    }
+    const labelIn = (raw: unknown, id: string): string => {
+      const n = ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []).find((x) => x?.id === id);
+      return typeof n?.label === 'string' ? n.label : id;
+    };
+    const limits = limitsKeptBy(g.raw, candidate);
+    const sayRow = (raw: unknown, r: { node_id: string; operator: string; value: number; unit: string }): string =>
+      `\u2018${labelIn(raw, r.node_id)}\u2019 ${TARGET_COMPARATOR_WORDS[r.operator] ?? r.operator} ${targetFigure(r.value, r.unit)}`;
+    if (limits.dropped.length > 0) {
+      return notOffered('revised_draft_dropped_a_limit', `The revised draft did not keep ${limits.dropped.map((r) => sayRow(g.raw, r)).join(' and ')}, `
+        + 'so it was not offered and the model is unchanged. Tell the user plainly; never offer a draft that loses their limit.');
+    }
+    const held = targetsHeldBy(candidate);
+    if (held.length === 0) {
+      return notOffered('revised_draft_has_no_target', 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
+    }
+    const nodesOf = (raw: unknown) => ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []);
+    const basis = goalTargetBasisOf(nodesOf(candidate).find((n) => n?.kind === 'goal'));
+    const period = basis === undefined ? '' : basis.period_kind === 'over_period'
+      ? ` over the first ${basis.period_months} month${basis.period_months === 1 ? '' : 's'}${basis.reference === 'launch' ? ' after launch' : ''}`
+      : ` at month ${basis.period_months}${basis.reference === 'launch' ? ' after launch' : ''}`;
+    const options = nodesOf(candidate).filter((n) => n?.kind === 'option' && typeof n.label === 'string').map((n) => `\u2018${n.label as string}\u2019`);
+    const card = `Replace the early draft with a revised one built from your brief and the goal you just gave: `
+      + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
+      + (limits.kept.length > 0 ? `Kept from your brief: ${limits.kept.map((r) => sayRow(g.raw, r)).join('; ')}. ` : '')
+      + (options.length > 0 ? `Options: ${options.join(', ')}. ` : '')
+      + 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.';
+    const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
+    const proposal = createProposal({
+      scenario_id: sid,
+      user_id: ctx.authenticated_user_id,
+      base_graph_identity_hash: g.graph_hash,
+      operations: [{ op: 'replace_draft', path: sid, value: {
+        candidate, candidate_hash: candidateHash, base_identity: g.graph_identity_hash, brief_text: g.brief_text,
+        goal_turn_id: ctx.turn_id, typed_goal: typedGoal,
+        operation_id: constructionOperationId(sid, `replace_draft:${g.graph_identity_hash}:${candidateHash}`),
+      } }],
+      provenance: { authored_by: 'model_proposed', basis: 'A revised draft prepared from the stored brief and the goal the user typed; only its own card replaces the draft.' },
+      validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: card,
+    });
+    proposals.put(proposal);
+    return { proposal, held };
+  };
+
+  /** This target call's answer from the turn's one revised draft: the same card, or why this target is not in it. */
+  const offerRevisedDraft = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
+    target: { measures: string; value: number; unit: string; comparator: string },
+  ): Promise<ToolResult> => {
+    const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}`;
+    let pending = revisedDrafts.get(key);
+    if (pending === undefined) {
+      pending = prepareRevisedDraft(ctx, g, goal);
+      revisedDrafts.set(key, pending);
+    }
+    const draft = await pending;
+    if ('refused' in draft) {
+      return draft.found === undefined ? draft.refused : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered', [{
+        words: `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`,
+        onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
+    }
+    // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
+    const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
+      && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
+    return {
+      ok: true, mutated: false,
+      proposal_id: draft.proposal.proposal_id,
+      public_label: draft.proposal.public_label,
+      base_revision: g.graph_hash,
+      revised_draft: { replaces_goal: goal.label, holds_this_target: holds },
+      note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
+        + 'targets, limits, options and what is redrafted; do not repeat the full card or show its id. '
+        + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
+        + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
+    };
+  };
+
+  /**
+   * Apply the pressed revised-draft card: the same three gates again, then the candidate's exact bytes through
+   * `/graph/register` with compare-and-set on the identity it was prepared against, under an operation id of that base
+   * and those bytes (a retry replays; a conflict writes nothing). Confirmed from state, never from the write's return.
+   */
+  const applyReplaceDraft = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const pid = parent.proposal_id;
+    const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
+      goal_turn_id?: unknown; operation_id?: unknown };
+    const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
+    if (ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
+      || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
+      return notApplied('not_applied', 'This revised draft is replaced only by pressing its own card, so nothing was changed.');
+    }
+    if (before.graph_identity_hash !== v.base_identity) {
+      return notApplied('superseded', 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
+    }
+    const found = await unreviewedDraftGate(ctx, before, [v.goal_turn_id]);
+    if (found.length > 0) {
+      const label = (id: string): string => String((((v.candidate as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? [])
+        .find((n) => n?.id === id)?.label ?? id);
+      return notApplied(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'replaced', targetsHeldBy(v.candidate).map((t) => ({
+        words: targetsInWords(v.candidate, [t]), onCanvas: resolveNamed(before, label(t.node_id), () => true).kind !== 'none' }))));
+    }
+    // The WHOLE approved graph (every top-level member the candidate carries: options, goal_constraints and all), CAS-gated
+    // on both of the base's hashes, like the sibling registers (`frame-write-is-cas-gated.test.ts`).
+    const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+      graph: { ...(v.candidate as Record<string, unknown>) },
+      expected_graph_hash: before.graph_hash,
+      expected_graph_identity_hash: v.base_identity,
+      operation_id: v.operation_id,
+    });
+    /**
+     * ⛔ CONFIRMED FROM STATE, THE WHOLE GRAPH (AIE 0452 AMEND 3): the read-back's canonical identity must be the identity the
+     * registration acknowledged for the bytes it stored from this exact candidate (`graph_identity_hash`, "the server has the
+     * graph, and this token names it"). Any other postimage (another writer's change to a link, a value, an option) is
+     * UNCONFIRMED: no replacement receipt. Then the targets and every limit the draft held, by quantity.
+     */
+    const acknowledged = identityHashOf(reg.json.graph_identity_hash);
+    const after = await readGraph(ctx.scenario_id);
+    const heldTargets = targetsHeldBy(after?.raw);
+    // …and the acknowledged graph IS the approved candidate, whole (AIE B34): every component it carries held unchanged.
+    const landed = after !== null && acknowledged !== '' && after.graph_identity_hash === acknowledged
+      && approvedGraphHeld(v.candidate, after.raw)
+      && limitsKeptBy(before.raw, after.raw).dropped.length === 0
+      && targetsHeldBy(v.candidate).every((t) => heldTargets.some((h) => h.node_id === t.node_id && h.comparator === t.comparator && h.value === t.value && h.unit === t.unit));
+    if (!landed) {
+      return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+        detail: 'The revised draft was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+          + 'offer to check the model again, and never say it was replaced or that it was not.' };
+    }
+    // The receipt as the construction's and the goal level's registrations read it (guests get none: no versions).
+    const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+    const receipts: ReceiptSummary[] = mv !== undefined && mv !== null && typeof mv.version_id === 'string'
+      ? [{ version: Number(mv.version_number), version_id: mv.version_id, mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '',
+        source_turn_id: registrationTurnId(ctx.scenario_id, v.operation_id) }]
+      : [];
+    proposals.markApplied(pid, receipts);
+    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
+      follow_up: 'Your model is now the revised draft, with your goal as its targets and your limits kept. The earlier analysis was of the old draft; run the analysis again.' };
+  };
+
   /** Consume the exact held card through the approved batch, then read back through the door's verdict on its committed bytes. */
   const applyGoalSteady = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
@@ -3706,13 +4030,30 @@ export function createAgentCapabilities(
     }
   };
 
-  const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown }, g: GraphRead, words: string, reference: string | undefined): Promise<ToolResult> => {
+  const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown }, g: GraphRead, words: string, reference: string | undefined,
+    dating?: { readonly turnText: string; readonly required?: Weekday }): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
-      const stated = readStatedDeadline(words, reference ?? todayInLondon((opts.now ?? (() => new Date()))()));
+      const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
+      // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
+      // accepted only when that date IS that weekday. With no recorded reference day, "last <weekday>" is never counted back.
+      const datedWeekday = dating === undefined ? null : readStatedWeekdayDate(dating.turnText, today);
+      const named = lastWeekdayNamedIn(words);
+      const stated = dating?.required !== undefined && datedWeekday?.weekday !== dating.required ? null
+        : readStatedDeadline(words, today, { ...(datedWeekday !== null ? { lastWeekday: datedWeekday } : {}), relativeWeekdays: reference !== undefined });
       if (stated === null) {
+        const deadlineAsk = chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
+          ?? (g.nodes.filter((n) => n.kind === 'goal').length === 1 ? g.nodes.find((n) => n.kind === 'goal')!.label : 'your goal'));
         return { ok: false, mutated: false, refusal: 'deadline_not_placed',
-          detail: `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
-            + 'Ask the user which date they mean, and never offer a date of your own.' };
+          ...(named !== null ? {} : { deadline_ask: deadlineAsk }),
+          detail: named !== null
+            ? `Olumi cannot tell which date "last ${named}" in "${words}" is without guessing, so nothing was prepared. `
+              + 'Ask which date the user means. Once they explicitly date that weekday, call propose_goal_deadline with the original deadline_words. '
+              + 'Never invent or offer a start date.'
+            // EBD E3 (Paul, 12 Oct: refused twice, then "Can you not work that out?"; AIE 6122738619, verbatim): re-read what the
+            // user said first, then at most the ONE question in `deadline_ask`, never a restatement of a date already held.
+            : 'No deadline change was prepared because the quoted words do not resolve to a calendar date against the recorded reference date. '
+              + "Re-read the user's deadline words and recorded reference first. If they still do not identify a date, ask the one question in deadline_ask, "
+              + 'then call propose_goal_deadline with their answer. Do not ask them to restate a date already resolved and held.' };
       }
       const goals = g.nodes.filter((n) => n.kind === 'goal');
       if (goals.length !== 1) {
@@ -4724,7 +5065,15 @@ export function createAgentCapabilities(
        * exactly base × multiplier. No word list reads the user's wording (DL: a free-text door is banned).
        */
       const derivedArg = (args as { derived_from?: { base?: unknown; multiplier?: unknown } }).derived_from;
-      const derived = derivedArg === undefined || derivedArg === null ? null
+      /**
+       * ⛔ AN EMPTY OR IDENTITY DERIVATION IS NO DERIVATION (marketing L20, served 11 Oct 22:29Z and A′: 4 of 4 calls
+       * refused `unreadable_derivation`; DL, 12 Oct). `{}`, a null base and multiplier, or a multiple of 1 derives nothing,
+       * so the figure itself must be one the user wrote (the check below). Any other derivation keeps every check.
+       */
+      const noDerivation = derivedArg === undefined || derivedArg === null
+        || (typeof derivedArg === 'object' && !Array.isArray(derivedArg)
+          && (((derivedArg.base ?? null) === null && (derivedArg.multiplier ?? null) === null) || derivedArg.multiplier === 1));
+      const derived = noDerivation ? null
         : typeof derivedArg.base === 'number' && Number.isFinite(derivedArg.base) && typeof derivedArg.multiplier === 'number'
           && Number.isFinite(derivedArg.multiplier) && derivedArg.multiplier > 0 && derivedArg.multiplier !== 1
           ? { base: derivedArg.base, multiplier: derivedArg.multiplier } : undefined;
@@ -4748,7 +5097,11 @@ export function createAgentCapabilities(
        * primary when the words are silent, asked, denied or both ways ("double that", "our target is £200k"); the other
        * direction is the alternative button, and the user's click is the authorship. No word list over the user's wording.
        */
-      const said = comparatorTheUserWrote(ctx.user_turn_text);
+      // The comparator the user wrote FOR THIS figure (`comparatorTheUserWroteFor`): with two targets in one turn ("over 15%
+      // and secure 20 new customers"), the whole turn's "over" is not 20's. The whole turn is read only when it holds at
+      // most one figure, where its comparator can belong to no other (a target derived from one figure: "double that").
+      const said = comparatorTheUserWroteFor(ctx.user_turn_text, derived?.base ?? value)
+        ?? (figuresWrittenIn(ctx.user_turn_text) <= 1 ? comparatorTheUserWrote(ctx.user_turn_text) : null);
       const type: TargetDirection = said ?? typed;
       const inclusiveType = inclusiveTargetDirection(type);
       const directionIsADecision = said === null || inclusiveType !== typed;
@@ -4763,6 +5116,17 @@ export function createAgentCapabilities(
             : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this target is for. Ask the user which goal they mean.` };
       }
       const goal = goals[0]!;
+      /**
+       * ⭐ B RESTATED GOAL (DL ruling (B); PL 6116779075; AIE 0244): a target for a quantity the draft does not contain
+       * (`measures` names no entity and is not the goal) cannot land as a row: Paul's marketing L20, "conversion rate of over
+       * 15% and secure 20 new customers", on a draft of "launch % complete". With the goal typed in THIS message, the answer
+       * is ONE revised-draft card when the draft is still unreviewed, else the gates' refusal; nothing changes either way.
+       */
+      const measures = typeof args.measures === 'string' ? args.measures.trim() : '';
+      if (measures !== '' && norm(measures) !== norm(goal.label) && resolveNamed(g, measures, () => true).kind === 'none'
+        && norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_turn_text)) {
+        return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type] });
+      }
       // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
       // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).
       if (isEventShareForecast(g.raw)) {
@@ -4909,8 +5273,9 @@ export function createAgentCapabilities(
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
         detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
+      const read = teamTimeReadDigest(g.raw);
       const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
-        reference_date: todayInLondon((opts.now ?? (() => new Date()))()) };
+        reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}) };
       if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
         detail: 'That deadline has passed. Type a future deadline and confirm it, then give the soonest and latest times with your current team.' };
       if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), g.raw)) {
@@ -4950,7 +5315,14 @@ export function createAgentCapabilities(
       const plainOf = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
       const phrase = plainOf(words).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const typed = typeof ctx.user_turn_text === 'string' ? plainOf(ctx.user_turn_text) : '';
-      if (typed === '' || !new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').test(typed)) {
+      const writes = (text: string): boolean => text !== '' && new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').test(text);
+      // ⭐ Recovery Batch B (Paul's marketing test, 11 Oct): "We have 6 months to launch our new features from last Friday" in one
+      // message, "Last Friday was the 9th of October." in the next. An EARLIER message's phrase is the user's deadline only when
+      // THIS message dates its "last <weekday>" — never otherwise (an earlier duration never stands in for today's: Codex r1).
+      const named = lastWeekdayNamedIn(words);
+      const datedNow = named !== null && weekdayDatedIn(typed) === named;
+      const fromEarlier = !writes(typed) && datedNow && writes(typeof ctx.user_text === 'string' ? plainOf(ctx.user_text) : '');
+      if (!writes(typed) && !fromEarlier) {
         return { ok: false, mutated: false, refusal: 'deadline_not_stated',
           detail: `"${words}" is not something the user wrote in this message, so nothing was prepared: it would be recorded as their deadline. Ask them for the date, in their own words.` };
       }
@@ -4963,7 +5335,80 @@ export function createAgentCapabilities(
           detail: deadlineRefusalDetail.reference_not_stated };
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
       const reference = draftReferenceDate({ ...(typeof asOf === 'string' ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
-      return proposePlacedDeadline(ctx, args, g, words, reference);
+      return proposePlacedDeadline(ctx, args, g, words, reference,
+        // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
+        datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined);
+    },
+
+    /**
+     * ⭐ E5 (Paul's manual test, 12 Oct): the hiring timings the user states, per option, on ONE card. Each start is the
+     * user's quote, from this message or an earlier one (E2's source-bound path), in a sentence naming that option; the months
+     * are read from the quote (`hiring-times.ts`), never from the model's arguments, and every figure keeps its role and
+     * origin. r2 (DL CUT): one refusal for every form Olumi cannot model as quoted. Nothing is written here.
+     */
+    async proposeHiringTimes(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const texts = { now: ctx.user_turn_text, conversation: ctx.user_text };
+      const refuse = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
+      const unusable = (): ToolResult => refuse('hiring_timings_unusable', 'Olumi could not use these hiring timings as quoted, so nothing was prepared. '
+        + 'Re-read the user\'s own words and quote each start exactly, in the order they happen. If Olumi still cannot use them, say plainly that '
+        + 'Olumi’s own hiring estimates stay in the model, labelled as Olumi’s, and ask once for each start as a number of months.');
+      const asked = Array.isArray(args?.options) ? args.options : [];
+      if (asked.length === 0) return unusable();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
+      const reference = todayInLondon((opts.now ?? (() => new Date()))());
+      if (part === null || deadline === undefined || reference >= deadline) {
+        return refuse('deadline_not_held', 'The deadline must be confirmed before these timings can be applied. Keep the supplied timings and prepare them once the deadline is confirmed.');
+      }
+      const goalId = String(part.goal.id), planned: PlannedOption[] = [];
+      for (const o of asked) {
+        const id = typeof o?.option_id === 'string' ? o.option_id : '';
+        const option = g.nodes.find(n => n.id === id && n.kind === 'option');
+        if (option === undefined) return refuse('unknown_option', `"${id}" is not an option in this model. Nothing was prepared.`);
+        const label = String(option.label);
+        if (planned.some(p => p.option_id === id)) return unusable();
+        const held = capacityPartsOf(g.raw, id, goalId), estimate = olumiEstimateOf(held);
+        if (held.length === 0 || estimate === null) return refuse('adds_no_people', `‘${label}’ adds no people in this model, so it has no start time. Nothing was prepared.`);
+        const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
+        const heldQuotes = heldStatementsOf(held);
+        for (const quote of quotes) {
+          if (heldQuotes.includes(quote)) continue;
+          const stated = quoteStatedFor(texts, quote, label);
+          if (stated === 'not_stated') return refuse('hiring_time_not_stated', `"${quote}" is not in the user's messages, so nothing was prepared. Copy the hiring time exactly from the user's own message and call again; do not ask the user to retype it.`);
+          if (stated === 'not_for_option') return refuse('hiring_time_not_for_option', `"${quote}" is not said about ‘${label}’ in the user's message, so nothing was prepared. Ask which option that time is for.`);
+        }
+        const plan = planStarts(quotes, estimate, held.length);
+        if (!('parts' in plan)) {
+          if (plan.refusal === 'too_many_starts') return refuse('too_many_starts', `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly, and ask once which two starts to use; until then Olumi’s own hiring estimate for ‘${label}’ stays in the model, labelled as Olumi’s.`);
+          if (plan.refusal === 'fewer_starts_than_held') {
+            return refuse('fewer_starts_than_held', heldQuotes.length === held.length
+              ? `This card replaces all ${held.length} hiring timings for ‘${label}’ together, so nothing was prepared. Retain the unchanged timings and their sources and prepare the complete card for the requested change. If a held timing cannot be verified, ask only about that missing input.`
+              : `This card replaces all ${held.length} hiring timings for ‘${label}’ together, and Olumi cannot yet keep a timing it estimated while another changes, so nothing was prepared. Say so plainly, and ask once for every start of ‘${label}’ together.`);
+          }
+          if (plan.refusal === 'relative_to_range') return refuse('relative_to_range', `"${plan.quote}" for ‘${label}’ ties this start to an earlier one given as a range, which Olumi cannot model yet, so nothing was prepared. Say so plainly, and ask once for that start's own time in months (for example “about 5 months”); until then Olumi’s own hiring estimate for ‘${label}’ stays in the model, labelled as Olumi’s.`);
+          return unusable();
+        }
+        planned.push({ option_id: id, label, part_ids: held.map(n => String(n.id)), expected: held.map(n => n.observed_state.extra_share_by_date),
+          olumi_estimate: estimate, parts: plan.parts, quotes });
+      }
+      const a: ApprovedHiringTimes = { goal_id: goalId, deadline, reference_date: reference, options: planned };
+      if (hiringTimesHeld(g.raw, a)) return refuse('already_held', 'Those hiring times are already in the model. Nothing was changed.');
+      // The postimage must hold exactly what the card says before it is offered, never only after the press.
+      if (!hiringTimesHeld(withHiringTimes(g.raw, a), a)) return unusable();
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_HIRING_TIMES, path: goalId, value: a }],
+        provenance: { authored_by: 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: hiringTimesCard(a, part.deliverable) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === SET_HIRING_TIMES)) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+        note: 'Nothing has changed yet. The hiring times are ready for review on ONE card. Tell the user what the card says, in its words; never the ids. '
+          + 'Call authorise_change only for the approval bound to this card; a typed ‘yes’ alone is not that approval.' };
     },
 
     async proposeModelChange(ctx, args): Promise<ToolResult> {
@@ -5295,9 +5740,11 @@ export function createAgentCapabilities(
       // Sorted by node id so an identical set proposed in a different order is
       // the SAME proposal, not a second one.
       const ordered = [...adopted].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
-      // A revision the user named AND wrote is theirs; anything else is Olumi's (`valueOpAuthor`). ONE predicate for
-      // what is stored and for what the Agent is told to say, so the words cannot drift from the authorship.
-      const usersOwn = (a: { replaces?: number; userWrote: boolean }): boolean => typeof a.replaces === 'number' && a.userWrote;
+      // A figure the user WROTE is theirs, a revision or a first value alike (DL ruling, X8: what the user stated is the
+      // user's; crediting only revisions stored a typed first figure as Olumi's assumption, a false attribution). Anything
+      // else is Olumi's (`valueOpAuthor`). ONE predicate for what is stored, what the card heads it as and what the Agent
+      // is told to say, so the words cannot drift from the authorship.
+      const usersOwn = (a: { userWrote: boolean }): boolean => a.userWrote;
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
@@ -5328,29 +5775,37 @@ export function createAgentCapabilities(
             : `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
           : `${a.label} = ${withUnit(a)}`;
       const kept = ordered.filter((a) => a.kept);
+      // A first value the user wrote is RECORDED as theirs, never offered as a starting assumption (`usersOwn`).
+      const freshYours = fresh.filter(usersOwn);
+      const freshOlumis = fresh.filter((a) => !usersOwn(a));
+      const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+      const acts = [
+        ...(revisions.length > 0 ? [`revise ${plural(revisions.length, 'value')}${fresh.length === 0 ? ' you asked to change' : ''}`] : []),
+        ...(freshYours.length > 0 ? [`record ${plural(freshYours.length, 'figure')} you gave`] : []),
+        ...(freshOlumis.length > 0 ? [`adopt ${plural(freshOlumis.length, 'starting assumption')}`] : []),
+      ];
+      const actsSaid = acts.length <= 1 ? (acts[0] ?? '') : `${acts.slice(0, -1).join(', ')} and ${acts[acts.length - 1]}`;
       const heading =
         kept.length > 0
           // The figure is unchanged and stays Olumi's; what the Yes records is the user's acceptance (AIQ words).
           ? `Accept Olumi\u2019s estimate${kept.length === 1 ? '' : 's'}, unchanged: `
-          : revisions.length === 0
-          ? `Adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `
-          : fresh.length === 0
-            ? `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} you asked to change: `
-            : `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} and adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `;
+          : `${actsSaid.charAt(0).toUpperCase()}${actsSaid.slice(1)}: `;
+      const allYours = kept.length === 0 && ordered.every(usersOwn);
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations,
         provenance: {
-          // A revision the user named is theirs, not the model's. Only a proposal
-          // made entirely of those may claim it.
-          authored_by: fresh.length === 0 && revisions.length > 0 && notWritten.length === 0 ? 'user_stated' : 'model_proposed',
+          // Figures the user wrote are theirs, not the model's. Only a proposal made entirely of those may claim it.
+          authored_by: allYours ? 'user_stated' : 'model_proposed',
           basis:
             kept.length > 0
               ? KEEP_PROPOSAL_BASIS
-              : revisions.length > 0 && fresh.length === 0 && notWritten.length === 0
+              : allYours && fresh.length === 0
               ? 'values the user asked to change, at the figures they gave'
+              : allYours
+              ? 'figures the user gave, recorded as theirs'
               : 'starting assumptions offered for the user to adopt or correct',
         },
         validation: { admitted: true, loss_count: 0, refusals: [] },
@@ -6038,6 +6493,11 @@ export function createAgentCapabilities(
         authenticated_user_id: ctx.authenticated_user_id,
         current_graph_identity_hash: before.graph_hash,
         typed_approval_of: ctx.typed_approval_of,
+        // EBD: a team-time card is stale only when what it read changed (hiring times landing never stale it).
+        // E5: likewise a hiring-times card, while its own parts, carriers and deadline stand (the team time landing never stales it).
+        scoped_precondition_holds: (p) => teamTimeReadHolds(p, before.raw)
+          || (p.operations.length === 1 && p.operations[0]!.op === SET_HIRING_TIMES
+            && hiringTimesStillApply(p.operations[0]!.value as ApprovedHiringTimes, before.raw)),
       });
       if (decision.status === 'already_applied') {
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so
@@ -6466,12 +6926,18 @@ export function createAgentCapabilities(
         const op = ops[0]!;
         const v = op.value as { operator: '<=' | '>='; raw_value: number; unit: string | null; constraint_id: string; before: number;
           /** A2 follow-up: the comparator the user stated when proposing it, if they stated one (`proposeLimitChange`). */
-          stated_operator?: '<' | '<=' | '>' | '>='; source_quote?: string; reserve?: NewLimitValue['reserve'] };
+          stated_operator?: '<' | '<=' | '>' | '>='; source_quote?: string; reserve?: NewLimitValue['reserve'];
+          /** B (3): the row is one of the goal's targets: the target's words, and the read-back must keep its role. */
+          role?: 'goal_target' };
+        const isTarget = v.role === 'goal_target';
+        // The approved one-target card's own words (`set_goal_target` above) for a target row; a limit's are unchanged.
+        const TARGET_UNCONFIRMED = 'The target was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+          + 'offer to check the model again, and never say it was set or that it was not.';
         const pid = decision.proposal.proposal_id;
         const approval = limitApprovalWords(ctx.typed_approval_words ?? ctx.user_turn_text ?? '');
         const useReserve = v.reserve !== undefined
           && (approval === limitApprovalWords(v.reserve.message) || approval === limitApprovalWords(v.reserve.label));
-        if (v.reserve !== undefined && !['yes', 'yes, change that limit'].includes(approval) && !useReserve) {
+        if (v.reserve !== undefined && !['yes', 'yes, change that limit', ...(v.role === 'goal_target' ? ['yes, set that target'] : [])].includes(approval) && !useReserve) {
           return { ok: false, mutated: false, refusal: 'approval_words_mismatch' };
         }
         const approvedValue = useReserve ? v.reserve!.alternative : v.raw_value;
@@ -6491,7 +6957,13 @@ export function createAgentCapabilities(
           : readUnitParts(v.unit)?.kind === 'percent' ? limitFigure(x, v.unit) : targetFigure(x, v.unit);
         if (res.status === 'stale') {
           return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: pid,
-            detail: 'The model changed just before this limit was written, so nothing was changed. Offer to prepare it again.' };
+            detail: isTarget ? 'The model changed just before this target was written, so nothing was changed. Offer to prepare it again.'
+              : 'The model changed just before this limit was written, so nothing was changed. Offer to prepare it again.' };
+        }
+        if (res.status === 'refused' && isTarget) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            follow_up: `${ADD_CONSTRAINT_USER_GUIDANCE} Nothing on your model changed.`,
+            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Tell the user plainly, in those words, and ask what target they would like instead.` };
         }
         if (res.status === 'refused') {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
@@ -6499,18 +6971,27 @@ export function createAgentCapabilities(
             detail: `The limit was not changed, and nothing on the model changed. Tell the user plainly, and ask what they would like instead.` };
         }
         if (res.status === 'unconfirmed') {
+          if (isTarget) return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid, detail: TARGET_UNCONFIRMED };
           return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
             detail: 'The limit was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
               + 'offer to check the model again, and never say it was changed or that it was not.' };
         }
         // Landed is what the model HOLDS: that very row, at exactly the approved figure, in its own unit.
+        const beforeRow = (Array.isArray(before.raw.goal_constraints) ? before.raw.goal_constraints as Record<string, unknown>[] : [])
+          .find((c) => c !== null && typeof c === 'object' && c['constraint_id'] === v.constraint_id);
         const after = await readGraph(ctx.scenario_id);
         const heldRows = (Array.isArray(after?.raw.goal_constraints) ? after!.raw.goal_constraints as Record<string, unknown>[] : [])
           .filter((c) => c !== null && typeof c === 'object' && c['node_id'] === op.path && c['operator'] === v.operator);
         const landed = heldRows.length === 1 && heldRows[0]!['constraint_id'] === v.constraint_id && heldRows[0]!['value'] === approvedValue
           && (heldRows[0]!['unit'] ?? null) === v.unit
           && (v.source_quote === undefined || heldRows[0]!['source_quote'] === v.source_quote)
-          && (v.stated_operator === undefined || statedOperatorOf(heldRows[0]!) === v.stated_operator);
+          && (v.stated_operator === undefined || statedOperatorOf(heldRows[0]!) === v.stated_operator)
+          // A target row is landed only if it is still one of the goal's targets (else the joint is withheld for a false reason),
+          // on THIS approval's committed postimage (the read-back is the door's committed graph, not equal figures after another
+          // writer), with its frame and label as they were (AIE 0836 / PL 6120477801: every applicable coordinate).
+          && (!isTarget || (heldRows[0]!['role'] === 'goal_target' && after!.graph_hash === res.graph_hash
+            && ['value_frame', 'label', 'deadline_metadata'].every((k) => isDeepStrictEqual(heldRows[0]![k], beforeRow?.[k]))));
+        if (!landed && isTarget) return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid, detail: TARGET_UNCONFIRMED };
         if (!landed) {
           return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
             detail: 'The limit was written, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
@@ -6521,6 +7002,16 @@ export function createAgentCapabilities(
         proposals.markApplied(pid, receipts);
         // A2: said as the model now HOLDS it ("less than 5%" for a strict limit), from the row read back above.
         const words = LIMIT_OPERATOR_WORDS[statedOperatorOf(heldRows[0]!) ?? v.operator];
+        if (isTarget) {
+          const held = statedOperatorOf(heldRows[0]!) ?? v.operator;
+          const direction = DIRECTION_WORDS[held === '<' ? 'below' : held === '>' ? 'above' : held === '<=' ? 'at_most' : 'at_least'];
+          return {
+            ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
+            ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
+            // AIE-B-multi-target-text-AMEND-0836 S7 (one): "using your figure" — a comparator kept from the row is not newly stated.
+            follow_up: `The target for ‘${label}’ is now ${direction} ${figure(approvedValue)}, using your figure.`,
+          };
+        }
         return {
           ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
@@ -6534,7 +7025,9 @@ export function createAgentCapabilities(
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === SET_HIRING_TIMES) return applyHiringTimes(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
@@ -9072,7 +9565,8 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string }[] = [];
+      const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string;
+        range?: { low: number; high: number; quote: string } }[] = [];
       const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
       const ambiguous: AmbiguousTarget[] = [];
       const recordOf = (x: unknown): Record<string, unknown> => (x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {});
@@ -9114,13 +9608,13 @@ export function createAgentCapabilities(
         if (res.kind === 'other' && res.node.kind === 'factor') {
           return { ok: false, mutated: false, refusal: 'target_is_a_lever',
             detail: `Nothing was prepared: "${res.node.label}" is set by the options, so nothing else may drive it. Link "${label}" to `
-              + 'the outcome or the non-lever factor (one no option sets) it affects instead, from the user’s words; if it is unclear, ask.' };
+              + 'the goal, the outcome or the non-lever factor (one no option sets) it affects instead, from the user’s words; if it is unclear, ask.' };
         }
         if (res.kind !== 'one') {
           return { ok: false, mutated: false, refusal: res.kind === 'none' ? 'target_not_found' : 'target_not_allowed',
             detail: res.kind === 'none'
-              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets).`
-              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets) — never the goal, a risk, an option or a decision.` };
+              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives the goal, an outcome or a non-lever factor (one no option sets).`
+              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives the goal, an outcome or a non-lever factor (one no option sets) — never a risk, an option or a decision.` };
         }
         const direction = f.direction === 'positive' || f.direction === 'negative' ? f.direction : null;
         if (direction === null) {
@@ -9163,10 +9657,30 @@ export function createAgentCapabilities(
         // THE ONE FRAMING RULE (ruling point 3; `proposeNewOption` statedToday): Olumi's default range over the largest
         // figure this change carries for the factor — its own — then stamped as the user's.
         const v = t.value;
-        const observed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
+        const framed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
           plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }), source: USER_TODAY_SOURCE };
+        // ⭐ RECOVERY BATCH B (SYS3 TRACE L6): the RANGE the user gave for this figure ("between 20% and 30%") is stored AS A
+        // RANGE beside the figure they chose (`isStatedLevelRange`, add-factor-transaction.ts), only when BOTH ends are in ONE
+        // sentence the user wrote in this conversation and the chosen figure lies inside. Never a midpoint: the figure is still
+        // the one they wrote in THIS message (checked above), or nothing is prepared.
+        let range: { low: number; high: number; quote: string } | undefined;
+        if (t.range_low !== undefined || t.range_high !== undefined) {
+          const lo = t.range_low, hi = t.range_high;
+          const sentence = typeof lo === 'number' && typeof hi === 'number' ? sentenceStatingBoth(lo, hi, todayUnit, ctx.user_text ?? turnText) : null;
+          const stored = sentence === null ? undefined
+            : { low: lo as number, high: hi as number, meaning: 'min_max' as const, source: USER_TODAY_SOURCE, source_quote: sentence };
+          if (stored === undefined || !isStatedLevelRange(stored, framed)) {
+            todayNotSet.push({ factor: label, value: t.value,
+              reason: `The range ${String(lo ?? '?')} to ${String(hi ?? '?')} ${todayUnit} for "${label}" is not one the user wrote, both ends in one sentence of theirs, `
+                + `with ${shown} inside it, so nothing was prepared. Ask the user; never supply a range, an end or a midpoint of your own.` });
+            continue;
+          }
+          range = { low: stored.low, high: stored.high, quote: sentence! };
+        }
+        const observed = range === undefined ? framed
+          : { ...framed, range: { low: range.low, high: range.high, meaning: 'min_max', source: USER_TODAY_SOURCE, source_quote: range.quote } };
         planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed,
-          basis: confirmPairing ? 'confirmed_by_approval' : 'written_about', quote });
+          basis: confirmPairing ? 'confirmed_by_approval' : 'written_about', quote, ...(range !== undefined ? { range } : {}) });
       }
       if (ambiguous.length > 0) {
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
@@ -9220,7 +9734,7 @@ export function createAgentCapabilities(
       if (!heldOk || res.status !== 'held') {
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(res.status === 'refused' ? { reason: res.reason } : {}),
           detail: res.status === 'refused' && res.reason === 'target_not_allowed'
-            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives an outcome or a non-lever factor (one no option sets). Tell the user plainly.'
+            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives the goal, an outcome or a non-lever factor (one no option sets). Tell the user plainly.'
             : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);
@@ -9235,7 +9749,8 @@ export function createAgentCapabilities(
           label: p.label,
           // `user_to_confirm`: the figure is in their words, and the PAIRING is Olumi's until they approve it (the card
           // shows `quote`). `user`: one figure for one factor, written about it.
-          current_value: { value: p.value, unit: p.unit, stated_by: p.basis === 'confirmed_by_approval' ? 'user_to_confirm' : 'user', quote: p.quote },
+          current_value: { value: p.value, unit: p.unit, stated_by: p.basis === 'confirmed_by_approval' ? 'user_to_confirm' : 'user', quote: p.quote,
+            ...(p.range !== undefined ? { range: { low: p.range.low, high: p.range.high, quote: p.range.quote } } : {}) },
           affects: `${labelOfId(p.to_id)} (${p.direction === 'positive' ? 'raises it' : 'lowers it'})`,
           how_strongly: FACTOR_PLACEHOLDER_STRENGTH,
         })),
@@ -9418,6 +9933,14 @@ export function createAgentCapabilities(
       }
       const now = `${LIMIT_OPERATOR_WORDS[nowOp]} ${figureOf(before)}`;
       const becomes = `${LIMIT_OPERATOR_WORDS[becomesOp]} ${figureOf(value)}`;
+      /**
+       * ⭐ B (3) (DL lease, 12 Oct): CURRENT MODEL STATE lists every `goal_constraints` row under `limits`, so a later edit
+       * of one of the goal's targets (C's `role: 'goal_target'`) arrives here. The limit door writes it and keeps its role
+       * (4c4f0e66); only the words were a limit's ("Change the limit on …"). A target row gets the target's card, note,
+       * button and receipt; a limit is unchanged, byte for byte.
+       */
+      const isTarget = row['role'] === 'goal_target';
+      const targetBecomes = `${DIRECTION_WORDS[becomesOp === '<' ? 'below' : becomesOp === '>' ? 'above' : becomesOp === '<=' ? 'at_most' : 'at_least']} ${figureOf(value)}`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -9425,12 +9948,26 @@ export function createAgentCapabilities(
         operations: [{ op: 'set_limit', path: node.id, value: { ...(interpretation ?? {}),
           operator, raw_value: value, unit, constraint_id: String(row['constraint_id'] ?? ''), before,
           ...(stated !== undefined ? { stated_operator: stated } : {}),
+          ...(isTarget ? { role: 'goal_target' } : {}),
         } }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Change the limit on "${node.label}" from ${now} to ${becomes}`,
+        public_label: isTarget ? `Set the target for "${node.label}" to ${targetBecomes}` : `Change the limit on "${node.label}" from ${now} to ${becomes}`,
       });
       proposals.put(proposal);
+      if (isTarget) {
+        return {
+          ok: true, mutated: false,
+          proposal_id: proposal.proposal_id,
+          public_label: proposal.public_label,
+          base_revision: g.graph_hash,
+          target: { on: node.label, now, becomes },
+          // AIE-B-multi-target-text-AMEND-0836 S6 (6120751692; 6121167535): consent is the card's own button, never a typed yes.
+          note: `The target for ‘${node.label}’ is ready for review: ${targetBecomes}. Tell the user they can review it and press ‘Set this target’. `
+            + 'Never show the id. Call authorise_change only for the approval bound to this card; a typed ‘yes’ alone is not that approval.'
+            + (interpretation?.reserve === undefined ? '' : ` ${interpretation.reserve.detail}`),
+        };
+      }
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,

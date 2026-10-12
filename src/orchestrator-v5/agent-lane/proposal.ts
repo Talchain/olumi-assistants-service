@@ -118,7 +118,16 @@ export interface ProposalOperation {
     | 'set_goal_deadline'
     /** The user's card-only temporal judgement for the held month; `value` is `{months}`. */
     | 'attest_goal_steady'
-    | 'set_team_time';
+    | 'set_team_time'
+    /** E5 (SYS1): each capacity option's hiring times; field-scoped like `set_team_time` (`scoped_precondition_holds`). */
+    | 'set_hiring_times'
+    /**
+     * ⭐ B RESTATED GOAL (DL ruling (B); PL 6116779075; AIE 0244) — REPLACE AN UNREVIEWED DRAFT WITH THE REVISED ONE
+     * PREPARED FROM THE STORED BRIEF AND THE USER'S TYPED GOAL. `path` is the scenario id; `value` is the prepared
+     * candidate and the identities it was prepared against (`runtime/draft-replacement.ts`). Written only through
+     * `/graph/register` with compare-and-set on that base, and only while the draft still holds no later human material.
+     */
+    | 'replace_draft';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;
@@ -269,15 +278,23 @@ export interface AuthorisationRequest {
   readonly authenticated_user_id: string | null;
   /** The model's CURRENT revision, read server-side. Never client-supplied. */
   readonly current_graph_identity_hash: string;
+  /**
+   * EBD: a FIELD-SCOPED precondition, read server-side from the current model. When it returns true the proposal executes
+   * although the whole-model revision moved (only what the proposal read is compared). Its writer stays CAS-fenced.
+   */
+  readonly scoped_precondition_holds?: (proposal: StructuredProposal) => boolean;
 }
 
 export const MAX_PROPOSALS = 200;
 /** Distinct approved-operation memos kept for ONE proposal (distinct turn ids); the oldest is forgotten first. */
 export const MAX_EXECUTIONS_PER_PROPOSAL = 32;
 
-/** B3's card-only approval authority also covers a level's temporal reading. */
+/**
+ * B3's card-only approval authority also covers a level's temporal reading, and a revised draft (`replace_draft`): a
+ * whole-draft replacement is approved only by pressing its own card, never by the Agent's reading of a "yes".
+ */
 export function hasCardOnlyOperations(operations: readonly ProposalOperation[]): boolean {
-  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'set_option_intervention'
+  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'set_option_intervention'
     && op.value !== null && typeof op.value === 'object'
     && (Object.hasOwn(op.value, 'unmodelled_mechanisms') || Object.hasOwn(op.value, 'likely_range')));
 }
@@ -402,7 +419,7 @@ export class ProposalStore {
       if (partial.revision === req.current_graph_identity_hash) return { status: 'execute', proposal: p, continuation: partial };
       return { status: 'superseded', expected: partial.revision, actual: req.current_graph_identity_hash };
     }
-    if (p.base_graph_identity_hash !== req.current_graph_identity_hash) {
+    if (p.base_graph_identity_hash !== req.current_graph_identity_hash && req.scoped_precondition_holds?.(p) !== true) {
       return {
         status: 'superseded',
         expected: p.base_graph_identity_hash,

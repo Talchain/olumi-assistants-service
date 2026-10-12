@@ -155,6 +155,7 @@ import {
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
 import { carryStatedLevelSpread, carrySwitchLevelSpread, statedLevelNodeIds, switchLevelNodeIds } from './stated-level-spread.js';
+import { withoutStatedLevelRanges } from '../../routing/add-factor-transaction.js';
 import { carryUnconfirmedGoalProduct } from './unconfirmed-goal-product.js';
 import {
   AnalysisNotReadyError,
@@ -1193,7 +1194,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     const plotPayload: Record<string, unknown> = {
-      graph: toOutboundGraph(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph)),
+      // Recovery Batch B (L6): a stated level range changes no compute; the wire copy drops it (`withoutStatedLevelRanges`).
+      graph: toOutboundGraph(withoutStatedLevelRanges(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph))),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -2876,12 +2878,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ISL src/services/robustness_analyzer_v2.py:1053-1055,1090, read at 3cfadcfc:
     // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
+    // Recovery Batch B (b1, AIE 6125204695): what CEE SENT binds a deadline goal's engine-read chance, per option. The payload
+    // itself (its graph, direction and strictness), never a copy: nothing edits it after the PLoT call above.
+    const sentRun = plotPayload;
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance),
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, sentRun),
       snapshot.rawPersistedGraph ?? graphForAnalysis,
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
-      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints });
+      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);

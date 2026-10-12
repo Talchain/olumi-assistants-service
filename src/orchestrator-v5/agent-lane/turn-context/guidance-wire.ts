@@ -9,7 +9,7 @@
  * the id string; an item no single entity answers to gets no `item_ref` (the row is then words only). Absent `guidance`
  * = no row this turn. Pure.
  */
-import { selectGuidance, type GuidanceState, type Selection, type SelectedRow } from '../guidance/index.js';
+import { policyWhySaid, selectGuidance, type GuidanceState, type Selection, type SelectedRow } from '../guidance/index.js';
 import type { LeaderLicence } from '../../compose/leader-licence.js';
 import { assembleGuidanceSignals, type GuidanceRequest } from './guidance-signals.js';
 import { POLICY } from '../guidance/policy.js';
@@ -105,7 +105,16 @@ export function turnGuidanceFor(i: TurnGuidanceInputs): GuidanceWire | undefined
 
 /** The same selector inputs before or after a reply; no prose enters selection. */
 export function selectTurnGuidance(i: Omit<TurnGuidanceInputs, 'assistantText' | 'preReplySelection'>): GuidanceWire | undefined {
-  if (i.guidance === null) return undefined;
+  return selectTurnGuidanceShown(i).wire;
+}
+
+/**
+ * The wire, and whether its slot-1 row's "Why?" was already said on this state of its policy (`policyWhySaid`). The
+ * flag is display only: it never changes the wire, the selection, or what the model is told.
+ */
+export interface TurnGuidanceSelection { readonly wire: GuidanceWire | undefined; readonly whySaid: boolean }
+export function selectTurnGuidanceShown(i: Omit<TurnGuidanceInputs, 'assistantText' | 'preReplySelection'>): TurnGuidanceSelection {
+  if (i.guidance === null) return { wire: undefined, whySaid: false };
   try {
     const signals = assembleGuidanceSignals({
       request: i.request, offeredSpecific: i.offeredSpecific, graph: i.state.graph, analysisState: i.state.analysisState,
@@ -114,9 +123,12 @@ export function selectTurnGuidance(i: Omit<TurnGuidanceInputs, 'assistantText' |
       guidance: i.guidance ?? {}, explicitRequest: null, leaderLicensed: guidanceLeaderLicensed(i.licence),
     });
     const selectedSignals = selectorSignalsOf(signals, null, i.runKey);
-    return guidanceWireFor(selectGuidance(selectedSignals, selectedSignals.guidance ?? {}), i.state.graph);
+    const history = selectedSignals.guidance ?? {};
+    const wire = guidanceWireFor(selectGuidance(selectedSignals, history), i.state.graph);
+    const policy = wire?.slot1?.policy_id;
+    return { wire, whySaid: policy !== undefined && policyWhySaid(policy, selectedSignals, history) };
   } catch {
-    return undefined;
+    return { wire: undefined, whySaid: false };
   }
 }
 
@@ -129,12 +141,30 @@ export interface EligibleIntervention {
   readonly trigger: string;
 }
 export const ELIGIBLE_INTERVENTION_INSTRUCTION = 'Only name the scientific method in CURRENT MODEL STATE.eligible_intervention. If absent, give a direct grounded answer without a named method. Write next moves as plain action bullets of at most eight words each. Keep useful questions and user figures. Olumi supplies the Why? disclosure; do not write it.';
+/**
+ * ⛔ A ROW'S SCIENCE SENTENCE IS NOT ALWAYS TRUE OF EVERY VARIANT (SYS2 G1, served 11 Oct). RC-WIDEN's sentence ("Decisions
+ * framed with a single alternative ('whether or not') fail more often…") describes W2 only, the one-proposed-route case
+ * (AIE 6115647793: W2Z is ZERO options, not a single alternative). Paul's two-option hiring model got it under "Suggest
+ * drivers" (W7). Every other variant names a different situation (no option yet; a broken limit, which can hold with one
+ * option; one lever; no baseline; close options; few risks; few drivers), so behind "Why?" it carries its own approved
+ * `why_now` (the policy's progressive_detail: "Why: one line on the variant's why_now").
+ */
+const ROW_SCIENCE_ONLY_FOR: Readonly<Partial<Record<SelectedRow['policy_id'], readonly string[]>>> = { 'RC-WIDEN': ['W2'] };
+function whyOf(row: (typeof POLICY.rows)[number], variant: string | undefined): string | undefined {
+  const only = ROW_SCIENCE_ONLY_FOR[row.policy_id];
+  if (only === undefined || (variant !== undefined && only.includes(variant))) return row.science_basis.summary;
+  const own = typeof row.why_now === 'string' || variant === undefined ? undefined : (row.why_now as Readonly<Record<string, string>>)[variant];
+  return typeof own === 'string' && own.trim() !== '' ? own : undefined;
+}
 export function eligibleInterventionFor(wire: GuidanceWire | undefined): EligibleIntervention | undefined {
   const selected = wire?.slot1;
   if (selected === undefined) return undefined;
   const row = POLICY.rows.find(row => row.policy_id === selected.policy_id)!;
   const variant = 'variants' in row.trigger_predicate ? row.trigger_predicate.variants.find(v => v.id === selected.variant) : undefined;
+  // No true sentence for this variant → no named method (a direct grounded answer), never the row's untrue one.
+  const why = whyOf(row, selected.variant);
+  if (why === undefined) return undefined;
   return { policy_id: selected.policy_id, variant_id: selected.variant ?? null,
-    name: row.name, why: row.science_basis.summary,
+    name: row.name, why,
     trigger: variant?.when ?? row.trigger_predicate.all.join(' AND ') };
 }

@@ -269,10 +269,16 @@ describe('every register call in this module asserts a base', () => {
     });
   });
 
-  it('⭐ and there are exactly TWO of them — a third must be judged, not inherited', () => {
+  it('⭐ and there are exactly FOUR of them — a fifth must be judged, not inherited', () => {
     // Bounds the claim above: it cannot pass by finding fewer calls than exist. The compound's value write was the third;
     // it now rides the one port commit (Canonical #70 5849037691), so it is no whole-graph write at all.
-    expect(SRC.split('graph/register`, {').length - 1).toBe(2);
+    // ⭐ JUDGED THIRD (B restated goal, DL ruling (B); AIE 0452): `applyReplaceDraft` registers the revised draft the user
+    // pressed. It sends the WHOLE approved candidate (spread), `expected_graph_hash` AND `expected_graph_identity_hash` of
+    // the base the card was prepared on, and an operation id of that base and those bytes; the read-back must then carry
+    // the identity the registration acknowledged (`restated-goal-revised-draft.test.ts`).
+    // JUDGED, the fourth: E5's hiring times (`applyHiringTimes`, DL 12 Oct): the whole postimage of THIS read, spread, with
+    // `expected_graph_hash` AND `expected_graph_identity_hash` of that read, after its own field-scoped precondition.
+    expect(SRC.split('graph/register`, {').length - 1).toBe(4);
   });
 });
 
@@ -475,7 +481,7 @@ describe('every graph/register in this module sends the WHOLE graph', () => {
 
   it('⛔ no register call sends a bare { nodes, edges } without spreading the read graph', () => {
     const calls = SRC.split('graph/register`, {').slice(1);
-    expect(calls.length, 'the split must find the register calls').toBe(2);
+    expect(calls.length, 'the split must find the register calls (the third and fourth are judged above)').toBe(4);
     for (const [i, call] of calls.entries()) {
       // ⚠ Bounded by the call's OWN closing `});`, not a fixed character window.
       // My first version sliced 400 chars and the docblock I had just added pushed

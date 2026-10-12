@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { SupabaseSessionStore } from '../../session/supabase-store.js';
 import { SessionLRUCache } from '../../session/cache.js';
 import { guidanceHistoryOf, guidanceOnAnswer, parseAnswerGuidance } from '../turn-context/guidance-history.js';
-import { guidanceWireFor } from '../turn-context/guidance-wire.js';
+import { eligibleInterventionFor, guidanceWireFor } from '../turn-context/guidance-wire.js';
+import { selectGuidance, type GuidanceSignals } from '../guidance/index.js';
 import { widenTurnForReadback } from '../method-turn/guidance-widen-turn.js';
 import { widenTurnForReadback as currentWidenTurnForReadback } from '../method-turn/widen-turn.js';
 import { selectorSignalsOf } from '../turn-context/selector-signals.js';
@@ -138,5 +139,69 @@ describe('A6 durable variant and slot identity', () => {
     expect(guidanceOnAnswer(undefined, guidanceHistoryOf([saved]), { policy_id: 'RC-WIDEN' })).toEqual({
       version: 1, entries: { 'RC-WIDEN': { ...saved.entries['RC-WIDEN'], status: 'pressed' } },
     });
+  });
+});
+
+/**
+ * SYS2 G1 · THE "Why?" UNDER A METHOD IS TRUE OF THE SELECTED VARIANT (core system 7). Served defect (Paul's hiring
+ * transcript, 11 Oct; CEE 50530b5f): a TWO-option decision got, under "Suggest drivers", RC-WIDEN's science sentence
+ * "Decisions framed with a single alternative ('whether or not') fail more often…", because the disclosure took the ROW's
+ * sentence for every variant. That sentence describes W2 (one proposed route) only (AIE 6115647793: W2Z is zero options).
+ * Signals are the served hiring model's (live run 2026-10-11T222932Z, hiring/turns/14.json); the real selector picks.
+ */
+describe('SYS2 G1 · the Why? is true of the variant the selector picked', () => {
+  const WIDEN = POLICY.rows.find(r => r.policy_id === 'RC-WIDEN')!;
+  const SINGLE_ALTERNATIVE = WIDEN.science_basis.summary;
+  const WHY_NOW = WIDEN.why_now as Readonly<Record<string, string>>;
+  const HIRING: GuidanceSignals = {
+    'turn.request': 'turn', 'open.decision_point': false, 'run.kind': 'complete_current', 'run.withheld_reason': 'goal_path_unsized',
+    'model.goal_present': true, 'model.goal_label': 'productivity', 'model.status_quo_option_id': 'continue_with_current_team',
+    'model.non_sq_option_ids': ['hire_a_tech_lead', 'hire_two_developers'],
+    'model.option_labels': { hire_a_tech_lead: 'Hire a Tech lead', hire_two_developers: 'Hire two developers', continue_with_current_team: 'Continue with current team' },
+    'model.same_lever': false,
+    'model.risk_ids': ['code_quality_regression', 'developer_candidate_shortage', 'onboarding_drains_team_capacity'],
+    'model.goal_path_factor_ids': ['mid_weight_developers', 'tech_leads'],
+  };
+  const whyFor = (signals: GuidanceSignals) => {
+    const wire = guidanceWireFor(selectGuidance(signals, {}), { nodes: [], edges: [] });
+    return { variant: wire?.slot1?.variant, policy: wire?.slot1?.policy_id, why: eligibleInterventionFor(wire)?.why };
+  };
+
+  it('RED on 50530b5f: Paul\'s two-option hiring model (W7, "Suggest drivers") is not told it has a single alternative', () => {
+    const got = whyFor(HIRING);
+    expect(got).toMatchObject({ policy: 'RC-WIDEN', variant: 'W7' });
+    expect(got.why).not.toBe(SINGLE_ALTERNATIVE);
+    expect(got.why).toBe(WHY_NOW.W7);
+  });
+  it('RED on 50530b5f: the same model with one risk (W6, "Suggest risks") gets W6\'s own reason', () => {
+    const got = whyFor({ ...HIRING, 'model.risk_ids': ['code_quality_regression'] });
+    expect(got).toMatchObject({ policy: 'RC-WIDEN', variant: 'W6' });
+    expect(got.why).toBe(WHY_NOW.W6);
+  });
+  it('NEGATIVE (kept): a genuine single-alternative decision (W2: one proposed route) still gets the science sentence', () => {
+    const got = whyFor({ ...HIRING, 'model.non_sq_option_ids': ['hire_a_tech_lead'] });
+    expect(got).toMatchObject({ policy: 'RC-WIDEN', variant: 'W2' });
+    expect(got.why).toBe(SINGLE_ALTERNATIVE);
+  });
+  it('AIE AMEND: no option at all (W2Z) is not "a single alternative": it gets its own practical reason', () => {
+    const got = whyFor({ ...HIRING, 'model.non_sq_option_ids': [] });
+    expect(got).toMatchObject({ policy: 'RC-WIDEN', variant: 'W2Z' });
+    expect(got.why).toBe(WHY_NOW.W2Z);
+    expect(got.why).not.toBe(SINGLE_ALTERNATIVE);
+  });
+  it('every RC-WIDEN variant other than W2 carries its own approved why_now; only W2 carries the row sentence', () => {
+    const variants = (WIDEN.trigger_predicate as { variants: readonly { id: string }[] }).variants.map(v => v.id);
+    expect(variants).toEqual(['W1', 'W2Z', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7']);
+    for (const variant of variants) {
+      const why = eligibleInterventionFor({ slot1: { policy_id: 'RC-WIDEN', variant } as never })?.why;
+      expect(why, variant).toBe(variant === 'W2' ? SINGLE_ALTERNATIVE : WHY_NOW[variant]);
+      expect(typeof why === 'string' && why.length > 0, variant).toBe(true);
+    }
+  });
+  it('CONTRAST: a row whose sentence holds for every variant keeps it (RC-STRENGTHEN-ITEM S1–S3V, assumption-based planning)', () => {
+    const strengthen = POLICY.rows.find(r => r.policy_id === 'RC-STRENGTHEN-ITEM')!;
+    for (const variant of ['S1', 'S2', 'S3L', 'S3V']) {
+      expect(eligibleInterventionFor({ slot1: { policy_id: 'RC-STRENGTHEN-ITEM', variant } as never })?.why, variant).toBe(strengthen.science_basis.summary);
+    }
   });
 });
