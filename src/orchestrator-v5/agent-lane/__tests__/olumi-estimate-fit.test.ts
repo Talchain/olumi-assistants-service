@@ -105,8 +105,27 @@ it('row (a): served goal estimate fits, preserves every other natural size, and 
   noCandidates(after.graph);
 });
 
-it('row (b): user outcome level refuses and preserves the old placeholder and set-aside ledger', () => {
-  const { graph, legacy, loss } = admitted({ id: 'y', label: 'Y', kind: 'outcome', scale_frame: 100, observed_state: { value: 0.4, raw_value: 40, source: 'brief_extraction', unit: '£' } });
+it('row (b), DL rule (AIE PENDING): a user LEVEL alone binds the frame only to CONTAIN it — Y is widened 100 → 500, its level kept exact', () => {
+  const { graph } = admitted({ id: 'y', label: 'Y', kind: 'outcome', scale_frame: 100, observed_state: { value: 0.4, raw_value: 40, source: 'brief_extraction', unit: '£' } });
+  const snapshot = JSON.stringify(graph);
+  const result = frames.refitFramesForOlumiEstimates(graph);
+  expect(result).toMatchObject({ fitted: ['x→y'], refused: [] });
+  expect(frames.frameOf(node(result.graph, 'y'))).toBe(500);
+  // The user's level is the same figure: raw kept, its normalised value is raw / the new frame.
+  expect(node(result.graph, 'y').observed_state).toMatchObject({ raw_value: 40, value: expect.closeTo(40 / 500, 12), source: 'brief_extraction' });
+  expect(edge(result.graph, 'x→y')).toMatchObject({ strength: { mean: expect.closeTo(3 * 100 / 500, 12) }, provenance: { magnitude: 'olumi_estimate' } });
+  // Its natural size is Olumi's 3 per item, unchanged by the move of units.
+  expect(naturalSize(result.graph, edge(result.graph, 'x→y'))).toBeCloseTo(3, 12);
+  expect(JSON.stringify(graph)).toBe(snapshot);
+  noCandidates(result.graph);
+});
+
+it.each([
+  ['a user level OUTSIDE the proposed frame (900 on a frame of 500)', { value: 9, raw_value: 900, source: 'brief_extraction', unit: '£' }],
+  ['a RANGE held on the node (a stated range fixes its frame)', { value: 0.4, raw_value: 40, source: 'brief_extraction', unit: '£',
+    range: { low: 30, high: 50, meaning: 'min_max', source: 'user_today', source_quote: 'between £30 and £50' } }],
+])('row (b) NEGATIVE: %s refuses and preserves the old placeholder and set-aside ledger', (_name, observed) => {
+  const { graph, legacy, loss } = admitted({ id: 'y', label: 'Y', kind: 'outcome', scale_frame: 100, observed_state: observed });
   const snapshot = JSON.stringify(graph);
   const result = frames.refitFramesForOlumiEstimates(graph);
   expect(result.refused).toEqual([{ link: 'x→y', reason: 'levels_set_on_node' }]);
