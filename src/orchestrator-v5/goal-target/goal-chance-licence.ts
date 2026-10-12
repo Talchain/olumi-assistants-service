@@ -1483,6 +1483,9 @@ export function periodEndEffectsWords(record: GoalRecord, basis: Pick<GoalTarget
  * The Run says why ({@link periodEndEffectsUnstatedOf}) for each scored option, through the ONE goal-figure seam; the outcome
  * and ordering stay. Carrying on as now changes nothing, so its own row is not given this reason.
  */
+/** The withhold's CEE-local reason (`detail.reason`): its sentence says "isn’t shown" itself, so no reader prefixes it. */
+export const PERIOD_END_EFFECTS_UNSTATED = 'effects_at_period_end_unstated';
+
 export function withholdForPeriodEndEffects<E>(envelope: E, graph: unknown, goalId: unknown): E {
   if (!isRec(envelope)) return envelope;
   const held = periodEndEffectsUnstatedOf(graph, goalId);
@@ -1497,7 +1500,7 @@ export function withholdForPeriodEndEffects<E>(envelope: E, graph: unknown, goal
   // `detail.reason` is CEE-local (as `target_reading_open`); the UI renders `message` for this code.
   return withholdOptionGoalFigures(envelope, new Set(scored), {
     code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: periodEndEffectsWords(held.record, held.basis),
-    node_ids: [String(goalId)], option_ids: scored, detail: { reason: 'effects_at_period_end_unstated' },
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: PERIOD_END_EFFECTS_UNSTATED },
   }, { keepOutcome: true, keepOrdering: true });
 }
 
