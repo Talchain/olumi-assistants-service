@@ -19,6 +19,7 @@ import { sharePartsForOption, shareOptionEstimateWords } from '../../goal-target
 import { createAgentCapabilities, projectModelContext, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
+import { approvalChipIdFor, approvalChipsFor } from '../approval-chips.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = '4184e877-0000-4000-8000-00000000e5e5';
@@ -97,6 +98,16 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
       + 'with Olumi’s estimate of the soonest start (2 months), the second start taken as 1 month after the first (Olumi’s reading of “another a month or so later”), '
       + 'and Olumi’s estimate of the additional progress from the hires (20% of next feature launch per month, split equally between the two starts).');
     expect(w.registers).toHaveLength(0);
+  });
+
+  it('the card\'s two buttons (AIE 6122738619: approved chips): [Use these times] presses THIS card; [Change] asks to change the times', async () => {
+    const w = world();
+    const r = await dispatchTool('propose_hiring_times', JSON.stringify(PAULS_ARGS), ctx(PAUL) as never, w.caps) as Rec;
+    const chips = approvalChipsFor([{ name: 'propose_hiring_times', ok: true, mutated: false, proposal_id: r.proposal_id }],
+      () => ({ proposal: w.proposals.get(r.proposal_id), result: r } as never));
+    expect(chips).toEqual([
+      { id: approvalChipIdFor(r.proposal_id), label: 'Use these times', message: 'Yes, use these hiring times.', detail: r.public_label },
+      { id: 'agent-hiring-times-change', label: 'Change', message: 'I want to change the hiring times.' }]);
   });
 
   it('the press writes them; "set" only once the model holds every start; the staggered start is kept as two starts', async () => {

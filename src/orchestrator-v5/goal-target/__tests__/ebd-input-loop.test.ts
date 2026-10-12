@@ -23,7 +23,7 @@ import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { buildModelFromBrief, constructionOperationId, type CallStructuredModel } from '../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { applyTeamShareEdit, bindTeamTimeQuote, teamTimeCard, teamTimesInQuote, widenedTeamTime, type ApprovedTeamTime } from '../team-share-write.js';
-import { shareChanceRunBlock, sharePartsForOption } from '../share-by-date-run.js';
+import { shareChanceRunBlock, shareOptionEstimateWords, sharePartsForOption } from '../share-by-date-run.js';
 import { withShareByDateChanceGate } from '../goal-chance-range.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import type { SessionTurnWrite } from '../../session/store.js';
@@ -336,6 +336,10 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     expect(draftedTeamPartOf(w.graph())!.team.observed_state.stated_time).toMatchObject({ low: 3.5, high: 10.5, forecast: 7 });
     const devs = sharePartsForOption(w.graph(), 'event_option_2')!;
     expect([devs.extra, ...(devs.furtherExtras ?? [])]).toHaveLength(2);
+    // ONE label, both attributions: EBD's assumed team range, then the user's hiring statement and every Olumi assumption.
+    expect(shareOptionEstimateWords(w.graph(), 'event_option_1')).toBe('using your 7-month forecast and Olumi’s assumed 3.5–10.5-month range, '
+      + 'and your hiring time (“at least 3 months”) as modelled: 3–4 months, with Olumi’s estimate of the latest start (4 months), '
+      + 'and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month)');
   });
   it('CONTROL (E5 combine): a hiring-times card whose own carriers changed is still refused as superseded, nothing written', async () => {
     const w = world();

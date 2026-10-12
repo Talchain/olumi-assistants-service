@@ -65,6 +65,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // S-E GOALS (Science ruling 7 Oct §3): the user's deadline as a date. Two buttons: [Yes] [Change date].
   propose_team_time: { label: 'Yes', message: 'Yes' },
+  // E5: the user's hiring times per option, on ONE card (`hiring-times.ts`). Two buttons: [Use these times] [Change].
+  propose_hiring_times: { label: 'Use these times', message: 'Yes, use these hiring times.' },
   propose_new_limit: { label: 'Yes', message: 'Yes, record that limit.' },
   propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
@@ -285,12 +287,13 @@ export function approvalChipsFor(
       ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
         message: value.reserve.message, detail: value.reserve.detail }])];
   }
-  if (tool === 'propose_goal_deadline' || tool === 'propose_team_time') {
+  if (tool === 'propose_goal_deadline' || tool === 'propose_team_time' || tool === 'propose_hiring_times') {
     const source = labelSourceFor?.(proposalId);
     const card = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === source.proposal.proposal_id
       && source.result.public_label === source.proposal.public_label ? source.proposal.public_label : undefined;
     return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
-      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' } : DEADLINE_CHANGE_CHIP];
+      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' }
+        : tool === 'propose_hiring_times' ? { id: 'agent-hiring-times-change', label: 'Change', message: 'I want to change the hiring times.' } : DEADLINE_CHANGE_CHIP];
   }
   const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
