@@ -1,5 +1,5 @@
 {
-  "source_sha": "467f101997ad49474d33aa9a2c1c8b5941df07e2",
+  "source_sha": "8b12c13d392c00dce2e720a027620376086d00a6",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -232,7 +232,7 @@
       "src/schemas/value-warrant-guard.ts": 4
     },
     "goal_level_reading": {
-      "src/orchestrator-v5/agent-lane/admit-model.ts": 6,
+      "src/orchestrator-v5/agent-lane/admit-model.ts": 9,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 6,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 1,
       "src/orchestrator-v5/coaching/goal-reading-disclosure.ts": 1,
@@ -260,6 +260,7 @@
       "src/orchestrator-v5/admission/target-testability.ts": 1,
       "src/orchestrator-v5/agent-lane/conditional-input-basis.ts": 2,
       "src/orchestrator-v5/agent-lane/goal-chance-estimate-egress.ts": 6,
+      "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts": 1,
       "src/orchestrator-v5/agent-lane/guided-sizing.ts": 5,
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 6,
@@ -440,7 +441,7 @@
       "src/cee/unified-pipeline/types.ts": 1,
       "src/cee/validation/integrity-sentinel.ts": 3,
       "src/orchestrator-v5/agent-lane/admit-constraint.ts": 1,
-      "src/orchestrator-v5/agent-lane/admit-model.ts": 13,
+      "src/orchestrator-v5/agent-lane/admit-model.ts": 14,
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 2,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 21,
       "src/orchestrator-v5/agent-lane/refit-frames.ts": 3,
@@ -554,7 +555,7 @@
       "src/cee/unified-pipeline/types.ts": 1,
       "src/cee/validation/integrity-sentinel.ts": 3,
       "src/orchestrator-v5/admission/analysis-admission.ts": 1,
-      "src/orchestrator-v5/agent-lane/admit-model.ts": 13,
+      "src/orchestrator-v5/agent-lane/admit-model.ts": 14,
       "src/orchestrator-v5/agent-lane/break-even.ts": 5,
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 2,
       "src/orchestrator-v5/agent-lane/current-level-answer.ts": 4,
@@ -816,17 +817,17 @@
     "goal_direction": 97,
     "goal_horizon": 52,
     "goal_horizon_months": 43,
-    "goal_level_reading": 19,
-    "goal_node_id": 284,
+    "goal_level_reading": 22,
+    "goal_node_id": 285,
     "goal_period": 3,
     "goal_scope": 48,
     "goal_sense_reading": 15,
     "goal_stated_as": 3,
     "goal_threshold": 249,
-    "goal_threshold_cap": 166,
+    "goal_threshold_cap": 167,
     "goal_threshold_cap_provenance": 37,
     "goal_threshold_frame": 141,
-    "goal_threshold_raw": 246,
+    "goal_threshold_raw": 247,
     "goal_threshold_unit": 224,
     "pickGoalThresholdTrio": 18,
     "quantity_frame": 41,
@@ -840,7 +841,7 @@
     "threshold_source": 37,
     "unit_reading": 79
   },
-  "total_references": 2445,
+  "total_references": 2451,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

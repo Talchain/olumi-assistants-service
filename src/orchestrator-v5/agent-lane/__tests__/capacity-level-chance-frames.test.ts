@@ -502,7 +502,7 @@ describe('admitGoalLevelDefinedByParts: whose definition it is', () => {
 
   it('the brief\'s own definition: the level is the user\'s, on the target\'s cap', () => {
     const r = run('brief_extraction');
-    expect((r.nodes as Rec[]).find((n) => n.id === GOAL)!.observed_state).toEqual({ value: 0.64, baseline: 0.64, unit: 'tickets per week', source: 'brief_extraction', raw_value: 80, cap: 125 });
+    expect((r.nodes as unknown as Rec[]).find((n) => n.id === GOAL)!.observed_state).toEqual({ value: 0.64, baseline: 0.64, unit: 'tickets per week', source: 'brief_extraction', raw_value: 80, cap: 125 });
   });
 
   it('NEGATIVE: Olumi\'s own minted sum is not the user\'s definition, so nothing is derived from it', () => {
