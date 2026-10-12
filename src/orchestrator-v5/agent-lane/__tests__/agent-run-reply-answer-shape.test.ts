@@ -36,6 +36,8 @@ import {
 import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
 import { HORIZON_MARKER, ROBUSTNESS_MARKER, WITHHOLD_FALLBACK_MARKER, sentenceMultiset, sentencesOf } from '../reply/compose-reply.js';
+/** The canonical view's licensed line for a withheld cell with no recorded wording (`canonical-analysis-view.ts`). */
+const UNRECORDED_WHY = 'Olumi can’t yet say its chance of meeting your goal, in this model.';
 import { textAtRest, untestedHorizonLine } from '../decision-input-ask.js';
 import type { CanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 
@@ -523,17 +525,22 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     readbackState = WITHHELD_STATE;
     // r15 contract re-pin: "cell-sourced marker". The authoritative read records a withheld cell whose
     // cause was not retained; a leader-claim closing alone cannot supply this goal-chance marker.
+    // The cell as the canonical view writes it for an unrecorded cause (`canonical-analysis-view.ts`: the ≤8-word face, and
+    // its licensed reason line as `why`).
     readbackCellRows = [{ option_id: 'keep_pro_at_49', main_driver: { kind: 'not_recorded' },
-      cell: { kind: 'withheld', why: 'Chance not shown yet', face: 'Olumi can’t yet say its chance of meeting your goal, in this model.',
+      cell: { kind: 'withheld', face: 'Chance not shown yet', why: UNRECORDED_WHY,
         reasons: [{ code: 'reason_not_recorded', message: null }] } }];
     const { b, turnId } = await typedRun(served.text);
     expect(b._diagnostic_trace.leader_claim_enforced, 'the control: the gate edited this turn').toBe(true);
     expect(b.assistant_text, 'the control: the gate’s own sentence is in the reply').toContain(noLeaderSentence);
     expect(b._answer_shape, 'shaped after the gate').toBeDefined();
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
-    expect(faceOf(b._answer_shape!), 'typed fallback withhold marker is must-face').toContain(WITHHOLD_FALLBACK_MARKER);
-    expect(b._answer_shape!.headline, 'withheld cells lead when no chance cell is shown').toBe(WITHHOLD_FALLBACK_MARKER);
-    expect(occurrences(b.assistant_text, WITHHOLD_FALLBACK_MARKER), 'one recorded cause gives one marker').toBe(1);
+    // Score run 4 U2-1 (DL 12 Oct): one recorded cause the face has no fixed words for is said in the cell's own words,
+    // never "Not shown yet; why is under More detail".
+    expect(faceOf(b._answer_shape!), 'the cell\'s own withheld line is must-face').toContain(UNRECORDED_WHY);
+    expect(b._answer_shape!.headline, 'withheld cells lead when no chance cell is shown').toBe(UNRECORDED_WHY);
+    expect(occurrences(b.assistant_text, UNRECORDED_WHY), 'one recorded cause gives one line').toBe(1);
+    expect(b.assistant_text).not.toContain(WITHHOLD_FALLBACK_MARKER);
     expect(faceOf(b._answer_shape!), 'full withheld reason is behind progressive disclosure').not.toContain(noLeaderSentence);
     expect(occurrences(b._answer_shape!.detail, noLeaderSentence), 'exact gate reason once in detail').toBe(1);
     expect(b.assistant_text.split(noLeaderSentence)).toHaveLength(2);

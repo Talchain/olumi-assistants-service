@@ -1,0 +1,340 @@
+{
+ "source": {
+  "run": "live/runs/2026-10-12T172858Z (score run 4, Batch B served witness)",
+  "cee": "a770ce49fe29691b9e7f28982a100f01ab3b8eef",
+  "ui": "616bbf21ea5e5695b7f3c5dcd9b056635963d221",
+  "turns": "capacity/turns/01-03.json",
+  "log": "Render logs, event agent_lane.reply_shaped, by x-request-id",
+  "repair": "step 1 was captured through an SSE reader that decoded UTF-8 as cp1252 (screenshot 01-brief-canvas.png shows the right glyphs); the stored text is the inverse, checked to round-trip"
+ },
+ "cases": {
+  "capacity_01": {
+   "step": 1,
+   "request_id": "027b9315-d9e8-447e-bd1b-b90aa4b640b3",
+   "user_message": "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.",
+   "captured_text_sha256": "18af53e8132a01c81f73ee7ceb804e1d409d26bbaccbec1c82cce432f09745d4",
+   "harness_decoding_repaired": true,
+   "assistant_text": "I’ve built the comparison around your stated capacity target.\n\n- Today’s team capacity is **80 tickets per week** (your figure).\n- The added specialist uses **20 tickets per week** as a provisional planning estimate; your range is 10–30.\n- “Keep current staffing” holds today’s values; no deadline or staffing timing is modelled.\n\nA provisional first pass has run, but it is only a draft to challenge: it has not been validated. The model can run when you ask.\n\nThis chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.\n\nOlumi's estimates: 3, see Check estimates.\n\nNot shown yet; why is under More detail\n\nQuestions this model does not answer yet: What do you expect ‘Additional specialists’ to be? ‘Additional specialists’ is 0 today, so Olumi adds up their effects on ‘Weekly support capacity’ instead of multiplying them: treat the comparison as a rough approximation until you say. The specialist estimate ranges from 10 to 30 tickets per week; 20 tickets per week is used as the provisional planning estimate. Confirm the expected capacity after onboarding and whether the low-end 10-ticket case must still meet the target. 1 more question remains unresolved.\n\n‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates). It rests most on Olumi’s own estimate of how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?\n\nProvisional: this result uses inputs whose sources have not been verified.",
+   "text_sha256": "5947aedf93e2b196dbc4378a55113b46ff9662f1dbf813de51debd6348d720b4",
+   "served_shape": null,
+   "chance_cells": [
+    {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "reference_moved",
+       "message": "Not shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first."
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Not shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first."
+    },
+    {
+     "kind": "figure",
+     "display": "about 36%",
+     "face": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates)."
+    }
+   ],
+   "option_ids": [
+    "keep_current_staffing",
+    "add_one_specialist"
+   ],
+   "graph_nodes": [
+    {
+     "id": "decision_weekly_support_capacity",
+     "kind": "decision",
+     "label": "Decision: Weekly support capacity"
+    },
+    {
+     "id": "weekly_support_capacity",
+     "kind": "goal",
+     "label": "Weekly support capacity"
+    },
+    {
+     "id": "keep_current_staffing",
+     "kind": "option",
+     "label": "Keep current staffing"
+    },
+    {
+     "id": "add_one_specialist",
+     "kind": "option",
+     "label": "Add one specialist"
+    },
+    {
+     "id": "add_two_specialists",
+     "kind": "option",
+     "label": "Add two specialists"
+    },
+    {
+     "id": "existing_team_support_capacity",
+     "kind": "factor",
+     "label": "Existing team support capacity"
+    },
+    {
+     "id": "additional_specialists",
+     "kind": "factor",
+     "label": "Additional specialists"
+    },
+    {
+     "id": "support_capacity_per_additional_specialist",
+     "kind": "factor",
+     "label": "Support capacity per additional specialist"
+    },
+    {
+     "id": "specialist_capacity_below_estimate",
+     "kind": "risk",
+     "label": "Specialist capacity below estimate"
+    },
+    {
+     "id": "additional_specialist_capacity",
+     "kind": "outcome",
+     "label": "Additional specialist capacity"
+    }
+   ],
+   "served_log": {
+    "outcome": "kept_whole",
+    "reason": "obligation_unlocated",
+    "fast_path": "agent",
+    "obligations": 4,
+    "words_in": 265,
+    "units_in": 9,
+    "bullets_in": 3,
+    "questions_in": 0,
+    "face_bullets": 0,
+    "detail_units": 0,
+    "face_words": 0,
+    "obligations_on_face": 0,
+    "open_questions_segment": true
+   },
+   "guidance_slot1": null
+  },
+  "capacity_02": {
+   "step": 2,
+   "request_id": "bea962ba-72f5-49c5-a10c-528cfabbac53",
+   "user_message": "Run analysis",
+   "captured_text_sha256": "ab457a67c0020f6cb6dc2000e6c8089aaf7d3d333aa48a92d66414168d77b368",
+   "harness_decoding_repaired": false,
+   "assistant_text": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates). It rests most on Olumi’s own estimate of how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?\n\n• At today's numbers; not projected forward yet\n• Not shown yet; why is under More detail\n\nYour results are ready. You can view them now or ask me to explain them.\n\n\"Additional specialists\": Not confirmed from your brief These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.\n\nProvisional: this result uses inputs whose sources have not been verified.\n\nWhat would change it: how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’.\n\nOlumi's estimates: 3, see Check estimates.\n\nThis chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.",
+   "text_sha256": "ab457a67c0020f6cb6dc2000e6c8089aaf7d3d333aa48a92d66414168d77b368",
+   "served_shape": {
+    "headline": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates). It rests most on Olumi’s own estimate of how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?",
+    "bullets": [
+     "At today's numbers; not projected forward yet",
+     "Not shown yet; why is under More detail"
+    ],
+    "detail": "Your results are ready. You can view them now or ask me to explain them.\n\n\"Additional specialists\": Not confirmed from your brief These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.\n\nProvisional: this result uses inputs whose sources have not been verified.\n\nWhat would change it: how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’.\n\nOlumi's estimates: 3, see Check estimates.\n\nThis chance uses the model's numbers as they are today; the model doesn't project how they change over time yet."
+   },
+   "chance_cells": [
+    {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "reference_moved",
+       "message": "Not shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first."
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Not shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first."
+    },
+    {
+     "kind": "figure",
+     "display": "about 36%",
+     "face": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates)."
+    }
+   ],
+   "option_ids": [
+    "keep_current_staffing",
+    "add_one_specialist"
+   ],
+   "graph_nodes": [
+    {
+     "id": "decision_weekly_support_capacity",
+     "kind": "decision",
+     "label": "Decision: Weekly support capacity"
+    },
+    {
+     "id": "weekly_support_capacity",
+     "kind": "goal",
+     "label": "Weekly support capacity"
+    },
+    {
+     "id": "keep_current_staffing",
+     "kind": "option",
+     "label": "Keep current staffing"
+    },
+    {
+     "id": "add_one_specialist",
+     "kind": "option",
+     "label": "Add one specialist"
+    },
+    {
+     "id": "add_two_specialists",
+     "kind": "option",
+     "label": "Add two specialists"
+    },
+    {
+     "id": "existing_team_support_capacity",
+     "kind": "factor",
+     "label": "Existing team support capacity"
+    },
+    {
+     "id": "additional_specialists",
+     "kind": "factor",
+     "label": "Additional specialists"
+    },
+    {
+     "id": "support_capacity_per_additional_specialist",
+     "kind": "factor",
+     "label": "Support capacity per additional specialist"
+    },
+    {
+     "id": "specialist_capacity_below_estimate",
+     "kind": "risk",
+     "label": "Specialist capacity below estimate"
+    },
+    {
+     "id": "additional_specialist_capacity",
+     "kind": "outcome",
+     "label": "Additional specialist capacity"
+    }
+   ],
+   "served_log": {
+    "outcome": "shaped",
+    "fast_path": "run",
+    "obligations": 7,
+    "words_in": 158,
+    "units_in": 9,
+    "bullets_in": 0,
+    "questions_in": 1,
+    "face_bullets": 2,
+    "detail_units": 6,
+    "face_words": 69,
+    "obligations_on_face": 3,
+    "open_questions_segment": false
+   },
+   "guidance_slot1": null
+  },
+  "capacity_03": {
+   "step": 3,
+   "request_id": "de559eb2-e03e-4679-a62f-fbfdd78b0b9a",
+   "user_message": "Explain this result",
+   "captured_text_sha256": "8e55179d8752980992e2780db42100d8e6f93a696d901ed4f92ea12ef028a692",
+   "harness_decoding_repaired": false,
+   "assistant_text": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates). It rests most on Olumi’s own estimate of how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?\n\n• At today's numbers; not projected forward yet\n• Not shown yet; why is under More detail\n\nThis result needs checking before it can answer your absolute-capacity question.\n\n- Check the target interpretation and capacity arithmetic.\n- “Add two specialists” was excluded from this comparison.\n\nYour target is “Weekly support capacity” of **at least 100 tickets per week**, but this run recorded its threshold as a change, not an absolute level. Its chance therefore cannot safely answer your stated question. The model also uses uncertain relationships where you defined capacity arithmetically.\n\nNot shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first.\n\n\"Additional specialists\": Not confirmed from your brief These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.\n\nProvisional: this result uses inputs whose sources have not been verified.\n\n‘Add two specialists’ is Olumi’s suggestion, so it was left out of this comparison until you add it.\n\nWhat would change it: how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’.\n\nOlumi's estimates: 3, see Check estimates.\n\nThis chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.\n\nWhy? Decisions framed with a single alternative ('whether or not') fail more often than ones with real alternatives; generating options before evaluating is a core decision-quality step.",
+   "text_sha256": "8e55179d8752980992e2780db42100d8e6f93a696d901ed4f92ea12ef028a692",
+   "served_shape": {
+    "headline": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates). It rests most on Olumi’s own estimate of how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?",
+    "bullets": [
+     "At today's numbers; not projected forward yet",
+     "Not shown yet; why is under More detail"
+    ],
+    "detail": "This result needs checking before it can answer your absolute-capacity question.\n\n- Check the target interpretation and capacity arithmetic.\n- “Add two specialists” was excluded from this comparison.\n\nYour target is “Weekly support capacity” of **at least 100 tickets per week**, but this run recorded its threshold as a change, not an absolute level. Its chance therefore cannot safely answer your stated question. The model also uses uncertain relationships where you defined capacity arithmetically.\n\nNot shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first.\n\n\"Additional specialists\": Not confirmed from your brief These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.\n\nProvisional: this result uses inputs whose sources have not been verified.\n\n‘Add two specialists’ is Olumi’s suggestion, so it was left out of this comparison until you add it.\n\nWhat would change it: how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’.\n\nOlumi's estimates: 3, see Check estimates.\n\nThis chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.\n\nWhy? Decisions framed with a single alternative ('whether or not') fail more often than ones with real alternatives; generating options before evaluating is a core decision-quality step."
+   },
+   "chance_cells": [
+    {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "reference_moved",
+       "message": "Not shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first."
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Not shown: this run’s result for carrying on as now doesn’t match ‘Weekly support capacity’ as it stands today in the model, so it needs checking first."
+    },
+    {
+     "kind": "figure",
+     "display": "about 36%",
+     "face": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates)."
+    }
+   ],
+   "option_ids": [
+    "keep_current_staffing",
+    "add_one_specialist"
+   ],
+   "graph_nodes": [
+    {
+     "id": "decision_weekly_support_capacity",
+     "kind": "decision",
+     "label": "Decision: Weekly support capacity"
+    },
+    {
+     "id": "weekly_support_capacity",
+     "kind": "goal",
+     "label": "Weekly support capacity"
+    },
+    {
+     "id": "keep_current_staffing",
+     "kind": "option",
+     "label": "Keep current staffing"
+    },
+    {
+     "id": "add_one_specialist",
+     "kind": "option",
+     "label": "Add one specialist"
+    },
+    {
+     "id": "add_two_specialists",
+     "kind": "option",
+     "label": "Add two specialists"
+    },
+    {
+     "id": "existing_team_support_capacity",
+     "kind": "factor",
+     "label": "Existing team support capacity"
+    },
+    {
+     "id": "additional_specialists",
+     "kind": "factor",
+     "label": "Additional specialists"
+    },
+    {
+     "id": "support_capacity_per_additional_specialist",
+     "kind": "factor",
+     "label": "Support capacity per additional specialist"
+    },
+    {
+     "id": "specialist_capacity_below_estimate",
+     "kind": "risk",
+     "label": "Specialist capacity below estimate"
+    },
+    {
+     "id": "additional_specialist_capacity",
+     "kind": "outcome",
+     "label": "Additional specialist capacity"
+    }
+   ],
+   "served_log": {
+    "outcome": "shaped",
+    "fast_path": "explain",
+    "obligations": 5,
+    "words_in": 262,
+    "units_in": 16,
+    "bullets_in": 2,
+    "questions_in": 1,
+    "face_bullets": 2,
+    "detail_units": 13,
+    "face_words": 69,
+    "obligations_on_face": 3,
+    "open_questions_segment": false
+   },
+   "guidance_slot1": {
+    "policy_id": "RC-WIDEN",
+    "priority": "P1",
+    "variant": "W2",
+    "target": "options",
+    "primary_action": {
+     "label": "Suggest options",
+     "action_kind": "choose_1_of_3",
+     "intent": "elicit_options"
+    },
+    "state_key_hash": "1a73966288a2",
+    "copy": {
+     "title": "Only one real option on the table. Decisions go better with alternatives.",
+     "why": "Alternatives expose trade-offs that a single proposed route leaves untested.",
+     "question": "Is it really just ‘Add one specialist’ or carry on as now? What other routes are there?"
+    }
+   }
+  }
+ }
+}

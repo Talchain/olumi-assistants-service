@@ -204,7 +204,12 @@ describe('result-first on retry, lost response and failed explanation (live rout
     const ask = decisionInputAsk(GRAPH, { restingText: `${RUN_RESULT_READY_TEXT}\n\n${finding}`,
       questionsToggle: false, awaitingApproval: false, builtOrRan: true });
     expect(ask).toBe('What figure should "MRR" reach or stay under? I\'ll propose it as your target.');
-    expect(live._answer_shape).toEqual({ headline: 'Not shown yet; why is under More detail', bullets: ['What figure should "MRR" reach or stay under?'],
+    // Score run 4 U2-1 (DL 12 Oct; re-pinned from the pointer headline): the withheld cells' ONE recorded reason (the Run's
+    // GOAL_FIGURES_TARGET_NOT_TESTABLE words, read by code) leads in its own declarative sentences: the change adds no ask.
+    const recorded = ((SERVED.block.enrichment as { inference_warnings: { code: string; message: string }[] }).inference_warnings)
+      .find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!.message;
+    const reason = sentencesOf(recorded).filter((s) => !s.trim().endsWith('?')).join(' ');
+    expect(live._answer_shape).toEqual({ headline: reason, bullets: ['What figure should "MRR" reach or stay under?'],
       detail: `${RUN_RESULT_READY_TEXT}\n\nI'll propose it as your target.\n\n${finding}` });
     expect([live._answer_shape!.headline, ...live._answer_shape!.bullets].join('\n')).not.toContain(finding);
     expect(live._answer_shape!.detail.split(finding)).toHaveLength(2);

@@ -187,8 +187,16 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     expect(shape, explained.assistant_text).toBeDefined();
     const finding = goalChanceWithheldForAgent(SERVED.block, GRAPH)!.say;
     expect(finding).toBe('This run doesn’t yet show each option’s chance of meeting your goal.');
-    expect(WITHHOLD_FALLBACK_MARKER).toBe('Not shown yet; why is under More detail');
-    expect(shape!.headline).toBe(WITHHOLD_FALLBACK_MARKER);
+    // Score run 4 U2-1 (DL 12 Oct; re-pinned from the pointer headline): the withheld cells' ONE recorded reason (the Run's
+    // GOAL_FIGURES_TARGET_NOT_TESTABLE words, read by code) leads in its own words: its declarative sentences, since the
+    // change adds no ask. "Not shown yet; why is under More detail" is never shown.
+    const recorded = ((SERVED.block.enrichment as { inference_warnings: { code: string; message: string }[] }).inference_warnings)
+      .find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!.message;
+    const reason = sentencesOf(recorded).filter((s) => !s.trim().endsWith('?')).join(' ');
+    expect(recorded.endsWith('What is quarterly revenue today?'), 'the control: the recorded words end on their own question').toBe(true);
+    expect(shape!.headline).toBe(reason);
+    expect(explained.assistant_text).not.toContain(WITHHOLD_FALLBACK_MARKER);
+    expect(explained.assistant_text, 'no question is added').not.toContain('What is quarterly revenue today?');
     expect([shape!.headline, ...shape!.bullets].join('\n')).not.toContain(finding);
     expect(shape!.detail.split(finding)).toHaveLength(2);
     // R4: Olumi's code line is the answer, so it is on the face (each sentence once), not under More detail.
