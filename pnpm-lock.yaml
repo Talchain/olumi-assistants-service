@@ -1111,7 +1111,7 @@ packages:
     engines: {node: '>=20.0.0'}
 
   '@talchain/schemas@file:vendor/talchain-schemas-0.83.0.tgz':
-    resolution: {integrity: sha512-NI4v+eriPoLB1rd39PDPcJSdN6QEon2YIW12l0vl2zgCRHC7TIKv/Nbttkl8KKJ2XT2Os8fZVRhJ2OCYxk03Vw==, tarball: file:vendor/talchain-schemas-0.83.0.tgz}
+    resolution: {integrity: sha512-2yK1A9GDHfeLV1mm9bjF3omNCzsnKBLBWZ7Pb/HfpVhnH7G7xOlJ2L42leYd2eQaKTsJs0829mLrd9ifZnLMZg==, tarball: file:vendor/talchain-schemas-0.83.0.tgz}
     version: 0.83.0
     engines: {node: '>=18.0.0'}
 
