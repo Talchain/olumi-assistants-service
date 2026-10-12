@@ -71,7 +71,7 @@ function eventDateSpans(brief: string): { start: number; end: number }[] {
         const end = word.index + word[0].length;
         if (end > 80) break;
         // The reference only recognises a date phrase; no date is written or inferred here.
-        if (readStatedDeadline(tail.slice(0, end), '1900-01-01')) {
+        if (readStatedDeadline(tail.slice(0, end), '1900-01-01', { leadWordsOnly: true })) {
           spans.push({ start: part.start + lead.index, end: part.start + lead.index + end });
         }
       }

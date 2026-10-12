@@ -161,6 +161,6 @@ export function deadlineCardToIssue(p: DeadlineIssueInput): { readonly goal_id: 
   if (words === '' || words.length > 80) return undefined;
   const sources = [p.storedBrief, p.typedNow].filter((s): s is string => typeof s === 'string');
   if (!sources.some(s => whole(words, s)) || !sources.some(s => goalOwnsDeadline(goal, words, s))) return undefined;
-  const stated = readStatedDeadline(words, p.reference);
+  const stated = readStatedDeadline(words, p.reference, { leadWordsOnly: true });
   return stated === null ? undefined : { goal_id: goal.id, words, reference: p.reference, date: stated.date };
 }

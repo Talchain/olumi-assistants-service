@@ -101,6 +101,7 @@ function world() {
   let bytes: string | null = null;
   const read = (): Rec => (bytes === null ? { nodes: [], edges: [] } : JSON.parse(bytes));
   const rows: SessionTurnWithContent[] = [];
+  const writes: Rec[] = [];
   const latest = () => rows.find(r => !r.turn_id.endsWith(':claim'));
   const store = createMockSessionStore({
     loadGraph: async () => (bytes === null ? null : read()), loadGraphAndBriefText: async () => ({ graph: bytes === null ? null : read(), briefText: bytes === null ? null : PAUL.brief }),
@@ -109,7 +110,10 @@ function world() {
       user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used, pending_actions: (r as Rec).pending_actions ?? [] } : null; },
     readMostRecentPendingActions: async (_sid, opts) => { opts?.onLatestRowId?.(latest()?.id ?? null); return (latest() as Rec)?.pending_actions ?? []; },
     readRecent: async () => rows.filter(r => !r.turn_id.endsWith(':claim')),
+    readFactsWithTurnFor: async ids => rows.flatMap(r => ids.includes(r.id) ? (writes.find(w => w.turn_id === r.turn_id)?.handler_facts ?? [])
+      .map((fact: Rec) => ({ turn_id: r.id, fact_created_at: r.created_at, fact })) : []),
     append: async write => {
+      writes.push(write);
       if (write.graph !== undefined && write.graph !== null) bytes = JSON.stringify(write.graph);
       const id = randomUUID(); rows.unshift({ ...makeSessionTurnRow({ id, scenario_id: sid, turn_id: write.turn_id, request_hash: write.request_hash,
         turn_class: write.turn_class, handler_id: write.handler_id, response_emitted: write.response_emitted, created_at: new Date().toISOString(),

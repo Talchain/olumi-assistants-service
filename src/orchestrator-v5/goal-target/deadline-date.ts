@@ -63,6 +63,12 @@ export interface DeadlineReadOptions {
   readonly lastWeekday?: { readonly weekday: Weekday; readonly date: string };
   /** `false`: no reference day to count "last <weekday>" back from, so it is never counted (the user is asked). Default true. */
   readonly relativeWeekdays?: boolean;
+  /**
+   * EBD E3: `true` keeps the closed lead-word list as the only words a phrase may open with (the brief's own date-span
+   * scan and the drafter's stated-deadline card, which read text no one quoted as the deadline). Default `false`: the
+   * phrase is the user's own bound quote, and the date expression it ends with is found inside it.
+   */
+  readonly leadWordsOnly?: boolean;
 }
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'] as const;
@@ -86,6 +92,17 @@ const COUNT_RE = '(\\d{1,3}|a|an|one|two|three|four|five|six|seven|eight|nine|te
  */
 const LEAD_TOKEN = /^(?:we[ \t]{1,4}have|we've[ \t]{1,4}got|there[ \t]{1,4}is|there's|a|an|the|our|hard|firm|fixed|deadline|launch[ \t]{1,4}date|due[ \t]{1,4}date|is|of|at|by|before|until|till|within|in|no[ \t]{1,4}later[ \t]{1,4}than)(?:[ \t]{1,4}|$)/;
 
+/**
+ * ⭐ EBD E3 (Paul's hiring test, 12 Oct, scenario 4184e877: "…our launch deadline in six months time" was refused twice,
+ * because "launch" is not a lead word). The span the Agent quotes is the user's own words, bound to their message by the
+ * door; the date expression is found INSIDE it, as the phrase it ends with. Any word may come before it, except one that
+ * makes its count something other than the deadline — a duration, a delay or a hiring time ("recruitment will take more
+ * than 3 months", "miss it by over a month", "3 months ago"): then nothing is placed and the user is asked.
+ */
+const NOT_A_DEADLINE_WORD = /^(?:take|takes|took|taking|last|lasts|lasted|lasting|hire|hires|hiring|hired|recruit|recruits|recruiting|recruited|recruitment|onboard|onboards|onboarding|notice|ago|since|for|over|late|later|early|earlier|behind|delay|delays|delayed|slip|slips|slipped|slipping|miss|misses|missed|missing|spent|been)$/;
+/** One whole word of a phrase and the space after it. */
+const PHRASE_WORD = /^[^ \t]{1,80}[ \t]*/;
+
 /** The forms a deadline phrase may take, anchored and bounded (no nested repeats); one canonical body each. */
 const COUNT_FORM = new RegExp(`^${COUNT_RE}[ \\t-]{1,2}(months?|weeks?|days?)(?:'?s?[ \\t]{1,2}time|[ \\t]{1,2}from[ \\t]{1,2}(?:now|today)|[ \\t]{1,2}(?:deadline|away|out))?$`);
 /**
@@ -108,7 +125,7 @@ const MONTH_DAY_FORM = new RegExp(`^${MONTH_RE}[ \\t]{1,2}(\\d{1,2})(?:st|nd|rd|
 const ISO_FORM = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** Every pattern this module runs, for the 5k → 20k timing rows only (the public reader gates input at 80 characters). */
-export const DEADLINE_PATTERNS_FOR_TIMING: readonly RegExp[] = [LEAD_TOKEN, COUNT_FORM, FROM_DAY_FORM, LAST_WEEKDAY_FORM, LAST_WEEKDAY_NAMED, WEEKDAY_DATED, QUARTER_FORM, YEAR_END_FORM, MONTH_END_FORM, DAY_MONTH_FORM, MONTH_DAY_FORM, ISO_FORM];
+export const DEADLINE_PATTERNS_FOR_TIMING: readonly RegExp[] = [LEAD_TOKEN, COUNT_FORM, FROM_DAY_FORM, LAST_WEEKDAY_FORM, LAST_WEEKDAY_NAMED, WEEKDAY_DATED, QUARTER_FORM, YEAR_END_FORM, MONTH_END_FORM, DAY_MONTH_FORM, MONTH_DAY_FORM, ISO_FORM, NOT_A_DEADLINE_WORD, PHRASE_WORD];
 
 const pad = (n: number): string => String(n).padStart(2, '0');
 const iso = (y: number, m0: number, d: number): string => `${y}-${pad(m0 + 1)}-${pad(d)}`;
@@ -262,16 +279,24 @@ export function readStatedDeadline(phrase: string, today: string, opts: Deadline
   // One canonical spelling: lower case, typographic apostrophes and dashes plain, runs of spaces single, end punctuation off.
   const plain = words.toLowerCase().replace(/[‘’]/g, "'").replace(/[–—]/g, '-').replace(/[ \t]{2,}/g, ' ').replace(/[.!?,;:]+$/, '').trim();
   let body = plain;
-  for (let i = 0; i <= 10 && body !== ''; i += 1) {
+  // 80 characters hold at most 40 words: every word can be tried as the start of the date expression.
+  for (let i = 0; i <= 40 && body !== ''; i += 1) {
     const countBody = body.replace(/^(?:end of (?:the )?)?month (\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)$/i, '$1 months');
     const placed = placeDeadline(countBody, words, today, opts);
     if (placed !== undefined) return placed;
     const lead = LEAD_TOKEN.exec(body);
-    if (lead === null) return null;
-    // ⛔ Codex buddy r1 on #2742: "before March" is NOT the end of March, and "until March" may or may not include it. A
-    // boundary word whose reading changes the date is never resolved here: the user is asked (`null`).
-    if (/^(?:before|until|till)\b/.test(lead[0])) return null;
-    body = body.slice(lead[0].length).trim();
+    if (lead !== null) {
+      // ⛔ Codex buddy r1 on #2742: "before March" is NOT the end of March, and "until March" may or may not include it. A
+      // boundary word whose reading changes the date is never resolved here: the user is asked (`null`).
+      if (/^(?:before|until|till)\b/.test(lead[0])) return null;
+      body = body.slice(lead[0].length).trim();
+      continue;
+    }
+    if (opts.leadWordsOnly === true) return null;
+    // EBD E3: a word of the user's own sentence before the date expression ("launch", "it's"), stepped over whole.
+    const word = PHRASE_WORD.exec(body);
+    if (word === null || NOT_A_DEADLINE_WORD.test(word[0].trim().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, ''))) return null;
+    body = body.slice(word[0].length).trim();
   }
   return null;
 }

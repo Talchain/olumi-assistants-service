@@ -252,7 +252,7 @@ import { meetsLimit } from '../limit-operator-words.js';
 import { levelLimitNodeDecision, thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
 import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participation-guard.js';
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
-import { goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
+import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
 import { lastWeekdayNamedIn, readStatedDeadline, readStatedWeekdayDate, sayDate, sayDeadlineFromToday, todayInLondon, weekdayDatedIn, type Weekday } from '../../goal-target/deadline-date.js';
 import { draftReferenceDate } from '../../goal-target/draft-reference.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
@@ -3915,8 +3915,12 @@ export function createAgentCapabilities(
             ? `Olumi cannot tell which date "last ${named}" in "${words}" is without guessing, so nothing was prepared. `
               + 'Ask which date the user means. Once they explicitly date that weekday, call propose_goal_deadline with the original deadline_words. '
               + 'Never invent or offer a start date.'
+            // EBD E3 (Paul, 12 Oct: refused twice, then "Can you not work that out?"): a direct question that invites a time
+            // from today, which Olumi then places — not a ban that left the Agent asking for an exact calendar date.
             : `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
-              + 'Ask the user which date they mean, and never offer a date of your own.' };
+              + `Ask the user directly: "${chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
+                ?? (g.nodes.filter((n) => n.kind === 'goal').length === 1 ? g.nodes.find((n) => n.kind === 'goal')!.label : 'your goal'))}" `
+              + 'Then call propose_goal_deadline with the words they reply with; Olumi works out the date from them.' };
       }
       const goals = g.nodes.filter((n) => n.kind === 'goal');
       if (goals.length !== 1) {
