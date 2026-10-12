@@ -1566,7 +1566,7 @@ describe('post-B: a single stated target the Run did not send as specified is sa
     expect(withholdForUnsentGoalTarget(env, g, 'new_customers', constraints)).toBe(env);
     const joint = licenceFor(marketingRun(), g, sent)!.targets!.joint as Rec;
     expect([joint.reason, joint.line]).toEqual(['figure_not_preserved',
-      'The chance of meeting both together isn’t shown: this analysis did not use every stated target as specified.']);
+      'The chance of meeting both together isn’t shown: this analysis did not use every stated target as specified. Run the analysis again to use the saved targets.']);
   });
   it('CONTROL: another run-wide cause keeps its own words (no comparator held → the gate\'s cause, never this sentence)', () => {
     const g = capacityGraph({ goal: { goal_threshold: undefined, goal_direction: undefined } });
