@@ -3430,7 +3430,7 @@ export function createAgentCapabilities(
   };
   const DRAFT_GATE_REFUSAL = 'draft_holds_your_work';
   const draftGateDetail = (found: readonly string[], stage: 'offered' | 'replaced'): string =>
-    `Your model already holds ${found.join('; ')}, so a revised draft was not ${stage}: replacing the draft would discard it, `
+    `Olumi found ${found.join('; ')}, so a revised draft was not ${stage}: replacing the draft could discard your work, `
     + 'and nothing was changed. Tell the user that plainly, and that their goal is not yet in the model. Never rebuild part of it.';
 
   /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
