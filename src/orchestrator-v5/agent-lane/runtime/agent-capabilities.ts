@@ -3430,14 +3430,27 @@ export function createAgentCapabilities(
     return found;
   };
   const DRAFT_GATE_REFUSAL = 'draft_holds_your_work';
-  const draftGateDetail = (found: readonly string[], stage: 'offered' | 'replaced'): string =>
+  const TARGET_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>': 'above', '>=': 'at least', '<': 'below', '<=': 'at most' };
+  /**
+   * DL ruling 12 Oct (Paul's test: never a dead end): the refusal names the one step that exists today, the canvas edit of
+   * the goal to the targets the user gave. The revised-draft card is not offered in its place: it could not truthfully say
+   * the user's work survives (its edits are not carried, and a guest has no earlier version to go back to).
+   */
+  const draftGateDetail = (found: readonly string[], stage: 'offered' | 'replaced', goalWords: string): string =>
     `Olumi found ${found.join('; ')}, so a revised draft was not ${stage}: replacing the draft could discard your work, `
-    + 'and nothing was changed. Tell the user that plainly, and that their goal is not yet in the model. Never rebuild part of it.';
+    + 'and nothing was changed. Tell the user that plainly, that their goal is not yet in the model, and give the one step that '
+    + `works today: edit the goal on the canvas to ${goalWords}. Never rebuild part of it.`;
+  /** The targets in the user's terms: ‘Quantity’ at least 20 (one target, or several joined by "and"). */
+  const targetsInWords = (raw: unknown, targets: readonly { node_id: string; comparator: string; value: number; unit: string }[]): string =>
+    targets.map((t) => {
+      const n = ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []).find((x) => x?.id === t.node_id);
+      return `\u2018${typeof n?.label === 'string' ? n.label : t.node_id}\u2019 ${TARGET_COMPARATOR_WORDS[t.comparator] ?? t.comparator} ${targetFigure(t.value, t.unit)}`;
+    }).join(' and ');
 
   /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
-  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> } | { readonly refused: ToolResult };
+  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> }
+    | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
-  const TARGET_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>': 'above', '>=': 'at least', '<': 'below', '<=': 'at most' };
 
   /**
    * Prepare the revised draft with C's own construction from the stored brief and THIS turn's typed goal
@@ -3449,7 +3462,7 @@ export function createAgentCapabilities(
   ): Promise<RevisedDraft> => {
     const notOffered = (refusal: string, detail: string): RevisedDraft => ({ refused: { ok: false, mutated: false, refusal, detail } });
     const found = await unreviewedDraftGate(ctx, g, []);
-    if (found.length > 0) return notOffered(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'offered'));
+    if (found.length > 0) return { refused: { ok: false, mutated: false, refusal: DRAFT_GATE_REFUSAL, detail: '' }, found };
     const typedGoal = (ctx.user_turn_text ?? '').trim();
     if (callStructured === undefined || ctx.turn_id === undefined || g.graph_identity_hash === '' || typedGoal === '') {
       return notOffered('revised_draft_unavailable', 'A revised draft cannot be prepared here, so nothing was offered and the model is unchanged. Tell the user plainly that their goal is not yet in the model.');
@@ -3523,7 +3536,10 @@ export function createAgentCapabilities(
       revisedDrafts.set(key, pending);
     }
     const draft = await pending;
-    if ('refused' in draft) return draft.refused;
+    if ('refused' in draft) {
+      return draft.found === undefined ? draft.refused : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered',
+        `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`) };
+    }
     // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
     const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
       && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
@@ -3560,7 +3576,9 @@ export function createAgentCapabilities(
       return notApplied('superseded', 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
     }
     const found = await unreviewedDraftGate(ctx, before, [v.goal_turn_id]);
-    if (found.length > 0) return notApplied(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'replaced'));
+    if (found.length > 0) {
+      return notApplied(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'replaced', targetsInWords(v.candidate, targetsHeldBy(v.candidate))));
+    }
     // The WHOLE approved graph (every top-level member the candidate carries: options, goal_constraints and all), CAS-gated
     // on both of the base's hashes, like the sibling registers (`frame-write-is-cas-gated.test.ts`).
     const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {

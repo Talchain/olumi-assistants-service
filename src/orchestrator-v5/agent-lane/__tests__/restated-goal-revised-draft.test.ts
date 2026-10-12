@@ -292,6 +292,8 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
     expect(String(r.detail)).toMatch(found);
+    // DL ruling 12 Oct (never a dead end): the one step that exists today, in this call's own target.
+    expect(String(r.detail)).toMatch(/give the one step that works today: edit the goal on the canvas to \u2018conversion rate\u2019 above 15%\. Never rebuild part of it\.$/);
     expect(drafts()).toBe(0);
     expect(s.commits).toHaveLength(0);
   };
@@ -355,6 +357,8 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     s.said('typed-turn-after-l20');
     const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
+    // At the press: the targets the card carried, as the canvas step (never a dead end).
+    expect(String(r.detail)).toMatch(/edit the goal on the canvas to \u2018New customers\u2019 at least 20 customers and \u2018Conversion rate\u2019 above 15%\. Never rebuild part of it\.$/);
     expect(s.commits).toHaveLength(0);
   });
 });
