@@ -113,12 +113,22 @@ describe('(B) get_canonical_state carries the ONE readiness verdict, in plain wo
   });
 
   it('RED (C33): each link carries whose it is and how strong — so a challenge can say "an assumption Olumi made"', async () => {
-    const r = await capsOver(paulGraph).getCanonicalState(ctx) as { links?: { from: string; to: string; source?: string; strength?: { mean?: number } }[] };
+    const r = await capsOver(paulGraph).getCanonicalState(ctx) as { links?: { from: string; to: string; source?: string; sizing?: string; strength?: { mean?: number } }[] };
     // A BELIEF link (a factor's effect) is what a challenge can call "an assumption Olumi made". Rebound from the
     // decision → option link it first named: that one is structure, said by its ends only (PJ-C1 lever 2).
     const belief = r.links?.find((l) => l.from === 'pro_plan_price' && l.to === 'mrr');
     expect(belief, JSON.stringify(r.links?.slice(0, 3))).toBeDefined();
-    expect(belief).toEqual(expect.objectContaining({ source: 'cee_hypothesis', strength: expect.objectContaining({ mean: 0.5 }) }));
+    // D1 ECHO GUARD (DL ruling 12 Oct, recovery Batch D): this link is Olumi's 0.5 placeholder, so it says whose it is and
+    // that nobody has sized it, never the default's number (read, the Agent echoed its band back as an estimate).
+    expect(belief).toEqual(expect.objectContaining({ source: 'cee_hypothesis', sizing: 'placeholder' }));
+    expect(belief).not.toHaveProperty('strength');
+    // CONTRAST: the same link once Olumi has sized it says how strong it is.
+    const g = JSON.parse(JSON.stringify(paulGraph)) as { edges: { from: string; to: string; provenance?: unknown }[] };
+    const e = g.edges.find((x) => x.from === 'pro_plan_price' && x.to === 'mrr')!;
+    e.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate' };
+    const sized = (await capsOver(g).getCanonicalState(ctx) as { links?: { from: string; to: string; sizing?: string; strength?: { mean?: number } }[] })
+      .links?.find((l) => l.from === 'pro_plan_price' && l.to === 'mrr');
+    expect(sized).toEqual(expect.objectContaining({ sizing: 'olumi_estimate', strength: expect.objectContaining({ mean: 0.5 }) }));
     expect(r.links?.find((l) => l.from === 'decision_mrr' && l.to === 'keep_49_price')).toEqual({ from: 'decision_mrr', to: 'keep_49_price' });
   });
 });

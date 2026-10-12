@@ -1505,7 +1505,9 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // R11: the user confirmed Olumi's strength for this link — still Olumi's figure, but not one to ask about again.
       ...(edgeReviewedByUser(e) ? { confirmed_by_user: true } : {}),
       ...(str(e.effect_direction) ? { direction: e.effect_direction } : {}),
-      ...(st !== undefined && num(st.mean) ? { strength: { mean: st.mean, ...(num(st.std) ? { std: st.std } : {}) } } : {}),
+      // D1 ECHO GUARD (DL ruling 12 Oct, Batch D): a placeholder's stored figure is nobody's size, so it is not projected,
+      // as its band is not (below): read, the Agent echoed the 0.5 default's band back as its own estimate.
+      ...(linkSizing(e) !== 'placeholder' && st !== undefined && num(st.mean) ? { strength: { mean: st.mean, ...(num(st.std) ? { std: st.std } : {}) } } : {}),
       // ⭐ The band, in the canvas's own WORD (`format/edge-strength-bands.ts`, #2003): without it the Agent named
       // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
@@ -4827,9 +4829,21 @@ export function createAgentCapabilities(
         // B1: preview the canonical review writer, then read it with THE predicate. Some contradictory projected
         // records must remain unsized after review; their card must not promise an estimate that review cannot store.
         const provenance = isPlainRecord(edge.provenance) ? edge.provenance : {};
-        const sizedAfterApproval = linkSizing({ ...edge, provenance: sizedByApproval({ ...provenance,
-          reviewed_by_user: { intent: 'confirm' } }, edge,
-          currentBand === band ? undefined : (direction === 'negative' ? -1 : 1) * bandMidpoint(band)) });
+        const sizedBy = (newMean: number | undefined): LinkSizing => linkSizing({ ...edge, provenance: sizedByApproval({ ...provenance,
+          reviewed_by_user: { intent: 'confirm' } }, edge, newMean) });
+        /**
+         * ⭐ D1: A PLACEHOLDER HAS NO CURRENT BAND (DL ruling 12 Oct, recovery Batch D, amending Batch A ruling 1/5 · L4 (c)
+         * for this case only; Science 393023 LICENCE ruling 3). Its default always sits in some band (0.5 reads "strong"),
+         * so a band proposed for it, the user's or Olumi's, was "kept as it is": a review, and run 3's decisive link
+         * ("Tech leads hired" → "Leadership capacity") stayed unsized. A proposed band now SIZES a placeholder at that
+         * band's midpoint, so the default is never what gets stamped. It stays a review only where that write cannot size
+         * it: the default already IS the midpoint, or (Olumi's) the adoption writer keeps the link unsized.
+         */
+        const midpoint = (direction === 'negative' ? -1 : 1) * bandMidpoint(band);
+        const placeholderMoves = linkSizing(edge) === 'placeholder' && Math.abs(mean) !== bandMidpoint(band);
+        const keepsUsers = currentBand === band && !placeholderMoves;
+        const keepsOlumis = currentBand === band && !(placeholderMoves && sizedBy(midpoint) !== 'placeholder');
+        const sizedAfterApproval = sizedBy(keepsOlumis ? undefined : midpoint);
         /**
          * ⭐ F1 (#87 6006627551; DL lease c6): a band that MOVES a link holding the user's own figure would drop it — for
          * the user's band and Olumi's estimate alike (a brief figure is `brief_extraction` + `user_stated`, so the
@@ -4844,8 +4858,8 @@ export function createAgentCapabilities(
         if (namedByTheUser(band, l.from_words, from.label, to.label)) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)
-          // and never credits. Only a band that MOVES the link is theirs.
-          const keeps = currentBand === band;
+          // and never credits. Only a band that MOVES the link is theirs, and a placeholder has no band to sit in (D1).
+          const keeps = keepsUsers;
           // #2473 CR (CODEX_CLI_OVERFLOW 5937437431): the user's OWN strength, named in the band it already sits in, is
           // "already" — nothing to approve. Any other kept link is a review whose figure the writer holds byte-equal.
           if (keeps && linkSizing(edge) === 'user') {
@@ -4870,8 +4884,9 @@ export function createAgentCapabilities(
         // figure. Matching only the band's midpoint re-set a sized estimate μ 0.6 → 0.55 (σ 0.3 → 0.275, its sizing note
         // dropped) and Paul's placeholders 0.5 → 0.55 on a no-change approval, staling the Run. Kept, it is a REVIEW
         // (`confirm_current`); a placeholder confirmation is refused by the canonical writer because no estimate exists.
-        // An estimate already accepted in that band is "already". Only a band that MOVES the link sets its midpoint.
-        const keeps = currentBand === band;
+        // An estimate already accepted in that band is "already". Only a band that MOVES the link sets its midpoint, and a
+        // placeholder has no band to sit in (D1): Olumi's band sizes it, as Olumi's estimate the user accepts.
+        const keeps = keepsOlumis;
         const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
         if (keeps && !approvalSizes(edge) && isAcceptedOlumiSize(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
         // Kept at its value it is a REVIEW of Olumi's band (`confirm_current`): the writer refuses a `set` that changes nothing.

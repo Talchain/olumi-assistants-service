@@ -9,6 +9,11 @@
  * Contract: the heading counts from the STORED outcome (strengths sized, changes to unsized links, reviews), every link
  * still unsized is said to be unsized, a review-only link's value is said to be unchanged (never the whole model's), and
  * A's next step is offered once.
+ *
+ * ⭐ D1 (DL ruling 12 Oct, recovery Batch D, amending Batch A ruling 1/5 · L4 (c) for a placeholder only): a placeholder has
+ * no current band, so Olumi's band now SIZES the served set's two kept 0.5 placeholders (the first test below, on the served
+ * bytes). A review of an unsized link remains where the approval cannot size it: a link the user drew but never sized
+ * (`source: user_specified` + a projected mean). The receipt contract is pinned on that shape, the two kept links drawn so.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -48,13 +53,13 @@ const argsFor = (at: readonly number[] = SIX.map((_, i) => i)) => ({ rationale: 
  * unsized (the canonical adoption writer's prior change). Its INTENT is `set`, its STORED outcome is a placeholder: this is
  * what tells a heading counted from the stored outcome apart from one counted from intent.
  */
-function world(variant = false) {
+function world(variant = false, servedBytes = false) {
   const VARIANT = 'developer_hires::productivity';
+  // D1: unless the served bytes are asked for, the two kept links are links the user drew but never sized, the one
+  // placeholder shape whose approval stays a review (Olumi's adoption cannot size it).
+  const drawn = new Set([...(variant ? [VARIANT] : []), ...(servedBytes ? [] : SIX.filter((l) => l.kept).map(key))]);
   const before = structuredClone(FX.before.graph);
-  if (variant) {
-    const e = before.edges.find((x) => key(x) === VARIANT)!;
-    e.provenance = { source: 'user_specified', mean_projected: true };
-  }
+  for (const e of before.edges) if (drawn.has(key(e))) e.provenance = { source: 'user_specified', mean_projected: true };
   let graph = before; let hash = FX.before.graph_hash;
   const sent: Record<string, unknown>[] = [];
   const dispatch: InternalDispatch = async (path) => {
@@ -66,8 +71,8 @@ function world(variant = false) {
       sent.push(input as unknown as Record<string, unknown>);
       // The stored outcome is the SERVED read after the approval; the variant link is written as that writer writes it.
       graph = { ...structuredClone(FX.after.graph), edges: FX.after.graph.edges.map((e) => {
-        if (!variant || key(e) !== VARIANT) return structuredClone(e);
-        const was = before.edges.find((x) => key(x) === VARIANT)!;
+        if (!drawn.has(key(e))) return structuredClone(e);
+        const was = before.edges.find((x) => key(x) === key(e))!;
         return { ...structuredClone(e), provenance: { ...was.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-10-12T00:17:53.645Z' } } };
       }) };
       hash = FX.after.graph_hash;
@@ -112,7 +117,22 @@ const WITNESS_B = {
 const itemsOf = (label: string): string => label.slice(label.indexOf(': '));
 
 describe('served mixed link set: preview and receipt follow the stored outcome', () => {
-  it('the fixture is the served approval: the same six offered items, the same six writes, the same stored outcome', async () => {
+  it('RED (D1, the served bytes): the two links Olumi kept "as it is" are 0.5 placeholders, so Olumi\'s band now SIZES them; no review is offered', async () => {
+    const w = world(false, true);
+    const p = await w.caps.proposeLinkStrengths!(ctx, argsFor());
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    // RED on staging 9bac9729: "Record 4 link strengths and 2 reviews: …, whose strength nobody has set yet (kept as it is); …".
+    expect(String(p.public_label).startsWith('Record these 6 link strengths: ')).toBe(true);
+    expect(String(p.public_label)).not.toMatch(/\breviews?\b(?! leadership)|nobody has set|kept as it is/i);
+    const links = (p as unknown as { links: Record<string, unknown>[] }).links;
+    for (const i of [1, 4]) {
+      expect(linkSizing(edgeOf(FX.before.graph, SIX[i]!)), `${key(SIX[i]!)}: precondition`).toBe('placeholder');
+      expect(links[i], key(SIX[i]!)).toMatchObject({ becomes: { band: 'strong' }, keeps_current_strength: false,
+        whose: 'Olumi\u2019s first estimate for a link nobody had sized', sizing_after_approval: 'olumi_accepted' });
+    }
+  });
+
+  it('the fixture is the served approval (D1: its two kept links drawn by the user): the same six offered items, the same six writes, the same stored outcome', async () => {
     const { w, p } = await approveServedSet();
     expect(itemsOf(String(p.public_label))).toBe(itemsOf(FX.served_offer_label));
     const links = (w.sent[0]!.link_strengths as { from: string; to: string; intent: string; magnitude: number }[]);
