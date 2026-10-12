@@ -171,7 +171,9 @@ function beforeAiLevelType(a: ReturnType<typeof admitted>, raw: CandidateModel, 
   return { ...a, nodes: a.nodes.map(n => {
     if (!ids.includes(n.id)) return n;
     const { extractionType: _type, ...observed_state } = n.observed_state!;
-    assert.equal(valueAuthorshipOf(observed_state), 'unknown', n.id);
+    // ONE PROVENANCE AUTHORITY (DL ruling; AIE 6119326092): the pre-type shape — an absent-type `cee_inference` — is Olumi's
+    // estimate on every reader now (S7 read it 'unknown'); the digest below still pins the pre-type bytes.
+    assert.equal(valueAuthorshipOf(observed_state), 'olumi_estimate', n.id);
     return { ...n, observed_state };
   }) };
 }

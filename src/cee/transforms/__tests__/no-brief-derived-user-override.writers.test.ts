@@ -193,7 +193,9 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // field the withdrawal does not reach. They map to `null` (defer), so the
   // only stamps this module will act on are those a genuine user-edit writer
   // wrote — i.e. precisely the ones the entries above establish as truthful.
-  "cee/transforms/provenance-display.ts":
+  // ONE PROVENANCE AUTHORITY (Batch C): the display tables moved VERBATIM from `cee/transforms/provenance-display.ts`
+  // (now a re-export shim with no literal) into `cee/provenance/provenance-of.ts`; the same reader-only justification holds.
+  "cee/provenance/provenance-of.ts":
     "reader only — maps the stamp to the display vocabulary (from_brief/ai_inferred/user_set) that reaches the LLM context; the literal is a lookup key, the module has no write path, and the two synthesised-from-extractionType literals DEFER so it can only act on a genuine user-edit writer's stamp",
   // ── The analysis-admission census. Reviewed 21 Sep 2026 against this guard's
   // ── one truth condition, while registering it for the provenance-widening

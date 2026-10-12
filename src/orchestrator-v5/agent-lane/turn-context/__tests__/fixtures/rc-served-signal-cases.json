@@ -2325,7 +2325,7 @@
      {
       "factor_id": "integration_step_bug_resolution",
       "label": "Integration-step bug resolution",
-      "value_authorship": "unknown",
+      "value_authorship": "olumi_estimate",
       "goal_distance": 3
      },
      {
@@ -3549,7 +3549,7 @@
      {
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
-      "value_authorship": "unknown",
+      "value_authorship": "olumi_estimate",
       "goal_distance": 2
      },
      {
@@ -4760,7 +4760,7 @@
      {
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
-      "value_authorship": "unknown",
+      "value_authorship": "olumi_estimate",
       "goal_distance": 2
      },
      {
@@ -5389,7 +5389,7 @@
      {
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
-      "value_authorship": "unknown",
+      "value_authorship": "olumi_estimate",
       "goal_distance": 2
      },
      {
@@ -6601,7 +6601,7 @@
      {
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
-      "value_authorship": "unknown",
+      "value_authorship": "olumi_estimate",
       "goal_distance": 2
      },
      {
@@ -7798,7 +7798,7 @@
      {
       "factor_id": "integration_step_bug_resolution",
       "label": "Integration-step bug resolution",
-      "value_authorship": "unknown",
+      "value_authorship": "olumi_estimate",
       "goal_distance": 3
      },
      {
@@ -10456,7 +10456,7 @@
      {
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
-      "value_authorship": "unknown",
+      "value_authorship": "olumi_estimate",
       "goal_distance": 2
      },
      {
