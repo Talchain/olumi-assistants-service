@@ -28,6 +28,7 @@ import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint
 import { WILSON_Z_95 } from './goal-chance-driver.js';
 import { readGoalRecord } from './goal-record.js';
 import { shareByDateGoalForChanceOf } from './share-by-date-run.js';
+import { goalTargetBasisOf } from './goal-target-basis.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -60,14 +61,52 @@ export interface GoalOwnConstraintRead {
  * operator PLoT derives from the sent direction and strictness must be the goal's held comparator.
  */
 export function sentRunTestsHeldTarget(sent: SentRunInputs | undefined, graph: unknown, goalId: unknown): boolean {
-  if (sent === undefined || typeof goalId !== 'string' || !isRec(sent.graph) || !Array.isArray(sent.graph.nodes)) return false;
-  const sentGoal = sent.graph.nodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
-  const sentOperator = sent.goal_direction === 'minimise'
-    ? (sent.goal_threshold_strict === true ? '<' : '<=') : (sent.goal_threshold_strict === true ? '>' : '>=');
+  const sentGoal = sentGoalOf(sent, goalId);
   const share = shareByDateGoalForChanceOf(graph), threshold = sentGoal?.goal_threshold;
   return sentGoal !== undefined && share !== null && share.goal.id === goalId && finite(threshold)
     && threshold === share.threshold_raw / 100 && sentGoal.goal_threshold_frame === 'delta'
-    && readGoalRecord(graph, goalId)?.target?.comparator === sentOperator;
+    && readGoalRecord(graph, goalId as string)?.target?.comparator === sentOperatorOf(sent!);
+}
+
+/** The goal node CEE sent for this Run (`plotPayload.graph`), by identity; undefined when there is none. */
+function sentGoalOf(sent: SentRunInputs | undefined, goalId: unknown): Rec | undefined {
+  if (sent === undefined || typeof goalId !== 'string' || !isRec(sent.graph) || !Array.isArray(sent.graph.nodes)) return undefined;
+  return sent.graph.nodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
+}
+
+/** The comparison PLoT scores: the operator it derives from the SENT direction and strictness (`run.ts`, autoConstraint). */
+function sentOperatorOf(sent: SentRunInputs): '<' | '<=' | '>' | '>=' {
+  return sent.goal_direction === 'minimise'
+    ? (sent.goal_threshold_strict === true ? '<' : '<=') : (sent.goal_threshold_strict === true ? '>' : '>=');
+}
+
+/**
+ * ⭐ G (AIE #94 6128697025 "S4/S8 — D timing decision"; amendment 6131950992 (a), 12 Oct): THE SELECTED RUN SCORED THE HELD
+ * CHANGE TARGET, OR NO CONDITIONAL CHANCE IS READ. A `probability_of_goal` on the wire alone licenses nothing: the goal CEE
+ * SENT for this Run must be this goal node with the held QUANTITY (its quantity frame), TARGET (the held raw figure and the
+ * normalised threshold the engine scored), FRAME, UNIT, REFERENCE and PERIOD (Olumi's validated reading, `goalTargetBasisOf`,
+ * on the sent node itself), and the operator PLoT derives from the sent direction and strictness must be the COMPARATOR the
+ * chance is stated with (`stated`: the goal's held one, else — a change carrying its direction in its sign — the licence's
+ * own reading of the Run's sense; the same derivation as {@link sentRunTestsHeldTarget}). Any difference, or anything
+ * missing, is false.
+ */
+export function sentRunScoresHeldChange(sent: SentRunInputs | undefined, graph: unknown, goalId: unknown, stated: string): boolean {
+  const sentGoal = sentGoalOf(sent, goalId);
+  if (sentGoal === undefined || !isRec(graph) || !Array.isArray(graph.nodes)) return false;
+  const goal = graph.nodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
+  const held = readGoalRecord(graph, goalId as string)?.target;
+  const scored = readGoalRecord(sent!.graph, goalId as string)?.target;
+  const heldBasis = goalTargetBasisOf(goal), sentBasis = goalTargetBasisOf(sentGoal);
+  if (goal === undefined || held == null || scored == null || heldBasis === undefined || sentBasis === undefined) return false;
+  // The whole validated reading (quantity, frame, target, reference, denominator, period, effect unit, timing, conditions) is the
+  // same on the sent node. The normalised threshold the engine scored has no record field: read on both nodes, once each.
+  const threshold = sentGoal.goal_threshold;
+  return JSON.stringify(sentBasis) === JSON.stringify(heldBasis)
+    && finite(threshold) && threshold === goal.goal_threshold
+    && finite(held.raw) && scored.raw === held.raw
+    && held.frame !== undefined && scored.frame === held.frame
+    && typeof held.unit === 'string' && scored.unit === held.unit
+    && (held.comparator === undefined || held.comparator === stated) && stated === sentOperatorOf(sent!);
 }
 
 /** AIE 6129564354 (AMENDED), verbatim: a deadline Run that did not test the target saved in the model shows no option's chance. */

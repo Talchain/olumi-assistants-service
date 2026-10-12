@@ -62,6 +62,7 @@ export const TYPED_RUN_PAYLOAD_PATHS = [
   'result.enrichment.inference_warnings[].pct_by_option.{option_id}',
   'result.enrichment.inference_warnings[].horizon_untested',
   'result.enrichment.inference_warnings[].summary_withheld',
+  'result.enrichment.inference_warnings[].period_end_assumption',
   'result.enrichment.inference_warnings[].driver_by_option.{option_id}',
 ] as const;
 
@@ -269,7 +270,9 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
       return { quarantine: `option ${optionId} GOAL_CHANCE_LICENSED percentage is malformed` };
     }
     const recordedDriver = recordOf(recordOf(licence!.driver_by_option)?.[optionId]);
-    const caveated = licence!.horizon_untested === true || recordOf(licence!.summary_withheld) !== undefined;
+    // G: a chance read on Olumi's period-end assumption is conditional, never stored as an unqualified permission.
+    const caveated = licence!.horizon_untested === true || recordOf(licence!.summary_withheld) !== undefined
+      || recordOf(licence!.period_end_assumption) !== undefined;
     options.push({
       option_id: optionId, chance: chance as number,
       low: precision?.interval_lower ?? null, high: precision?.interval_upper ?? null,

@@ -2217,7 +2217,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // the Run says why, with the next step (confirm the estimate, or give today's level) — never a silent gap.
     // ⭐ D3 (AIE #94 6128697025; recovery Batch D): a change target whose effects are not stated at the period's end (ruling
     // 12) is refused by the licence; the Run says why — never an invisible null. No next step is promised.
-    response = [withholdForOlumiGoalLevel, withholdForPeriodEndEffects]
+    // ⭐ G (AIE amendments 6131950992): unless the licence reads it CONDITIONALLY — this Run's sent target is the held one and
+    // the persisted brief, read, states no partial or late effect by the period (the licence below reads the same inputs).
+    const periodEndInputs = { sentRun: plotPayload, brief: snapshot.briefText ?? null };
+    const withholdForPeriodEnd = <E,>(run: E, graph: unknown, goalId: unknown): E => withholdForPeriodEndEffects(run, graph, goalId, periodEndInputs);
+    response = [withholdForOlumiGoalLevel, withholdForPeriodEnd]
       .reduce((run, withhold) => withhold(run, graphForAnalysis, snapshot.goal_node_id), response);
 
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
@@ -2889,7 +2893,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       snapshot.rawPersistedGraph ?? graphForAnalysis,
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
-      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun });
+      // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
+      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun,
+        brief: snapshot.briefText ?? null });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);

@@ -302,9 +302,9 @@ describe('readback — gap 1: a change goal\'s effects are stored and said in th
 // against the reopened graph. Expected words are written by hand from the decision text, never read off the code.
 
 /** The Run handler end to end, PLoT faked with `rowsOf(request)`: the request, the stored Run result, its screen view. */
-async function runAndRead(bytes: string, rowsOf: (request: Rec) => Rec[]): Promise<{ payload: Rec; result: Rec; view: Rec; reloaded: Rec }> {
+async function runAndRead(bytes: string, rowsOf: (request: Rec) => Rec[], briefText: string | null = null): Promise<{ payload: Rec; result: Rec; view: Rec; reloaded: Rec }> {
   const port = {
-    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 3 })),
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText, revision: 3 })),
     readMostRecentPendingActions: vi.fn(async () => []),
   };
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-batch-c-response', port as never);
@@ -386,6 +386,32 @@ describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "
     for (const r of (result.enrichment.option_comparison as Rec[]).filter((x) => x.option_id !== 'carry_on_with_the_current_team')) {
       expect(r, String(r.option_id)).not.toHaveProperty('probability_of_goal');
     }
+  });
+
+  it('G (AIE #94 6128697025; amendments 6131950992): with the brief read, the same Run is licensed CONDITIONALLY through the real handler, and it survives the stored bytes', async () => {
+    const g = JSON.parse(store(hiringSized())) as Rec;
+    const goal = (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    goal.goal_target_basis = { ...(goal.goal_target_basis as Rec), effects_at_period_end: false };
+    const brief = 'Should we hire a tech lead or two developers to raise productivity by at least 10% within three months?';
+    const { result, payload, reloaded } = await runAndRead(JSON.stringify(g), hiringAnswer, brief);
+    // The sent goal is the held one: the handler's own request carries the same basis (false, never flipped).
+    expect(node(payload.graph, 'productivity').goal_target_basis).toMatchObject({ effects_at_period_end: false, period_months: 3 });
+    // The stored fact, as bytes, read cold.
+    const view = { type: 'analysis_result', enrichment: (JSON.parse(JSON.stringify(result)) as Rec).enrichment };
+    const licence = goalChanceLicenceForAgent(view)!;
+    const note = 'Provisional: this calculation assumes the estimated effects are in place by month three. It does not model when they arrive.';
+    expect(licence.period_end_assumption).toEqual({ origin: 'olumi', period_months: 3, reference: 'today' });
+    expect(licence.chance_words).toBe('chance of ‘Productivity’ being at least 10% higher than today at three months');
+    expect(goalChanceNotesForAgent(view, reloaded, true).filter((n) => n === note)).toHaveLength(1);
+    expect([...goalChanceCellFacesForAgent(view, reloaded, true)].map(([id]) => id)).toEqual(['hire_a_tech_lead', 'hire_two_developers']);
+    expect((result.enrichment.inference_warnings as Rec[]).some((w) => (w.detail as Rec | undefined)?.reason === 'effects_at_period_end_unstated')).toBe(false);
+    expect(goalTargetBasisOf(node(reloaded, 'productivity'))!.effects_at_period_end).toBe(false);
+    // CONTRAST, the same handler: a brief stating only half the gain by month three withholds with E's sentence.
+    const half = await runAndRead(JSON.stringify(g), hiringAnswer, `${brief} We expect only half the productivity gain by month 3.`);
+    expect(goalChanceLicenceForAgent({ type: 'analysis_result', enrichment: half.result.enrichment })).toBeUndefined();
+    expect((half.result.enrichment.inference_warnings as Rec[]).find((w) => (w.detail as Rec | undefined)?.reason === 'effects_at_period_end_unstated')!.message)
+      .toBe('The chance of reaching your target for ‘Productivity’ (up 10% from today) by month three isn’t shown: '
+        + 'the model has not established how much of these effects would be in place by then.');
   });
 
   it('RED (amendment 7, per option): an option whose OWN setting is Olumi\'s says so on its result only — never on another option\'s', async () => {

@@ -1,0 +1,203 @@
+/**
+ * ⭐ G: HIRING'S CONDITIONAL GOAL CHANCE (AIE #94 6128697025, "S4/S8 — D timing decision"; amendments 6131950992 (a)–(e)).
+ *
+ * Served run 4 (2026-10-12T172858Z, hiring, step 7): the Run scored every option (‘Hire a Tech lead’ 0.2372, ‘Hire two
+ * developers’ 0.3246, ‘Continue as now’ 0), yet every canonical cell was `{ kind: 'none' }` with no reason: the goal is
+ * ‘productivity’ up at least 10% from today at month three, its basis holds `effects_at_period_end: false`, and ruling 12
+ * refused the licence. The AIE ruled that a static model may support a CONDITIONAL chance under Olumi's disclosed assumption
+ * that the estimated effects are in place by then. The fixture is that served Run's envelope and graph, verbatim, and the
+ * persisted brief read on the same graph hash. What CEE SENT for that Run is rebuilt here by CEE's own wire functions, in the
+ * order the Run handler applies them (`run-analysis.ts`, `plotPayload`): the served request body itself was not captured.
+ */
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import {
+  goalChanceLicenceForAgent, goalChanceLicenceOf, periodEndConditionalOf, sentGoalThresholdOf, withGoalChanceLicence,
+  withholdForPeriodEndEffects,
+} from '../goal-chance-licence.js';
+import { PERIOD_END_ASSUMPTION_NOTE_TEMPLATE, statedPartialOrLateEffect } from '../period-end-assumption.js';
+import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
+import { goalChanceCellFacesForAgent, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../../agent-lane/goal-chance-screen-lines.js';
+import { toOutboundGraph } from '../outbound-graph.js';
+import { withShareByDateFrame } from '../share-by-date-run.js';
+import { withoutStatedLevelRanges } from '../../routing/add-factor-transaction.js';
+import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-direction.js';
+
+type Rec = Record<string, any>;
+const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
+const GOAL = 'productivity';
+const HIRING = ['hire_a_tech_lead', 'hire_two_developers'];
+const SQ = 'continue_as_now';
+/** The AIE's note, exactly (#94 6128697025), at the basis' month. */
+const NOTE = 'Provisional: this calculation assumes the estimated effects are in place by month three. It does not model when they arrive.';
+/** E's withhold sentence, exactly (#94 6128697025). */
+const WITHHOLD = 'The chance of reaching your target for ‘productivity’ (up at least 10% from today) by month three isn’t shown: '
+  + 'the model has not established how much of these effects would be in place by then.';
+const OWN_TARGET = 'chance of ‘productivity’ being at least 10% higher than today at three months';
+const CONDITIONS = 'This chance covers ‘productivity’ only. It does not include: ‘Hiring spend’ at most £200,000; maintaining code quality; the urgent launch date.';
+const FACE = {
+  hire_a_tech_lead: `‘Hire a Tech lead’: about 24% ${OWN_TARGET}, in this model, using Olumi's estimates for 4 starting values, 2 option settings and 7 relationships (see Check estimates).`,
+  hire_two_developers: `‘Hire two developers’: about 32% ${OWN_TARGET}, in this model, using Olumi's estimates for 4 starting values, 1 option setting and 7 relationships (see Check estimates).`,
+};
+
+/** What the Run handler sends PLoT for this graph (`plotPayload`): the wire copy, the direction and the strictness. */
+function sentRunOf(graph: Rec): Rec {
+  const sent: Rec = { graph: toOutboundGraph(withoutStatedLevelRanges(withShareByDateFrame(graph, graph))) };
+  const direction = resolveGoalDirection(graph, GOAL);
+  if (direction !== undefined) sent.goal_direction = direction.direction;
+  if (resolveGoalThresholdStrict(graph, GOAL)) sent.goal_threshold_strict = true;
+  return sent;
+}
+const earned = (id: string, p: 0 | 1): boolean => (FX.goal_certainty as Rec[]).some((d) => d.option_id === id && d.probability_of_goal === p && d.earned);
+
+/** The Run handler's own order: E's withhold, then the licence, with the same inputs (`run-analysis.ts`). */
+function runAsTheHandlerDoes(o: { graph?: Rec; brief?: string | null; sentRun?: Rec } = {}): { envelope: Rec; view: Rec } {
+  const graph = o.graph ?? FX.graph;
+  const sentRun = o.sentRun ?? sentRunOf(graph);
+  const brief = 'brief' in o ? o.brief : FX.brief;
+  const withheld = withholdForPeriodEndEffects(FX.envelope, graph, GOAL, { sentRun, brief });
+  const envelope = withGoalChanceLicence(withheld, graph, GOAL, earned, sentGoalThresholdOf(withheld, sentRun.graph, GOAL, earned, sentRun),
+    graph, { storedConstraints: graph.goal_constraints, sentConstraints: graph.goal_constraints, sentRun, brief });
+  return { envelope, view: { type: 'analysis_result', enrichment: envelope } };
+}
+const cellsOf = (view: Rec, graph: Rec = FX.graph): Record<string, Rec> => Object.fromEntries(
+  projectCanonicalAnalysisCells(view as never, graph, FX.goal_certainty).map((c) => [c.option_id, c.cell as Rec]));
+const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.id === GOAL)!;
+const withGoal = (g: Rec, patch: (goal: Rec) => void): Rec => { const c = structuredClone(g); patch(goalOf(c)); return c; };
+
+/** Withheld with E's sentence on each hiring option, no figure, no licence, no note. */
+function expectWithheld(run: { envelope: Rec; view: Rec }, why: string): void {
+  expect(goalChanceLicenceForAgent(run.view), why).toBeUndefined();
+  const w = (run.envelope.inference_warnings as Rec[]).find((x) => x.detail?.reason === 'effects_at_period_end_unstated');
+  expect(w, why).toMatchObject({ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', message: WITHHOLD, option_ids: HIRING });
+  const cells = cellsOf(run.view);
+  for (const id of HIRING) expect(cells[id], `${why}: ${id}`).toMatchObject({ kind: 'withheld', why: WITHHOLD });
+  expect(JSON.stringify(run.envelope), why).not.toContain('in place by month three');
+}
+
+describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance of its own target', () => {
+  it('precondition (RED as served): the Run scored every option, the cells said nothing, and E alone only withholds', () => {
+    const rows = Object.fromEntries((FX.envelope.option_comparison as Rec[]).map((r) => [r.option_id, r.probability_of_goal]));
+    expect(rows).toEqual({ hire_a_tech_lead: 0.2372, hire_two_developers: 0.3246, continue_as_now: 0 });
+    expect(goalOf(FX.graph).goal_target_basis).toMatchObject({ target_frame: 'change_abs', target_raw: 10, period_months: 3,
+      period_kind: 'at_end', reference: 'today', effects_at_period_end: false,
+      also_required: ['maintaining code quality', 'the urgent launch date'] });
+    for (const o of FX.served_canonical_options as Rec[]) expect(o.cell, o.option_id).toEqual({ kind: 'none' });
+    // E's head, without the Run's own inputs: refused, and the withhold says why (unchanged).
+    expect(goalChanceLicenceOf(FX.envelope, FX.graph, GOAL)).toBeNull();
+    expect(withholdForPeriodEndEffects(FX.envelope, FX.graph, GOAL)).not.toBe(FX.envelope);
+  });
+
+  it('GREEN: each hiring option is licensed on its own target, with the AIE\'s note once and Olumi\'s assumption recorded', () => {
+    const before = JSON.stringify(FX.graph);
+    const run = runAsTheHandlerDoes();
+    const licence = goalChanceLicenceForAgent(run.view)!;
+    expect(licence.chance_words).toBe(OWN_TARGET);
+    expect(licence.notes!.filter((n) => n === NOTE)).toHaveLength(1);
+    expect(licence.notes).toContain(CONDITIONS);
+    expect(licence.provisional).toBe(true);
+    expect(licence.period_end_assumption).toEqual({ origin: 'olumi', period_months: 3, reference: 'today' });
+    expect([...goalChanceCellFacesForAgent(run.view, FX.graph, true)]).toEqual(Object.entries(FACE));
+    const cells = cellsOf(run.view);
+    expect(cells.hire_a_tech_lead).toEqual({ kind: 'figure', display: 'about 24%', face: FACE.hire_a_tech_lead });
+    expect(cells.hire_two_developers).toEqual({ kind: 'figure', display: 'about 32%', face: FACE.hire_two_developers });
+    // E's withhold did not run; the Run's own figures stand; the protected field is never written (still false).
+    expect((run.envelope.inference_warnings as Rec[]).some((w) => w.detail?.reason === 'effects_at_period_end_unstated')).toBe(false);
+    expect(JSON.stringify(FX.graph)).toBe(before);
+    expect(goalOf(FX.graph).goal_target_basis.effects_at_period_end).toBe(false);
+    // The note is the one shared template (no second copy of its words).
+    expect(NOTE).toBe(PERIOD_END_ASSUMPTION_NOTE_TEMPLATE.replace('{period}', 'month three'));
+  });
+
+  it('the AND: never "chance of meeting your goal" — the own target\'s words, and every unscored condition named', () => {
+    const run = runAsTheHandlerDoes();
+    const said = [...goalChanceCellFacesForAgent(run.view, FX.graph, true).values(), ...goalChanceNotesForAgent(run.view, FX.graph, true),
+      goalChanceLicenceForAgent(run.view)!.chance_words!];
+    for (const s of said) expect(s).not.toMatch(/chance of meeting (?:your|the) goal|by the (?:urgent )?launch date/i);
+    expect(goalChanceNotesForAgent(run.view, FX.graph, true)).toContain(CONDITIONS);
+  });
+
+  it('survives the stored bytes and a cold reopen: the licence, its origin and the note read back from JSON on a reloaded graph', () => {
+    const stored = JSON.parse(JSON.stringify(runAsTheHandlerDoes().envelope)) as Rec;
+    const reloaded = JSON.parse(JSON.stringify(FX.graph)) as Rec;
+    const view = { type: 'analysis_result', enrichment: stored };
+    expect(goalChanceLicenceForAgent(view)!.period_end_assumption).toEqual({ origin: 'olumi', period_months: 3, reference: 'today' });
+    expect(goalChanceNotesForAgent(view, reloaded, true).filter((n) => n === NOTE)).toHaveLength(1);
+    expect([...goalChanceCellFacesForAgent(view, reloaded, true)]).toEqual(Object.entries(FACE));
+    // Stale: nothing is said (currentness is the readers' own guard, unchanged).
+    expect(goalChanceNotesForAgent(view, reloaded, false)).toEqual([]);
+  });
+
+  it('Agent prose: a Run narration owes each option\'s own-target line and the note, said once and never twice', () => {
+    const run = runAsTheHandlerDoes();
+    const lines = goalChanceScreenLinesForAgent(run.view, FX.graph, true);
+    const notes = goalChanceNotesForAgent(run.view, FX.graph, true);
+    const owed = withScreenLinesOwed('Here is what this run shows for the two hiring options.', lines, notes).text;
+    for (const face of Object.values(FACE)) expect(owed).toContain(face);
+    expect(owed.split(NOTE)).toHaveLength(2);
+    expect(withScreenLinesOwed(owed, lines, notes).text).toBe(owed);
+  });
+
+  it('NEGATIVE (c): a stated PARTIAL effect by the period withholds with E\'s sentence', () => {
+    expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} We'd expect only half the productivity gain by month 3.` }), 'partial');
+  });
+
+  it('NEGATIVE (c): a stated LATE effect (the full gain only after the period) withholds with E\'s sentence', () => {
+    expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} We won't see the full gain until month 6.` }), 'late');
+  });
+
+  it('CONTRAST (c): a later START alone is not a contradiction — still licensed, with the note', () => {
+    const run = runAsTheHandlerDoes({ brief: `${FX.brief} The hires start in month 2.` });
+    expect(goalChanceLicenceForAgent(run.view)!.notes).toContain(NOTE);
+    expect([...goalChanceCellFacesForAgent(run.view, FX.graph, true)]).toEqual(Object.entries(FACE));
+  });
+
+  it('NEGATIVE (a): a Run whose sent threshold, frame, unit or period is not the held target withholds with E\'s sentence', () => {
+    const sent = sentRunOf(FX.graph);
+    const variants: Record<string, (g: Rec) => void> = {
+      threshold: (g) => { g.goal_threshold = 0.04; },
+      frame: (g) => { g.goal_threshold_frame = 'change_rel'; },
+      unit: (g) => { g.goal_threshold_unit = 'points'; },
+      period: (g) => { g.goal_target_basis = { ...g.goal_target_basis, period_months: 6 }; },
+    };
+    for (const [why, patch] of Object.entries(variants)) {
+      expectWithheld(runAsTheHandlerDoes({ sentRun: { ...sent, graph: withGoal(sent.graph, patch) } }), why);
+    }
+    // ... and the comparator PLoT scores (a minimised Run for the held "at least").
+    expectWithheld(runAsTheHandlerDoes({ sentRun: { ...sent, goal_direction: 'minimise' } }), 'comparator');
+    // No sent Run at all: a probability on the wire alone licenses nothing.
+    expect(periodEndConditionalOf(FX.envelope, FX.graph, GOAL, { brief: FX.brief })).toBeUndefined();
+  });
+
+  it('NEGATIVE (d): a brief that could not be read is never "no contradiction"', () => {
+    expectWithheld(runAsTheHandlerDoes({ brief: null }), 'null');
+    expectWithheld(runAsTheHandlerDoes({ brief: '   ' }), 'blank');
+  });
+
+  it('NEGATIVE (b): a held month (a producer reading of timing) is never given this note', () => {
+    const held = withGoal(FX.graph, (g) => { g.goal_horizon_months = 3; });
+    expect(periodEndConditionalOf(FX.envelope, held, GOAL, { sentRun: sentRunOf(held), brief: FX.brief })).toBeUndefined();
+    expect(JSON.stringify(runAsTheHandlerDoes({ graph: held }).envelope)).not.toContain('in place by month three');
+  });
+});
+
+describe('G: the partial/late-effect grammar (bound to the basis\' own period; a start alone never counts)', () => {
+  const at3 = { period_months: 3 };
+  it.each([
+    ['We expect only half the productivity gain by month 3.', 'only half the productivity gain by month 3'],
+    ['Realistically just 50% of the improvement by the end of month three.', 'just 50% of the improvement by the end of month three'],
+    ['There will be a partial effect within three months.', 'partial effect within three months'],
+    ['We won’t see the full gain until month 6.', 'full gain until month 6'],
+    ['The full benefit only arrives after month 3.', 'full benefit only arrives after month 3'],
+    ['New developers won’t be fully productive by month 3.', 'won’t be fully productive by month 3'],
+  ])('contradiction: %s', (brief, words) => { expect(statedPartialOrLateEffect(brief, at3)).toBe(words); });
+
+  it.each([
+    'The hires start in month 2.',
+    'Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months.',
+    'We want a 10% productivity increase by month 3.',
+    'Half the team is remote, and we need the full gain by month 3.',
+    'We would see half the gain by month 2.',
+    'Developers won’t be fully productive until month 2.',
+  ])('no contradiction: %s', (brief) => { expect(statedPartialOrLateEffect(brief, at3)).toBeUndefined(); });
+});
