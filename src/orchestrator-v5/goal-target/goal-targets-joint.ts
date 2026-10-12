@@ -276,20 +276,25 @@ export function goalTargetsBlockOf(args: {
 
 /** The stored block as a reader may use it, or `undefined` when it is malformed (a record at odds with itself speaks for nothing). */
 export function readGoalTargetsBlock(v: unknown, optionIds: readonly string[]): GoalTargetsBlock | undefined {
-  if (!isRec(v) || !Array.isArray(v.conditions) || !Array.isArray(v.per_target) || !isRec(v.joint)) return undefined;
+  return isGoalTargetsBlock(v, optionIds) ? v : undefined;
+}
+
+/** Every member a reader relies on, checked; a type guard, so the stored record is never cast to the block. */
+function isGoalTargetsBlock(v: unknown, optionIds: readonly string[]): v is GoalTargetsBlock {
+  if (!isRec(v) || !Array.isArray(v.conditions) || !Array.isArray(v.per_target) || !isRec(v.joint)) return false;
   const text = (s: unknown): s is string => typeof s === 'string' && s.trim() !== '' && s.length <= 600 && !/[\r\n]/.test(s);
   const pcts = (m: unknown): m is Record<string, number> => isRec(m) && Object.entries(m).every(([id, x]) =>
     optionIds.includes(id) && typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= 100);
   const conditions = v.conditions.filter(isRec);
   if (conditions.length !== v.conditions.length || !conditions.every((c) => text(c.constraint_id) && text(c.clause)
-    && (c.role === 'target' || c.role === 'limit') && OPS.has(String(c.operator)))) return undefined;
+    && (c.role === 'target' || c.role === 'limit') && OPS.has(String(c.operator)))) return false;
   const perTarget = v.per_target.filter(isRec);
-  if (perTarget.length !== v.per_target.length || !perTarget.every((t) => text(t.constraint_id) && text(t.words) && pcts(t.pct_by_option))) return undefined;
+  if (perTarget.length !== v.per_target.length || !perTarget.every((t) => text(t.constraint_id) && text(t.words) && pcts(t.pct_by_option))) return false;
   const j = v.joint;
   if (j.status === 'licensed') {
-    if (!text(j.words) || !pcts(j.pct_by_option) || Object.keys(j.pct_by_option).length === 0) return undefined;
-  } else if (j.status !== 'withheld' || !text(j.line) || (j.frechet_line !== undefined && !text(j.frechet_line))) return undefined;
-  return v as unknown as GoalTargetsBlock;
+    if (!text(j.words) || !pcts(j.pct_by_option) || Object.keys(j.pct_by_option).length === 0) return false;
+  } else if (j.status !== 'withheld' || !text(j.line) || (j.frechet_line !== undefined && !text(j.frechet_line))) return false;
+  return true;
 }
 
 /** "about 37%", "less than 1%", "more than 99%" — the screen's one edge-word rule for a displayed whole percentage. */
