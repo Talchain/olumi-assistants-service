@@ -3067,6 +3067,44 @@ function headlineGrammarRegexes(legacyFiguresDisclosure = ''): RegExp[] {
 
 const HEADLINE_GRAMMAR_REGEXES = headlineGrammarRegexes();
 
+/**
+ * ⭐ RECOVERY BATCH E (DL, 12 Oct; ruling A and Paul's #87: a win share is never the headline). Run 4 capacity turn 3
+ * served `analysis_result.summary` = "Add one specialist gave the highest weekly support capacity in 88% of runs of this
+ * model because …": the lead ladder's sentence is the share of runs in which an option came out on top, never the chance
+ * of meeting the goal. The block's summary drops that sentence and keeps everything after it byte for byte; no word is
+ * added. Olumi's legacy-figures sentence, which the composer inserts inside the probability case's lead, is kept.
+ *
+ * The lead sentences are the headline grammar's OWN cases with their shared tail cut off, derived at module load (never
+ * restated), so every lead the grammar admits is a lead this drops; a case that stops ending in the tail fails loud here.
+ * A summary that starts with a locked template has no lead. Where the rest is all tails (the grammar's own shape) the
+ * lead is the case that leaves exactly that; otherwise, as when Olumi's goal-reading sentence follows the headline, the
+ * longest case that matches at the start.
+ */
+const LEAD_SENTENCE_REGEXES: readonly { readonly anchored: RegExp; readonly prefix: RegExp }[] = (() => {
+  const end = new RegExp(`${TAIL_PATTERN}$`).source;
+  return HEADLINE_GRAMMAR_REGEXES.map((re) => {
+    if (!re.source.startsWith('^') || !re.source.endsWith(end)) {
+      throw new Error('analysis-result-headline: a headline case no longer ends in the shared tail, so its lead sentence cannot be derived.');
+    }
+    const lead = re.source.slice(0, -end.length);
+    return { anchored: new RegExp(`${lead}(?=${end})`), prefix: new RegExp(lead) };
+  });
+})();
+const LEGACY_FIGURES_DISCLOSURE_RE = new RegExp(LEGACY_FIGURES_DISCLOSURE_RE_SRC);
+
+/** The `analysis_result` summary without the lead ladder's win-share sentence (see {@link LEAD_SENTENCE_REGEXES}). */
+export function summaryWithoutLeadSentence(summary: string): string {
+  if (typeof summary !== 'string' || summary.length === 0) return summary;
+  for (const template of RUN_ANALYSIS_LOCKED_TEMPLATES) if (summary.startsWith(template)) return summary;
+  const longest = (kind: 'anchored' | 'prefix'): string | undefined => LEAD_SENTENCE_REGEXES
+    .map((r) => r[kind].exec(summary)?.[0])
+    .reduce<string | undefined>((a, b) => (b !== undefined && (a === undefined || b.length > a.length) ? b : a), undefined);
+  const lead = longest('anchored') ?? longest('prefix');
+  if (lead === undefined) return summary;
+  const legacy = LEGACY_FIGURES_DISCLOSURE_RE.exec(lead)?.[0] ?? '';
+  return `${legacy}${summary.slice(lead.length)}`.trimStart();
+}
+
 function matchesHeadlineGrammar(text: string, legacyFiguresDisclosure = ''): boolean {
   const grammars = legacyFiguresDisclosure === '' ? HEADLINE_GRAMMAR_REGEXES : headlineGrammarRegexes(legacyFiguresDisclosure);
   for (const re of grammars) {
