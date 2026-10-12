@@ -585,7 +585,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         items: obj({
           label: { type: 'string' },
           unit: { type: 'string', description: 'The user\u2019s unit, e.g. "GBP/year per engineer".' },
-          today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' } }, ['value']),
+          today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' },
+            range_low: { type: 'number', description: 'Only when the user also gave a range for this figure, both ends in one sentence of theirs ("between 20% and 30%"): its low end, in the same unit as value. value stays the one figure they chose; never a midpoint.' },
+            range_high: { type: 'number', description: 'The high end of that same range. Send it with range_low.' } }, ['value']),
           affects: { type: 'string', description: 'ONE existing outcome, the goal, or a factor no option sets, that it drives, as the CURRENT MODEL STATE labels it.' },
           direction: { type: 'string', enum: ['positive', 'negative'] },
         }, ['label', 'unit', 'today', 'affects', 'direction']),

@@ -743,4 +743,65 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);
   }, 120_000);
+
+  /**
+   * ⭐ RECOVERY BATCH B (SYS3 TRACE L6): Paul's stated range was never stored. His turn 11 (live run 2026-10-11T222932Z,
+   * transcript l.164) gave "between 20% and 30%"; the Agent said the range "is not currently captured" (no tool could carry
+   * it). Rule (DL GO, 12 Oct): the range is stored AS A RANGE beside the figure he chose (25 %), in the schemas 0.66
+   * `InterventionRangeSchema` shape on `observed_state.range`, only when both ends are in ONE sentence he wrote and his figure
+   * lies inside; a range with no chosen figure is still asked; no midpoint is ever invented.
+   */
+  const RANGE_MSG = "If we think of our development team's monthly capacity, currently they spend between 20% and 30% of their time on non-development tasks (e.g., meetings, admin, and other distractions that are not writing code).";
+  const rangedArgs = (over: Record<string, unknown> = {}) => [{ label: 'Non-development time', unit: '%', today: { value: 25, range_low: 20, range_high: 30, ...over },
+    affects: 'productivity', direction: 'negative' }];
+  /** Paul's turn 11 first (the Agent answers without a tool, as served), so his range is in the conversation. */
+  const sayRangeFirst = async (): Promise<void> => {
+    script = [() => say('That is a useful capacity input.')];
+    await turn({ message: RANGE_MSG });
+  };
+
+  it('(r) RED (L6, Paul\'s words): "between 20% and 30%" then "Let\'s go with 25%." → committed: 25 % as his figure AND his 20–30 % range beside it, as a range, with his sentence', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(rangedArgs(), HIRING_MSG, (o) => { out = o; });
+    expect(callOf(t1), `${JSON.stringify(t1._agent.tool_calls)} ${JSON.stringify(out)}`).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const approve = approveChipOf(t1)!;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const node = graphNow().nodes.find((x) => x.label === 'Non-development time')!;
+    const os = node['observed_state'] as Record<string, unknown>;
+    expect(os['raw_value'], 'his chosen figure, as his').toBe(25);
+    expect(os['source']).toBe(USER_SOURCE);
+    expect(os['range'], JSON.stringify(os)).toEqual({ low: 20, high: 30, meaning: 'min_max', source: USER_SOURCE, source_quote: RANGE_MSG });
+    // It survives the save and a reload: a JSONB round trip, then the persisted-graph parse.
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(graphNow()))) as unknown as G;
+    expect((reloaded.nodes.find((x) => x.id === node.id)!['observed_state'] as Record<string, unknown>)['range']).toEqual(os['range']);
+  }, 180_000);
+
+  it('(r′) Paul is shown his range on the card, in his words, beside the figure he chose', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    script = [() => fnCall('propose_new_factor', { factors: rangedArgs(), rationale: 'The user chose 25% within 20-30%.', whole_request: true })];
+    const t1 = await turn({ message: HIRING_MSG });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Non-development time’ is 25 ?%, the figure you gave, within your range of 20 ?% to 30 ?% \(“[^”]*between 20% and 30%[^”]*”\), and affects productivity \(lowers it\)\./);
+  }, 120_000);
+
+  it.each([
+    ['the ends were never written by him', { range_low: 15, range_high: 35 }, true],
+    ['his chosen figure lies outside the range', { value: 25, range_low: 26, range_high: 30 }, true],
+    ['only one end is given', { range_high: undefined }, true],
+    ['a range with NO chosen figure: Olumi\'s midpoint 25 is not his (he only wrote the range)', {}, false],
+  ])('(r″) refused, nothing held, byte-identical: %s', async (_what, over, saidTwentyFive) => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    const before = bytes();
+    const t1 = await propose(rangedArgs(over), saidTwentyFive ? HIRING_MSG : 'Use my range for it.');
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
 });

@@ -31,6 +31,7 @@ import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../graph-management/types.js';
+import { StoredInterventionRange } from '../intervention-range.js';
 import { hypothesisEdgeValue, isAffectsTarget, isStatedTodayObservedState, reachesGoal, sameLabel, type AddOptionGraphView } from './add-option-transaction.js';
 
 /** At most this many new factors in ONE change (the ruling: 1..3). */
@@ -209,10 +210,57 @@ export interface UserTodayLevel {
  */
 export function isUserTodayObservedState(os: unknown): boolean {
   if (os === null || typeof os !== 'object' || Array.isArray(os)) return false;
-  const o = os as Record<string, unknown>;
+  const { range, ...o } = os as Record<string, unknown>;
   if (o.source !== USER_TODAY_SOURCE) return false;
+  // Recovery Batch B (L6): a range rides only beside the user's own figure, and only as `isStatedLevelRange` admits it.
+  if (range !== undefined && !isStatedLevelRange(range, o)) return false;
   // The shape rule is the stated-baseline one, verbatim: only the source differs.
   return isStatedTodayObservedState({ ...o, source: 'brief_extraction' });
+}
+
+/**
+ * ⭐ RECOVERY BATCH B (SYS3 TRACE L6) — A LEVEL THE USER STATED AS A RANGE IS STORED AS A RANGE.
+ *
+ * Paul, 11 Oct: "currently they spend between 20% and 30% of their time on non-development tasks", then "Let's go with
+ * 25%." The range was never stored: no door could carry it. It now rides `observed_state.range` beside the figure the
+ * user CHOSE, in the existing schemas 0.66 `InterventionRangeSchema` shape (`intervention-range.ts`): `{low, high,
+ * meaning, source, source_quote}`, in the figure's own (raw) units, with its own author — never a new store.
+ *
+ *   · the user's own range: `source` is the user's literal (`USER_TODAY_SOURCE`) and `source_quote` the ONE sentence of
+ *     theirs that states both ends (the door checks that sentence; this rule requires that one is carried);
+ *   · `meaning: 'min_max'`: the ends as the user wrote them ("between 20% and 30%"), read as bounds and nothing more —
+ *     never `likely_range`, which claims the middle half of what is likely (the contract's meanings are likely_range,
+ *     min_max, at_most, at_least). Nothing samples a level range, so the analysis is unchanged (the wire copy drops it:
+ *     `withoutStatedLevelRanges`);
+ *   · it CONTAINS the user's chosen figure (`low ≤ figure ≤ high`); never a midpoint: the figure beside it is the one the
+ *     user wrote, or there is no range.
+ */
+export function isStatedLevelRange(range: unknown, os: Readonly<Record<string, unknown>>): boolean {
+  const parsed = StoredInterventionRange.safeParse(range);
+  if (!parsed.success) return false;
+  const r = parsed.data;
+  if (r.meaning !== 'min_max' || r.source !== USER_TODAY_SOURCE || typeof r.source_quote !== 'string' || r.source_quote.trim() === '' || r.source_quote.length > USER_TODAY_QUOTE_MAX) return false;
+  const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+  return typeof figure === 'number' && Number.isFinite(figure) && r.low <= figure && figure <= r.high;
+}
+
+/**
+ * The ANALYSIS wire copy without any stated level range (Batch B, L6): the range changes no compute, so the request PLoT
+ * receives is byte-identical with or without it. Identity when no node carries one; the stored graph is never touched.
+ */
+export function withoutStatedLevelRanges<G>(graph: G): G {
+  if (graph === null || typeof graph !== 'object') return graph;
+  const nodes = (graph as unknown as { nodes?: unknown }).nodes;
+  if (!Array.isArray(nodes)) return graph;
+  const carries = (n: unknown): boolean => n !== null && typeof n === 'object'
+    && (n as { observed_state?: unknown }).observed_state !== null && typeof (n as { observed_state?: unknown }).observed_state === 'object'
+    && Object.hasOwn((n as { observed_state: object }).observed_state, 'range');
+  if (!nodes.some(carries)) return graph;
+  return { ...graph, nodes: nodes.map((n) => {
+    if (!carries(n)) return n;
+    const { range: _range, ...os } = (n as { observed_state: Record<string, unknown> }).observed_state;
+    return { ...(n as object), observed_state: os };
+  }) } as G;
 }
 
 /**
