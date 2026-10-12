@@ -21,7 +21,7 @@
  */
 import { GOAL_FIGURES_WITHHELD_CODES } from '../../orchestrator/context/option-result-source.js';
 import { WILSON_Z_95 } from './goal-chance-driver.js';
-import { statedGoalTargetOf } from './stated-goal-target.js';
+import { readGoalRecord } from './goal-record.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -43,13 +43,14 @@ export function goalOwnConstraintChanceRecords(
 ): GoalOwnConstraintRead {
   const none: GoalOwnConstraintRead = { records, engineRead: new Set() };
   if (!isRec(envelope) || !isRec(graph) || typeof goalId !== 'string' || !Array.isArray(graph.nodes)) return none;
-  const goal = graph.nodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
-  if (goal === undefined || !finite(goal.goal_threshold)) return none;
-  const operator = statedGoalTargetOf(graph, goal)?.held;
-  if (operator === undefined) return none;
+  // The goal's comparator through the one record (S5). The threshold PLoT scored is the one CEE SENDS (the node's own
+  // threshold in the Run's frame), which the record deliberately does not normalise: bound to exactly that.
+  const operator = readGoalRecord(graph, goalId)?.target?.comparator;
+  const sent = graph.nodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal')?.goal_threshold;
+  if (operator === undefined || !finite(sent)) return none;
   const own = (Array.isArray(envelope.constraint_results) ? envelope.constraint_results : [])
     .filter(isRec).filter((c) => c.constraint_id === GOAL_OWN_CONSTRAINT_ID);
-  if (own.length === 0 || !own.every((c) => c.node_id === goalId && c.operator === operator && c.value === goal.goal_threshold)) return none;
+  if (own.length === 0 || !own.every((c) => c.node_id === goalId && c.operator === operator && c.value === sent)) return none;
   const warnings = (Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : []).filter(isRec);
   const withheld = (id: string): boolean => warnings.some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
     && (!Array.isArray(w.option_ids) || w.option_ids.length === 0 || w.option_ids.includes(id)));
