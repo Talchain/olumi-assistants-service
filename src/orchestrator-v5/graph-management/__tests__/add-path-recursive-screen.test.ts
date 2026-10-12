@@ -113,6 +113,8 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
       'goal_scope',
       'goal_sense_reading',
       'goal_stock_reading',
+      // Batch C: ruling 4 — the target's stated basis, written only by construction (`admitGoalTargetBasis`).
+      'goal_target_basis',
       // S4 §(ad): the horizon basis stamps are CEE-owned.
       'horizon_basis',
       'horizon_basis_months',
@@ -143,7 +145,8 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
   it('the union adds six MORE names the same screen now kills (33 total: 27 smuggle names + five J2 names + event_risk)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
     // 27 CEE-owned smuggle names include the three new S4 pipeline-owned fields and three horizon-basis stamps; add five J2 names and event_risk.
-    expect(all.length).toBe(33);
+    // Batch C: ruling 4 — +1 smuggle name (`goal_target_basis`), so 34 in all; the six non-smuggle names are unchanged.
+    expect(all.length).toBe(34);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

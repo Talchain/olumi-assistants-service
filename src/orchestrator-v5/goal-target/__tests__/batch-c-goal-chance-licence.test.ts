@@ -12,6 +12,7 @@ import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
 import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
 import { goalChanceNotesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
+import { withholdOptionLimitScores } from '../../../orchestrator/context/constraint-feasibility.js';
 
 type Rec = Record<string, unknown>;
 
@@ -309,5 +310,75 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
       face: '‘Hire two developers’: about 31% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model.' });
     expect(byId.carry_on).toMatchObject({ kind: 'withheld', face: 'No change, by assumption',
       why: 'Doing nothing: no change to ‘Productivity’ in this model, by assumption.' });
+  });
+});
+
+// ── DL contract rulings from the independent check (12 Oct): precision names, no "±0", no interval on the status quo ──
+describe('DL contract rulings (12 Oct): precision names follow PLoT\'s wire; never "±0"; no interval on the status quo', () => {
+  it('RED (ruling 1): the joint\'s precision is read ONLY as `probability_of_joint_goal_precision` — no other name is a fallback', () => {
+    const l = licenceFor(marketingRun({ probability_of_joint_goal_precision: undefined, joint_probability_precision: PRECISION }))!;
+    expect(l.pct_by_option).toEqual({});
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'precision_missing' });
+  });
+
+  it('RED (ruling 1): a withheld per-option limit P takes its `constraint_results[].probability_precision` with it', () => {
+    const env = { constraint_results: [
+      { constraint_id: 'limit:spend', option_id: 'hire_manager', probability: 0.4, probability_precision: PRECISION },
+      { constraint_id: 'limit:spend', option_id: 'ai_plus_ads', probability: 0.7, probability_precision: PRECISION },
+    ] };
+    const out = withholdOptionLimitScores(env, new Map([['limit:spend', new Set(['hire_manager'])]])) as Rec;
+    expect(out.constraint_results).toEqual([
+      { constraint_id: 'limit:spend', option_id: 'hire_manager' },
+      { constraint_id: 'limit:spend', option_id: 'ai_plus_ads', probability: 0.7, probability_precision: PRECISION },
+    ]);
+  });
+
+  it('ruling 2: a joint of exactly 1 (standard error 0) is said as an extreme with NO interval, and the disclosures stay', () => {
+    const g = marketingGraph();
+    const run = marketingRun({ probability_of_joint_goal: 1, probability_of_joint_goal_precision: { n_informative: 10000, standard_error: 0 } });
+    const l = licenceFor(run, g)!;
+    expect(l.targets!.joint.status).toBe('licensed');
+    expect(l.pct_by_option).toEqual({ hire_manager: 100, ai_plus_ads: 100 });
+    // Nothing an interval could be drawn from is carried on the licence: no standard error, no bounds, no "±".
+    expect(JSON.stringify(l)).not.toMatch(/standard_error|interval|±/);
+    expect(l.notes!.some((n) => n.startsWith('This assumes carrying on as now leaves'))).toBe(true);
+    expect(l.notes!.some((n) => n.startsWith('Each option’s effects are read as their size'))).toBe(true);
+    const env = withGoalChanceLicence(run, g, 'new_customers', () => false, undefined, g,
+      { storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints) });
+    const cells = projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g);
+    for (const c of cells) expect(JSON.stringify(c.cell)).not.toMatch(/±/);
+  });
+
+  it('RED (ruling 3): the status-quo row carries no precision and no Monte Carlo interval; the other options keep theirs', () => {
+    const g = hiringGraph();
+    const wilson = (p: number, met: number) => ({ basis: 'simulation_precision', method: 'wilson_score', confidence_level: 0.95,
+      n_informative: 10000, n_met: met, interval_lower: Math.max(0, p - 0.01), interval_upper: Math.min(1, p + 0.01) });
+    const outcome = { mean: 0, std: 0, p10: 0, p50: 0, p90: 0 };
+    const run = { option_comparison: [
+      { option_id: 'hire_a_tech_lead', probability_of_goal: 0.46, probability_of_goal_precision: wilson(0.46, 4600), outcome: { mean: 9, std: 3, p10: 5, p50: 9, p90: 13 } },
+      { option_id: 'hire_two_developers', probability_of_goal: 0.31, probability_of_goal_precision: wilson(0.31, 3100), outcome: { mean: 8, std: 4, p10: 3, p50: 8, p90: 13 } },
+      { option_id: 'carry_on', probability_of_goal: 0, probability_of_goal_precision: wilson(0, 0), outcome,
+        probability_of_joint_goal_precision: { n_informative: 10000, standard_error: 0 },
+        constraint_probabilities_precision: { 'agent-lane:cost:<=': { n_informative: 10000, standard_error: 0 } } },
+    ], constraint_results: [
+      { constraint_id: 'agent-lane:cost:<=', option_id: 'carry_on', probability: 1, probability_precision: { n_informative: 10000, standard_error: 0 } },
+      { constraint_id: 'agent-lane:cost:<=', option_id: 'hire_a_tech_lead', probability: 0.9, probability_precision: PRECISION },
+    ] };
+    const env = withGoalChanceLicence(run, g, 'productivity', () => false, undefined, g, hiringConstraints(g)) as Rec;
+    const rows = Object.fromEntries((env.option_comparison as Rec[]).map((r) => [r.option_id, r]));
+    for (const k of ['probability_of_goal_precision', 'probability_of_joint_goal_precision', 'constraint_probabilities_precision']) {
+      expect(rows.carry_on, k).not.toHaveProperty(k);
+    }
+    // The status quo's outcome keeps its centre (no change) and loses its spread: never a Monte Carlo interval.
+    expect(rows.carry_on.outcome).toEqual({ mean: 0, p50: 0 });
+    expect((env.constraint_results as Rec[])[0]).toEqual({ constraint_id: 'agent-lane:cost:<=', option_id: 'carry_on', probability: 1 });
+    // The compared options are untouched.
+    expect(rows.hire_a_tech_lead).toEqual(run.option_comparison[0]);
+    expect(rows.hire_two_developers).toEqual(run.option_comparison[1]);
+    expect((env.constraint_results as Rec[])[1]).toEqual(run.constraint_results[1]);
+    // CONTROL: a level goal with no status quo by assumption keeps every row as PLoT sent it.
+    const level = hiringGraph({ quantity_frame: 'level', goal_threshold_frame: 'level', goal_target_basis: undefined });
+    const kept = withGoalChanceLicence(run, level, 'productivity', () => false, undefined, level, hiringConstraints(level)) as Rec;
+    expect(kept.option_comparison).toEqual(run.option_comparison);
   });
 });

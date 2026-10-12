@@ -217,8 +217,8 @@ export function goalTargetsBlockOf(args: {
       const p = r?.probability_of_joint_goal;
       if (!unit01(p)) { missing.push(id); continue; }
       anyFigure = true;
-      // PLoT #448's name; schemas 0.83.0 also documents `joint_probability_precision` on the same entry. Same block.
-      const pr = precisionOf(r!.probability_of_joint_goal_precision ?? r!.joint_probability_precision);
+      // DL contract ruling 1 (12 Oct): PLoT's wire name ONLY (schemas 0.83.0 renamed to match); no other name is a fallback.
+      const pr = precisionOf(r!.probability_of_joint_goal_precision);
       // ⛔ Rulings 14 and 17: a joint figure with no joint precision is not said (never the single-goal interval reused).
       if (pr === null) { anyPrecisionMissing = true; missing.push(id); continue; }
       const step = displayRoundingFor(wilsonHalfWidthPoints(p, pr.n));

@@ -192,7 +192,6 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
     }
     if ('probability_of_joint_goal' in out) delete out.probability_of_joint_goal;
     delete out.probability_of_joint_goal_precision;
-    delete out.joint_probability_precision;
     return out;
   };
   const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
@@ -217,7 +216,8 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
       const cid = r === null ? null : readString(r.constraint_id);
       if (r === null || id === undefined || cid === null || !dropFor(id).includes(cid) || !('probability' in r)) return entry;
       if (r.probability === 0) withheldBreach = true;
-      const { probability: _withheld, ...rest } = r;
+      // Recovery Batch C (DL contract ruling 1): the entry's `probability_precision` describes that P, so it goes with it.
+      const { probability: _withheld, probability_precision: _itsPrecision, ...rest } = r;
       return rest;
     });
   }
@@ -235,6 +235,60 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
 
 /** The outcome figures that are claims about the goal (PLoT #416's "centre and spread"); the sample counts stay. */
 const GOAL_OUTCOME_FIGURES = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
+
+/** A Monte Carlo spread of an outcome: what an interval is drawn from. The centre (`mean`, `p50`) is not one. */
+const OUTCOME_SPREAD_FIGURES = ['std', 'p10', 'p90'] as const;
+/** Every precision block PLoT puts on an option's row (schemas 0.83.0 names, as PLoT sends them). */
+const OPTION_PRECISION_KEYS = ['probability_of_goal_precision', 'probability_of_joint_goal_precision', 'constraint_probabilities_precision'] as const;
+
+/**
+ * ⭐ Recovery Batch C, amendment 1 (DL contract ruling 3, 12 Oct): the status quo is "no change, by assumption" (paired
+ * arithmetic: its level is today's on every draw), so its row never carries a precision or a Monte Carlo interval — its
+ * standard error is 0 by construction, and any interval drawn from it would read "±0". In EVERY option-result carrier
+ * (the `withholdOptionGoalFigures` set) the status quo's row loses its precision blocks and its outcome's spread, and its
+ * top-level `constraint_results[]` entries lose `probability_precision`. Its centre and every other option stay exactly
+ * as PLoT sent them. Applied only where the licence records the status quo as by assumption. Pure.
+ */
+export function withholdStatusQuoIntervals<E>(envelope: E, statusQuoId: string): E {
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const stripEntry = (entry: unknown): unknown => {
+    const r = readRecord(entry);
+    if (r === null || optionIdOf(r) !== statusQuoId) return entry;
+    const out: Record<string, unknown> = { ...r };
+    for (const k of OPTION_PRECISION_KEYS) delete out[k];
+    const outcome = readRecord(r.outcome);
+    if (outcome !== null) {
+      const kept: Record<string, unknown> = { ...outcome };
+      for (const k of OUTCOME_SPREAD_FIGURES) delete kept[k];
+      out.outcome = kept;
+    }
+    return out;
+  };
+  const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
+  const env = envelope as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...env };
+  if ('option_comparison' in env) out.option_comparison = strip(env.option_comparison);
+  if (Array.isArray(env.results)) out.results = strip(env.results);
+  else {
+    const nested = readRecord(env.results);
+    if (nested !== null) {
+      const n: Record<string, unknown> = { ...nested };
+      for (const k of ['option_comparison', 'options', 'option_results'] as const) if (k in nested) n[k] = strip(nested[k]);
+      out.results = n;
+    }
+  }
+  const brief = readRecord(env.decision_brief);
+  if (brief !== null && 'options' in brief) out.decision_brief = { ...brief, options: strip(brief.options) };
+  if (Array.isArray(env.constraint_results)) {
+    out.constraint_results = env.constraint_results.map((entry) => {
+      const r = readRecord(entry);
+      if (r === null || readString(r.option_id) !== statusQuoId || !('probability_precision' in r)) return entry;
+      const { probability_precision: _none, ...rest } = r;
+      return rest;
+    });
+  }
+  return out as E;
+}
 
 /**
  * ⭐ F1b PER-CLAIM WITHHOLDING (contract §2, programme-docs `s1/f1b-contract`): the claim classes a goal-figure withhold
@@ -296,7 +350,6 @@ export function withholdOptionGoalFigures<E>(
       delete out.probability_of_joint_goal;
       // Recovery Batch C: the joint's precision goes with the joint it describes.
       delete out.probability_of_joint_goal_precision;
-      delete out.joint_probability_precision;
       // The downside figures (p05, cvar_10, regret) are in the goal's outcome units: they go with the target claims, as
       // before R2 (Codex r1 #2606: kept under P1/P5 they reached the Agent while the outcome was withheld).
       delete out.downside;

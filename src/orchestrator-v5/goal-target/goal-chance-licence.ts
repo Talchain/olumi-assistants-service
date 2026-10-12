@@ -35,6 +35,7 @@ import {
   GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
+import { withholdStatusQuoIntervals } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
@@ -755,8 +756,11 @@ export function withGoalChanceLicence<E>(
 ): E {
   const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
   if (licence === null || !isRec(envelope)) return envelope;
-  const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
-  return { ...envelope, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;
+  // Recovery Batch C, amendment 1 (DL contract ruling 3): a status quo the licence records as BY ASSUMPTION carries no
+  // precision and no Monte Carlo interval on any surface (its standard error is 0 by construction: never "±0").
+  const shown = licence.status_quo === undefined ? envelope : withholdStatusQuoIntervals(envelope, licence.status_quo.option_id);
+  const warnings = Array.isArray(shown.inference_warnings) ? shown.inference_warnings : [];
+  return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;
 }
 
 /**
