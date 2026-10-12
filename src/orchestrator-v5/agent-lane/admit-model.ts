@@ -4355,6 +4355,7 @@ function admitOnce(
     label: n.label, kind: n.kind, scale_frame: n.scale_frame,
     observed_state: n.observed_state as MagnitudeNode['observed_state'],
     goal_threshold_cap: n.goal_threshold_cap, goal_threshold_unit: n.goal_threshold_unit,
+    ...(n.quantity_frame !== undefined ? { quantity_frame: n.quantity_frame } : {}),
     unit: unitById.get(n.id) ?? null, option_levels: optionLevelsById.get(n.id) ?? [],
     ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
     ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),

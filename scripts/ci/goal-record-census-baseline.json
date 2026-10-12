@@ -1,5 +1,5 @@
 {
-  "source_sha": "0a9cbdcdf9bfb69f3e88a31a48066ec497e69fa8",
+  "source_sha": "80f5ed6f65eee75ac148c1442b99e52cfce6befc",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -689,7 +689,9 @@
       "src/utils/goal-threshold-trio.ts": 2
     },
     "quantity_frame": {
-      "src/orchestrator-v5/agent-lane/admit-model.ts": 6,
+      "src/cee/magnitude/frame-defaulted-links.ts": 3,
+      "src/cee/magnitude/link-effect.ts": 3,
+      "src/orchestrator-v5/agent-lane/admit-model.ts": 9,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 5,
       "src/orchestrator-v5/agent-lane/stated-limit.ts": 4,
       "src/orchestrator-v5/context/graph-hash.ts": 2,
@@ -826,7 +828,7 @@
     "goal_threshold_raw": 246,
     "goal_threshold_unit": 224,
     "pickGoalThresholdTrio": 18,
-    "quantity_frame": 31,
+    "quantity_frame": 40,
     "readHeldGoalComparator": 20,
     "resolveGoalDirection": 31,
     "resolveGoalThresholdStrict": 13,
@@ -837,7 +839,7 @@
     "threshold_source": 37,
     "unit_reading": 79
   },
-  "total_references": 2435,
+  "total_references": 2444,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

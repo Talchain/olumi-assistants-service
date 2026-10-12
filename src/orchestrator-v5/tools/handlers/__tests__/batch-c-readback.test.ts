@@ -24,6 +24,8 @@ import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { goalTargetBasisOf } from '../../../goal-target/goal-target-basis.js';
 import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { goalChanceTargetCause } from '../../../goal-target/goal-chance-gate.js';
+import { groupedGoalPathLinks } from '../../../compose/grouped-link-sizing.js';
+import { naturalAmountUnitsOf } from '../../../../cee/magnitude/frame-defaulted-links.js';
 
 type Rec = Record<string, any>;
 
@@ -259,5 +261,29 @@ describe('readback — AIE clause 3 and L6: each target is stored in its OWN fra
     const { payload } = await runFromStore(bytes);
     const sent = payload.goal_constraints as Rec[];
     for (const t of targets) expect(sent.find((r) => r.constraint_id === t.constraint_id)).toMatchObject({ node_id: t.node_id, value: t.value });
+  });
+});
+
+describe('readback — gap 1: a change goal\'s effects are stored and said in the goal\'s own change unit, never "percentage points"', () => {
+  it('RED: each link into Productivity stores amount_unit "%" (of today\'s productivity), and the sizing line says it so', () => {
+    const g = JSON.parse(store(hiring())) as Rec;
+    for (const from of ['additional_developers_hired', 'additional_tech_leads_hired']) {
+      const ne = edge(g, from, 'productivity').provenance.natural_effect;
+      expect(ne.amount_unit, from).toBe('%');
+    }
+    // Every later reader/re-sizer reads the stored size in the SAME unit the construction wrote (else it is "not sized").
+    expect(naturalAmountUnitsOf(g.nodes as Rec[]).get('productivity')).toBe('%');
+    // The served sizing question for a link still to be sized into the goal says the goal's own unit — not "the model
+    // units" (a change goal has no level today to carry one) and never "percentage points".
+    const lines = groupedGoalPathLinks(g).filter((l) => l.to === 'productivity');
+    expect(lines.map((l) => [l.from, l.target_unit])).toEqual([['first_year_hiring_cost', '%']]);
+    for (const l of lines) expect(l.question).toBe('How much does Productivity change, in %, when First-year hiring cost changes by one GBP per change?');
+  });
+
+  it('CONTROL: a percentage LEVEL goal still says its size in points (unchanged)', () => {
+    const level = hiring(); (level.goal as Rec).quantity_frame = 'level'; (level.goal as Rec).frame = 'level';
+    Object.assign(level.goal as Rec, { baseline_known: true, baseline_value: 75, value: 85, basis: null });
+    const g = JSON.parse(store(level)) as Rec;
+    expect(edge(g, 'additional_developers_hired', 'productivity').provenance.natural_effect.amount_unit).toBe('percentage points');
   });
 });

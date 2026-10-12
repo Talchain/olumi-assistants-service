@@ -60,6 +60,12 @@ export interface MagnitudeNode {
   readonly goal_threshold_cap?: unknown;
   readonly goal_threshold_unit?: unknown;
   /**
+   * Recovery Batch C (gap 1): a goal measured AS a change (`quantity_frame: 'change'`, e.g. "+10% productivity" on its own
+   * 0–100 change scale). Its '%' is a change of today's level, not a percentage LEVEL, so a size into it is said in the
+   * goal's own unit, never "percentage points" (`targetUnitWords`).
+   */
+  readonly quantity_frame?: unknown;
+  /**
    * A GOAL's distance to its target in its own natural unit (£9,000 for "cut £45k by 20%"), when admission can read it.
    * Only ever used to refuse an Olumi estimate sized FROM the target (`target_sized`, R3 #72 5899493499).
    */
@@ -400,7 +406,8 @@ const round6 = (x: number): number => Number(x.toPrecision(6));
 
 /** The unit words the natural size is said in: points for a percentage level, "switch" for a yes/no. */
 export const targetUnitWords = (t: MagnitudeNode, frame: number | undefined): string =>
-  isPercentLevel(t, frame) ? 'percentage points' : (unitOf(t) ?? '');
+  // Batch C gap 1: a change quantity's '%' is a % of today's level; "percentage points" would say a different quantity.
+  t.quantity_frame !== 'change' && isPercentLevel(t, frame) ? 'percentage points' : (unitOf(t) ?? '');
 
 /**
  * The unit words THIS sizer says a link's natural size in, for the node it points at (`naturalEffectOf`'s
