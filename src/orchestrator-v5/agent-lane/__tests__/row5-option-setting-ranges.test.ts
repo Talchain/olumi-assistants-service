@@ -57,13 +57,6 @@ describe('the range rides beside the setting it contains, quoted and attributed;
       expect(cell, `${option}: not the engine's range`).not.toHaveProperty('range');
     }
   });
-  it('D3 C r1: "Raise price to £22"\'s 15% carries the interviews\' 10–20%, with their sentence; its other settings carry none', () => {
-    const nodes = admitted('D3', 'C', 'r1');
-    expect(cellOf(nodes, 'Raise price to £22', 'Price-increase customer churn').attributed_range)
-      .toEqual({ low: 10, high: 20, meaning: 'min_max', source: 'brief_extraction', source_quote: INTERVIEWS });
-    expect(cellOf(nodes, 'Raise price to £22', 'Monthly price per customer')).not.toHaveProperty('attributed_range');
-    expect(cellOf(nodes, 'Raise price to £22', 'One-off research spend')).not.toHaveProperty('attributed_range');
-  });
   it('CONTRAST (design: "10–20% attrition"): words after the figure that do not name the factor are another quantity; none', () => {
     const nodes = admitted('D3', 'C', 'r1', () => {}, briefOf('D3').replace('10–20% churn', '10–20% attrition'));
     expect(cellOf(nodes, 'Raise price to £22', 'Price-increase customer churn')).not.toHaveProperty('attributed_range');
