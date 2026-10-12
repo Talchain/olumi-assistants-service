@@ -1,22 +1,24 @@
 /**
- * ⭐ DL (b1), 12 Oct 2026 — THE DEADLINE GOAL'S CHANCE IS THE ENGINE'S OWN (`goal-own-constraint-chance.ts`).
+ * ⭐ DL (b1) + AIE 6125204695, 12 Oct 2026: THE DEADLINE GOAL'S CHANCE IS THE ENGINE'S OWN APPROXIMATE POINT, BOUND PER OPTION
+ * (`goal-own-constraint-chance.ts`).
  *
- * Evidence: Paul's REAL-ENGINE response (staging PLoT 6ec01e8 + ISL, posted 2026-10-12T11:49:51Z; sha256 2b9d1b3c…,
- * `recovery/score/EBD-REAL-ENGINE.md`) to the request CEE builds from his stored graph (`ebd-paul-stored-graph-20261012.json`,
- * the graph the route replay stores; its request is sha256 7ea1f711…). The engine gives no `probability_of_goal` at threshold
- * 1; its `auto_goal_threshold` constraint on `event_goal` (>= 1) carries 0.8301 / 0.9515 / 0.4158 on n = 10,000 draws.
- * CEE's own approximation (`normalChance`) is never the evidence here.
+ * Evidence: Paul's REAL request (`ebd-paul-plot-request-7ea1f711.json`, sha256 7ea1f711…, what CEE sent) and the REAL-ENGINE
+ * response to it (staging PLoT 6ec01e8 + ISL, posted 2026-10-12T11:49:51Z; sha256 2b9d1b3c…, `recovery/score/EBD-REAL-ENGINE.md`),
+ * over his stored graph (`ebd-paul-stored-graph-20261012.json`). The engine gives no `probability_of_goal` at threshold 1; each
+ * option's own row carries `constraint_probabilities.auto_goal_threshold` (0.8301 / 0.9515 / 0.4158 on n = 10,000 draws).
+ * CEE's own approximation (`normalChance`) and the uniform law (`exactChance`, `gate`) are never the served figure.
  *
- * Rows: the bound read (positive), its identity contrasts (id, node, operator, threshold), never over a CEE withhold, never the
- * joint, and the three share-gate branches the DL pinned (engine-read: no 2-point test; equal exact-law ends: the exact
- * point; unsupported parts: E5's next step, never a wordless withhold).
+ * Rows: the bound read (positive); the SENT-run contrasts (frame, comparator, goal node, threshold); the PER-OPTION contrasts
+ * (option not sent, row not on this goal, key absent); the top-level `constraint_results` is never read; never over a CEE
+ * withhold; never the joint; a row's own `probability_of_goal` is kept; the earned-0/1 guard; one remaining withhold (more
+ * ranged starts than Olumi uses), with its actual reason; and the timing-range note.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { goalOwnConstraintChanceRecords, GOAL_OWN_CONSTRAINT_ID } from '../goal-own-constraint-chance.js';
+import { goalOwnConstraintChanceRecords, GOAL_OWN_CONSTRAINT_ID, type SentRunInputs } from '../goal-own-constraint-chance.js';
 import { goalChanceLicenceOf } from '../goal-chance-licence.js';
 import { goalChancePrecisionOf } from '../goal-chance-driver.js';
-import { exactChance, gate, normalChance, type ShareParts } from '../event-by-date-share.js';
+import { exactChance, normalChance } from '../event-by-date-share.js';
 import { shareGateForOption, sharePartsForOption } from '../share-by-date-run.js';
 import { withShareByDateChanceGate } from '../goal-chance-range.js';
 import { GOAL_FIGURES_SHARE_APPROXIMATION } from '../../../orchestrator/context/option-result-source.js';
@@ -25,113 +27,132 @@ type Rec = Record<string, any>;
 const fixture = (name: string): Rec => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
 const ENGINE = (): Rec => fixture('ebd-paul-real-engine-response-6ec01e8.json');
 const GRAPH = (): Rec => fixture('ebd-paul-stored-graph-20261012.json');
+const REQUEST = (): Rec => fixture('ebd-paul-plot-request-7ea1f711.json');
 const GOAL = 'event_goal';
 const OPTIONS = ['event_option_1', 'event_option_2', 'event_option_3'];
-const withConstraint = (r: Rec, edit: (c: Rec) => Rec): Rec => ({ ...r, constraint_results: r.constraint_results.map(edit) }) as Rec;
+const sentGoal = (q: Rec): Rec => q.graph.nodes.find((n: Rec) => n.id === GOAL);
+const SENT = (edit: (q: Rec) => Rec = q => q): SentRunInputs => {
+  const q = edit(REQUEST());
+  return { graph: q.graph, goal_direction: q.goal_direction, goal_threshold_strict: q.goal_threshold_strict };
+};
+const licenceOf = (r: Rec, sent: SentRunInputs | undefined = SENT(), g: Rec = GRAPH()) =>
+  goalChanceLicenceOf(r, g, GOAL, undefined, undefined, g, sent === undefined ? {} : { sentRun: sent });
+const readOf = (r: Rec, sent: SentRunInputs | undefined = SENT()) => goalOwnConstraintChanceRecords(r, GRAPH(), GOAL, r.option_comparison, sent);
+const withOption = (r: Rec, id: string, edit: (o: Rec) => Rec): Rec =>
+  ({ ...r, option_comparison: r.option_comparison.map((o: Rec) => o.option_id === id ? edit(o) : o) });
 
-describe('DL (b1): the goal’s own constraint is the figure where PLoT gives no probability_of_goal at threshold 1', () => {
-  it('precondition: the real engine sent no probability_of_goal, and its auto constraint sits on the goal at >= 1', () => {
+describe('AIE 6125204695: the goal’s own constraint, bound per option to what CEE sent, is the figure at threshold 1', () => {
+  it('precondition: the engine sent no probability_of_goal; CEE sent the goal at threshold 1 in the delta frame; top-level results hold option 1 only', () => {
     const r = ENGINE();
     for (const o of r.option_comparison) expect('probability_of_goal' in o, o.option_id).toBe(false);
-    expect(r.constraint_results).toEqual([expect.objectContaining({ constraint_id: GOAL_OWN_CONSTRAINT_ID, node_id: GOAL, operator: '>=', value: 1 })]);
-    expect(GRAPH().nodes.find((n: Rec) => n.id === GOAL)).toMatchObject({ goal_threshold: 1, goal_direction: '>=' });
+    expect(sentGoal(REQUEST())).toMatchObject({ goal_threshold: 1, goal_threshold_frame: 'delta' });
+    expect(r.constraint_results.map((c: Rec) => c.option_id)).toEqual(['event_option_1']);
+    for (const o of r.option_comparison) expect(o.goal_fit_basis.node_ids).toEqual([GOAL]);
   });
 
-  it('Paul’s real-engine response: the licence quotes 83 / 95 / 42, each with its own 95% Wilson block on n = 10,000', () => {
-    const r = ENGINE(), g = GRAPH();
-    const licence = goalChanceLicenceOf(r, g, GOAL)!;
-    expect(licence).not.toBeNull();
+  it('Paul’s real engine: the licence quotes 83 / 95 / 42, each with its own 95% Wilson block on n = 10,000, and the range note once', () => {
+    const r = ENGINE();
+    const licence = licenceOf(r)!;
     expect(licence.pct_by_option).toEqual({ event_option_1: 83, event_option_2: 95, event_option_3: 42 });
     expect(licence.withheld_option_ids).toBeUndefined();
-    const read = goalOwnConstraintChanceRecords(r, g, GOAL, r.option_comparison);
+    expect(licence.notes).toEqual(['You gave 7 months. Olumi’s assumed 3.5–10.5-month range informs this approximate calculation; '
+      + 'modelled outcomes can fall outside those time bounds.']);
+    const read = readOf(r);
     expect([...read.engineRead].sort()).toEqual(OPTIONS);
     for (const rec of read.records as Rec[]) {
       expect(rec.probability_of_goal).toBe(rec.constraint_probabilities[GOAL_OWN_CONSTRAINT_ID]);
       expect(goalChancePrecisionOf(rec)).toMatchObject({ n_informative: 10000, n_met: Math.round(rec.probability_of_goal * 10000) });
     }
-    // The Run's own records are never edited.
-    expect(r.option_comparison.every((o: Rec) => !('probability_of_goal' in o))).toBe(true);
+    expect(r.option_comparison.every((o: Rec) => !('probability_of_goal' in o))).toBe(true); // the Run's records are never edited
   });
 
-  it('DL (b1)(ii): an ENGINE-READ figure skips the 2-point test; where CEE’s own approximation is the figure, the test still applies', () => {
-    const r = ENGINE(), g = GRAPH();
-    // Contrast: the same option with CEE's own approximation as its figure is not a point under the 2-point test.
-    const parts = sharePartsForOption(g, 'event_option_2')!;
+  it('no old-law authority: two developers is the engine’s 95 although the uniform law and CEE’s Normal disagree by > 2 points', () => {
+    const g = GRAPH(), parts = sharePartsForOption(g, 'event_option_2')!;
     expect(Math.abs(normalChance(parts, 1) - exactChance(parts, 1)) * 100).toBeGreaterThan(2);
-    expect(shareGateForOption(g, 'event_option_2', 0.9515)?.form).toBe('range');
-    const approximated = { ...r, option_comparison: r.option_comparison.map((o: Rec) => ({ ...o, probability_of_goal: normalChance(sharePartsForOption(g, o.option_id)!, 1) })) };
-    expect(goalChanceLicenceOf(approximated, g, GOAL)!.withheld_option_ids).toEqual(expect.arrayContaining(['event_option_2', 'event_option_3']));
-    // The engine-read figure is quoted as the engine's point.
-    expect(goalChanceLicenceOf(r, g, GOAL)!.pct_by_option.event_option_2).toBe(95);
+    expect(shareGateForOption(g, 'event_option_2', 0.9515)?.form).toBe('range'); // the old gate's verdict: a reference only
+    expect(licenceOf(ENGINE())!.pct_by_option.event_option_2).toBe(95);
+    const out = withShareByDateChanceGate(ENGINE(), g, GOAL) as Rec;
+    expect((out.inference_warnings ?? []).some((w: Rec) => w.code === 'GOAL_CHANCE_RANGE' || w.code === GOAL_FIGURES_SHARE_APPROXIMATION)).toBe(false);
+  });
+
+  it('the top-level constraint_results is never read: removed, or naming another node, the per-option figures are unchanged', () => {
+    const { constraint_results: _gone, ...none } = ENGINE();
+    expect(licenceOf(none)!.pct_by_option).toEqual({ event_option_1: 83, event_option_2: 95, event_option_3: 42 });
+    const wrong = { ...ENGINE(), constraint_results: [{ ...ENGINE().constraint_results[0], node_id: 'event_team', value: 0.5 }] };
+    expect(licenceOf(wrong)!.pct_by_option).toEqual({ event_option_1: 83, event_option_2: 95, event_option_3: 42 });
   });
 
   it.each([
-    ['a different constraint id', (c: Rec) => ({ ...c, constraint_id: 'c_deadline' })],
-    ['another node', (c: Rec) => ({ ...c, node_id: 'event_team' })],
-    ['a strict operator', (c: Rec) => ({ ...c, operator: '>' })],
-    ['another threshold', (c: Rec) => ({ ...c, value: 0.9 })],
-  ])('CONTRAST — %s: no read, every figure withheld', (_name, edit) => {
-    const r = withConstraint(ENGINE(), edit), g = GRAPH();
-    expect(goalOwnConstraintChanceRecords(r, g, GOAL, r.option_comparison).engineRead.size).toBe(0);
-    const licence = goalChanceLicenceOf(r, g, GOAL);
+    ['not in the delta frame', (q: Rec) => { sentGoal(q).goal_threshold_frame = 'level'; return q; }],
+    ['minimised (a different comparator from the goal’s held >=)', (q: Rec) => ({ ...q, goal_direction: 'minimise' })],
+    ['strict (> rather than the held >=)', (q: Rec) => ({ ...q, goal_threshold_strict: true })],
+    ['not this goal node', (q: Rec) => { sentGoal(q).id = 'another_goal'; return q; }],
+    ['with no finite threshold', (q: Rec) => { delete sentGoal(q).goal_threshold; return q; }],
+  ])('SENT-RUN CONTRAST — the goal was sent %s: no read, every figure withheld', (_name, edit) => {
+    const sent = SENT(edit);
+    expect(readOf(ENGINE(), sent).engineRead.size).toBe(0);
+    const licence = licenceOf(ENGINE(), sent);
     expect(licence === null || Object.keys(licence.pct_by_option).length === 0).toBe(true);
   });
 
-  it('CONTRAST — one entry of the auto id that does not bind (a second, on another node) vetoes the read', () => {
+  it('no sent run (a caller that cannot say what was sent): no read', () => {
     const r = ENGINE();
-    const two: Rec = { ...r, constraint_results: [...r.constraint_results, { ...r.constraint_results[0], node_id: 'event_team', option_id: 'event_option_2' }] };
-    expect(goalOwnConstraintChanceRecords(two, GRAPH(), GOAL, two.option_comparison).engineRead.size).toBe(0);
+    expect(goalOwnConstraintChanceRecords(r, GRAPH(), GOAL, r.option_comparison, undefined).engineRead.size).toBe(0);
+    expect(Object.keys(goalChanceLicenceOf(r, GRAPH(), GOAL)?.pct_by_option ?? {})).toEqual([]);
   });
 
-  it('never over a CEE withhold: an option a goal-figures withhold names stays withheld; the others are read', () => {
+  it.each([
+    ['its row is scored on another node', (o: Rec) => ({ ...o, goal_fit_basis: { ...o.goal_fit_basis, node_ids: ['event_team'] } })],
+    ['its row names two nodes', (o: Rec) => ({ ...o, goal_fit_basis: { ...o.goal_fit_basis, node_ids: [GOAL, 'event_team'] } })],
+    ['its row has no goal-fit basis', (o: Rec) => { const { goal_fit_basis: _b, ...rest } = o; return rest; }],
+    ['its own key is another constraint', (o: Rec) => ({ ...o, constraint_probabilities: { c_deadline: 0.9515 } })],
+    ['its own figure is not a chance', (o: Rec) => ({ ...o, constraint_probabilities: { [GOAL_OWN_CONSTRAINT_ID]: 1.4 } })],
+  ])('PER-OPTION CONTRAST — two developers, %s: that option alone is not read', (_name, edit) => {
+    const r = withOption(ENGINE(), 'event_option_2', edit);
+    expect([...readOf(r).engineRead].sort()).toEqual(['event_option_1', 'event_option_3']);
+    const licence = licenceOf(r)!;
+    expect(licence.pct_by_option).toEqual({ event_option_1: 83, event_option_3: 42 });
+    expect(licence.withheld_option_ids).toEqual(['event_option_2']);
+  });
+
+  it('PER-OPTION CONTRAST — an option CEE did not send is never read', () => {
+    const sent = SENT(q => { q.graph.nodes = q.graph.nodes.filter((n: Rec) => n.id !== 'event_option_3'); return q; });
+    expect([...readOf(ENGINE(), sent).engineRead].sort()).toEqual(['event_option_1', 'event_option_2']);
+  });
+
+  it('never over a CEE withhold: an option a goal-figures withhold names stays withheld; a Run-wide withhold reads none', () => {
     const r: Rec = { ...ENGINE(), inference_warnings: [{ code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ['event_option_2'], message: 'x' }] };
-    const read = goalOwnConstraintChanceRecords(r, GRAPH(), GOAL, r.option_comparison);
-    expect([...read.engineRead].sort()).toEqual(['event_option_1', 'event_option_3']);
+    expect([...readOf(r).engineRead].sort()).toEqual(['event_option_1', 'event_option_3']);
     const runWide: Rec = { ...ENGINE(), inference_warnings: [{ code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', message: 'x' }] };
-    expect(goalOwnConstraintChanceRecords(runWide, GRAPH(), GOAL, runWide.option_comparison).engineRead.size).toBe(0);
+    expect(readOf(runWide).engineRead.size).toBe(0);
   });
 
-  it('never the joint of several: a record with only probability_of_joint_goal is not read', () => {
-    const r = ENGINE();
-    const jointOnly = { ...r, option_comparison: r.option_comparison.map((o: Rec) => {
+  it('never the joint of several: a row with only probability_of_joint_goal is not read', () => {
+    const r = withOption(ENGINE(), 'event_option_1', (o) => {
       const { constraint_probabilities: _c, constraint_probabilities_precision: _p, ...rest } = o;
       return rest;
-    }) };
-    expect(jointOnly.option_comparison[0].probability_of_joint_goal).toBe(0.8301);
-    expect(goalOwnConstraintChanceRecords(jointOnly, GRAPH(), GOAL, jointOnly.option_comparison).engineRead.size).toBe(0);
+    });
+    expect(r.option_comparison[0].probability_of_joint_goal).toBe(0.8301);
+    expect([...readOf(r).engineRead].sort()).toEqual(['event_option_2', 'event_option_3']);
   });
 
-  it('a record that carries probability_of_goal keeps it (the read never overrides the engine’s own goal figure)', () => {
-    const r = ENGINE();
-    const carried = { ...r, option_comparison: r.option_comparison.map((o: Rec) => ({ ...o, probability_of_goal: 0.5 })) };
-    const read = goalOwnConstraintChanceRecords(carried, GRAPH(), GOAL, carried.option_comparison);
+  it('a row that carries probability_of_goal keeps it (the read never overrides the engine’s own goal figure)', () => {
+    const r = ENGINE(), carried = { ...r, option_comparison: r.option_comparison.map((o: Rec) => ({ ...o, probability_of_goal: 0.5 })) };
+    const read = readOf(carried);
     expect(read.engineRead.size).toBe(0);
     expect((read.records as Rec[]).map((x) => x.probability_of_goal)).toEqual([0.5, 0.5, 0.5]);
-  });
-});
-
-describe('DL 12 Oct: the share gate’s three branches where CEE’s own approximation is the figure (probability_of_goal present)', () => {
-  // A narrow team time (7.00–7.01 months to finish, six months to the deadline) and one hire starting 0–6 months in, adding
-  // 10% a month: the Normal stands in badly for the hire's uniform start (error > 2 points), yet both ends of the exact law's
-  // range show the same whole %.
-  const narrow: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low: 7, high: 7.01 }, extra: { monthlyShare: 0.1, D: 6, leadLow: 0, leadHigh: 6 } };
-
-  it('equal ends: the exact law’s own figure is the point (monotone in the team’s time), never a range or nothing', () => {
-    const at = (v: number): number => exactChance({ ...narrow, team: { ...narrow.team, low: v, high: v } }, 1);
-    expect(Math.abs(normalChance(narrow, 1) - exactChance(narrow, 1)) * 100).toBeGreaterThan(2);
-    expect(Math.round(at(7) * 100)).toBe(Math.round(at(7.01) * 100));
-    const decision = gate(narrow, 1);
-    expect(decision).toMatchObject({ form: 'point', exact_point: exactChance(narrow, 1) });
-    expect(Math.round(exactChance(narrow, 1) * 100)).toBe(Math.round(at(7) * 100));
+    expect(licenceOf(carried)!.pct_by_option).toEqual({ event_option_1: 50, event_option_2: 50, event_option_3: 50 });
   });
 
-  it('distinct ends: a range, as before (control: Paul’s two developers under CEE’s own approximation)', () => {
-    const decision = gate(sharePartsForOption(GRAPH(), 'event_option_2')!, 1);
-    expect(decision.form).toBe('range');
-    if (decision.form === 'range') expect(Math.round(decision.low * 100)).not.toBe(Math.round(decision.high * 100));
+  it('the earned-0/1 guard holds: an engine-read exact 1 the Run did not earn is withheld; earned, it is said', () => {
+    const r = withOption(ENGINE(), 'event_option_2', (o) => ({ ...o, constraint_probabilities: { [GOAL_OWN_CONSTRAINT_ID]: 1 } }));
+    expect(licenceOf(r)!.withheld_option_ids).toEqual(['event_option_2']);
+    const g = GRAPH();
+    const earned = goalChanceLicenceOf(r, g, GOAL, (id, p) => id === 'event_option_2' && p === 1, undefined, g, { sentRun: SENT() })!;
+    expect(earned.pct_by_option.event_option_2).toBe(100);
   });
 
-  it('unsupported parts (three ranged starts on one option): withheld with E5’s next step, never a wordless withhold', () => {
+  it('one withhold remains, with its actual reason: three ranged starts on one option (Olumi uses at most two)', () => {
     const g = GRAPH();
     const third = { ...structuredClone(g.nodes.find((n: Rec) => n.id === 'event_capacity_1')), id: 'event_capacity_3', label: 'Third hire' };
     g.nodes.push(third);
@@ -141,11 +162,12 @@ describe('DL 12 Oct: the share gate’s three branches where CEE’s own approxi
       g.edges.push({ ...structuredClone(g.edges.find((e: Rec) => e.from === o.id && e.to === 'event_capacity_1')), to: 'event_capacity_3' });
     }
     g.nodes.find((n: Rec) => n.id === 'event_option_2').interventions.event_capacity_1 = { value: 1 };
-    expect(sharePartsForOption(g, 'event_option_2'), 'three ranged starts exceed the exact check').toBeNull();
-    const run = { option_comparison: OPTIONS.map(id => ({ option_id: id, probability_of_goal: 0.5 })) };
-    const ws = ((withShareByDateChanceGate(run, g, GOAL) as Rec).inference_warnings ?? []) as Rec[];
-    const own = ws.filter(w => Array.isArray(w.option_ids) && w.option_ids.includes('event_option_2'));
-    expect(own.map(w => w.message)).toEqual(['Not shown. Olumi can use at most two start times for ‘Hire two developers’ yet: say which two starts to use.']);
-    expect(JSON.stringify(ws)).not.toContain('so this chance is not shown');
+    expect(sharePartsForOption(g, 'event_option_2'), 'three ranged starts').toBeNull();
+    const out = withShareByDateChanceGate(ENGINE(), g, GOAL) as Rec;
+    const own = (out.inference_warnings ?? []).filter((w: Rec) => Array.isArray(w.option_ids) && w.option_ids.includes('event_option_2'));
+    expect(own.map((w: Rec) => w.message)).toEqual(['Not shown. Olumi can use at most two start times for ‘Hire two developers’ yet: say which two starts to use.']);
+    const licence = goalChanceLicenceOf(out, g, GOAL, undefined, undefined, g, { sentRun: SENT() })!;
+    expect(licence.withheld_option_ids).toEqual(['event_option_2']);
+    expect(Object.keys(licence.pct_by_option).sort()).toEqual(['event_option_1', 'event_option_3']);
   });
 });

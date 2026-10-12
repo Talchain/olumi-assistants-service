@@ -2875,12 +2875,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ISL src/services/robustness_analyzer_v2.py:1053-1055,1090, read at 3cfadcfc:
     // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
+    // Recovery Batch B (b1, AIE 6125204695): what CEE SENT binds a deadline goal's engine-read chance, per option.
+    const sentRun = { graph: plotPayload.graph, goal_direction: plotPayload.goal_direction, goal_threshold_strict: plotPayload.goal_threshold_strict };
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance),
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, sentRun),
       snapshot.rawPersistedGraph ?? graphForAnalysis,
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
-      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints });
+      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);

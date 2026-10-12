@@ -1,5 +1,5 @@
 {
-  "source_sha": "991e72dd2843fe7016ebc705f912b884029fdd81",
+  "source_sha": "0022d022169de8df70849dd6a98f62fe0638469c",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -180,12 +180,13 @@
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
       "src/orchestrator-v5/goal-target/goal-direction.ts": 6,
       "src/orchestrator-v5/goal-target/goal-level-reading.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-own-constraint-chance.ts": 2,
       "src/orchestrator-v5/goal-target/goal-record.ts": 5,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 3,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/orchestrator-v5/signals/coaching-signals.ts": 1,
       "src/orchestrator-v5/tools/handlers/add-constraint.ts": 5,
-      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 8,
+      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 10,
       "src/orchestrator-v5/tools/handlers/run-input-residual.ts": 2,
       "src/orchestrator-v5/tools/handlers/run-input-snapshot.ts": 7,
       "src/orchestrator-v5/tools/registry.ts": 1,
@@ -517,6 +518,7 @@
       "src/orchestrator-v5/goal-target/goal-direction.ts": 6,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 3,
       "src/orchestrator-v5/goal-target/goal-level-reading.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-own-constraint-chance.ts": 1,
       "src/orchestrator-v5/goal-target/goal-record.ts": 2,
       "src/orchestrator-v5/goal-target/goal-target-basis.ts": 3,
       "src/orchestrator-v5/goal-target/share-by-date-run.ts": 1,
@@ -656,7 +658,6 @@
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 3,
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 1,
-      "src/orchestrator-v5/goal-target/goal-chance-range.ts": 1,
       "src/orchestrator-v5/goal-target/goal-direction.ts": 3,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 3,
       "src/orchestrator-v5/goal-target/goal-record.ts": 4,
@@ -816,7 +817,7 @@
     "goalUnitOf": 5,
     "goal_constraints": 450,
     "goal_deadline_as_stated": 11,
-    "goal_direction": 97,
+    "goal_direction": 101,
     "goal_horizon": 52,
     "goal_horizon_months": 43,
     "goal_level_reading": 19,
@@ -828,9 +829,9 @@
     "goal_threshold": 250,
     "goal_threshold_cap": 166,
     "goal_threshold_cap_provenance": 37,
-    "goal_threshold_frame": 141,
+    "goal_threshold_frame": 142,
     "goal_threshold_raw": 246,
-    "goal_threshold_unit": 225,
+    "goal_threshold_unit": 224,
     "pickGoalThresholdTrio": 18,
     "quantity_frame": 41,
     "readHeldGoalComparator": 20,
@@ -843,7 +844,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2458,
+  "total_references": 2462,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

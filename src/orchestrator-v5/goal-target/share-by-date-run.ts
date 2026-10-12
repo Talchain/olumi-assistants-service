@@ -145,17 +145,20 @@ export function olumiAssumedTeamRange(graph: unknown): { readonly forecast: numb
 }
 const months = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
 /**
- * The provisional chance attribution, after "using ". ⛔ DL (b1)(2), 12 Oct: a NEUTRAL PLACEHOLDER pending the AIE's
- * replacement (`recovery/bB/B-STRINGS-FOR-AIE.md`). It states only the forecast and that the spread is Olumi's assumption:
- * the engine does not treat every time in the range as equally likely (it samples the range's mean and spread,
- * `recovery/bB/ebd-law/DIAGNOSIS.md`), so the words name no law. The range itself is on the card the user approved.
+ * The team part of the provisional chance attribution, after "using ". AIE 6125204695 (b1), verbatim: the engine's chance is a
+ * bell-curve approximation built from the range's moments (`recovery/bB/ebd-law/DIAGNOSIS.md`), never "all times in the range
+ * equally likely" (withdrawn for b1). The forecast and its words stay the user's; the range and the approximation are Olumi's.
  */
 export function olumiAssumedRangeAttribution(t: { readonly forecast: number; readonly low: number; readonly high: number }): string {
-  return `your ${months(t.forecast)}-month forecast and Olumi’s assumed spread`;
+  return `your ${months(t.forecast)}-month forecast and Olumi’s bell-curve approximation based on an assumed ${months(t.low)}–${months(t.high)}-month range`;
 }
-/** AIE 6122738619, verbatim: the range line's sentence. */
+/**
+ * AIE 6125204695 (b1), verbatim: the timing-range note. It describes the INPUT range, never a probability interval, and never
+ * says the range covers a fixed fraction or "most runs" (the engine samples derived progress, not completion times).
+ */
 export function olumiAssumedRangeLine(t: { readonly forecast: number; readonly low: number; readonly high: number }): string {
-  return `You gave ${months(t.forecast)} months; Olumi’s provisional model range is ${months(t.low)}–${months(t.high)} months.`;
+  return `You gave ${months(t.forecast)} months. Olumi’s assumed ${months(t.low)}–${months(t.high)}-month range informs this approximate calculation; `
+    + 'modelled outcomes can fall outside those time bounds.';
 }
 
 /**

@@ -42,8 +42,8 @@ import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
-import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
-import { goalOwnConstraintChanceRecords } from './goal-own-constraint-chance.js';
+import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
+import { goalOwnConstraintChanceRecords, type SentRunInputs } from './goal-own-constraint-chance.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { resolveGoalDirection } from './goal-direction.js';
@@ -205,6 +205,8 @@ export interface GoalChanceLicence {
 export interface GoalChanceConstraintInputs {
   readonly storedConstraints?: unknown;
   readonly sentConstraints?: unknown;
+  /** What CEE sent PLoT for this Run: binds a deadline goal's engine-read chance (`goal-own-constraint-chance.ts`). */
+  readonly sentRun?: SentRunInputs;
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -279,7 +281,8 @@ export function goalChanceLicenceOf(
   const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
   // The Run's own option records, current-first: the first carrier that has any is the comparison. DL (b1): where PLoT gave
   // no `probability_of_goal` at threshold 1, the goal's OWN constraint, bound by identity, is the figure (never over a withhold).
-  const engine = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find((s) => s.length > 0) ?? []);
+  const engine = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find((s) => s.length > 0) ?? [],
+    constraints.sentRun);
   const records = engine.records;
   // ⭐ Amendment 1 (independent check r1 item 3): EVERY frame reads carrying on as now as the reference BY ASSUMPTION, never
   // a finding. A quantity measured AS a change (hiring) is 0 today by definition, so its status quo is no change by
@@ -311,7 +314,6 @@ export function goalChanceLicenceOf(
   const recordOf = new Map<string, Rec>();
   const precisionOf = new Map<string, GoalChancePrecision>();
   const rounding: Record<string, GoalChanceDisplayRounding> = {};
-  const exactExtremes = new Set<string>();
   const zeroSpreadSide: Record<string, 'meets' | 'falls_short'> = {};
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
@@ -321,13 +323,10 @@ export function goalChanceLicenceOf(
     option_ids.push(id);
     const precision = goalChancePrecisionOf(r);
     const step = precision === null ? 'whole' : displayRoundingFor(precisionHalfWidthPoints(precision));
-    const shareGate = share !== null && share.goal.id === goalId
-      ? shareGateForOption(graph, id, typeof p === 'number' ? p : undefined, step) : undefined;
-    // ⭐ DL (b1)(ii), 12 Oct: an ENGINE-READ figure is the disclosed law's own answer (the user's forecast and Olumi's assumed
-    // spread), so the 2-point test (CEE's Normal against the uniform law, which is no longer claimed) is not applied to it.
-    // Unsupported parts (null) still withhold. Wherever CEE's own approximation is the figure source, the gate stays.
-    const engineFigure = engine.engineRead.has(id);
-    if (shareGate !== undefined && (engineFigure ? shareGate === null : shareGate?.form !== 'point')) { withheld.push(id); continue; }
+    // ⭐ AIE 6125204695 (b1), 12 Oct: a deadline chance is the engine's own approximate point, said with its attribution; never
+    // an old-law range, exact figure or exact-extreme override (`gate`/`exactChance` are mathematical references only). An
+    // option whose parts CEE cannot state (so its attribution cannot be said) is withheld; the range record says why.
+    if (share !== null && share.goal.id === goalId && sharePartsForOption(graph, id) === null) { withheld.push(id); continue; }
     // ⭐ Amendment 1: the status quo is measured against itself — no change, by assumption, never a finding (every frame).
     if (sqByAssumption && id === statusQuoId) { withheld.push(id); continue; }
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
@@ -339,22 +338,12 @@ export function goalChanceLicenceOf(
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
     if (!Number.isFinite(p) || p < 0 || p > 1) return null;
     licensed.push(id);
-    // The exact law's own figure where both ends of its range show the same whole % (`gate`): it is not the Run's draws, so
-    // the Run's precision does not describe it (whole step, no interval, no driver).
-    const exactPoint = !engineFigure && shareGate?.form === 'point' ? shareGate.exact_point : undefined;
     // ⭐ Ruling 5: the displayed step follows the figure's own precision; no precision block → whole, as before.
-    if (precision !== null && exactPoint === undefined) {
+    if (precision !== null) {
       precisionOf.set(id, precision);
       rounding[id] = step;
     }
-    // The licence is the sole producer of the exact-extreme display; the raw Run evidence stays intact.
-    if (shareGate?.form === 'point' && shareGate.exact_extreme !== undefined && !engineFigure) {
-      pct[id] = shareGate.exact_extreme * 100;
-      exactExtremes.add(id);
-    } else if (exactPoint !== undefined) {
-      pct[id] = displayedPctAt(exactPoint, 'whole');
-      exactExtremes.add(id);
-    } else pct[id] = displayedPctAt(p, step);
+    pct[id] = displayedPctAt(p, step);
   }
   // The status quo's own line is a said row (amendment 1): with nothing else licensed it still reaches the user, as its typed
   // zero-spread reason did before (never a figure; the licence's message stays empty) — but only where the Run's own status-quo
@@ -396,7 +385,6 @@ export function goalChanceLicenceOf(
   const noDrivers: Record<string, GoalChanceNoDriverReason> = {};
   if (licensed.some((id) => recordOf.get(id)!.probability_of_goal_drivers !== undefined)) {
     for (const id of licensed) {
-      if (exactExtremes.has(id)) { noDrivers[id] = 'none'; continue; } // drivers are moot at a ruled extreme or the exact law's point
       const claim = goalChanceDriverOf(recordOf.get(id)!, id, graph, envelope);
       if ('driver' in claim) drivers[id] = claim.driver;
       else noDrivers[id] = claim.no_driver;
@@ -443,10 +431,14 @@ export function goalChanceLicenceOf(
     ...(Object.keys(drivers).length > 0 ? { driver_by_option: drivers } : {}),
     ...(Object.keys(noDrivers).length > 0 ? { no_driver_by_option: noDrivers } : {}),
   };
-  return withBatchCWords(single, {
+  const worded = withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
     sqByAssumption, quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, constraints, option_ids,
   });
+  // ⭐ AIE 6125204695 (3): beside a deadline chance on Olumi's range assumed from the user's single forecast, the input time
+  // range is said once (the input, never a probability interval), on the licence's own notes.
+  const assumedRange = share !== null && share.goal.id === goalId && licensed.length > 0 ? olumiAssumedTeamRange(graph) : null;
+  return assumedRange === null ? worded : { ...worded, notes: [...(worded.notes ?? []), olumiAssumedRangeLine(assumedRange)] };
 }
 
 /**
@@ -617,14 +609,14 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
 
 /** One Run-input candidate must agree with every licensed option; ambiguity records nothing. */
 export function sentGoalThresholdOf(
-  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
+  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean, sentRun?: SentRunInputs,
 ): SentGoalThreshold | undefined {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned);
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, undefined, graph, sentRun === undefined ? {} : { sentRun });
   if (licence === null || Object.keys(licence.pct_by_option).length === 0) return undefined;
   const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
   if (goal === undefined || !isRec(envelope)) return undefined;
-  const records = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find(s => s.length > 0) ?? []).records;
+  const records = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find(s => s.length > 0) ?? [], sentRun).records;
   const candidates: SentGoalThreshold[] = [];
   for (const field of ['goal_threshold_raw', 'goal_threshold'] as const) {
     const value = goal[field];

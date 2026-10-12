@@ -71,8 +71,8 @@ export function teamTimesInQuote(quote: unknown): { low_months: number; high_mon
  * ⭐ EBD E2 (a) — THE MODEL RANGE FROM A SINGLE FORECAST (AIE 6121986101 / 6122738619, PL 6122519782; settled 12 Oct). A single
  * time (Paul's "7 months") is the user's FORECAST P, a human point kept with their words; it is never called their "most
  * likely" time. The chance needs bounds, so Olumi assumes a provisional model range from P by ONE convention, labelled as
- * Olumi's on the card and on every result line (the words name no law: DL (b1)(2), 12 Oct; the engine samples the range's
- * mean and spread, `recovery/bB/ebd-law/DIAGNOSIS.md`):
+ * Olumi's on the card and on every result line (AIE 6125204695: the engine's chance is a bell-curve approximation from the
+ * range's moments, `recovery/bB/ebd-law/DIAGNOSIS.md`; never "every time in it equally likely"):
  *   · low confidence positively bound to that forecast in the same sentence (`TEAM_TIME_LOW_CONFIDENCE`): 0.5 × P to 1.5 × P;
  *   · otherwise: 0.75 × P to 1.25 × P.
  * These widths are an explicitly assumed convention, not calibrated uncertainty. Each end is rounded to 0.1 month (0.01
@@ -202,17 +202,28 @@ export function teamTimeIsHeld(team: Rec, a: ApprovedTeamTime, unit: string, gra
 export function teamTimeCardParts(a: ApprovedTeamTime, _unit: string, deliverable: string): { readonly question: string; readonly explanation: string } {
   if (a.low_months === a.high_months) return { question: `Use about ${a.low_months} months as your most likely time with today's team?`,
     explanation: 'The chance stays withheld until you give the soonest and latest times.' };
-  // ⭐ EBD E2 (AIE 6122738619, verbatim): ONE card for a single forecast, Olumi's provisional range labelled as Olumi's, with
-  // the human qualifier said back; no derived progress headline on an input-approval card.
+  // ⭐ EBD E2, AIE 6125204695 (b1) verbatim: ONE card for a single forecast. The forecast, its words and the qualifier stay the
+  // user's; the range and the bell-curve approximation are Olumi's assumptions. No derived progress headline on the card.
   if (a.forecast_months !== undefined && a.range_origin === 'olumi_estimate') {
-    return { question: `Use Olumi’s provisional ${a.low_months}–${a.high_months}-month range for the current team?`,
-      // ⛔ DL (b1)(2), 12 Oct: a neutral placeholder pending the AIE (the engine does not treat the range's times as equally likely).
-      explanation: `It uses your ${a.forecast_months}-month forecast and Olumi’s assumed spread.`
+    return { question: `Use Olumi’s provisional model based on your ${a.forecast_months}-month forecast and an assumed ${a.low_months}–${a.high_months}-month range?`,
+      explanation: 'The calculation uses bell-curve approximations of progress and can include outcomes outside those time bounds.'
         + (a.range_rule === 'low_confidence' ? ' You described low confidence in that forecast.' : '') };
   }
   const pct = displayedPctAt(cappedTeamShareMean(timeBetween(a.reference_date, a.deadline, 'months'), a.low_months, a.high_months), 'whole');
   return { question: `Use ${a.low_months}–${a.high_months} months for today's team?`,
     explanation: `By ${sayDate(a.deadline)} that is about ${pct}% of ${deliverable}.` };
+}
+/**
+ * The edit fact's summary (`safe_summary`, at most 80 characters). The card question, as before, except on the assumed-range path,
+ * whose AIE 6125204695 question is longer than a summary may be: there it states the same two inputs in fewer words (pending the
+ * AIE's ACK, `recovery/bB/B-STRINGS-FOR-AIE.md`), and Olumi's range alone if even that is too long.
+ */
+export function teamTimeSummary(a: ApprovedTeamTime, unit: string, deliverable: string): string {
+  if (a.forecast_months !== undefined && a.range_origin === 'olumi_estimate') {
+    const both = `Team time: your ${a.forecast_months}-month forecast, Olumi’s assumed ${a.low_months}–${a.high_months}-month range`;
+    return both.length <= 80 ? both : `Team time: Olumi’s assumed ${a.low_months}–${a.high_months}-month range`;
+  }
+  return teamTimeCardParts(a, unit, deliverable).question.replace(/\?$/, '');
 }
 export function teamTimeCard(a: ApprovedTeamTime, unit: string, deliverable: string): string {
   const { question, explanation } = teamTimeCardParts(a, unit, deliverable);
@@ -244,7 +255,7 @@ export function applyTeamShareEdit(graph: unknown, a: ApprovedTeamTime, expected
     result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1,
       affected_entities: [{ kind: 'factor', label: part.team.label.slice(0, 120) }],
       graph_hash_before: expectedHash, graph_hash_after: computeAnalysisAffectingGraphHash(out as never),
-      safe_summary: teamTimeCardParts(a, String(part.goal.goal_threshold_unit), part.deliverable).question.replace(/\?$/, ''), impact: 'low', rerun_recommended: true } });
+      safe_summary: teamTimeSummary(a, String(part.goal.goal_threshold_unit), part.deliverable), impact: 'low', rerun_recommended: true } });
   return { kind: 'mutated', mutatedGraph: out, handlerFacts: [fact as HandlerFact], confirmation: teamTimeCardParts(a, String(part.goal.goal_threshold_unit), part.deliverable).explanation };
 }
 /** Only the one part's observed state can differ. */

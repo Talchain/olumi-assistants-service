@@ -19,6 +19,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { GOAL_CHANCE_RANGE } from '../goal-chance-range.js';
+import { GOAL_CHANCE_LICENSED } from '../goal-chance-licence.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../orchestrator/context/option-result-source.js';
 import { valueAuthorshipOf } from '../../agent-lane/turn-context/guidance-signals.js';
 import { shareByDateGoalOf } from '../goal-kind.js';
@@ -243,7 +244,7 @@ describe('a start given as one figure has no spread: the recogniser applies the 
     devsLink(after).strength.std = 0.01;
     expect(shareByDateGoalOf(after)).toBeNull();
   });
-  it('Run: the real snapshot loader floors the spread, and the share gate still decides each option', async () => {
+  it('Run: the real snapshot loader floors the spread, and each option gets the Run’s own point (AIE b1: no old-law range)', async () => {
     const after = paulsAfter();
     const store = { readMostRecentPendingActions: async () => [], loadGraph: async () => structuredClone(after),
       loadGraphAndBriefText: async () => ({ graph: structuredClone(after), briefText: null }) };
@@ -266,10 +267,12 @@ describe('a start given as one figure has no spread: the recogniser applies the 
     expect(run).toHaveBeenCalledOnce();
     const result = (outcome.handler_facts.find(f => f.fact_type === 'run_analysis') as unknown as Rec).result;
     // ⛔ Without the floor clause this Run says, for EVERY option, "Olumi can compare your options, but can't yet test them
-    // against your target" (GOAL_FIGURES_TARGET_NOT_TESTABLE ×3, measured). With it the share gate decides each option on
-    // the floored graph: the Tech lead's 3–4 month range is shown as a range, by identity.
+    // against your target" (GOAL_FIGURES_TARGET_NOT_TESTABLE ×3, measured). With it every option is tested on the floored
+    // graph. ⭐ AIE 6125204695 (b1): each option's chance is the Run's own point, never an old-law range (the Tech lead's
+    // 3–4 month range used to be shown as a slow-to-fast range here).
     const warnings = result.enrichment.inference_warnings as Rec[];
     expect(warnings.filter(w => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).toEqual([]);
-    expect(warnings.find(w => w.code === GOAL_CHANCE_RANGE)?.option_ids).toEqual([TECH]);
+    expect(warnings.some(w => w.code === GOAL_CHANCE_RANGE)).toBe(false);
+    expect(Object.keys(warnings.find(w => w.code === GOAL_CHANCE_LICENSED)?.pct_by_option ?? {}).sort()).toEqual(ids.slice().sort());
   });
 });

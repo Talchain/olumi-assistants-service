@@ -62,7 +62,7 @@ import { shareChanceRunBlock, sharePartsForOption } from '../share-by-date-run.j
 import { normalChance } from '../event-by-date-share.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
-import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
+import { goalChanceNotesForAgent, goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
@@ -294,8 +294,9 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     const team = proposed(t3, 'propose_team_time');
     const card = cardOf(t3, team.proposal_id);
     // AIE 6122738619, verbatim: Olumi's provisional [0.5P, 1.5P] for his low confidence IN THIS forecast; his words kept.
-    // DL (b1)(2): the law is not named (neutral placeholder pending the AIE); the range itself is on the card.
-    expect(card).toBe('Use Olumi’s provisional 3.5–10.5-month range for the current team? It uses your 7-month forecast and Olumi’s assumed spread. '
+    // AIE 6125204695 (b1), verbatim: Olumi's provisional model from his forecast and an assumed range; the bell-curve note; his qualifier.
+    expect(card).toBe('Use Olumi’s provisional model based on your 7-month forecast and an assumed 3.5–10.5-month range? '
+      + 'The calculation uses bell-curve approximations of progress and can include outcomes outside those time bounds. '
       + 'You described low confidence in that forecast.');
     const t3yes = await turn(approve(t3, team.proposal_id));
     seen.push(t3yes);
@@ -338,8 +339,8 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     expect(Object.fromEntries(lines.map(l => [l.option_id, l.figure]))).toEqual({ event_option_1: 'about 83%', event_option_2: 'about 95%', event_option_3: 'about 42%' });
     for (const l of lines) {
       expect(l.chance).toContain('chance of launching by 12 April 2027');
-      // DL (b1)(2): the attribution names no law (neutral placeholder pending the AIE).
-      expect(l.chance, l.chance).toContain('using your 7-month forecast and Olumi’s assumed spread');
+      // AIE 6125204695 (b1), verbatim: the team part of the attribution.
+      expect(l.chance, l.chance).toContain('using your 7-month forecast and Olumi’s bell-curve approximation based on an assumed 3.5–10.5-month range');
       expect(l.chance, l.chance).not.toMatch(/equally likely|your 3\.5|most likely|which Olumi widened|slow end|between about/);
     }
     // ⭐ DISCRIMINATING MUTANT (DL (b1)(ii)): what the user sees is the ENGINE's figure, never CEE's `normalChance`. The same
@@ -350,6 +351,14 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     const moved = await runOn(w, r => ({ ...r, option_comparison: r.option_comparison.map((o: Rec) => o.option_id !== 'event_option_2' ? o
       : { ...o, constraint_probabilities: { ...o.constraint_probabilities, auto_goal_threshold: 0.9015 } }) }));
     expect(goalChanceScreenLinesForAgent(moved.result, held, true).find(l => l.option_id === 'event_option_2')!.figure).toBe('about 90%');
+    // AIE 6125204695 (3): the input time range is said ONCE, beside the chances (never a probability interval).
+    const notes = goalChanceNotesForAgent(result, held, true);
+    expect(notes.filter(n => n.startsWith('You gave 7 months.'))).toEqual(['You gave 7 months. Olumi’s assumed 3.5–10.5-month range informs '
+      + 'this approximate calculation; modelled outcomes can fall outside those time bounds.']);
+    // MISMATCH NEGATIVE (AIE 6125204695): an engine row not scored on THIS goal node is never read; no figure is said for it.
+    const offGoal = await runOn(w, r => ({ ...r, option_comparison: r.option_comparison.map((o: Rec) => o.option_id !== 'event_option_2' ? o
+      : { ...o, goal_fit_basis: { ...o.goal_fit_basis, node_ids: ['event_team'] } }) }));
+    expect(goalChanceScreenLinesForAgent(offGoal.result, held, true).map(l => l.option_id).sort()).toEqual(['event_option_1', 'event_option_3']);
     for (const id of ['event_option_1', 'event_option_2']) {
       // E5 combine: the AIE 6122738619 words (the hires' additional progress), after the team's attribution.
       expect(lines.find(l => l.option_id === id)!.chance).toContain("Olumi’s estimates of hiring time (2–4 months) and of the additional progress from the hires");
