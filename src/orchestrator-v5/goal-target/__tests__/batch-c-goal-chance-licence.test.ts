@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
+import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { conditionsRefusedBasis, CONDITIONS_NOT_KEPT, targetChanceWords } from '../goal-target-basis.js';
@@ -572,6 +572,23 @@ const capacityRun = (): Rec => ({ option_comparison: [
   { option_id: 'carry_on', probability_of_goal: 0, probability_of_goal_precision: wilson(0, 0), outcome: { mean: 75, std: 0, p10: 75, p50: 75, p90: 75 } },
 ] });
 const capacityLicence = (g: Rec = capacityGraph()) => goalChanceLicenceOf(capacityRun(), g, 'capacity', () => false, undefined, g, {});
+/**
+ * D2 (DL ruling A, 12 Oct, recovery Batch D): the status quo is read in the frame the Run was scored in, from the field the
+ * Run itself records (`sentGoalThresholdOf`, as run-analysis does); unknown stays unknown. On the wire the samples are
+ * normalised (served capacity: 0.16 = 80/500; the 11 Oct Run recorded `goal_threshold`, frame 'delta'), so the status-quo
+ * rows below are WIRE-SHAPED: 0.75 = 75/100. The raw rows above (75) were self-authored and never on the wire.
+ */
+const capacityWireRun = (): Rec => ({ option_comparison: [
+  { option_id: 'lead', probability_of_goal: 0.46, probability_of_goal_precision: wilson(0.46, 4600), outcome: { mean: 0.84, std: 0.03, p10: 0.8, p50: 0.84, p90: 0.88 } },
+  { option_id: 'two', probability_of_goal: 0.31, probability_of_goal_precision: wilson(0.31, 3100), outcome: { mean: 0.83, std: 0.03, p10: 0.79, p50: 0.83, p90: 0.87 } },
+  { option_id: 'carry_on', probability_of_goal: 0, probability_of_goal_precision: wilson(0, 0), outcome: { mean: 0.75, std: 0, p10: 0.75, p50: 0.75, p90: 0.75 } },
+] });
+/** The status quo's typed zero-spread line (Science §(ab)(2)), its true reading when the frame is unknown. */
+const ZERO_SPREAD_LINE = 'Falls short of 85% if today’s figures hold.';
+/** The field this Run records for itself (run-analysis.ts: `sentGoalThresholdOf` beside `withGoalChanceLicence`). */
+const recordedField = (run: Rec, g: Rec) => sentGoalThresholdOf(run, g, 'capacity', () => false);
+const wireLicence = (g: Rec = capacityGraph(), run: Rec = capacityWireRun()) => goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {});
+const wireEnvelope = (run: Rec, g: Rec = capacityGraph()): Rec => withGoalChanceLicence(run, g, 'capacity', () => false, recordedField(run, g), g, {}) as Rec;
 
 describe('independent check r1 — item 1: a percentage quantity changed by an absolute amount is said in POINTS', () => {
   // The discriminator is the goal's quantity frame (DL precision, 12 Oct): 'level' → points; 'change' → % of today; neither → not said.
@@ -607,7 +624,9 @@ describe('independent check r1 — item 1: a percentage quantity changed by an a
 
 describe('independent check r1 — item 3: the status quo is "no change, by assumption" for LEVEL targets too (amendment 1)', () => {
   it('RED: a level target\'s status quo is never a figure — its line is said, and the options keep their chances and words', () => {
-    const l = capacityLicence()!;
+    // D2: read in the Run's recorded frame (goal_threshold → today's normalised 0.75), on wire-shaped rows.
+    expect(recordedField(capacityWireRun(), capacityGraph())).toEqual({ value: 0.85, field: 'goal_threshold', frame: 'delta' });
+    const l = wireLicence()!;
     expect(l.pct_by_option).toEqual({ lead: 46, two: 31 });
     expect(l.withheld_option_ids).toEqual(['carry_on']);
     expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'Doing nothing: no change to ‘Development capacity’ in this model, by assumption.' });
@@ -615,7 +634,7 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     // The option's sentence is exactly today's: "about N% chance of meeting your goal, in this model".
     expect(l.chance_words).toBeUndefined();
     const g = capacityGraph();
-    const env = withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {});
+    const env = wireEnvelope(capacityWireRun(), g);
     const faces = goalChanceCellFacesForAgent({ type: 'analysis_result', enrichment: env }, g, true);
     expect(faces.get('lead')).toBe('‘Hire a tech lead’: about 46% chance of meeting your goal, in this model.');
     const cells = Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
@@ -634,20 +653,24 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
 
   it('RED (CI 6e3bce10): with no other option licensed, the status quo\'s own line still reaches the screen — the licence is never dropped', () => {
     // Before item 3 this row carried its zero-spread reason; dropping the whole licence left the cell empty.
-    const run = capacityRun();
+    // D2 (DL ruling A): with nothing licensed the Run records no field, so its frame is unknown and no "no change" is
+    // claimed; the status quo keeps its TRUE zero-spread line (as served run 3's capacity status quo now does).
+    const run = capacityWireRun();
     for (const row of (run.option_comparison as Rec[]).slice(0, 2)) delete row.probability_of_goal;
     const g = capacityGraph();
-    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
+    expect(recordedField(run, g), 'nothing licensed: the Run records no field').toBeUndefined();
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {})!;
     expect(l).not.toBeNull();
     expect(l).toMatchObject({ message: '', pct_by_option: {}, withheld_option_ids: ['lead', 'two', 'carry_on'],
-      status_quo: { option_id: 'carry_on', line: 'Doing nothing: no change to ‘Development capacity’ in this model, by assumption.' } });
-    for (const key of ['leader_option_id', 'similar_option_ids', 'olumi_estimate_link_count', 'provisional', 'withheld_reason_by_option']) {
+      withheld_reason_by_option: { carry_on: { reason: 'zero_spread', side: 'falls_short', line: ZERO_SPREAD_LINE } } });
+    expect(l.status_quo).toBeUndefined();
+    for (const key of ['leader_option_id', 'similar_option_ids', 'olumi_estimate_link_count', 'provisional']) {
       expect(l).not.toHaveProperty(key);
     }
-    const env = withGoalChanceLicence(run, g, 'capacity', () => false, undefined, g, {});
+    const env = wireEnvelope(run, g);
     const cells = Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
-    expect(cells.carry_on).toMatchObject({ kind: 'withheld', face: 'No change, by assumption',
-      why: 'Doing nothing: no change to ‘Development capacity’ in this model, by assumption.' });
+    expect(cells.carry_on).toMatchObject({ kind: 'withheld', why: ZERO_SPREAD_LINE });
+    expect(JSON.stringify(cells.carry_on)).not.toMatch(/by assumption|doesn’t match/);
     // NEGATIVE: a status-quo figure already withheld upstream (an untested horizon strips every option's) said nothing before,
     // so no status-quo-only record is added for it (goal-horizon-verdict.route "a stored triple does not unlock…").
     const stripped = structuredClone(run);
@@ -668,18 +691,18 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'zero_spread', side: 'falls_short', line: 'Not shown yet: needs month-by-month changes' } });
     expect(l.status_quo).toBeUndefined();
     expect(JSON.stringify(l)).not.toMatch(/by assumption/);
-    // CONTROL: the same status quo with no held month is amendment 1's.
-    expect(capacityLicence()!.status_quo?.option_id).toBe('carry_on');
-    expect(capacityLicence()).not.toHaveProperty('withheld_reason_by_option');
+    // CONTROL: the same status quo with no held month is amendment 1's (D2: wire-shaped, in the Run's recorded frame).
+    expect(wireLicence()!.status_quo?.option_id).toBe('carry_on');
+    expect(wireLicence()).not.toHaveProperty('withheld_reason_by_option');
   });
 
   it('RED: the level status quo row carries no precision and no Monte Carlo interval; the options keep theirs', () => {
     const g = capacityGraph();
-    const env = withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {}) as Rec;
+    const env = wireEnvelope(capacityWireRun(), g);
     const rows = Object.fromEntries((env.option_comparison as Rec[]).map((r) => [r.option_id, r]));
     expect(rows.carry_on).not.toHaveProperty('probability_of_goal_precision');
-    expect(rows.carry_on.outcome).toEqual({ mean: 75, p50: 75 });
-    expect(rows.lead).toEqual((capacityRun().option_comparison as Rec[])[0]);
+    expect(rows.carry_on.outcome).toEqual({ mean: 0.75, p50: 0.75 });
+    expect(rows.lead).toEqual((capacityWireRun().option_comparison as Rec[])[0]);
   });
 });
 
@@ -858,20 +881,29 @@ const capacityWith = (sq: Rec): Rec => {
   (run.option_comparison as Rec[])[2] = { ...(run.option_comparison as Rec[])[2], ...sq };
   return run;
 };
+/** D2: the same status-quo variants on wire-shaped rows, read in the Run's recorded frame. */
+const capacityWireWith = (sq: Rec): Rec => {
+  const run = capacityWireRun();
+  (run.option_comparison as Rec[])[2] = { ...(run.option_comparison as Rec[])[2], ...sq };
+  return run;
+};
 const cellsOf = (run: Rec, g: Rec): Record<string, Rec> => {
-  const env = withGoalChanceLicence(run, g, 'capacity', () => false, undefined, g, {});
+  // D2: the envelope as run-analysis writes it, with the field the Run records for itself.
+  const env = wireEnvelope(run, g);
   return Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
 };
 
 describe('AIE status-quo disposition — the same-draw reference is decided by the checked facts, and checked by the Run', () => {
   it.each([
-    ['spreads (72%–80%)', { probability_of_goal: 0.1, outcome: { mean: 76, std: 3, p10: 72, p50: 76, p90: 80 } }],
-    ['drifts to 78% with no spread', { outcome: { mean: 78, std: 0, p10: 78, p50: 78, p90: 78 } }],
+    ['spreads (72%–80%)', { probability_of_goal: 0.1, outcome: { mean: 0.76, std: 0.03, p10: 0.72, p50: 0.76, p90: 0.8 } }],
+    ['drifts to 78% with no spread', { outcome: { mean: 0.78, std: 0, p10: 0.78, p50: 0.78, p90: 0.78 } }],
     ['meets the target on some draws only', { probability_of_goal: 0.2 }],
   ])('RED (drift): an ordinary paired Run whose status quo %s is withheld with that reason — never a finding, never "no change"', (_name, sq) => {
+    // D2: wire-shaped rows, read in the frame the Run records (goal_threshold → 0.75).
     const g = capacityGraph();
-    const run = capacityWith(sq);
-    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
+    const run = capacityWireWith(sq);
+    expect(recordedField(run, g)?.field).toBe('goal_threshold');
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {})!;
     expect(l.pct_by_option).toEqual({ lead: 46, two: 31 });
     expect(l.withheld_option_ids).toEqual(['carry_on']);
     expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'reference_moved', line: MOVED('Development capacity') } });
@@ -880,7 +912,7 @@ describe('AIE status-quo disposition — the same-draw reference is decided by t
     expect(cellsOf(run, g).carry_on).toEqual({ kind: 'withheld', face: 'Chance not shown yet', why: MOVED('Development capacity'),
       reasons: [{ code: 'reference_moved', message: MOVED('Development capacity') }] });
     // Read back by the Agent exactly as stored; a malformed one (with a side, or no line) speaks for nothing.
-    const env = withGoalChanceLicence(run, g, 'capacity', () => false, undefined, g, {}) as Rec;
+    const env = wireEnvelope(run, g);
     expect(goalChanceLicenceForAgent({ enrichment: env })?.withheld_reason_by_option).toEqual(l.withheld_reason_by_option);
     for (const bad of [{ reason: 'reference_moved', side: 'falls_short', line: MOVED('x') }, { reason: 'reference_moved', line: '' }]) {
       const record = { ...structuredClone(l), withheld_reason_by_option: { carry_on: bad } };
@@ -964,7 +996,8 @@ describe('AIE status-quo disposition — the same-draw reference is decided by t
   });
 
   it('CONTROL (assumed): ordinary anchored capacity and hiring\'s change quantity keep the assumption line, with no interval', () => {
-    expect(capacityLicence()!.status_quo?.line).toBe('Doing nothing: no change to ‘Development capacity’ in this model, by assumption.');
+    // D2: capacity on wire-shaped rows, in the Run's recorded frame; hiring's change quantity is 0 today by construction.
+    expect(wireLicence()!.status_quo?.line).toBe('Doing nothing: no change to ‘Development capacity’ in this model, by assumption.');
     const g = hiringGraph();
     expect(goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!.status_quo?.option_id).toBe('carry_on');
     // Hiring's status quo whose change is NOT 0 disagrees with its own reference: withheld with that reason.

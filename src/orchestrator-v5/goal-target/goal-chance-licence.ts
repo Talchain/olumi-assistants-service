@@ -290,7 +290,7 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
  * deciles apart; or any recorded centre or decile away from the reference (beyond float representation, 1e-9 relative).
  * A row that records none of these (no outcome, or its spread already withheld) agrees.
  */
-function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | undefined }): StatusQuoReading {
+function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined }): StatusQuoReading {
   if (!a.paired) return a.forecast ? 'projection' : 'unknown';
   const row = a.row;
   if (row === undefined) return 'assumed';
@@ -300,6 +300,8 @@ function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: bo
   if (o === undefined) return 'assumed';
   if (finite(o.std) && o.std > 0) return 'moved';
   if (finite(o.p10) && finite(o.p90) && o.p10 !== o.p90) return 'moved';
+  // D2: a reference whose frame is not known is never compared, so the row is neither "moved" nor "no change".
+  if (a.reference === 'unknown') return ['p10', 'p50', 'p90', 'mean'].some((k) => finite(o[k])) ? 'unknown' : 'assumed';
   const ref = a.reference;
   const away = (v: unknown): boolean => finite(v) && ref !== undefined && Math.abs(v - ref) > 1e-9 * Math.max(1, Math.abs(ref));
   return ['p10', 'p50', 'p90', 'mean'].some((k) => away(o[k])) ? 'moved' : 'assumed';
@@ -406,6 +408,22 @@ export function goalChanceLicenceOf(
   const sqRow = statusQuoId === undefined ? undefined
     : records.find((r) => (typeof r.option_id === 'string' ? r.option_id : r.id) === statusQuoId);
   const today = finite(goalState?.raw_value) ? goalState!.raw_value as number : undefined;
+  /**
+   * ⭐ D2 (DL ruling 12 Oct, recovery Batch D): today's level is compared with the Run's status-quo row IN THE FRAME THE RUN
+   * WAS SCORED IN, never across frames. Served run 3 (capacity): the row was on the normalised scale (0.16 = 80/500) and was
+   * compared with `raw_value` 80, so a status quo sitting exactly at today read "doesn't match … as it stands today". The
+   * Run's own recorded threshold (`SentGoalThreshold`, the samples' frame, checked against the goal it names) decides: its
+   * normalised field → the normalised `value`, its raw field → `raw_value`. With no record, only a level both frames hold
+   * alike is known; anything else is 'unknown', never 'moved'.
+   */
+  const levelToday = ((): number | 'unknown' | undefined => {
+    if (today === undefined) return undefined;
+    const normalised = finite(goalState?.value) ? goalState!.value as number : undefined;
+    if (sentThreshold === undefined) return normalised === today ? today : 'unknown';
+    if (sentThreshold.frame !== 'delta' || !finite(sentThreshold.value) || goal?.[sentThreshold.field] !== sentThreshold.value) return 'unknown';
+    // The record's two fields name the two frames (`SentGoalThreshold['field']`): the raw one, and the normalised one.
+    return sentThreshold.field.endsWith('_raw') ? today : normalised ?? 'unknown';
+  })();
   // The goal's quantity frame as Olumi's validated reading holds it (`goalTargetBasisOf` keeps a reading only while its frame
   // equals the node's: 'change', else 'level'); read once, here.
   const readingFrame = basis?.quantity_frame;
@@ -416,8 +434,9 @@ export function goalChanceLicenceOf(
       paired: timing.ordinary && (changeQuantity || pairedLevelFacts(graph, goal, basis)),
       forecast: timing.forecast,
       row: sqRow,
-      // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today.
-      reference: changeQuantity ? 0 : today,
+      // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in
+      // the Run's own frame).
+      reference: changeQuantity ? 0 : levelToday,
     });
   const sqByAssumption = sqReading === 'assumed';
   const sqP = sqRow?.probability_of_goal;
