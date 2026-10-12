@@ -738,6 +738,8 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   notes.push(...unverified);
   const out: GoalChanceLicence = {
     ...single,
+    // G (AIE #94 6133027121): the record the Agent reads says the chance in its own target's words, never "of meeting your goal".
+    ...(single.message === '' ? {} : { message: `Each option’s chance of ${words} is licensed on this Run.` }),
     target: { ...single.target, ...(changeFrame !== undefined ? { frame: changeFrame } : {}) },
     chance_words: `chance of ${words}`,
     notes,
@@ -1353,6 +1355,8 @@ export function goalChanceLicenceForAgent(result: unknown): {
   chance_words?: string; notes?: readonly string[]; status_quo?: { option_id: string; line: string };
   estimate_only?: { base: number; unit: string }; provisional?: true; targets?: GoalTargetsBlock;
   period_end_assumption?: GoalChanceLicence['period_end_assumption'];
+  /** G (AIE #94 6133027121): the licensed target itself, read only when well formed. */
+  target?: GoalChanceLicence['target'];
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
@@ -1438,7 +1442,18 @@ export function goalChanceLicenceForAgent(result: unknown): {
     ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),
     ...(Object.keys(zeroSpreadReasons).length > 0 ? { withheld_reason_by_option: zeroSpreadReasons } : {}),
     ...batchCPartsOf(r, optionIds, withheld ?? []),
+    ...(licensedTargetOf(r.target) !== undefined ? { target: licensedTargetOf(r.target)! } : {}),
   };
+}
+
+/** The stored target, only when every member is well formed (G: the Agent is handed the actual target it describes). */
+function licensedTargetOf(t: unknown): GoalChanceLicence['target'] | undefined {
+  if (!isRec(t) || !['at_least', 'above', 'at_most', 'below'].includes(String(t.comparator)) || !finite(t.value)
+    || typeof t.unit !== 'string' || (t.frame !== undefined && !['level', 'change_abs', 'change_rel'].includes(String(t.frame)))
+    || (t.by_date !== undefined && typeof t.by_date !== 'string')) return undefined;
+  return { comparator: t.comparator as GoalChanceComparator, value: t.value, unit: t.unit,
+    ...(typeof t.by_date === 'string' ? { by_date: t.by_date } : {}),
+    ...(t.frame !== undefined ? { frame: t.frame as 'level' | 'change_abs' | 'change_rel' } : {}) };
 }
 
 /** The longest stored note read back: every retained condition at its full kept length, plus the limits beside them. */

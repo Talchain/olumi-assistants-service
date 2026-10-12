@@ -23,6 +23,9 @@ import { withShareByDateFrame } from '../share-by-date-run.js';
 import { withoutStatedLevelRanges } from '../../routing/add-factor-transaction.js';
 import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-direction.js';
 import { toTypedRunRows } from '../../runs/typed-run-rows.js';
+import { analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
+import { HOST_TOOL_CONTRACT } from '../../agent-lane/coach-route-v0_2.js';
+import { GOAL_CHANCE_RANKING_INSTRUCTION, SELECTED_RUN_SCOPE_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
@@ -201,6 +204,33 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
       expect(l.withheld_reason_by_option?.[SQ], why).toBeUndefined();
       expect(JSON.stringify(l), why).not.toMatch(/by assumption|carrying on as now leaves/);
     }
+  });
+
+  it('AGENT, raw explanation: the AIE line once where the licence is received, no whole-goal direction, and the actual target, notes and licence', () => {
+    // The AIE's words (#94 6133027121), verbatim, once — at the instruction that names the selected Run's licence.
+    expect(SELECTED_RUN_SCOPE_INSTRUCTION).toBe('Describe the selected Run using its licensed target wording and scope. If it scores only part of '
+      + 'the user\'s goal, name that target and retain the unscored conditions; never call its chance the chance of meeting the whole goal. '
+      + 'Keep its provisional or timing-assumption qualification in your own explanation.');
+    const instruction = [HOST_TOOL_CONTRACT, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ');
+    expect(instruction.split(SELECTED_RUN_SCOPE_INSTRUCTION)).toHaveLength(2);
+    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('analysis.goal_chance_licence');
+    // No conflicting whole-goal direction is left at that point (the per-option headline, the superlative, "similar", ranges).
+    expect(instruction).not.toMatch(/headline is its chance of meeting|highest chance of meeting|similar chances of meeting|then \u201c chance of meeting your goal/);
+    // The Agent is handed the actual target, its own-target words, the notes and the licence (with Olumi's assumption).
+    const agent = analysisResultForAgent(runAsTheHandlerDoes().view, FX.graph, true) as Rec;
+    expect(agent.goal_chance_licence).toMatchObject({ target: { comparator: 'at_least', value: 10, unit: '%', frame: 'change_abs' },
+      chance_words: OWN_TARGET, period_end_assumption: { origin: 'olumi', period_months: 3, reference: 'today' } });
+    expect(agent.goal_chance_words).toBe(OWN_TARGET);
+    expect(agent.goal_chance_notes).toEqual(expect.arrayContaining([NOTE, CONDITIONS, SQ_ASSUMED]));
+    expect(agent.goal_chance_status_quo).toEqual({ option_id: SQ, line: DOING_NOTHING });
+    // Nothing the Agent reads about this Run calls a productivity-only chance the chance of meeting the goal.
+    expect(JSON.stringify(agent)).not.toMatch(/chance of meeting (?:your|the) goal/);
+  });
+
+  it('AGENT, replay: the stored Run read cold hands the Agent the same target, notes and licence as the live one', () => {
+    const live = analysisResultForAgent(runAsTheHandlerDoes().view, FX.graph, true);
+    const stored = { type: 'analysis_result', enrichment: JSON.parse(JSON.stringify(runAsTheHandlerDoes().envelope)) as Rec };
+    expect(analysisResultForAgent(stored, JSON.parse(JSON.stringify(FX.graph)), true)).toEqual(live);
   });
 
   it('NEGATIVE (c): a stated PARTIAL effect by the period withholds with E\'s sentence', () => {
