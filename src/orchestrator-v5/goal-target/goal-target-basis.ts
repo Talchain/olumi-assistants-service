@@ -170,7 +170,9 @@ export const comparatorWords = (op: unknown): string | undefined => typeof op ==
  * The words after "chance of", for the goal's own target (rulings 18–21): `undefined` when they cannot be said exactly.
  *   · level:       ‘X’ being at least T at three months
  *   · change_abs:  ‘X’ increasing by at least C units from today at three months — and, for a change MEASURED in % of today
- *                  (hiring, ruling 20), ‘X’ being at least 10% higher than today at three months
+ *                  (a quantity measured AS a change, the goal's change quantity frame: hiring, ruling 20), ‘X’ being at least 10%
+ *                  higher than today at three months; for a quantity that IS a percentage level (capacity 75%), an absolute
+ *                  change is in POINTS: ‘X’ being at least 10 percentage points higher than today (75% → 85%, never 82.5%)
  *   · change_rel:  ‘X’ being at least r% higher than today at three months (today's level is said by the caller, ruling 21)
  */
 export function targetChanceWords(args: {
@@ -181,6 +183,8 @@ export function targetChanceWords(args: {
   readonly value: number;
   readonly unit: string;
   readonly basis?: Pick<GoalTargetBasis, 'reference' | 'period_months' | 'period_kind'>;
+  /** The goal's quantity frame: 'change' = measured AS a change (its % is a % of today); 'level' = a level (a % moves in points). */
+  readonly quantityFrame?: unknown;
 }): string | undefined {
   const { label, frame, comparator, value, unit } = args;
   const bound = comparatorWords(comparator);
@@ -202,9 +206,18 @@ export function targetChanceWords(args: {
     return `${x} being ${more} ${pct}% ${up ? 'higher' : 'lower'} than today${time}`;
   }
   if (unit.trim() === '') return undefined;
-  if (/^%$|^percent$/i.test(unit.trim())) return `${x} being ${more} ${size}% ${up ? 'higher' : 'lower'} than today${time}`;
+  if (isPercentUnit(unit)) {
+    // Independent check r1 item 1: only a quantity measured AS a change has a % of today; a percentage LEVEL moves in points.
+    // With neither frame known the size cannot be said exactly: no default, it is not said (and the licence, which needs a
+    // validated reading for any change target, is withheld before this: ruling 11).
+    if (args.quantityFrame === 'change') return `${x} being ${more} ${size}% ${up ? 'higher' : 'lower'} than today${time}`;
+    if (args.quantityFrame === 'level') return `${x} being ${more} ${size} percentage ${size === 1 ? 'point' : 'points'} ${up ? 'higher' : 'lower'} than today${time}`;
+    return undefined;
+  }
   return `${x} ${up ? 'increasing' : 'decreasing'} by ${more} ${sayFigureAsWritten(size, unit)} from today${time}`;
 }
+
+const isPercentUnit = (unit: string): boolean => /^%$|^percent$/i.test(unit.trim());
 
 /** Amendment 1: every paired frame reads the status quo as unchanged; disclosed for every frame, the status quo row by assumption. */
 export function statusQuoAssumptionWords(labels: string | readonly string[], basis?: Pick<GoalTargetBasis, 'reference' | 'period_months' | 'period_kind'>): string {

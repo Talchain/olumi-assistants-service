@@ -1,4 +1,4 @@
-import { agentLicenceRecordOf } from '../goal-target/goal-chance-licence.js';
+import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
 import { goalChanceScreenLinesForAgent } from './goal-chance-screen-lines.js';
 import { foldQuotes } from './quote-normalisation.js';
 
@@ -18,9 +18,12 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   userAuthoredTexts?: readonly string[];
 }): T {
   const licence = agentLicenceRecordOf(context.analysisResult);
-  if (!context.current || typeof body.assistant_text !== 'string'
-    || typeof licence?.olumi_estimate_link_count !== 'number' || !Number.isSafeInteger(licence.olumi_estimate_link_count)
-    || licence.olumi_estimate_link_count <= 0) return body;
+  // Amendment 7 (independent check r1 item 6): ANY Olumi input the Run recorded (relationships, starting values, an option's
+  // own settings) owes the labelled sentence; the validated reader decides which counts are well formed.
+  const counted = goalChanceLicenceForAgent(context.analysisResult);
+  const owed = counted !== undefined && ((counted.olumi_estimate_link_count ?? 0) + (counted.olumi_estimate_value_count ?? 0) > 0
+    || Object.keys(counted.olumi_estimate_settings_by_option ?? {}).length > 0);
+  if (!context.current || typeof body.assistant_text !== 'string' || licence === undefined || !owed) return body;
   const nodes = rec(context.graph)?.nodes;
   const goals = (Array.isArray(nodes) ? nodes : []).map(rec).filter(n => n?.kind === 'goal');
   // Run identity comes ONLY from analysis_result: the producer captures snapshot.goal_node_id on the licence.

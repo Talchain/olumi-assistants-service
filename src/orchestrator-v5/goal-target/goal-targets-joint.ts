@@ -86,16 +86,24 @@ function listWords(parts: readonly string[]): string {
 }
 
 /** The Run's one joint-withheld sentence (DL scope decision 2's words, kept for both and for more). */
-export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupported: readonly string[] = []): string {
+export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupported: readonly string[] = [],
+  /** The clauses of the targets whose own chance waits with the joint (strictness not kept, r1 item 4). */
+  strictLost: readonly string[] = []): string {
   const all = n === 2 ? 'both' : 'all of them';
   if (reason === 'target_not_supported' && unsupported.length > 0) {
     const names = listWords(unsupported.map((x) => `‘${x}’`));
     return `The chance of meeting ${all} together isn’t shown: ${names} ${unsupported.length === 1 ? 'is' : 'are'} stated as a change, which can’t yet be combined with the other targets in this analysis.`;
   }
-  if (reason === 'strict_not_preserved') return `The chance of meeting ${all} together isn’t shown: the comparison the analysis used is not the one you stated.`;
+  if (reason === 'strict_not_preserved') {
+    const own = strictLost.length === 0 ? ''
+      : `, and nor is the chance of ${listWords(strictLost)} on ${strictLost.length === 1 ? 'its' : 'their'} own`;
+    return `The chance of meeting ${all} together isn’t shown${own}: the comparison the analysis used is not the one you stated.`;
+  }
   if (reason === 'condition_not_named') return `The chance of meeting ${all} together isn’t shown: one of its conditions can’t be said in your units.`;
   if (reason === 'olumi_base') return `The chance of meeting ${all} together isn’t shown yet: it rests on Olumi’s own assumed starting value for a target, which you haven’t given.`;
-  return `The chance of meeting ${all} together isn’t calculated yet.`;
+  // Independent check r1 item 7: a joint figure that came back WITHOUT its precision was calculated; say what is missing.
+  if (reason === 'precision_missing') return `The chance of meeting ${all} together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.`;
+  return `The chance of meeting ${all} together isn’t calculated yet. Run the analysis again to get it.`;
 }
 
 /** Amendment 6: true whatever the targets' dependence; never a product of the marginals. */
@@ -141,6 +149,7 @@ export function goalTargetsBlockOf(args: {
   // Every condition the engine was sent, in the words the user stated it (strict kept). A row we cannot say is fatal to the joint.
   let unnamed = false;
   let strictLost = false;
+  const strictLostIds = new Set<string>();
   const conditions: GoalCondition[] = [];
   // AIE C clause 3: a target kept in its own (change) frame is named here, never forced into a level clause.
   const unsupported: string[] = [];
@@ -150,8 +159,9 @@ export function goalTargetsBlockOf(args: {
     const storedRow = stored.find((r) => r.constraint_id === id);
     const op = storedRow === undefined ? (typeof row.operator === 'string' && OPS.has(row.operator) ? row.operator : undefined) : statedOperator(storedRow);
     if (typeof id !== 'string' || typeof node !== 'string' || op === undefined) { unnamed = true; continue; }
-    // ⛔ Ruling 16: "above 15%" must have been SENT as ">" — never scored as "at least 15%" and called "above".
-    if (row.operator !== op) strictLost = true;
+    // ⛔ Ruling 16: "above 15%" must have been SENT as ">" — never scored as "at least 15%" and called "above". The joint
+    // waits, and so does THIS condition's own chance (independent check r1 item 4): its marginal was scored on the sent bound.
+    if (row.operator !== op) { strictLost = true; strictLostIds.add(id); }
     const label = labelOf(node);
     const unit = typeof row.unit === 'string' && row.unit.trim() !== '' ? row.unit.trim()
       : typeof storedRow?.unit === 'string' && storedRow.unit.trim() !== '' ? storedRow.unit.trim() : undefined;
@@ -197,7 +207,7 @@ export function goalTargetsBlockOf(args: {
 
   // Each target's own chance, per option, from the same Run (never re-derived).
   const perTarget: GoalTargetChance[] = targets.flatMap((t) => {
-    if (olumiBase.has(t.constraint_id)) return [];
+    if (olumiBase.has(t.constraint_id) || strictLostIds.has(t.constraint_id)) return [];
     const pct: Record<string, number> = {};
     const rounding: Record<string, GoalChanceDisplayRounding> = {};
     for (const id of compared) {
@@ -218,7 +228,8 @@ export function goalTargetsBlockOf(args: {
 
   const n = Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2);
   const withheld = (reason: JointWithholdReason): GoalJoint => ({
-    status: 'withheld', reason, line: jointWithheldLine(n, reason, unsupported),
+    status: 'withheld', reason,
+    line: jointWithheldLine(n, reason, unsupported, targets.filter((t) => strictLostIds.has(t.constraint_id)).map((t) => t.clause)),
     // Amendment 6: the bound needs each named target's own chance on the screen, for every compared option.
     ...(perTarget.length >= 2 && perTarget.length === targets.length && !unnamed && unsupported.length === 0 && ordered.length === targets.length
       && compared.every((id) => perTarget.every((t) => Object.hasOwn(t.pct_by_option, id))) ? { frechet_line: frechetLine(targets.length) } : {}),

@@ -27,7 +27,7 @@ import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
-import { goalChanceEstimateLinkCount } from './goal-chance-estimate-attribution.js';
+import { goalChanceEstimateLinkCount, olumiEstimateWords } from './goal-chance-estimate-attribution.js';
 import { sentencesOf } from './reply/compose-reply.js';
 import { sayDisplayedPct } from '../goal-target/goal-targets-joint.js';
 
@@ -43,7 +43,10 @@ export interface GoalChanceScreenLine {
   readonly depends: string;
   readonly spread_note?: string;
   readonly shortfall_note?: string;
-  /** GP §(i): this point's link-size count, from RC4 only; its full labelled sentence is owed. */
+  /**
+   * GP §(i): this point's link-size count, from RC4 only. Present whenever its full labelled sentence is owed — any Olumi
+   * input on its result (amendment 7: a starting value or its own setting too, so it may be 0).
+   */
   readonly olumi_estimate_link_count?: number;
 }
 
@@ -68,6 +71,12 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
   // Specialised deadline points keep their existing chance words and option-specific time/pace disclosures.
   const k = facts.goal_chance_display === undefined ? 0
     : facts.goal_chance_licence?.olumi_estimate_link_count ?? goalChanceEstimateLinkCount(graph);
+  // ⭐ Amendment 7 (independent check r1 item 6): the label names EVERY Olumi input kind on the goal paths, not only links —
+  // the shared starting values and relationships, and THIS option's own Olumi settings (never another option's).
+  const values = facts.goal_chance_licence?.olumi_estimate_value_count ?? 0;
+  const settingsOf = (optionId: string): number => facts.goal_chance_licence?.olumi_estimate_settings_by_option?.[optionId] ?? 0;
+  const olumiInputsOf = (optionId: string): string | undefined => facts.goal_chance_display === undefined ? undefined
+    : olumiEstimateWords({ links: k, values, settings: settingsOf(optionId) });
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
@@ -81,7 +90,8 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
     // The licence checks the two exact templates; this reader owns whether their named option is the graph's label.
     const shortfall = shortfallNoteLabel(shortfallNote) === label ? shortfallNote : undefined;
     const estimates = shareOptionEstimateWords(graph, optionId);
-    const estimateRelationships = point && k > 0 ? `, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates)` : '';
+    const olumiInputs = olumiInputsOf(optionId);
+    const estimateRelationships = point && olumiInputs !== undefined ? `, using Olumi's estimates for ${olumiInputs} (see Check estimates)` : '';
     return [{ option_id: optionId, label, figure,
       chance: `${prefix}${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}${estimateRelationships}.`
         + (spreadNote === undefined ? '' : ` ${spreadNote}`) + (shortfall === undefined ? '' : ` ${shortfall}`), depends,
@@ -89,7 +99,9 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
       ...(spreadNote === undefined ? {} : { spread_note: spreadNote }),
       ...(shortfall === undefined ? {} : { shortfall_note: shortfall }) }];
   };
-  const pointsOwed = k > 0 || facts.goal_chance_licence?.form === 'each' || facts.goal_chance_words !== undefined || share !== null;
+  const anyOlumiInput = facts.goal_chance_display !== undefined && (k + values > 0
+    || Object.keys(facts.goal_chance_licence?.olumi_estimate_settings_by_option ?? {}).length > 0);
+  const pointsOwed = anyOlumiInput || facts.goal_chance_licence?.form === 'each' || facts.goal_chance_words !== undefined || share !== null;
   const points = facts.goal_chance_display !== undefined
     ? facts.goal_chance_licence!.option_ids.flatMap((id) => {
       const figure = facts.goal_chance_display![id];

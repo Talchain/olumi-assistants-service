@@ -58,6 +58,17 @@ describe('B19 goal-relative shortfall — one licensed point option at a time', 
     expect(sayFigureAsWritten(15000, l.target.unit)).toBe('£15,000 / month');
     expect(l.sent_threshold).toEqual(f.sent);
   });
+  // Batch C: ruling r1 item 3 (amendment 1, every frame) — NEW row; the rows above keep a status quo whose current level the
+  // goal does not state (so the Run's row is its finding, as before).
+  it('Batch C r1 item 3: a declared status quo held at today\'s level carries no figure and no shortfall line — its line is said', () => {
+    const f = fixture();
+    Object.assign(goal(f), { observed_state: { value: 120000 / CAP, baseline: 120000 / CAP, raw_value: 120000, cap: CAP, unit: UNIT, source: 'brief_extraction' } });
+    const l = licence(f);
+    expect(l.pct_by_option).toEqual({ [RAISE]: 48, [STARTER]: 99 });
+    expect(l.withheld_option_ids).toEqual([KEEP]);
+    expect(l.shortfall_note_by_option).toEqual({ [RAISE]: RAISE_LINE });
+    expect(l.status_quo).toEqual({ option_id: KEEP, line: 'Doing nothing: no change to ‘Monthly recurring revenue’ in this model, by assumption.' });
+  });
   it('recorded delta positive control → level frame suppresses every shortfall', () => {
     const f = fixture(); positive(f); f.sent = { ...f.sent, frame: 'level' };
     expect(licence(f)).not.toHaveProperty('shortfall_note_by_option');

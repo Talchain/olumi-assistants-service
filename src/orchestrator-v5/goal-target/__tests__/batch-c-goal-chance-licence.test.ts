@@ -8,9 +8,11 @@ import { describe, expect, it } from 'vitest';
 
 import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, nearestFiveGoalChancesForAgent, withGoalChanceLicence } from '../goal-chance-licence.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
+import { targetChanceWords } from '../goal-target-basis.js';
 import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
 import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
-import { goalChanceNotesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
+import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
+import { withEstimateGoalPointsAtEgress } from '../../agent-lane/goal-chance-estimate-egress.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { withholdOptionLimitScores } from '../../../orchestrator/context/constraint-feasibility.js';
 
@@ -226,7 +228,7 @@ describe('marketing — the same-draw joint is the headline, each target below (
     expect(l.pct_by_option).toEqual({});
     expect(l.withheld_option_ids).toEqual(['hire_manager', 'ai_plus_ads']);
     expect(l.targets!.joint).toEqual({ status: 'withheld', reason: 'precision_missing',
-      line: 'The chance of meeting both together isn’t calculated yet.',
+      line: 'The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.', // Batch C: ruling 17 (independent check r1 item 7)
       frechet_line: 'Meeting both is no more likely than the lower of the two chances.' });
     // 0.6 × 0.42 = 0.252 and 0.7 × 0.55 = 0.385 must never appear as a figure anywhere in the record.
     expect(JSON.stringify(l)).not.toMatch(/"(?:hire_manager|ai_plus_ads)":(?:25|39)\b/);
@@ -273,7 +275,7 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
     const forAgent = goalChanceLicenceForAgent(result)!;
     expect(forAgent.targets?.joint.status).toBe('withheld');
     expect(goalChanceNotesForAgent(result, g, true)).toEqual([
-      'The chance of meeting both together isn’t calculated yet.',
+      'The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.', // Batch C: ruling 17 (independent check r1 item 7)
       'Meeting both is no more likely than the lower of the two chances.',
       'On its own, the chance of ‘New customers’ being at least 20 customers over the first three months after launch, in this model: ‘Hire a marketing manager’ about 60%; ‘AI planning plus advertising’ about 70%.',
       'On its own, the chance of ‘Conversion rate’ being above 15% over the first three months after launch, in this model: ‘Hire a marketing manager’ about 42%; ‘AI planning plus advertising’ about 55%.',
@@ -285,8 +287,8 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
     ]);
     const cells = projectCanonicalAnalysisCells(result as never, g);
     expect(cells.map((c) => [c.option_id, c.cell.kind, (c.cell as Rec).why])).toEqual([
-      ['hire_manager', 'withheld', 'The chance of meeting both together isn’t calculated yet. Meeting both is no more likely than the lower of the two chances.'],
-      ['ai_plus_ads', 'withheld', 'The chance of meeting both together isn’t calculated yet. Meeting both is no more likely than the lower of the two chances.'],
+      ['hire_manager', 'withheld', 'The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision. Meeting both is no more likely than the lower of the two chances.'], // Batch C: ruling 17 (independent check r1 item 7)
+      ['ai_plus_ads', 'withheld', 'The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision. Meeting both is no more likely than the lower of the two chances.'],
     ]);
   });
 
@@ -376,10 +378,27 @@ describe('DL contract rulings (12 Oct): precision names follow PLoT\'s wire; nev
     expect(rows.hire_a_tech_lead).toEqual(run.option_comparison[0]);
     expect(rows.hire_two_developers).toEqual(run.option_comparison[1]);
     expect((env.constraint_results as Rec[])[1]).toEqual(run.constraint_results[1]);
-    // CONTROL: a level goal with no status quo by assumption keeps every row as PLoT sent it.
-    const level = hiringGraph({ quantity_frame: 'level', goal_threshold_frame: 'level', goal_target_basis: undefined });
+    // Batch C: amendment 1 (independent check r1 item 3) — a LEVEL goal's status quo is by assumption too, where the Run held
+    // it at today's level (every draw at the goal's stated current level, 0 here): its row loses its precision and spread
+    // exactly as above, and the compared options keep theirs.
+    const level = hiringGraph({ quantity_frame: 'level', goal_threshold_frame: 'level', goal_target_basis: undefined,
+      observed_state: { value: 0, baseline: 0, raw_value: 0, cap: 100, unit: '%', source: 'brief_extraction' } });
     const kept = withGoalChanceLicence(run, level, 'productivity', () => false, undefined, level, hiringConstraints(level)) as Rec;
-    expect(kept.option_comparison).toEqual(run.option_comparison);
+    const keptRows = Object.fromEntries((kept.option_comparison as Rec[]).map((r) => [r.option_id, r]));
+    expect(keptRows.carry_on).not.toHaveProperty('probability_of_goal_precision');
+    expect(keptRows.carry_on.outcome).toEqual({ mean: 0, p50: 0 });
+    expect(keptRows.hire_a_tech_lead).toEqual(run.option_comparison[0]);
+    expect(keptRows.hire_two_developers).toEqual(run.option_comparison[1]);
+    // CONTROL: a level status quo the Run MOVED (its draws centre away from today's level) is the Run's finding, not an
+    // assumption — "no change" would be false of it — so every row stays as PLoT sent it.
+    const moved = { ...run, option_comparison: run.option_comparison.map((r) => (r.option_id === 'carry_on'
+      ? { ...r, outcome: { mean: 4, std: 0, p10: 4, p50: 4, p90: 4 } } : r)) };
+    const asSent = withGoalChanceLicence(moved, level, 'productivity', () => false, undefined, level, hiringConstraints(level)) as Rec;
+    expect(asSent.option_comparison).toEqual(moved.option_comparison);
+    // CONTROL: a goal with no status quo option at all keeps every row as PLoT sent it.
+    const noSq = { ...level, nodes: (level.nodes as Rec[]).map((n) => (n.id === 'carry_on' ? { ...n, is_baseline: false } : n)) };
+    const untouched = withGoalChanceLicence(run, noSq, 'productivity', () => false, undefined, noSq, hiringConstraints(noSq)) as Rec;
+    expect(untouched.option_comparison).toEqual(run.option_comparison);
   });
 });
 
@@ -443,5 +462,163 @@ describe('AIE clause 3: a target the joint cannot support is kept, named and ref
     const l = licenceFor(marketingRun())!;
     expect(l.targets!.joint.status).toBe('licensed');
     expect((l.notes ?? []).some((n) => n.startsWith('This chance covers'))).toBe(false);
+  });
+});
+
+// ── Independent check round 1 (Codex, CHECK-C-cee-r1.md; DL 12 Oct): items 1, 3, 4, 6, 7 ─────────────────────────────
+// A capacity-like LEVEL goal: development capacity 75% today, target at least 85% at three months; links sized by the user.
+const capacityGraph = (over: { factorOs?: Rec; setting?: Rec; goal?: Rec } = {}): Rec => ({
+  nodes: [
+    { id: 'capacity', kind: 'goal', label: 'Development capacity', goal_threshold_frame: 'level', goal_threshold_raw: 85,
+      goal_threshold_unit: '%', goal_threshold_cap: 100, goal_threshold: 0.85, goal_direction: '>=',
+      observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction' }, ...over.goal },
+    { id: 'devs', kind: 'factor', label: 'Developers', observed_state: over.factorOs ?? { value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'brief_extraction', extractionType: 'explicit' } },
+    { id: 'lead', kind: 'option', label: 'Hire a tech lead', interventions: { devs: over.setting ?? { value: 0.6, raw_value: 6, source: 'brief_extraction', target_match: { node_id: 'devs' } } } },
+    { id: 'two', kind: 'option', label: 'Hire two developers', interventions: { devs: { value: 0.8, raw_value: 8, source: 'brief_extraction', target_match: { node_id: 'devs' } } } },
+    { id: 'carry_on', kind: 'option', label: 'Carry on as now', is_baseline: true, interventions: {} },
+  ],
+  edges: [
+    { from: 'lead', to: 'devs', strength: { mean: 1, std: 0 } }, { from: 'two', to: 'devs', strength: { mean: 1, std: 0 } },
+    { from: 'devs', to: 'capacity', strength: { mean: 0.3, std: 0.05 }, exists_probability: 1, effect_direction: 'positive',
+      provenance: { source: 'user_specified', magnitude: 'user_stated' } },
+  ],
+  goal_constraints: [],
+});
+const wilson = (p: number, met: number): Rec => ({ basis: 'simulation_precision', method: 'wilson_score', confidence_level: 0.95,
+  n_informative: 10000, n_met: met, interval_lower: Math.max(0, p - 0.01), interval_upper: Math.min(1, p + 0.01) });
+const capacityRun = (): Rec => ({ option_comparison: [
+  { option_id: 'lead', probability_of_goal: 0.46, probability_of_goal_precision: wilson(0.46, 4600), outcome: { mean: 84, std: 3, p10: 80, p50: 84, p90: 88 } },
+  { option_id: 'two', probability_of_goal: 0.31, probability_of_goal_precision: wilson(0.31, 3100), outcome: { mean: 83, std: 3, p10: 79, p50: 83, p90: 87 } },
+  { option_id: 'carry_on', probability_of_goal: 0, probability_of_goal_precision: wilson(0, 0), outcome: { mean: 75, std: 0, p10: 75, p50: 75, p90: 75 } },
+] });
+const capacityLicence = (g: Rec = capacityGraph()) => goalChanceLicenceOf(capacityRun(), g, 'capacity', () => false, undefined, g, {});
+
+describe('independent check r1 — item 1: a percentage quantity changed by an absolute amount is said in POINTS', () => {
+  // The discriminator is the goal's quantity frame (DL precision, 12 Oct): 'level' → points; 'change' → % of today; neither → not said.
+  const CAPACITY_BASIS = { ...HIRING_BASIS, quantity_frame: 'level', denominator: 'today’s development capacity (75%)',
+    effect_unit: 'percentage points of capacity per added person, at month three' };
+  const capacityChange = (goal: Rec): Rec => hiringGraph({ label: 'Development capacity',
+    observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction' }, ...goal });
+  const wordsOf = (g: Rec) => goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
+
+  it('RED (level, as admission stores it): no frame on the node, Olumi\'s validated reading "level" — "10 percentage points higher" (75% → 85%, never 82.5%)', () => {
+    const l = wordsOf(capacityChange({ quantity_frame: undefined, goal_target_basis: CAPACITY_BASIS }));
+    expect(l.chance_words).toBe('chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months');
+  });
+
+  it('RED (level, stated on the node): quantity frame "level" — the same points sentence', () => {
+    const l = wordsOf(capacityChange({ quantity_frame: 'level', goal_target_basis: CAPACITY_BASIS }));
+    expect(l.chance_words).toBe('chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months');
+  });
+
+  it('CONTROL (change): a quantity measured AS a % change of today (hiring\'s productivity) keeps "10% higher than today", unchanged', () => {
+    const g = hiringGraph();
+    expect(wordsOf(g).chance_words).toBe('chance of ‘Productivity’ being at least 10% higher than today at three months');
+  });
+
+  it('NEITHER: no frame on the node and no validated reading — never a default: the chance is withheld (ruling 11), and the words are never formed', () => {
+    expect(goalChanceLicenceOf(hiringRun(), capacityChange({ quantity_frame: undefined, goal_target_basis: undefined }), 'productivity', () => false)).toBeNull();
+    const args = { label: 'Development capacity', frame: 'change_abs' as const, comparator: '>=', value: 10, unit: '%' };
+    expect(targetChanceWords({ ...args, quantityFrame: undefined })).toBeUndefined();
+    expect(targetChanceWords({ ...args, quantityFrame: 'level' })).toBe('‘Development capacity’ being at least 10 percentage points higher than today');
+    expect(targetChanceWords({ ...args, quantityFrame: 'change' })).toBe('‘Development capacity’ being at least 10% higher than today');
+  });
+});
+
+describe('independent check r1 — item 3: the status quo is "no change, by assumption" for LEVEL targets too (amendment 1)', () => {
+  it('RED: a level target\'s status quo is never a figure — its line is said, and the options keep their chances and words', () => {
+    const l = capacityLicence()!;
+    expect(l.pct_by_option).toEqual({ lead: 46, two: 31 });
+    expect(l.withheld_option_ids).toEqual(['carry_on']);
+    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'Doing nothing: no change to ‘Development capacity’ in this model, by assumption.' });
+    expect(l.notes).toContain('This assumes carrying on as now leaves ‘Development capacity’ unchanged; each option is measured against that.');
+    // The option's sentence is exactly today's: "about N% chance of meeting your goal, in this model".
+    expect(l.chance_words).toBeUndefined();
+    const g = capacityGraph();
+    const env = withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {});
+    const faces = goalChanceCellFacesForAgent({ type: 'analysis_result', enrichment: env }, g, true);
+    expect(faces.get('lead')).toBe('‘Hire a tech lead’: about 46% chance of meeting your goal, in this model.');
+    const cells = Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
+    expect(cells.carry_on).toMatchObject({ kind: 'withheld', face: 'No change, by assumption',
+      why: 'Doing nothing: no change to ‘Development capacity’ in this model, by assumption.' });
+  });
+
+  it('CONTROL: a level status quo whose draws SPREAD was not held unchanged — no "no change" line or assumption is said of it', () => {
+    const run = capacityRun();
+    (run.option_comparison as Rec[])[2]!.outcome = { mean: 76, std: 3, p10: 72, p50: 76, p90: 80 };
+    const g = capacityGraph();
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, undefined, g, {})!;
+    expect(l.status_quo).toBeUndefined();
+    expect(JSON.stringify(l)).not.toMatch(/by assumption|carrying on as now leaves/);
+  });
+
+  it('RED: the level status quo row carries no precision and no Monte Carlo interval; the options keep theirs', () => {
+    const g = capacityGraph();
+    const env = withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {}) as Rec;
+    const rows = Object.fromEntries((env.option_comparison as Rec[]).map((r) => [r.option_id, r]));
+    expect(rows.carry_on).not.toHaveProperty('probability_of_goal_precision');
+    expect(rows.carry_on.outcome).toEqual({ mean: 75, p50: 75 });
+    expect(rows.lead).toEqual((capacityRun().option_comparison as Rec[])[0]);
+  });
+});
+
+describe('independent check r1 — item 4: a stated ">" not sent strictly withholds the MARGINAL too', () => {
+  it('RED: "above 15%" sent as ">=" → no marginal is labelled "above 15%"; the other target keeps its own chance', () => {
+    const g = marketingGraph();
+    const oldWire = (g.goal_constraints as Rec[]).map(({ operator_as_stated: _s, role: _r, ...row }) => row);
+    const l = licenceFor(marketingRun(), g, oldWire)!;
+    expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
+    expect(JSON.stringify(l.targets!.per_target)).not.toMatch(/above 15%/);
+    // The withheld marginal is SAID, beside the joint, never silently missing.
+    expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'strict_not_preserved',
+      line: 'The chance of meeting both together isn’t shown, and nor is the chance of ‘Conversion rate’ being above 15% on its own: '
+        + 'the comparison the analysis used is not the one you stated.' });
+  });
+});
+
+describe('independent check r1 — item 6: provisional from EVERY Olumi input (amendment 7)', () => {
+  it('RED: an Olumi starting value on the goal path (links all the user\'s) makes the chance provisional and says so', () => {
+    const g = capacityGraph({ factorOs: { value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'cee_inference', extractionType: 'inferred' } });
+    const l = capacityLicence(g)!;
+    expect(l.provisional).toBe(true);
+    const env = withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {});
+    expect(goalChanceCellFacesForAgent({ type: 'analysis_result', enrichment: env }, g, true).get('lead'))
+      .toBe('‘Hire a tech lead’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 1 starting value (see Check estimates).');
+  });
+
+  it('RED: with no Olumi relationship at all, an Olumi starting value still relabels the narrator\'s bare chance at egress', () => {
+    const g = capacityGraph({ factorOs: { value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'cee_inference', extractionType: 'inferred' } });
+    const result = { type: 'analysis_result', enrichment: withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {}) };
+    const bare = '‘Hire a tech lead’: about 46% chance of meeting your goal, in this model.';
+    const text = withEstimateGoalPointsAtEgress({ assistant_text: bare }, { analysisResult: result, graph: g, current: true }).assistant_text;
+    expect(text).toContain('‘Hire a tech lead’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 1 starting value (see Check estimates).');
+  });
+
+  it('RED: an Olumi option setting on the goal path makes the chance provisional and says so — on THAT option only', () => {
+    const g = capacityGraph({ setting: { value: 0.6, raw_value: 6, source: 'cee_hypothesis', target_match: { node_id: 'devs' } } });
+    const l = capacityLicence(g)!;
+    expect(l.provisional).toBe(true);
+    expect(l.olumi_estimate_settings_by_option).toEqual({ lead: 1 });
+    const env = withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {});
+    const faces = goalChanceCellFacesForAgent({ type: 'analysis_result', enrichment: env }, g, true);
+    expect(faces.get('lead'))
+      .toBe('‘Hire a tech lead’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 1 option setting (see Check estimates).');
+    // ‘Hire two developers’ sets its own level from the brief: another option's Olumi setting is never said on its result.
+    expect(faces.get('two')).toBe('‘Hire two developers’: about 31% chance of meeting your goal, in this model.');
+  });
+
+  it('CONTROL: every input the user\'s → not provisional, and the sentence is unchanged', () => {
+    expect(capacityLicence()!.provisional).toBeUndefined();
+  });
+});
+
+describe('independent check r1 — item 7: a withheld joint says truly why, with a next step', () => {
+  it('a joint figure without its precision is not "not calculated": it says what is missing and what to do', () => {
+    const l = licenceFor(marketingRun({ probability_of_joint_goal_precision: undefined }))!;
+    expect((l.targets!.joint as Rec).line).toBe('The chance of meeting both together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.');
+  });
+  it('no joint figure at all: "not calculated yet", with the next step', () => {
+    const l = licenceFor(marketingRun({ probability_of_joint_goal: undefined, probability_of_joint_goal_precision: undefined }))!;
+    expect((l.targets!.joint as Rec).line).toBe('The chance of meeting both together isn’t calculated yet. Run the analysis again to get it.');
   });
 });

@@ -44,7 +44,7 @@ import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
-import { goalChanceEstimateLinkCount } from '../agent-lane/goal-chance-estimate-attribution.js';
+import { goalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import {
   effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, statusQuoAssumptionWords, statusQuoRowWords,
@@ -130,6 +130,10 @@ export interface GoalChanceLicence {
   readonly option_labels_by_option?: Readonly<Record<string, string>>;
   /** RC4's unaccepted link-size count for this scored Run; definitions are excluded. */
   readonly olumi_estimate_link_count?: number;
+  /** Amendment 7: Olumi's estimated starting values / option settings on this Run's goal paths (independent check r1 item 6). */
+  readonly olumi_estimate_value_count?: number;
+  /** Per option: Olumi's own settings in that option (never said on another option's result). */
+  readonly olumi_estimate_settings_by_option?: Readonly<Record<string, number>>;
   /** The options whose chance was withheld for their own path (model order); present only when non-empty. Form is `each`. */
   readonly withheld_option_ids?: readonly string[];
   /** `similar` only: the options within 10 displayed points of the top, in the model's order (≥ 2). */
@@ -272,9 +276,21 @@ export function goalChanceLicenceOf(
   if (changeFrame === 'change_rel' && base === undefined) return null;
   const estimateOnly = changeFrame === 'change_rel' && goalState?.source === 'cee_inference' && !isRec(goal?.goal_level_reading);
   const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
-
   // The Run's own option records, current-first: the first carrier that has any is the comparison.
   const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
+  // ⭐ Amendment 1 (independent check r1 item 3): EVERY frame reads carrying on as now as the reference BY ASSUMPTION, never
+  // a finding. A change target's status quo is no change by construction. A LEVEL target's is by assumption where the Run's
+  // own status-quo row is that assumption — every draw at the goal's stated current level (zero spread, at today's level),
+  // which is what the same-draw reading produces. A Run whose status quo MOVED (drift over the period, or spread) did not
+  // hold it unchanged, so "no change" would be false of it: that row stays the Run's finding, as before. (A deadline
+  // share/event goal is not paired this way: its status quo stays a finding.)
+  const sqRow = statusQuoId === undefined ? undefined
+    : records.find((r) => (typeof r.option_id === 'string' ? r.option_id : r.id) === statusQuoId);
+  const today = finite(goalState?.raw_value) ? goalState!.raw_value as number : undefined;
+  const sqCentre = isRec(sqRow?.outcome) ? (finite(sqRow!.outcome.p50) ? sqRow!.outcome.p50 : sqRow!.outcome.mean) : undefined;
+  const sqUnchanged = sqRow !== undefined && zeroSpread(sqRow) && today !== undefined && finite(sqCentre)
+    && Math.abs(sqCentre - today) <= 1e-6 * Math.max(1, Math.abs(today));
+  const sqByAssumption = share === null && statusQuoId !== undefined && (changeFrame !== undefined || sqUnchanged);
   const option_ids: string[] = [];
   const licensed: string[] = [];
   const withheld: string[] = [];
@@ -295,8 +311,8 @@ export function goalChanceLicenceOf(
     const shareGate = share !== null && share.goal.id === goalId
       ? shareGateForOption(graph, id, typeof p === 'number' ? p : undefined, step) : undefined;
     if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
-    // ⭐ Amendment 1: a change target's status quo is measured against itself — no change, by assumption, never a finding.
-    if (changeFrame !== undefined && id === statusQuoId) { withheld.push(id); continue; }
+    // ⭐ Amendment 1: the status quo is measured against itself — no change, by assumption, never a finding (every frame).
+    if (sqByAssumption && id === statusQuoId) { withheld.push(id); continue; }
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
     if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) {
       withheld.push(id);
@@ -320,6 +336,8 @@ export function goalChanceLicenceOf(
   if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0)) return null;
 
   // Only the superlative and every-option forms need every option (d5 6007421281): any withheld option ⇒ `each`.
+  // A status quo withheld by assumption counts as withheld here too, exactly as a change target's always has: no superlative
+  // or every-option form is said beside a row that carries no figure (fewer claims, never more).
   const complete = withheld.length === 0;
   const ranked = [...licensed].sort((a, b) => pct[b]! - pct[a]!);
   const [leader, next] = ranked as [string, string];
@@ -357,7 +375,11 @@ export function goalChanceLicenceOf(
   }
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
   const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
-  const estimateLinks = licensed.length === 0 ? 0 : goalChanceEstimateLinkCount(graph, option_ids, goalId);
+  // Amendment 7 (independent check r1 item 6): every Olumi input on the goal paths — links, starting values, option settings.
+  const estimates = licensed.length === 0 ? { links: 0, values: 0, settingsByOption: {} as Readonly<Record<string, number>> }
+    : goalChanceEstimateCounts(graph, option_ids, goalId);
+  const settingsByOption = Object.fromEntries(Object.entries(estimates.settingsByOption).filter(([id, n]) => licensed.includes(id) && n > 0));
+  const estimateLinks = estimates.links;
   const goalLabel = typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label) ? goal.label.trim() : undefined;
   const single: GoalChanceLicence = {
     code: GOAL_CHANCE_LICENSED,
@@ -374,6 +396,8 @@ export function goalChanceLicenceOf(
       return typeof label === 'string' && label.trim() !== '' ? [[id, label]] : [];
     })),
     ...(estimateLinks > 0 ? { olumi_estimate_link_count: estimateLinks } : {}),
+    ...(estimates.values > 0 ? { olumi_estimate_value_count: estimates.values } : {}),
+    ...(Object.keys(settingsByOption).length > 0 ? { olumi_estimate_settings_by_option: settingsByOption } : {}),
     ...(spread === undefined && Object.keys(shortfall).length === 0 ? {} : { sent_threshold: sentThreshold }),
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
     ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
@@ -392,7 +416,7 @@ export function goalChanceLicenceOf(
   };
   return withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
-    olumiEffects: estimateLinks > 0, constraints, option_ids,
+    sqByAssumption, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length > 0, constraints, option_ids,
   });
 }
 
@@ -406,21 +430,42 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   readonly basis: GoalTargetBasis | undefined; readonly changeFrame: 'change_abs' | 'change_rel' | undefined;
   readonly comparatorHeld: string; readonly target: { readonly value: number; readonly unit?: string };
   readonly base: number | undefined; readonly estimateOnly: boolean; readonly statusQuoId: string | undefined;
-  readonly olumiEffects: boolean; readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
+  readonly sqByAssumption: boolean; readonly olumiInputs: boolean;
+  readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
 }): GoalChanceLicence {
   const { goalLabel, changeFrame } = c;
   // A level target's period is said only on an at-period-end basis (ruling 12); otherwise today's words, unchanged.
   const basis = c.basis !== undefined && c.basis.effects_at_period_end ? c.basis : undefined;
   const alsoRequired = c.basis?.also_required ?? [];
+  // Amendment 7: any Olumi input (a starting value, an option setting or an effect size) on the path makes it provisional.
+  const provisional = c.estimateOnly || c.olumiInputs;
+  // Amendment 1, every frame: the status quo's own line, by assumption — never a figure or an interval.
+  const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
+    ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel) } } : {};
+  const assumed = 'status_quo' in statusQuo && goalLabel !== undefined ? [statusQuoAssumptionWords(goalLabel)] : [];
   if (goalLabel === undefined || (basis === undefined && changeFrame === undefined)) {
-    // No stated basis: today's single-target licence, plus the several-targets block if the Run sent target rows.
-    return withSeveralTargets(single, { ...c, basis, alsoRequired });
+    // No stated basis: today's single-target sentence ("chance of meeting your goal"), with amendment 1's assumption and the
+    // status quo's line where it is shown, and amendment 7's label; plus the several-targets block if the Run sent target rows.
+    return withSeveralTargets({
+      ...single,
+      ...(assumed.length > 0 ? { notes: assumed } : {}),
+      ...statusQuo,
+      ...(provisional ? { provisional: true as const } : {}),
+    }, { ...c, basis, alsoRequired });
   }
+  // Independent check r1 item 1: the goal's quantity frame as the validated reading holds it — `goalTargetBasisOf` keeps a
+  // reading only while its frame equals the node's ('change', else 'level'; admission stores a level with no frame on the
+  // node). No reading → no frame → a % change is never given a default wording.
+  const quantityFrame = c.basis?.quantity_frame;
   const words = targetChanceWords({
     label: goalLabel, frame: changeFrame ?? 'level', comparator: c.comparatorHeld, value: c.target.value, unit: c.target.unit ?? '',
+    quantityFrame,
     ...(basis !== undefined ? { basis } : {}),
   });
-  if (words === undefined) return withSeveralTargets(single, { ...c, basis, alsoRequired });
+  if (words === undefined) {
+    return withSeveralTargets({ ...single, ...(assumed.length > 0 ? { notes: assumed } : {}), ...statusQuo,
+      ...(provisional ? { provisional: true as const } : {}) }, { ...c, basis, alsoRequired });
+  }
   const notes: string[] = [];
   // Ruling 21: the base a relative change is read from is said; on Olumi's value, as Olumi's (amendments 7, 10).
   if (changeFrame === 'change_rel' && c.base !== undefined) {
@@ -438,14 +483,12 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   const others = (basis?.also_required ?? []).filter((t) => !limits.some((l) => t.includes(l.figure)));
   const partial = partialGoalWords(goalLabel, [...limits.map((l) => l.words), ...others]);
   if (partial !== undefined && !sentTargetRows(c.constraints)) notes.push(partial);
-  const provisional = c.estimateOnly || c.olumiEffects;
   const out: GoalChanceLicence = {
     ...single,
     target: { ...single.target, ...(changeFrame !== undefined ? { frame: changeFrame } : {}) },
     chance_words: `chance of ${words}`,
     notes,
-    ...(changeFrame !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
-      ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel) } } : {}),
+    ...statusQuo,
     ...(c.estimateOnly && c.base !== undefined ? { estimate_only: { base: c.base, unit: c.target.unit ?? '' } } : {}),
     ...(provisional ? { provisional: true as const } : {}),
   };
@@ -909,6 +952,8 @@ export function goalChanceLicenceForAgent(result: unknown): {
   shortfall_note_by_option?: Readonly<Record<string, string>>;
   withheld_reason_by_option?: Readonly<Record<string, GoalChanceZeroSpread>>;
   olumi_estimate_link_count?: number;
+  olumi_estimate_value_count?: number;
+  olumi_estimate_settings_by_option?: Readonly<Record<string, number>>;
   goal_node_id?: string; goal_label?: string; option_labels_by_option?: Readonly<Record<string, string>>;
   /** Recovery Batch C: the stored sentence parts, read only when well formed (a record at odds with itself speaks for nothing). */
   chance_words?: string; notes?: readonly string[]; status_quo?: { option_id: string; line: string };
@@ -974,6 +1019,12 @@ export function goalChanceLicenceForAgent(result: unknown): {
     ) } : {}),
     ...(typeof r.olumi_estimate_link_count === 'number' && Number.isSafeInteger(r.olumi_estimate_link_count)
       && r.olumi_estimate_link_count > 0 ? { olumi_estimate_link_count: r.olumi_estimate_link_count } : {}),
+    ...(typeof r.olumi_estimate_value_count === 'number' && Number.isSafeInteger(r.olumi_estimate_value_count)
+      && r.olumi_estimate_value_count > 0 ? { olumi_estimate_value_count: r.olumi_estimate_value_count } : {}),
+    ...(isRec(r.olumi_estimate_settings_by_option) && Object.keys(r.olumi_estimate_settings_by_option).length > 0
+      && Object.entries(r.olumi_estimate_settings_by_option).every(([id, n]) => optionIds.includes(id)
+        && typeof n === 'number' && Number.isSafeInteger(n) && n > 0)
+      ? { olumi_estimate_settings_by_option: r.olumi_estimate_settings_by_option as Record<string, number> } : {}),
     ...(validSent && sent !== undefined ? { sent_threshold: {
       value: sent.value as number,
       field: sent.field as SentGoalThreshold['field'],
