@@ -80,7 +80,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { verifiedFactorLevel } from './verified-option-setting.js';
+import { quoteBindsFactorFigure, verifiedFactorLevel } from './verified-option-setting.js';
 
 const MAX_ID = 100;
 
@@ -3068,6 +3068,54 @@ function withGoalTargetRows(
   return { ...result, constraints: [own, ...marked] };
 }
 
+/**
+ * ⭐ RECOVERY BATCH C, L2 — NO LAST-WINS (SYS3 trace #94 6115410093; PL 6115488243). The drafter may write one option's
+ * level on one factor twice: the user's stated addition (prepared into `derived_total`: a stated baseline plus the stated
+ * change, 6 + 2 = 8) and its own absolute duplicate (8, `ai_proposed`). Keying cells by factor let the LAST entry win, so
+ * the duplicate silently relabelled the user's total as Olumi's. One entry is kept per factor, by what it rests on:
+ *   · a user-grounded derivation (`derived_total`, explicit) over the user's stated level (explicit) over Olumi's own
+ *     derivation over Olumi's own figure — whatever their order;
+ *   · two USER entries (explicit, either kind) that disagree are a conflict the user resolves: NO level is set, and the
+ *     option is said to set the factor to both figures (never a silent overwrite);
+ *   · among Olumi's own entries the higher-ranked stays; equal ranks keep the first written (they are Olumi's either way).
+ * Returns the kept entries (by identity). Entries on a factor written once pass through untouched.
+ */
+function oneLevelPerFactor(
+  o: CandidateModel['options'][number], loss: RepairEntry[], ids: ReadonlyMap<string, string>,
+): ReadonlySet<NonNullable<CandidateModel['options'][number]['interventions']>[number]> {
+  type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
+  const all = (o.interventions ?? []) as Iv[];
+  const rank = (iv: Iv): number => {
+    const derived = (iv as { derived_total?: unknown }).derived_total === true;
+    return iv.provenance === 'explicit' ? (derived ? 4 : 3) : derived ? 2 : 1;
+  };
+  const kept = new Set<Iv>();
+  const byFactor = new Map<string, Iv[]>();
+  for (const iv of all) {
+    const key = ids.get(iv.factor_label) ?? `unresolved:${iv.factor_label}`;
+    byFactor.set(key, [...(byFactor.get(key) ?? []), iv]);
+  }
+  for (const [key, group] of byFactor) {
+    if (group.length === 1 || key.startsWith('unresolved:')) { for (const iv of group) kept.add(iv); continue; }
+    const users = group.filter((iv) => rank(iv) >= 3);
+    const values = [...new Set(users.map((iv) => iv.value))];
+    if (values.length > 1) {
+      const unit = group[0]!.unit ? ` ${group[0]!.unit}` : '';
+      loss.push({
+        field_path: `options[${o.label}].interventions.${key}.conflicting_user_levels`,
+        before: values, after: null,
+        reason: `“${o.label}” sets “${group[0]!.factor_label}” to both ${values.slice(0, -1).join(', ')} and ${values[values.length - 1]}${unit}, `
+          + 'so no level was set: say which one you mean.',
+        severity: 'warn',
+      } as RepairEntry);
+      continue;
+    }
+    const best = Math.max(...group.map(rank));
+    kept.add(group.find((iv) => rank(iv) === best)!);
+  }
+  return kept;
+}
+
 /** #1840's goal `observed_state` for a level the brief states: `{ value: B, baseline: B, unit?, source, raw_value, cap }`. */
 function briefGoalObservedState(normalised: number, unit: string | null | undefined, raw: number, cap: number): NonNullable<AdmittedNode['observed_state']> {
   return { value: normalised, baseline: normalised, ...(unit ? { unit } : {}), source: 'brief_extraction', raw_value: raw, cap };
@@ -3594,11 +3642,12 @@ function admitOnce(
    * starts from): a claim about what the user wrote, verified or not. A quote that does not carry the figure is context
    * ("Staffing is fixed…"), never the user's claim, so an estimate that cites it stays Olumi's.
    */
-  const quotesBrief = (f: { baseline_value?: number | null; baseline_evidence?: { quote?: string } | null }): boolean => {
+  // ⭐ Recovery Batch C, L3: the quote must bind THIS factor's figure in its quantity and typed frame, not merely contain it.
+  const quotesBrief = (f: CandidateModel['factors'][number]): boolean => {
     const quote = f.baseline_evidence?.quote;
     const value = f.baseline_value;
     return typeof quote === 'string' && typeof value === 'number' && Number.isFinite(value)
-      && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value));
+      && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value)) && quoteBindsFactorFigure(model, f);
   };
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
@@ -4160,7 +4209,14 @@ function admitOnce(
       actsOn.add(factorId);
     }
     const bundle: Record<string, ConstructedLevel> = {};
+    // ⭐ Recovery Batch C, L2 (SYS3 #94 6115410093; PL 6115488243): ONE level per factor, never the last entry written.
+    const kept = oneLevelPerFactor(o, loss, ids);
     for (const iv of o.interventions ?? []) {
+      if (!kept.has(iv)) {
+        const conflicted = ids.get(iv.factor_label);
+        if (conflicted !== undefined) actsOn.add(conflicted);
+        continue;
+      }
       const factorId = ids.get(iv.factor_label);
       if (factorId === undefined) {
         unresolved.push({

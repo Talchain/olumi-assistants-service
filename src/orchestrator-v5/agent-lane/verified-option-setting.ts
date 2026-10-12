@@ -140,7 +140,19 @@ function settingClause(a: Assertion, at: number): { text: string; start: number;
   }
   return found === null ? null : { ...found, others };
 }
-function sameFrame(text: string, span: { start: number; end: number }, unit: unknown, amount?: StatedAmount): boolean {
+/**
+ * Recovery Batch C, L1 (PL 6115488243): a count unit that names nothing of its own — "count", or "headcount" (a count of
+ * heads) — counts whatever the written noun names. Its noun is then the FACTOR's own, read from the label written beside the
+ * figure (the owned quantity anchor), never a synonym list. "FTE", "people" or "teams" name a measure or a thing of their
+ * own and must be written as such.
+ */
+const COUNT_ITSELF = /^(?:head)?count$/u;
+function countsItself(unit: unknown): boolean {
+  const parts = readUnitParts(unit);
+  return parts?.kind === 'count' && parts.noun?.length === 1 && COUNT_ITSELF.test(parts.noun[0]!)
+    && parts.period === null && !parts.per?.length && !parts.base?.length && !parts.qualifiers?.length;
+}
+function sameFrame(text: string, span: { start: number; end: number }, unit: unknown, amount?: StatedAmount, nounFromLabel = false): boolean {
   const literal = amount ?? findStatedAmounts(text).find(n => n.index === span.start);
   const written = literal ?? { index: span.start, matchedText: text.slice(span.start, span.end), kind: 'words' };
   const stated = statedTailParts(text, written); const expected = readUnitParts(unit);
@@ -149,7 +161,7 @@ function sameFrame(text: string, span: { start: number; end: number }, unit: unk
   const same = (x: readonly string[] | null, y: readonly string[] | null): boolean =>
     JSON.stringify(x?.length ? x : null) === JSON.stringify(y?.length ? y : null);
   return same(stated.per, expected.per) && same(stated.base, expected.base) && same(stated.qualifiers, expected.qualifiers)
-    && (expected.noun === null || (expected.noun.length > 0
+    && (expected.noun === null || nounFromLabel || (expected.noun.length > 0
       && expected.noun.every(w => stated.noun?.some(x => sameName(x, w)))));
 }
 /** In the brief the second person can only be Olumi, so any "you"/"your"/"assistant" is an attribution (DL 7 Oct). */
@@ -351,16 +363,17 @@ function factorLevelSpans(model: CandidateModel, factor: Factor, text: string, v
     // A qualified count in words must write the whole quantity label beside its amount, not just its head.
     const name = words(currentQuantityLabel(factor.label)).map(singular);
     const adjacent = words(text.slice(amount.index + amount.matchedText.length)).slice(0, name.length).map(singular);
-    const countNamesFactor = parts?.kind === 'count' && name.length > 0
-      && name.join(' ') === adjacent.join(' ') && parts.noun?.length === 1
-      && sameName(parts.noun[0]!, labelHead(currentQuantityLabel(factor.label)) ?? '');
+    // L1: the whole quantity label written beside the figure IS the anchor; a count-itself unit takes its noun from it.
+    const labelled = parts?.kind === 'count' && name.length > 0 && name.join(' ') === adjacent.join(' ') && parts.noun?.length === 1;
+    const countNamesFactor = labelled && (sameName(parts!.noun![0]!, labelHead(currentQuantityLabel(factor.label)) ?? '') || countsItself(factor.unit));
+    const nounFromLabel = labelled && countsItself(factor.unit);
     const others = rivals.filter(r => !incompatibleFactorFrame(r, factor, text, amount)).map(r => r.label);
     const tail = statedTailParts(text, amount);
     const written = amount.kind === 'plain' && !/[0-9]/u.test(amount.matchedText)
       ? { ...amount, kind: tail?.kind === 'percent' ? 'percent' as const : 'words' as const } : amount;
     const span = figureTheUserWroteForSpan(amount.magnitude, unitNamesFactor || countNamesFactor ? null : factor.unit, text,
       { target, others, strict: true, requireNamed: true, at: amount.index, writtenAmounts: [written] });
-    return span === null || !sameFrame(text, span, factor.unit, amount) ? [] : [span];
+    return span === null || !sameFrame(text, span, factor.unit, amount, nounFromLabel) ? [] : [span];
   });
   return matches;
 }
@@ -421,6 +434,24 @@ function differentGoalBound(model: CandidateModel, factor: Factor, text: string)
   return figureTheUserWroteForSpan(amount.magnitude, unit, text,
     { target: [model.goal.metric], others, strict: true, requireNamed: true, at: amount.index,
       writtenAmounts: amounts }) !== null;
+}
+
+/**
+ * ⭐ Recovery Batch C, L3 (SYS3 #94 6115410093; PL 6115488243): a drafter's quote is the user's (unverified) CLAIM about
+ * this factor only when it writes THIS factor's figure in its quantity and complete typed frame — the same binding the
+ * verifier starts from (`factorLevelSpans`: the figure, the factor's own quantity named beside it, unit/period/role), minus
+ * ownership. A quote that merely contains the number ("more than 25% of my time" cited for an experience score of 25)
+ * claims nothing about it. No new reader: the spans are the verifier's own.
+ */
+export function quoteBindsFactorFigure(model: CandidateModel, factor: Factor): boolean {
+  try {
+    const quote = factor.baseline_evidence?.quote;
+    const value = factor.baseline_value;
+    if (typeof quote !== 'string' || quote.length > MAX_ASSERTION || typeof value !== 'number' || !Number.isFinite(value)) return false;
+    return factorLevelSpans(model, factor, quote, value).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
