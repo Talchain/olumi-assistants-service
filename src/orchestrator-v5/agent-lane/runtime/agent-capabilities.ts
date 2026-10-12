@@ -239,7 +239,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -4758,7 +4758,11 @@ export function createAgentCapabilities(
        * primary when the words are silent, asked, denied or both ways ("double that", "our target is £200k"); the other
        * direction is the alternative button, and the user's click is the authorship. No word list over the user's wording.
        */
-      const said = comparatorTheUserWrote(ctx.user_turn_text);
+      // The comparator the user wrote FOR THIS figure (`comparatorTheUserWroteFor`): with two targets in one turn ("over 15%
+      // and secure 20 new customers"), the whole turn's "over" is not 20's. The whole turn is read only when it holds at
+      // most one figure, where its comparator can belong to no other (a target derived from one figure: "double that").
+      const said = comparatorTheUserWroteFor(ctx.user_turn_text, derived?.base ?? value)
+        ?? (figuresWrittenIn(ctx.user_turn_text) <= 1 ? comparatorTheUserWrote(ctx.user_turn_text) : null);
       const type: TargetDirection = said ?? typed;
       const inclusiveType = inclusiveTargetDirection(type);
       const directionIsADecision = said === null || inclusiveType !== typed;

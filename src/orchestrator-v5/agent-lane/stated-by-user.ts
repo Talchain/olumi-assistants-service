@@ -1052,6 +1052,52 @@ export function comparatorTheUserWrote(turnText: string | null | undefined): Sta
 }
 
 /**
+ * ⭐ THE COMPARATOR THE USER WROTE FOR ONE FIGURE (Batch B, DL 12 Oct; Paul's marketing L20: "a conversion rate of over
+ * 15% and secure 20 new customers within the first 3 months"). `comparatorTheUserWrote` reads the whole turn, so a turn
+ * stating two targets gave its one comparator ("over") to BOTH figures: 20 new customers read as "above 20", a strict
+ * bound the user never said. Here a comparator counts for `value` only when it is bound to a figure of that value: a
+ * prefix in the figure's own clause with NO other stated figure between them ("over 15%"; "at least £60k"; "a minimum
+ * of 20"), or a suffix straight after it ("20 or more"). Asked words say nothing; denied words, or two directions for the
+ * same figure, give null. No binding gives null: the caller asks, never guesses.
+ */
+export function comparatorTheUserWroteFor(turnText: string | null | undefined, value: number): StatedComparator | null {
+  if (typeof turnText !== 'string' || !Number.isFinite(value)) return null;
+  const figures = findStatedAmounts(turnText);
+  const own = figures.filter((amount) => amount.magnitude === value);
+  const comparators = [...turnText.matchAll(COMPARATOR_WORDS)].map((match) => ({
+    match, words: match[1]!.toLowerCase().replace(/\s+/g, ' '),
+  }));
+  const boundTo = (figure: StatedAmount, m: RegExpExecArray, suffix: boolean): boolean => {
+    const figureEnd = figure.index + figure.matchedText.length;
+    const comparatorEnd = m.index + m[0].length;
+    return suffix
+      ? m.index >= figureEnd && /^\s*$/.test(turnText.slice(figureEnd, m.index))
+      : comparatorEnd <= figure.index && figure.index - clauseBeforeAt(turnText, figure.index).length <= m.index
+        && !figures.some((other) => other !== figure && other.index >= comparatorEnd && other.index < figure.index);
+  };
+  // As the whole-turn reader: beside a prefix, a suffix counts only on that prefix's own figure, never on a repeat of the
+  // same value elsewhere ("under 4%. Last year, 4% or more of cancellations …").
+  const prefixed = own.filter((figure) => comparators.some(({ match, words }) => !words.startsWith('or ')
+    && boundTo(figure, match, false) && readingAt(turnText, match.index).said === 'affirmed'));
+  const said = new Set<StatedComparator>();
+  for (const figure of own) {
+    for (const { match: m, words } of comparators) {
+      const suffix = words.startsWith('or ');
+      if (!boundTo(figure, m, suffix)) continue;
+      if (suffix && prefixed.length > 0 && !prefixed.includes(figure)) continue;
+      const reading = readingAt(turnText, suffix ? figure.index : m.index);
+      if (reading.said === 'asked') continue;
+      if (reading.said === 'denied') return null;
+      const completed = suffix ? words.slice(3) : words.endsWith(' or equal to') ? words.split(' ')[0]! : null;
+      said.add(completed !== null ? INCLUSIVE_CEILING_WORDS.has(completed) ? 'at_most' : 'at_least'
+        : AT_MOST_WORDS.has(words) ? 'at_most' : BELOW_WORDS.has(words) ? 'below'
+        : ABOVE_WORDS.has(words) ? 'above' : 'at_least');
+    }
+  }
+  return said.size === 1 ? [...said][0]! : null;
+}
+
+/**
  * Whether this request is something the user TYPED: a composer message. A chip click is not — every chip's text is
  * Olumi's (an approval replaying the Agent's own labels, a suggestion, a coaching prompt) — and neither is a system
  * event such as a board edit.
