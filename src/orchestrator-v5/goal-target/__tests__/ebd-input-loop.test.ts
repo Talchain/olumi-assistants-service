@@ -431,30 +431,84 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
         .toMatchObject({ ok: false, refusal: 'team_time_not_stated' });
     }
   });
-  it('B2-c GENERATIVE NEGATIVE: whatever the sentence says (the check\'s five misbinds, other subjects, negation, condition, history), no path writes a forecast without the press', async () => {
-    const SAID: readonly string[] = [
-      'Recruitment, the team think, will take 7 months.', 'Procurement (the team say) takes [7 months].',
+  /**
+   * ⭐ B2-c PROPERTY — ONE generative test over the whole input class (DL, 12 Oct: as the share exit sweep, never instance rows).
+   * Every sentence (the check's five misbinds, other subjects, negation, condition, history, Paul's own, ranges, bounds) × where
+   * it was said (this turn, earlier) × the quote the Agent gives (verbatim, fabricated, a figure the quote does not state) ×
+   * every adoption path (the Agent's reading of a typed yes, ANOTHER card's press, the same words sent again, the card's OWN
+   * press). Judged against the corpus's hand-written class, never against what the capability computed:
+   *   Q1 a figure is recorded as chosen by the user ONLY by the press on its own card (`user_confirmed` + the selection);
+   *   Q2 a typed yes, another card's press, or the same words sent again write nothing (the same words prepare the same card);
+   *   Q3 the card shows the complete most recent source line, verbatim, and never calls it the user's forecast before the press;
+   *   Q4 a fabricated quote, a figure the quote does not state, or a bound gets no card; a range never becomes a point;
+   *   Q5 the press links the selection to its source and quote; the proposal stays Olumi's reading (`model_proposed`).
+   */
+  type Said = { readonly said: string; readonly quote: string; readonly low: number; readonly high: number;
+    readonly kind: 'point' | 'range' | 'bound' | 'fabricated' };
+  const point = (said: string, quote = '7 months'): Said => ({ said, quote, low: 7, high: 7, kind: 'point' });
+  const CORPUS: readonly Said[] = [
+    ...['Recruitment, the team think, will take 7 months.', 'Procurement (the team say) takes [7 months].',
       'I do not believe the team will finish in 7 months.', 'If we hire a contractor, the team will finish in 7 months.',
       'Last project, the team said 7 months.', 'The team are late (7 months).', '7 months? I am sure it is not.',
-      'The team will finish in 9 months; recruitment takes (7 months)', 'procurement takes 7 months', PAUL_TEAM,
-      ...['Hiring', 'Onboarding', 'The notice period', 'Legal review', 'The vendor', 'Security sign-off'].map((s) => `${s} takes 7 months.`),
-    ];
-    let cards = 0;
-    for (const said of SAID) for (const where of ['now', 'earlier'] as const) for (const q of ['7 months', said.includes('(so, 7 months)') ? PAUL_QUOTE : '7 months']) {
+      'The team will finish in 9 months; recruitment takes (7 months)', 'procurement takes 7 months',
+      ...['Hiring', 'Onboarding', 'The notice period', 'Legal review', 'The vendor', 'Security sign-off'].map((x) => `${x} takes 7 months.`),
+    ].map((said) => point(said)),
+    point(PAUL_TEAM), point(PAUL_TEAM, PAUL_QUOTE),
+    { said: 'The team say it will take 6–9 months, honestly.', quote: '6–9 months', low: 6, high: 9, kind: 'range' },
+    { said: 'Our lead reckons 5 to 8 months for this.', quote: '5 to 8 months', low: 5, high: 8, kind: 'range' },
+    ...['It’ll take at least 7 months.', 'The team need no more than 7 months.', 'Within 7 months, I think.', 'Up to 7 months, they say.',
+      'More than 7 months, realistically.'].map((said): Said => ({ ...point(said), kind: 'bound' })),
+    { said: 'The team say 7 months.', quote: 'the team say 8 months', low: 8, high: 8, kind: 'fabricated' },
+    { said: 'The team say 7 months.', quote: 'the team say 7 months', low: 8, high: 8, kind: 'fabricated' },
+    { said: 'Recruitment is slow.', quote: '7 months', low: 7, high: 7, kind: 'fabricated' },
+  ];
+  const PATHS = ['typed yes', 'another card', 'same words again', 'own press'] as const;
+  const statedTime = (w: ReturnType<typeof world>): Rec | undefined => draftedTeamPartOf(w.graph())?.team.observed_state?.stated_time as Rec | undefined;
+  it('B2-c PROPERTY: a figure from the user\'s words is theirs ONLY by the press on its own card, whatever the sentence, the quote or the path', async () => {
+    let cards = 0, presses = 0;
+    for (const s of CORPUS) for (const where of ['now', 'earlier'] as const) for (const path of PATHS) {
       const w = world();
       const before = JSON.stringify(w.graph());
-      const c = where === 'now' ? ctx(said) : earlier(said);
-      const card = await w.caps.proposeTeamTime!(c as never, { quote: q, low_months: 7, high_months: 7 }) as Rec;
-      if (card.ok !== true) { expect(card, said).toMatchObject({ ok: false, mutated: false }); continue; }
+      const c = where === 'now' ? ctx(s.said) : earlier(s.said);
+      const args = { quote: s.quote, low_months: s.low, high_months: s.high };
+      const card = await w.caps.proposeTeamTime!(c as never, args) as Rec;
+      const label = `${s.kind} | ${where} | ${path} | ${s.said} | ${s.quote}`;
+      if (s.kind === 'bound' || s.kind === 'fabricated') {                                                      // Q4
+        expect(card, label).toMatchObject({ ok: false, mutated: false, refusal: 'team_time_not_stated' });
+        expect(JSON.stringify(w.graph()), label).toBe(before);
+        continue;
+      }
+      expect(card.ok, label).toBe(true);
       cards += 1;
-      // The card shows the complete line, verbatim, and never calls it the user's forecast before the press.
-      expect(String(card.public_label).startsWith(`From your message: ‘${said}’ `), said).toBe(true);
-      expect(card.public_label, said).not.toMatch(/your 7-month forecast|your team forecast/);
-      expect(await noPress(w, card.proposal_id), said).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
-      expect(JSON.stringify(w.graph()), said).toBe(before);
-      expect(w.rows, said).toHaveLength(0);
+      expect(String(card.public_label).startsWith(`From your message: ‘${s.said.trim()}’ `), label).toBe(true);   // Q3
+      expect(card.public_label, label).not.toMatch(/your \d+(?:–\d+)?-month forecast|your team forecast/);
+      expect(w.proposals.get(String(card.proposal_id))?.provenance, label).toMatchObject({ authored_by: 'model_proposed', basis: s.said.trim() }); // Q5
+      if (s.kind === 'range') expect(card.team_time, label).not.toHaveProperty('forecast_months');            // Q4
+      if (path === 'typed yes') expect(await noPress(w, String(card.proposal_id)), label).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+      if (path === 'another card') expect(await noPress(w, String(card.proposal_id), 'prop_00000000000000000000000000000000'), label)
+        .toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+      if (path === 'same words again') {
+        // Q2: the same words again prepare the SAME card (ids are content-addressed), never a second way to adopt it.
+        const again = await w.caps.proposeTeamTime!(c as never, args) as Rec;
+        expect(again, label).toMatchObject({ ok: true, proposal_id: card.proposal_id });
+      }
+      if (path !== 'own press') {                                                                               // Q2
+        expect(JSON.stringify(w.graph()), label).toBe(before);
+        expect(w.rows, label).toHaveLength(0);
+        continue;
+      }
+      expect(await approve(w, String(card.proposal_id)), label).toMatchObject({ ok: true, applied: true });    // Q1
+      presses += 1;
+      const time = statedTime(w)!;
+      expect(time.selection, label).toEqual({ by: 'user_press', interpretation: 'olumi', source: s.said.trim(), quote: s.quote }); // Q5
+      if (s.kind === 'point') expect(time, label).toMatchObject({ forecast: 7, forecast_origin: 'user_confirmed', forecast_words: s.quote });
+      else expect(time, label).not.toHaveProperty('forecast');
+      expect(time.forecast_origin, label).not.toBe('user');
     }
-    expect(cards, 'positive control: the generated sentences do reach the card').toBeGreaterThan(SAID.length);
+    // Non-vacuity: every point and range sentence, in both places, reached a card; every own press applied.
+    const reaching = CORPUS.filter((s) => s.kind === 'point' || s.kind === 'range').length;
+    expect(cards).toBe(reaching * 2 * PATHS.length);
+    expect(presses).toBe(reaching * 2);
   });
 });
 
