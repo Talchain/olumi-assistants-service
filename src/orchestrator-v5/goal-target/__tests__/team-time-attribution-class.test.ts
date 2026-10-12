@@ -9,10 +9,12 @@
  *
  * Properties: (1) NO non-team subject is ever bound, in any generated sentence; (2) the team, named before its time in the
  * canonical orders, binds exactly the stated figure; (3) a sentence that names the team only AFTER the figure is refused
- * (conservative: asked, never misattributed); (4) the lists the rule reads hold no other-quantity word.
+ * (conservative: asked, never misattributed); (4) the lists the rule reads hold no other-quantity word; (5) THIS message's
+ * bare answer with a remark on confidence binds, and a remark that names anything else, or the same words in an earlier
+ * message, is asked.
  */
 import { describe, expect, it } from 'vitest';
-import { bindTeamTimeQuote, readTeamTime, TEAM_AFTER_WORDS, TEAM_GAP_WORDS } from '../team-share-write.js';
+import { ANSWER_CONFIDENCE_WORDS, bindTeamTimeQuote, readTeamTime, TEAM_AFTER_WORDS, TEAM_GAP_WORDS } from '../team-share-write.js';
 
 const NON_TEAM = ['Recruitment', 'Hiring', 'Procurement', 'Onboarding', 'The notice period', 'The contract', 'Legal review',
   'The recruiter', 'The vendor', 'Security sign-off', 'Training', 'Budget approval', 'Finance', 'The new hire', 'The tech lead',
@@ -106,7 +108,41 @@ describe('B2-c property 3: the team named only after the figure is asked, never 
 describe('B2-c property 4: the closed lists hold no other-quantity word', () => {
   it('no non-team subject word, and no delay or hiring word after the figure', () => {
     const subjectWords = new Set(NON_TEAM.flatMap((s) => s.toLowerCase().split(/[^\p{L}]+/u)).filter((w) => w !== '' && w !== 'the' && w !== 'their' && w !== 'other' && w !== 'new'));
-    expect([...subjectWords].filter((w) => TEAM_GAP_WORDS.has(w) || TEAM_AFTER_WORDS.has(w))).toEqual([]);
+    expect([...subjectWords].filter((w) => TEAM_GAP_WORDS.has(w) || TEAM_AFTER_WORDS.has(w) || ANSWER_CONFIDENCE_WORDS.has(w))).toEqual([]);
+    expect(['late', 'early', 'behind', 'over', 'hire', 'hiring', 'recruit', 'notice', 'ago', 'delay', 'start', 'team', 'months', 'wrong', 'longer', 'more', 'less']
+      .filter((w) => ANSWER_CONFIDENCE_WORDS.has(w))).toEqual([]);
     expect(['late', 'early', 'behind', 'over', 'hire', 'hiring', 'recruit', 'notice', 'ago', 'delay', 'start'].filter((w) => TEAM_AFTER_WORDS.has(w))).toEqual([]);
+  });
+});
+
+describe('B2-c property 5: THIS message\'s answer with a remark on confidence', () => {
+  const REMARKS = ["I'm not confident in that", "I'm not confident", 'We have no doubt', "I'm fairly sure", "I'm not very sure about this",
+    'I have low confidence in that', "Honestly I'm not sure"];
+  const JOINS: readonly ((a: string, r: string) => string)[] = [
+    (a, r) => `${a}, but ${r}.`, (a, r) => `${a}. ${r}.`, (a, r) => `${r}: ${a}.`, (a, r) => `${r}. ${a}.`,
+  ];
+  it(`${DURATIONS.length} answers × ${REMARKS.length} remarks × ${JOINS.length} joins: bound to exactly the stated figure`, () => {
+    const wrong: string[] = [];
+    for (const [d, low, high] of DURATIONS) for (const r of REMARKS) for (const join of JOINS) {
+      const now = join(d, r);
+      const out = bindTeamTimeQuote({ now }, { quote: d, low_months: low, high_months: high }, 'next feature launch');
+      const ok = out.kind === 'bound' && (low === high ? out.time.forecast_months === low
+        : out.time.low_months === low && out.time.high_months === high && out.time.forecast_months === undefined);
+      if (!ok) wrong.push(`${now} → ${JSON.stringify(out)}`);
+    }
+    expect(wrong.slice(0, 10), `${wrong.length} not bound`).toEqual([]);
+  });
+  it(`a remark naming anything else (${NON_TEAM.length} subjects), a remark with no confidence word, a second figure, or an earlier message → asked`, () => {
+    const bound: string[] = [];
+    for (const [d, low, high] of DURATIONS) for (const join of JOINS) {
+      const cases: [string, 'now' | 'earlier'][] = [
+        ...NON_TEAM.map((s): [string, 'now'] => [join(d, `I'm not sure about ${lower(s)}`), 'now']),
+        ...NON_TEAM.map((s): [string, 'now'] => [join(d, `${s} is slow`), 'now']),
+        [join(d, 'No'), 'now'], [join(d, "That's wrong"), 'now'], [join(d, "I'm not sure, maybe 12 months"), 'now'],
+        ...REMARKS.map((r): [string, 'earlier'] => [join(d, r), 'earlier']),
+      ];
+      for (const [text, where] of cases) if (bind(text, d, low, high, where).kind === 'bound') bound.push(`${where} | ${text}`);
+    }
+    expect(bound.slice(0, 20), `${bound.length} bound`).toEqual([]);
   });
 });

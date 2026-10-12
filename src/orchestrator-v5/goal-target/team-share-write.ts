@@ -179,6 +179,28 @@ function teamOwnsDuration(text: string, start: number, end: number, deliverable:
   }
   return words(text.slice(end, to)).every(w => TEAM_AFTER_WORDS.has(w) || own.has(w));
 }
+/** The closed list a remark on confidence beside the answer is made of. Nothing here names another quantity or a negation of the figure. */
+export const ANSWER_CONFIDENCE_WORDS: ReadonlySet<string> = new Set([
+  'i', "i'm", 'im', 'am', 'we', "we're", 'are', 'is', 'have', 'has', 'no', 'not', 'very', 'really', 'fairly', 'quite', 'pretty', 'that',
+  'this', 'it', 'in', 'of', 'about', 'so', 'too', 'confident', 'confidence', 'sure', 'certain', 'doubt', 'low', 'high', 'some', 'little',
+  'a', 'bit', 'honestly', 'totally', 'entirely', 'fully',
+]);
+const CONFIDENCE_WORD = /^(?:confident|confidence|sure|certain|doubt)$/;
+const STATEMENT_EDGE = /^[\s,;:()[\]"“”'‘’—–-]+|[\s,;:()[\]"“”'‘’—–-]+$/gu;
+/**
+ * ⭐ B2-c: THIS message is the base door's answer plus a remark on confidence ("About 8 months, but I'm not confident in that.",
+ * "We have no doubt: 8 months."): exactly one statement is, whole, a duration answer (`readTeamTime`), and every other
+ * statement is only words from `ANSWER_CONFIDENCE_WORDS` and names confidence itself. Anything else is asked.
+ */
+function answerWithConfidenceRemark(now: string): { low_months: number; high_months: number } | null {
+  const statements = now.split(STATEMENT_END).map(s => s.replace(STATEMENT_EDGE, '')).filter(s => s !== '');
+  const answers = statements.map(s => readTeamTime(s));
+  const at = answers.findIndex(a => a !== null);
+  if (at < 0 || answers.some((a, i) => a !== null && i !== at)) return null;
+  const remarks = statements.filter((_s, i) => i !== at).map(words);
+  return remarks.length > 0 && remarks.every(ws => ws.length > 0 && ws.every(w => ANSWER_CONFIDENCE_WORDS.has(w)) && ws.some(w => CONFIDENCE_WORD.test(w)))
+    ? answers[at]! : null;
+}
 /** Every place in `text`, inside a span of `quote`, where a duration reading as `stated` stands. */
 function durationSpansIn(text: string, quote: string, stated: { low_months: number; high_months: number }): (readonly [number, number])[] {
   const out: (readonly [number, number])[] = [];
@@ -204,9 +226,9 @@ export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonl
   const low = Number(args?.low_months), high = Number(args?.high_months);
   const stated = Number.isFinite(low) && Number.isFinite(high)
     ? teamTimesInQuote(quote).find(r => teamTimeArgumentsMatch(quote, { low_months: low, high_months: high }, r)) : undefined;
-  // B2-c: THIS message is, whole, the base door's duration answer ("6–10 months", "It’ll take 6–10 months"), or the team owns
-  // the figure in the user's own statement (positive attribution) at some place the quote stands.
-  const wholeAnswer = readTeamTime(plainWords(now));
+  // B2-c: THIS message is, whole, the base door's duration answer ("6–10 months", "It’ll take 6–10 months"), or that answer with
+  // a remark on confidence, or the team owns the figure in the user's own statement (positive attribution) where the quote stands.
+  const wholeAnswer = readTeamTime(plainWords(now)) ?? answerWithConfidenceRemark(plainWords(now));
   const inStatement = stated !== undefined && ((source === plainWords(now) && wholeAnswer !== null
       && wholeAnswer.low_months === stated.low_months && wholeAnswer.high_months === stated.high_months)
     || durationSpansIn(source, quote, stated).some(([start, end]) => teamOwnsDuration(source, start, end, plainWords(deliverable))));
