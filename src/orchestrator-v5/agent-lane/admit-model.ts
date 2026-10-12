@@ -40,7 +40,7 @@ import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-f
 import type { DraftOptionWideningT, DraftRiskWideningT, DraftWideningT, InterventionV3T } from '../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
 import { log } from '../../utils/telemetry.js';
-import { admitInterventionRange } from '../intervention-range.js';
+import { admitInterventionRange, interventionPoint } from '../intervention-range.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
@@ -411,6 +411,12 @@ export interface ConstructedLevel {
    */
   value_confidence?: 'medium';
   range?: InterventionV3T['range'];
+  /**
+   * ⭐ Row5, option settings (DL 12 Oct): a third party's range for the factor's quantity, quoted (`source_quote`), in the
+   * setting's raw units, beside a setting it contains. Display only (an `InterventionV3` passthrough field): never the
+   * engine's `range`, and dropped from the analysis wire (`withoutAttributedSettingRanges`).
+   */
+  attributed_range?: { low: number; high: number; meaning: 'min_max'; source: 'brief_extraction'; source_quote: string };
   estimate?: true;
   basis?: string;
 }
@@ -4371,8 +4377,34 @@ function admitOnce(
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
       if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
+      // ⭐ Row5, option settings (DL 12 Oct): a third party's range for this factor's quantity (D6: "A supplier says a
+      // specialist can contribute 10–30 features per week"), quoted, beside a setting it contains (20 and 10). Display
+      // only: never `range`, the engine's sampled input (`intervention-range.ts`), and dropped from the analysis wire
+      // (`withoutAttributedSettingRanges`), so no Run, limit or chance changes. Label, never withhold.
+      if (bundle[factorId]!.range === undefined) {
+        const factor = model.factors.find((f) => f.label === iv.factor_label);
+        const theirs = factor === undefined ? undefined : briefAttributedLevelRange(factor, brief);
+        const point = interventionPoint(bundle[factorId]);
+        if (theirs !== undefined && point !== undefined && theirs.low <= point && point <= theirs.high) {
+          bundle[factorId]!.attributed_range = { low: theirs.low, high: theirs.high, meaning: 'min_max', source: 'brief_extraction', source_quote: theirs.quote };
+        }
+      }
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
+  }
+  // Row5: one third party's range is about ONE quantity. When settings on two factors both fall inside the same quoted
+  // range ("10–20% churn" beside two churn factors), which one it describes is unknown, so it rides beside neither.
+  const quotedFactors = new Map<string, Set<string>>();
+  for (const bundle of interventionsByOption.values()) {
+    for (const [factorId, level] of Object.entries(bundle)) {
+      const quote = level.attributed_range?.source_quote;
+      if (quote !== undefined) quotedFactors.set(quote, (quotedFactors.get(quote) ?? new Set()).add(factorId));
+    }
+  }
+  for (const bundle of interventionsByOption.values()) {
+    for (const level of Object.values(bundle)) {
+      if (level.attributed_range !== undefined && quotedFactors.get(level.attributed_range.source_quote)!.size > 1) delete level.attributed_range;
+    }
   }
   /**
    * ⛔ AN OPTION THAT CHANGES NOTHING CANNOT BE COMPARED TO ANYTHING.

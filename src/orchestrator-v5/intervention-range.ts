@@ -152,3 +152,25 @@ export function wireInterventionRangePlan(
   }
   return { ranges, notForwarded };
 }
+
+/**
+ * ⭐ Row5, option settings (DL 12 Oct): a third party's range beside an option's setting (`attributed_range`, written at
+ * construction) is for the user and the Agent to read, never a compute input. The analysis wire copy drops it, as it
+ * drops a stated level range (`withoutStatedLevelRanges`), so the Run is byte-identical with or without it. A graph with
+ * none is returned as the ORIGINAL reference.
+ */
+export function withoutAttributedSettingRanges<G>(graph: G): G {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return graph;
+  const carries = (n: unknown): boolean => isRec(n) && isRec(n.interventions)
+    && Object.values(n.interventions).some((cell) => isRec(cell) && Object.hasOwn(cell, 'attributed_range'));
+  if (!graph.nodes.some(carries)) return graph;
+  return { ...graph, nodes: graph.nodes.map((n) => {
+    if (!carries(n)) return n;
+    const node = n as Rec & { interventions: Rec };
+    return { ...node, interventions: Object.fromEntries(Object.entries(node.interventions).map(([id, cell]) => {
+      if (!isRec(cell) || !Object.hasOwn(cell, 'attributed_range')) return [id, cell];
+      const { attributed_range: _attributed, ...rest } = cell;
+      return [id, rest];
+    })) };
+  }) } as G;
+}

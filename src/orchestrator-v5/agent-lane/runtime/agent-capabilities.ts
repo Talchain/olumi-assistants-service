@@ -1269,19 +1269,26 @@ export function projectOptionLevels(
   if (option.kind !== 'option' || option.interventions === null || typeof option.interventions !== 'object') return [];
   const out: Record<string, unknown>[] = [];
   for (const [factorId, raw] of Object.entries(option.interventions)) {
-    const cell = (raw ?? {}) as { value?: unknown; source?: unknown };
+    const cell = (raw ?? {}) as { value?: unknown; source?: unknown; attributed_range?: { low?: unknown; high?: unknown; source_quote?: unknown } };
     if (typeof cell.value !== 'number' || !Number.isFinite(cell.value)) continue;
     const factor = factorsById.get(factorId);
     const frame = levelFrameOf(factor);
     const unit = (factor?.observed_state ?? {}).unit;
+    const level = frame === null ? cell.value : cell.value * frame;
+    // ⭐ Row5, option settings (DL 12 Oct): a third party's range beside this setting, quoted, so the Agent can say "the
+    // supplier's 10–30 (unverified)". Shown only while the setting still lies inside it; never the user's.
+    const theirs = cell.attributed_range;
+    const ranged = theirs !== undefined && typeof theirs.low === 'number' && typeof theirs.high === 'number'
+      && typeof theirs.source_quote === 'string' && theirs.source_quote !== '' && theirs.low <= level && level <= theirs.high;
     out.push({
       factor_id: factorId,
       ...(typeof factor?.label === 'string' && factor.label !== '' ? { factor: factor.label } : {}),
-      level: frame === null ? cell.value : cell.value * frame,
+      level,
       ...(typeof unit === 'string' && unit !== '' ? { unit } : {}),
       // ONE PROVENANCE AUTHORITY: who set it, in the authority's words — never the raw stamp for the Agent to interpret.
       // A cell with no stamp carries no `set_by`, as before.
       ...(typeof cell.source === 'string' && cell.source !== '' ? { set_by: settingDisplayOf(raw, factor) } : {}),
+      ...(ranged ? { stated_range: { low: theirs.low, high: theirs.high, stated_by: 'third_party_unverified', quote: theirs.source_quote } } : {}),
     });
   }
   return out;

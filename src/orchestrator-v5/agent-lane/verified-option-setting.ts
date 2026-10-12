@@ -185,7 +185,7 @@ function countsItself(unit: unknown): boolean {
   return parts?.kind === 'count' && parts.noun?.length === 1 && COUNT_ITSELF.test(parts.noun[0]!)
     && parts.period === null && !parts.per?.length && !parts.base?.length && !parts.qualifiers?.length;
 }
-function sameFrame(text: string, span: { start: number; end: number }, unit: unknown, amount?: StatedAmount, nounFromLabel = false, implicitPer = false): boolean {
+function sameFrame(text: string, span: { start: number; end: number }, unit: unknown, amount?: StatedAmount, nounFromLabel = false, implicitPer = false, labelWords?: readonly string[]): boolean {
   const literal = amount ?? findStatedAmounts(text).find(n => n.index === span.start);
   const written = literal ?? { index: span.start, matchedText: text.slice(span.start, span.end), kind: 'words' };
   const stated = statedTailParts(text, written); const expected = readUnitParts(unit);
@@ -193,7 +193,12 @@ function sameFrame(text: string, span: { start: number; end: number }, unit: unk
     || stated.scale !== expected.scale || stated.period !== expected.period) return false;
   const same = (x: readonly string[] | null, y: readonly string[] | null): boolean =>
     JSON.stringify(x?.length ? x : null) === JSON.stringify(y?.length ? y : null);
-  return (same(stated.per, expected.per) || (implicitPer && !stated.per?.length)) && same(stated.base, expected.base) && same(stated.qualifiers, expected.qualifiers)
+  // Row5 D3: words after the figure that NAME the factor itself ("10–20% churn" for "Price-increase customer churn" in %)
+  // say which quantity, not another unit; only a caller that bound the sentence to that factor passes its label words.
+  const namesFactor = labelWords !== undefined && !expected.qualifiers?.length && (stated.qualifiers?.length ?? 0) > 0
+    && stated.qualifiers!.every(q => labelWords.some(n => sameName(n, q)));
+  return (same(stated.per, expected.per) || (implicitPer && !stated.per?.length)) && same(stated.base, expected.base)
+    && (same(stated.qualifiers, expected.qualifiers) || namesFactor)
     && (expected.noun === null || nounFromLabel || (expected.noun.length > 0
       && expected.noun.every(w => stated.noun?.some(x => sameName(x, w)))));
 }
@@ -618,7 +623,7 @@ function sentencesWritingFigure(factor: Factor, brief: string | undefined): { te
  * written with their own unit must be in the factor's frame (bare ends take the figure's, so a range with no figure beside
  * it must write its unit).
  */
-function statedRangePair(text: string, unit: unknown, figure?: StatedAmount): { low: number; high: number } | undefined {
+function statedRangePair(text: string, unit: unknown, figure?: StatedAmount, labelWords?: readonly string[]): { low: number; high: number } | undefined {
   const ends = findLinkEffectAmounts(text).filter(a => a.index !== figure?.index);
   for (let i = 0; i + 1 < ends.length; i++) {
     const lo = ends[i]!, hi = ends[i + 1]!;
@@ -627,7 +632,7 @@ function statedRangePair(text: string, unit: unknown, figure?: StatedAmount): { 
     if (!paired || !(lo.magnitude < hi.magnitude)) continue;
     const after = text.slice(hi.index + hi.matchedText.length).match(/^[^,;.!?)]*/u)?.[0] ?? '';
     const bare = !/[\p{L}%£$€]/u.test(after) && !/[%£$€]/u.test(hi.matchedText);
-    if (bare ? figure === undefined : !sameFrame(text, { start: hi.index, end: hi.index + hi.matchedText.length }, unit, hi, false, true)) continue;
+    if (bare ? figure === undefined : !sameFrame(text, { start: hi.index, end: hi.index + hi.matchedText.length }, unit, hi, false, true, labelWords)) continue;
     return { low: lo.magnitude, high: hi.magnitude };
   }
   return undefined;
@@ -670,7 +675,7 @@ export function briefAttributedLevelRange(factor: Factor, brief: string | undefi
     for (const a of assertions(brief)) {
       if (a.text.length > MAX_ASSERTION || !directContext(brief, a) || !attributed(a.text)) continue;
       if (!words(a.text).some(w => named.some(n => sameName(n, w)))) continue;
-      const pair = statedRangePair(a.text, factor.unit);
+      const pair = statedRangePair(a.text, factor.unit, undefined, named);
       if (pair !== undefined) return { ...pair, quote: a.text };
     }
   } catch {
