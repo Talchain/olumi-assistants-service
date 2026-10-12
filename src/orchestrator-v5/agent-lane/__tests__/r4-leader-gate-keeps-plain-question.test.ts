@@ -40,7 +40,7 @@ const response = (text: string): OlumiResponse => ({
 const gate = (text: string) => enforceAgentLaneLeaderClaimsAtWire(response(text), { requestId: 'r4-h12', exitPath: 'agent_lane_v1',
   mayNameLeadingOption: false, leaderClaimWithheldReason: 'goal_path_unsized', graph, analysisReady });
 const logged = (spy: ReturnType<typeof vi.spyOn>, event: string): Record<string, unknown>[] =>
-  spy.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>).filter((o) => o?.event === event);
+  spy.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>).filter((o: Record<string, unknown>) => o?.event === event);
 
 afterEach(() => vi.restoreAllMocks());
 
