@@ -328,10 +328,14 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(withholdMarkers(b), 'one marker is supplied by the Run cells despite three detail withhold sentences').toHaveLength(1);
     expect(withholdMarkers(b)[0], 'distinct identity and current-level causes cannot be replaced by one partial cause').toBe(WITHHOLD_FALLBACK_MARKER);
     for (const sentence of [
-      "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.",
       'This run doesn’t yet show each option’s chance of reaching £20,000.',
       "Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.",
-    ]) expect(b._answer_shape!.detail, 'the three original withhold sentences retain their producers this round').toContain(sentence);
+    ]) expect(b._answer_shape!.detail, 'the typed withhold sentence keeps its place, with its whole line, where the marker says').toContain(sentence);
+    // Score run 2 hidden answers (DL 12 Oct): this historical reply arrives as the narrator's words; its untyped copy of the
+    // current-level sentence is narrator text, so with the chance withheld it joins the face, once.
+    const currentLevel = "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.";
+    expect(faceUnits(b).join('\n')).toContain(currentLevel);
+    expect(b.assistant_text.split(currentLevel)).toHaveLength(2);
     const words = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
     process.stdout.write(`R11B_B1 ${JSON.stringify({
       before: READ_B1.before_shape, after: b._answer_shape,
