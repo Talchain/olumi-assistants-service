@@ -80,7 +80,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { quoteBindsFactorFigure, verifiedFactorLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedOptionSetting } from './verified-option-setting.js';
 
 const MAX_ID = 100;
 
@@ -3653,11 +3653,14 @@ function admitOnce(
    * ("Staffing is fixed…"), never the user's claim, so an estimate that cites it stays Olumi's.
    */
   // ⭐ Recovery Batch C, L3: the quote must bind THIS factor's figure in its quantity and typed frame, not merely contain it.
+  // ⭐ Recovery Batch B, S4 V2 origin (DL ruling (b)): with no binding quote, a figure the brief itself writes in the
+  // factor's frame is still the user's, role unverified (`briefWritesFactorFigure`), never Olumi's estimate.
   const quotesBrief = (f: CandidateModel['factors'][number]): boolean => {
     const quote = f.baseline_evidence?.quote;
     const value = f.baseline_value;
-    return typeof quote === 'string' && typeof value === 'number' && Number.isFinite(value)
-      && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value)) && quoteBindsFactorFigure(model, f, brief);
+    return (typeof quote === 'string' && typeof value === 'number' && Number.isFinite(value)
+      && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value)) && quoteBindsFactorFigure(model, f, brief))
+      || briefWritesFactorFigure(f, brief);
   };
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [

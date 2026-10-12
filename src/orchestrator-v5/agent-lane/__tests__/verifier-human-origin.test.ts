@@ -61,8 +61,12 @@ describe('W controls: a figure the user did not write for this frame stays Olumi
     const s = 'Each additional specialist resolves about 20 tickets per week per team, between 10 and 30.';
     expect(stored(variant(s), RATE, 20, s, 'inferred').origin).toBe('ai');
   });
-  it('a quote that is not a sentence of the brief', () => {
-    expect(stored(CAPACITY, RATE, 20, 'Specialists resolve about 20 tickets per week.', 'inferred').origin).toBe('ai');
+  it('a quote that is not a sentence of the brief, where the brief writes no such figure', () => {
+    const s = 'Each additional specialist resolves some tickets per week.';
+    expect(stored(variant(s), RATE, 20, 'Specialists resolve about 20 tickets per week.', 'inferred').origin).toBe('ai');
+  });
+  it('S4 V2 origin (DL ruling (b)): a quote that is not a sentence of the brief, where the BRIEF writes "about 20 tickets per week" in the frame: the user\'s', () => {
+    expect(stored(CAPACITY, RATE, 20, 'Specialists resolve about 20 tickets per week.', 'inferred')).toEqual({ origin: 'human', role: 'unverified', raw: 20 });
   });
 });
 

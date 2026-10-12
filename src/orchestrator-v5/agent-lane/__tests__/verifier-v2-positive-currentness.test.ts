@@ -1,7 +1,7 @@
 /**
  * Recovery Batch B, S4 V2 (AIE 0825 §2–§3; #94 6122028727): positive ownership and currentness on the drafter's REAL
- * output for Paul's capacity brief. (Human origin for an UNCITED figure is held back: it reverses #2942's receipt gate,
- * pinned in typed-level-span, so it waits for a ruling; b33bf531's 20 is a stated residual below.)
+ * output for Paul's capacity brief, and (origin commit, DL ruling (b)) human origin for a figure the brief writes when the
+ * drafter cites nothing: b33bf531 tagged Paul's 20 `ai_proposed` with no quote.
  *
  * `fixtures/capacity-served-drafts-20261011.json` holds the nine served drafts of the capacity level brief (staging
  * 11–12 Oct, builds 50530b5f / c87608e4 / c85817f2), read SELECT-only from `cee_drafter_raw_responses` with each raw text's
@@ -27,9 +27,8 @@ const BRIEF = fx.brief;
 const BRIEF_SHA256 = 'c5f2dacf88474c22ba4f84d82d1a5e5eb6904485cda15d7946490fd33bccef4f';
 /** The binder cannot bind the 80 where the draft's rival label repeats its verb ("Tickets resolved per specialist…"). */
 const RIVAL_VERB_LABEL = new Set(['c2a3f477-f3cf-4092-a286-388794963c57', '14b66c8e-5016-4414-807e-27412c92107a']);
-/** STATED RESIDUAL, ruling pending (#2942 receipt gate: "missing receipts never upgrade estimates"): this draft tagged
- * Paul's 20 `ai_proposed` and cited nothing, so it stays Olumi's estimate. Not fixed in V2. */
-const UNCITED_AI_TAGGED = new Set(['b33bf531-af92-4a2f-9b67-fa32ee8a8f9a']);
+/** The draft that tagged Paul's 20 `ai_proposed` and cited nothing (DL ruling (b), origin commit). */
+const UNCITED_AI_TAGGED = 'b33bf531-af92-4a2f-9b67-fa32ee8a8f9a';
 
 function stored(model: Rec, brief: string, value: number): Provenance {
   const factor = (model.factors as Rec[]).find(f => f.baseline_value === value)!;
@@ -57,9 +56,8 @@ describe('the served capacity drafts (the wire)', () => {
     it(`${d.scenario_id.slice(0, 8)} (${d.cee_build.slice(0, 8)}): Paul's 80 is ${binds ? 'the user\'s VERIFIED current level' : 'the user\'s, role unverified (stated residual: the binder)'}`, () => {
       expect(stored(d.candidate, BRIEF, 80)).toEqual(binds ? VERIFIED : UNVERIFIED);
     });
-    const uncited = UNCITED_AI_TAGGED.has(d.scenario_id);
-    it(`${d.scenario_id.slice(0, 8)}: Paul's 20 is ${uncited ? 'Olumi\'s estimate (stated residual: uncited ai_proposed, #2942 receipt gate, ruling pending)' : 'the user\'s, role unverified (an estimated contribution per additional specialist)'}`, () => {
-      expect(stored(d.candidate, BRIEF, 20)).toEqual(uncited ? { origin: 'ai', role: null } : UNVERIFIED);
+    it(`${d.scenario_id.slice(0, 8)}: Paul's 20 is the user's, role unverified (an estimated contribution per additional specialist), never Olumi's`, () => {
+      expect(stored(d.candidate, BRIEF, 20)).toEqual(UNVERIFIED);
     });
   }
 });
@@ -126,4 +124,36 @@ describe('positive ownership and currentness: who, current, and nothing that gov
     expect(level('The insurer claims: we\'re processing 1,400 claims per week right now.',
       'Claims processed per week', 'claims per week', 1400)).toEqual(UNVERIFIED);
   });
+});
+
+describe('origin commit (DL ruling (b)): a literal figure the brief writes in the factor\'s frame is never Olumi\'s', () => {
+  it('b33bf531, BOUND BY NODE ID: Paul\'s uncited ai_proposed 20 is the user\'s, role unverified', () => {
+    const d = fx.drafts.find(x => x.scenario_id === UNCITED_AI_TAGGED)!;
+    const drafted = (d.candidate.factors as Rec[]).find(f => f.label === 'Specialist capacity')!;
+    expect([drafted.provenance, drafted.baseline_known, drafted.baseline_evidence], 'as served').toEqual(['ai_proposed', false, null]);
+    const nodes = admitCandidateModel(structuredClone(d.candidate) as unknown as CandidateModel, {}, BRIEF).nodes as unknown as Rec[];
+    const node = nodes.find(n => n.id === 'specialist_capacity');
+    expect(node?.label).toBe('Specialist capacity');
+    expect(node?.observed_state?.raw_value).toBe(20);
+    expect(provenanceOf(node?.observed_state)).toEqual(UNVERIFIED);
+  });
+  const uncited = (sentence: string, label = 'Specialist capacity', unit = 'tickets per week per specialist', value = 20): Rec => ({
+    ...alone(sentence, label, unit, value),
+    factors: [{ label, baseline_value: value, unit, baseline_known: false, provenance: 'ai_proposed', role: 'observable',
+      plausible_max: 50, baseline_evidence: null }],
+  });
+  it('POSITIVE: Paul\'s sentence, drafted as b33bf531 drafted it', () => {
+    const s = 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.';
+    expect(stored(uncited(s), s, 20)).toEqual(UNVERIFIED);
+  });
+  for (const [name, sentence, label, unit] of [
+    ['the brief writes another period', 'Each additional specialist resolves about 20 tickets per month, between 10 and 30.', undefined, undefined],
+    ['the sentence names nothing of the factor', 'Each new hire resolves about 20 tickets per week, between 10 and 30.', undefined, undefined],
+    ['the figure is a bound', 'Each additional specialist must handle at least 20 tickets per week.', undefined, undefined],
+    ['the same number is another quantity ("20 staff" for a % factor)', 'We have 20 staff.', 'Staff utilisation', '%'],
+  ] as const) {
+    it(`stays Olumi's estimate: ${name}`, () => {
+      expect(stored(uncited(sentence, label, unit), sentence, 20)).toEqual({ origin: 'ai', role: null });
+    });
+  }
 });
