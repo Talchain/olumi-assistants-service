@@ -2245,7 +2245,7 @@ export async function buildModelFromBrief(
     // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
     // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
     const setAside = setAsideEstimatesOf(admitted.loss);
-    const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
+    const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside, candidate);
     // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
     // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
     // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
@@ -2692,12 +2692,44 @@ function setAsideEstimatesOf(loss: readonly unknown[]): SetAsideEstimate[] {
   });
 }
 
-/** The drafter's questions, less any that writes the amount of a size Olumi set aside (it is asked in the contract's words). */
-function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAsideEstimate[]): string[] {
-  const amounts = setAside.map((s) => s.amount).filter((a): a is number => a !== null && a !== 0).map(Math.abs);
-  if (amounts.length === 0) return questions;
+/**
+ * The drafter's questions, less any that restates the size of a link Olumi set aside (it is asked once, in the contract's
+ * words). ⛔ BY THAT LINK'S IDENTITY, never an equal number (DL 12 Oct; T5 D3, `recovery/t5-meaning/DIAGNOSIS.md` §3): the
+ * question names THAT link (every word of one end, a word of the other) and writes its size as that link's kind of
+ * quantity (its target's unit: money, a percentage or a count). D3 A r2 lost "The interview evidence gives a 10–20% churn
+ * range …" because its 20% equalled an unrelated set-aside £20 per paying customer.
+ */
+const STOP_WORDS = new Set(['the', 'and', 'for', 'per', 'after', 'before', 'from', 'with', 'into', 'onto', 'over', 'under', 'than']);
+const contentWords = (text: string): string[] => (text.toLowerCase().match(/\p{L}{3,}/gu) ?? [])
+  .filter((w) => !STOP_WORDS.has(w)).map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w));
+const slugOf = (label: string): string => label.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '');
+function namesLink(question: string, from: string, to: string): boolean {
+  const said = new Set(contentWords(question));
+  const [a, b] = [contentWords(from), contentWords(to)];
+  const all = (ws: string[]): boolean => ws.length > 0 && ws.every((w) => said.has(w));
+  const any = (ws: string[]): boolean => ws.some((w) => said.has(w));
+  return (all(a) && any(b)) || (all(b) && any(a));
+}
+function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAsideEstimate[], candidate: unknown): string[] {
+  const sized = setAside.filter((s): s is SetAsideEstimate & { amount: number } => s.amount !== null && s.amount !== 0);
+  if (sized.length === 0) return questions;
+  // The drafted label and unit behind each admitted end (ids are slugs of the drafted labels).
+  const c = (candidate ?? {}) as { goal?: { metric?: unknown; unit?: unknown }; factors?: unknown; outcomes?: unknown; risks?: unknown };
+  const drafted = new Map<string, { label: string; unit?: string }>();
+  if (typeof c.goal?.metric === 'string') drafted.set(slugOf(c.goal.metric), { label: c.goal.metric, ...(typeof c.goal.unit === 'string' ? { unit: c.goal.unit } : {}) });
+  for (const list of [c.factors, c.outcomes, c.risks]) {
+    for (const n of Array.isArray(list) ? list as { label?: unknown; unit?: unknown }[] : []) {
+      if (typeof n?.label === 'string') drafted.set(slugOf(n.label), { label: n.label, ...(typeof n.unit === 'string' ? { unit: n.unit } : {}) });
+    }
+  }
+  const end = (id: string): { label: string; unit?: string } => drafted.get(slugOf(id)) ?? { label: id.replace(/_/g, ' ') };
   const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, a, b);
-  return questions.filter((q) => !findStatedAmounts(q).some((w) => amounts.some((a) => same(Math.abs(w.magnitude), a))));
+  return questions.filter((q) => !sized.some((s) => {
+    const [from, to] = [end(s.from), end(s.to)];
+    if (!namesLink(q, from.label, to.label)) return false;
+    const kind = to.unit === undefined ? undefined : readCurrencyUnitWithQualifiers(to.unit).kind;
+    return findStatedAmounts(q).some((w) => same(Math.abs(w.magnitude), Math.abs(s.amount)) && (kind === undefined || w.kind === kind));
+  }));
 }
 
 export function userFacingDrafterQuestions(parked: unknown): string[] {
