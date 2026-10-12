@@ -103,8 +103,9 @@ function world() {
   let graph: Rec = structuredClone(FX.graph);
   const rows: SessionTurnWithContent[] = [];
   const registers: Rec[] = [];
-  const ledger: CommittedTurnLedger = { write_turn_ids: [FX.construction_commit_turn_id], user_message_turn_ids: [FX.l1.turn_id],
-    first_user_message: FX.l1.message.trim(), complete: true } as CommittedTurnLedger;
+  // Mutable here (the store appends to it); read back as the store's readonly `CommittedTurnLedger`.
+  const ledger: { write_turn_ids: string[]; user_message_turn_ids: string[]; first_user_message: string | null; complete: boolean } = {
+    write_turn_ids: [FX.construction_commit_turn_id], user_message_turn_ids: [FX.l1.turn_id], first_user_message: FX.l1.message.trim(), complete: true };
   const latest = () => rows.find(r => !r.turn_id.endsWith(':claim'));
   const store = createMockSessionStore({
     loadGraph: async () => graph, loadGraphAndBriefText: async () => ({ graph, briefText: FX.brief_text }),
@@ -113,7 +114,7 @@ function world() {
       user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used, pending_actions: (r as Rec).pending_actions ?? [] } : null; },
     readMostRecentPendingActions: async (_sid, opts) => { opts?.onLatestRowId?.(latest()?.id ?? null); return (latest() as Rec)?.pending_actions ?? []; },
     readRecent: async () => rows.filter(r => !r.turn_id.endsWith(':claim')),
-    readCommittedTurnLedger: async () => structuredClone(ledger),
+    readCommittedTurnLedger: async (): Promise<CommittedTurnLedger> => structuredClone(ledger),
     append: async write => {
       const id = randomUUID(); rows.unshift({ ...makeSessionTurnRow({ id, scenario_id: SID, turn_id: write.turn_id, request_hash: write.request_hash,
         turn_class: write.turn_class, handler_id: write.handler_id, response_emitted: write.response_emitted, created_at: new Date().toISOString(),
