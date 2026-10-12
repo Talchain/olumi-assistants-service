@@ -49,8 +49,9 @@ function assertShape(b: Obj, science = why): void {
   for (const bullet of array(shape.bullets)) expect(String(bullet).trim().split(/\s+/).length).toBeLessThanOrEqual(8);
   expect([shape.headline, ...array(shape.bullets)].join(' ').trim().split(/\s+/).length).toBeLessThanOrEqual(80);
   expect(String(b.assistant_text)).toContain('3%');
-  // Host-authored native Markdown disclosure; model text cannot replace its body.
-  expect(String(b.assistant_text)).toContain(`<details>\n<summary>Why?</summary>\n\n${science}\n\n</details>`);
+  // Host-authored disclosure as a plain paragraph the chat renders (R3-1: the UI escapes HTML); model text cannot replace its body.
+  expect(String(b.assistant_text)).toContain(`Why? ${science}`);
+  expect(String(b.assistant_text)).not.toContain('<details');
   expect(String(b.assistant_text)).toContain('Which risk could change your plan?');
 }
 async function run(trigger: Trigger, opts: Parameters<typeof capture>[2] = {}) {
@@ -176,14 +177,14 @@ it.each(['run', 'draft'] as const)('Run-turn face %s: carrier appends Why in det
   const normal = composeReplyShape(input);
   const carried = composeReplyShape({ ...input, eligibleIntervention: { policy_id: 'RC-WIDEN', variant_id: 'W6', name: row('RC-WIDEN').name, why, trigger: row('RC-WIDEN').trigger_predicate.variants![6].when }, interventionActionLabel: 'Suggest risks' });
   expect(normal.shape).not.toBeNull();
-  expect(carried.shape).toEqual({ ...normal.shape, detail: [normal.shape!.detail, `<details>\n<summary>Why?</summary>\n\n${why}\n\n</details>`].filter(Boolean).join('\n\n') });
-  expect(carried.text).toBe(`${normal.text}\n\n<details>\n<summary>Why?</summary>\n\n${why}\n\n</details>`);
+  expect(carried.shape).toEqual({ ...normal.shape, detail: [normal.shape!.detail, `Why? ${why}`].filter(Boolean).join('\n\n') });
+  expect(carried.text).toBe(`${normal.text}\n\nWhy? ${why}`);
 });
 
 
 // C2 base bytes are captured on d820c6a1424891d59f7d70afc9f7b0c903ae6dc1 through this same real route.
 const proposalText = 'Our churn is 3%.\n\n- Test customer response.\n\nI proposed a £54 price level for you to review.\n\nWould you approve this starting figure?';
-const disclosure = `<details>\n<summary>Why?</summary>\n\n${why}\n\n</details>`;
+const disclosure = `Why? ${why}`;
 function recordC2(name: string, w: Awaited<ReturnType<typeof run>>): void {
   if (!process.env.S8_CAPTURE_DIR) return;
   mkdirSync(process.env.S8_CAPTURE_DIR, { recursive: true });
