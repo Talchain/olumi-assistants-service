@@ -12,7 +12,9 @@
  *    "within 2 years"), or one month or year spelled with an article ("over the next year", "within a year").
  *    `months` is that count; `wording` is the brief's own span, verbatim.
  *  · `unresolved` — not attested, but the brief writes a deadline: a calendar point that needs a year or today's
- *    date to become a month count ("by Q3", "by the end of next year"), or a duration that is not the candidate's.
+ *    date to become a month count ("by Q3", "by the end of next year", D4's "by the end of that quarter" after "next
+ *    quarter": the END of a calendar quarter, never a rolling 3 months; PL #94 6131809231), or a duration that is not
+ *    the candidate's.
  *    `months` is null; `wording` is the brief's span, kept so the deadline is never lost unseen.
  *  · `absent` — the brief writes no deadline this recognises. `months` null, `wording` ''.
  *
@@ -45,7 +47,7 @@ const SPELLED_DURATION = new RegExp(
 );
 /** A calendar point: a year or today's date is needed to count its months. */
 const CALENDAR_POINT = new RegExp(
-  String.raw`\b(?:by|before|until)\s+(?:the\s+)?(?:end\s+of\s+)?(?:(?:Q[1-4]|H[12])\b(?:\s+\d{4})?|(?:this|next)\s+(?:year|quarter)\b|year[-\s]?end\b|(?:January|February|March|April|May|June|July|August|September|October|November|December)\b(?:\s+\d{4})?)`
+  String.raw`\b(?:by|before|until)\s+(?:the\s+)?(?:end\s+of\s+)?(?:(?:Q[1-4]|H[12])\b(?:\s+\d{4})?|(?:this|next|that)\s+(?:year|quarter)\b|year[-\s]?end\b|(?:January|February|March|April|May|June|July|August|September|October|November|December)\b(?:\s+\d{4})?)`
   + String.raw`|\b(?:in|during)\s+(?:Q[1-4]|H[12])\b(?:\s+\d{4})?`,
   'gi',
 );
