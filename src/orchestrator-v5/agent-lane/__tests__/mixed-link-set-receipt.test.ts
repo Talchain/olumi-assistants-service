@@ -85,6 +85,18 @@ async function approveServedSet(variant = false) {
 
 const UNSIZED_REVIEWED = '"Tech lead hires" → "Code review leadership" and "Code review leadership" → "Code quality deterioration"';
 const NEXT_STEP = 'Give a figure, or ask Olumi to estimate it.';
+const DISCLOSURE = `Your reviews of ${UNSIZED_REVIEWED} are recorded. They are not sized yet, so their values are unchanged. ${NEXT_STEP}`;
+/**
+ * Expectation (b)'s own instrument: the four element matchers the live witness applies to a receipt that confirms a
+ * placeholder (`recovery/live/live-journey.mjs` batchAReceipt, copied verbatim 12 Oct). A receipt the witness cannot read
+ * as carrying all four fails (b) on staging, whatever this spec says.
+ */
+const WITNESS_B = {
+  review_recorded: /review(?:ed)?\b[^.]{0,60}\b(?:recorded|noted|kept)|recorded (?:your|the) review|\breviewed\b/i,
+  not_sized_yet: /(?:isn['’]t|is not|not) (?:yet )?sized(?: yet)?|nobody has (?:sized|set)|whose strength nobody has set/i,
+  values_unchanged: /values? (?:are |is |stay |stays )?unchanged|unchanged|kept as it is/i,
+  give_a_figure: /Give a figure, or ask Olumi to estimate it\.?/i,
+};
 
 describe('served mixed link set: the receipt follows the stored outcome', () => {
   it('the fixture is the served approval: same offer, same six writes, same stored outcome', async () => {
@@ -102,8 +114,9 @@ describe('served mixed link set: the receipt follows the stored outcome', () => 
     expect(receipt).not.toBe(FX.served_receipt);
     expect(receipt).not.toContain('Recorded these 6 link strengths');
     expect(receipt.startsWith('Recorded 4 link strengths and your reviews of 2 links: ')).toBe(true);
-    expect(receipt).toContain(`${UNSIZED_REVIEWED} have not been sized yet, so their values are unchanged. ${NEXT_STEP}`);
+    expect(receipt.endsWith(DISCLOSURE)).toBe(true);
     expect(receipt.split(NEXT_STEP)).toHaveLength(2);
+    for (const [element, re] of Object.entries(WITNESS_B)) expect(re.test(receipt), element).toBe(true);
     // Other links WERE sized: never the whole model unchanged.
     expect(receipt).not.toMatch(/model[’']s values are unchanged|model is (?:exactly )?(?:as it was|unchanged)|nothing (?:was )?changed/i);
     // "You accepted Olumi's estimate" only for the four links stored as Olumi's accepted estimates.
@@ -119,7 +132,7 @@ describe('served mixed link set: the receipt follows the stored outcome', () => 
     expect(linkSizing(edgeOf(w.graph(), { from: 'developer_hires', to: 'productivity' }))).toBe('placeholder');
     expect(receipt.startsWith('Recorded 3 link strengths, the change to 1 link and your reviews of 2 links: ')).toBe(true);
     expect(receipt).toContain('"Developer hires" → "productivity" changed; it isn’t sized in the model yet');
-    expect(receipt).toContain(`${UNSIZED_REVIEWED} have not been sized yet, so their values are unchanged. ${NEXT_STEP}`);
+    expect(receipt.endsWith(DISCLOSURE)).toBe(true);
     expect(receipt.split(NEXT_STEP)).toHaveLength(2);
     expect(receipt).not.toMatch(/Olumi[’']s estimate for how much "Developer hires" changes "productivity"/);
   });
