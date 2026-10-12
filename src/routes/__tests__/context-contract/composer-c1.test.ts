@@ -199,7 +199,9 @@ async function proposalTurn(trigger: Trigger, name: string) {
   recordC2(name, w);
   return w;
 }
-it('P1-prime proposal carrier: base text is a byte-whole prefix, then Science Why only; approval unchanged', async () => {
+// R2 N2r (friction audit N2): this suffix reached the user as raw "<details> <summary>Why?</summary>…" (hiring step 5,
+// deadline step 3): a whole proposal ships unshaped. It now ships byte-identical, with no Why; approval unchanged.
+it('P1-prime proposal carrier (R2 N2r): base text byte-identical, no raw <details> Why; approval unchanged', async () => {
   const w = await proposalTurn('W6', 'P1');
   expect(carriers(w)).toHaveLength(2);
   expect(carriers(w)[1]).toEqual(carriers(w)[0]);
@@ -208,8 +210,8 @@ it('P1-prime proposal carrier: base text is a byte-whole prefix, then Science Wh
   const baseText = String(base.assistant_text);
   const label = object(object(object(w.response.guidance).slot1).primary_action).label;
   expect(label).toBe('Suggest risks');
-  expect(String(w.response.assistant_text).slice(0, baseText.length)).toBe(baseText);
-  expect(String(w.response.assistant_text).slice(baseText.length)).toBe(`\n\n${disclosure}`);
+  expect(String(w.response.assistant_text)).toBe(baseText);
+  expect(String(w.response.assistant_text)).not.toContain('<details>');
   expect(w.response.suggested_actions).toEqual(base.suggested_actions);
   expect(array(w.response.suggested_actions).some(a => String(object(a).id).startsWith('agent-approve-proposal:'))).toBe(true);
   expect(w.response._answer_shape).toBeUndefined();
@@ -219,7 +221,7 @@ it('P1-prime proposal carrier: base text is a byte-whole prefix, then Science Wh
     const input = { text: baseText, ...identity };
     const normal = composeReplyShape(input);
     const carried = composeReplyShape({ ...input, eligibleIntervention: intervention as never, interventionActionLabel: String(label) });
-    expect(carried).toEqual({ ...normal, text: `${baseText}\n\n${disclosure}` });
+    expect(carried).toEqual(normal);
   }
 });
 it('P2 proposal without carrier: byte-identical base text and suggested actions', async () => {
@@ -271,7 +273,7 @@ it('X4 carrier face caps: eight-word bullets, eighty-word face, long existing la
   for (const line of [longLabel, ...short, 'Which risk could change your plan?']) expect(String(w.response.assistant_text)).toContain(line);
   expect(String(shape.detail)).toContain(disclosure);
 });
-it('X5 profile gate: method_step with carrier is byte-identical; proposal appends per P1', async () => {
+it('X5 profile gate: method_step with carrier is byte-identical; proposal is byte-identical per P1 (R2 N2r)', async () => {
   const w = await capture('pre-mortem', 'run2', { evidenceLabel: 'X5', readSnapshot: async s => snapshot(s, 'S1'), providerReply: () => response(reply) });
   recordC2('X5', w);
   expect(w.calls).toHaveLength(1);
@@ -282,5 +284,5 @@ it('X5 profile gate: method_step with carrier is byte-identical; proposal append
   const method = { text: String(w.response.assistant_text), profile: 'method_step' as const };
   expect(composeReplyShape({ ...method, eligibleIntervention: intervention as never, interventionActionLabel: 'Suggest risks' })).toEqual(composeReplyShape(method));
   const proposed = await proposalTurn('W6', 'X5-proposal');
-  expect(String(proposed.response.assistant_text)).toBe(`${String(c2Base.P1.assistant_text)}\n\n${disclosure}`);
+  expect(String(proposed.response.assistant_text)).toBe(String(c2Base.P1.assistant_text));
 });
