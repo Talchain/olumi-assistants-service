@@ -129,12 +129,28 @@ export interface EligibleIntervention {
   readonly trigger: string;
 }
 export const ELIGIBLE_INTERVENTION_INSTRUCTION = 'Only name the scientific method in CURRENT MODEL STATE.eligible_intervention. If absent, give a direct grounded answer without a named method. Write next moves as plain action bullets of at most eight words each. Keep useful questions and user figures. Olumi supplies the Why? disclosure; do not write it.';
+/**
+ * ⛔ A ROW'S SCIENCE SENTENCE IS NOT ALWAYS TRUE OF EVERY VARIANT (SYS2 G1, served 11 Oct). RC-WIDEN's sentence ("Decisions
+ * framed with a single alternative ('whether or not') fail more often…") describes W2Z/W2 only; Paul's two-option hiring
+ * model got it under "Suggest drivers" (W7). Its other variants hold WITH real alternatives, so behind "Why?" they carry
+ * their own approved `why_now` (the policy's progressive_detail: "Why: one line on the variant's why_now").
+ */
+const ROW_SCIENCE_ONLY_FOR: Readonly<Partial<Record<SelectedRow['policy_id'], readonly string[]>>> = { 'RC-WIDEN': ['W2Z', 'W2'] };
+function whyOf(row: (typeof POLICY.rows)[number], variant: string | undefined): string | undefined {
+  const only = ROW_SCIENCE_ONLY_FOR[row.policy_id];
+  if (only === undefined || (variant !== undefined && only.includes(variant))) return row.science_basis.summary;
+  const own = typeof row.why_now === 'string' || variant === undefined ? undefined : (row.why_now as Readonly<Record<string, string>>)[variant];
+  return typeof own === 'string' && own.trim() !== '' ? own : undefined;
+}
 export function eligibleInterventionFor(wire: GuidanceWire | undefined): EligibleIntervention | undefined {
   const selected = wire?.slot1;
   if (selected === undefined) return undefined;
   const row = POLICY.rows.find(row => row.policy_id === selected.policy_id)!;
   const variant = 'variants' in row.trigger_predicate ? row.trigger_predicate.variants.find(v => v.id === selected.variant) : undefined;
+  // No true sentence for this variant → no named method (a direct grounded answer), never the row's untrue one.
+  const why = whyOf(row, selected.variant);
+  if (why === undefined) return undefined;
   return { policy_id: selected.policy_id, variant_id: selected.variant ?? null,
-    name: row.name, why: row.science_basis.summary,
+    name: row.name, why,
     trigger: variant?.when ?? row.trigger_predicate.all.join(' AND ') };
 }
