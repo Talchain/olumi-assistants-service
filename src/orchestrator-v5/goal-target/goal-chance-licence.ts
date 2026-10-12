@@ -53,7 +53,7 @@ import { resolveGoalDirection } from './goal-direction.js';
 import {
   BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, periodEndWords, statusQuoAssumptionWords, statusQuoMovedWords,
   statusQuoProjectionWords, statusQuoRowWords,
-  targetChanceWords, type GoalTargetBasis,
+  targetChanceWords, targetPhraseWords, type GoalTargetBasis,
 } from './goal-target-basis.js';
 import { goalTargetsBlockOf, readGoalTargetsBlock, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
 import {
@@ -232,7 +232,10 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
  * Science §(ab)(2) face words for a zero-spread option (93 @0ecd69e4, ruled (a): never " / month" on the face):
  *  · the goal's level projected from monthly rates (an accumulation carrier): "Meets £20,000 a month by month 12 if today’s
  *    rates hold." / "Falls short of £20,000 a month by month 12 if today’s rates hold.";
- *  · no carrier and no horizon: "Meets £20,000 a month if today’s figures hold." / "Falls short of … if today’s figures hold.";
+ *  · no carrier and no horizon (AIE 6129011591, D2/S12): "Meets the target: ‘MRR’ at least £20,000 a month, if today’s figures
+ *    hold." / "Falls short of the target: {validated target phrase}, if today’s figures hold." — the phrase is the chance
+ *    words' own (`targetPhraseWords`: frame, comparator, sign, and only an already licensed period), never target.value +
+ *    target.unit alone; where it cannot be said, no line (never a bare percentage level);
  *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
  */
 /**
@@ -315,18 +318,23 @@ function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: bo
 
 function zeroSpreadReasons(
   sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown, envelope: unknown,
+  target: { readonly phrase: string | undefined; readonly change: boolean },
 ): Record<string, GoalChanceZeroSpread> {
   const verdict = goalHorizonVerdict(graph, envelope);
   const rates = ordinaryTimingOf(graph, envelope).forecast;
   const months = heldGoalHorizonMonths(goal);
   // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
   const figure = sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
+  const phrase = target.phrase?.replace(/ \/ (day|week|month|quarter|year)\b/g, ' a $1');
   const out: Record<string, GoalChanceZeroSpread> = {};
   for (const [id, side] of Object.entries(sides)) {
-    const tail = rates ? `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.` : ' if today’s figures hold.';
+    const tail = `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.`;
+    // A change target is never said as its bare figure (a +10-point change is not "10%"): on rates it has no line.
     const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine()
-      : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`;
-    out[id] = { reason: 'zero_spread', side, line };
+      : rates ? (target.change ? undefined : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`)
+        : phrase === undefined ? undefined
+          : `${side === 'meets' ? 'Meets the target' : 'Falls short of the target'}: ${phrase}, if today’s figures hold.`;
+    if (line !== undefined) out[id] = { reason: 'zero_spread', side, line };
   }
   return out;
 }
@@ -550,7 +558,13 @@ export function goalChanceLicenceOf(
   // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
   // reference: withheld with that reason, never relabelled.
   const withheldReasons: Record<string, GoalChanceWithheldReason> = {
-    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope) : {}),
+    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope, {
+      change: changeFrame !== undefined,
+      // AIE 6129011591: the validated target, as the chance words say it; only a period they already license (ruling 12).
+      phrase: goalLabel === undefined ? undefined : targetPhraseWords({ label: goalLabel, frame: changeFrame ?? 'level', comparator: held,
+        value: target.value, unit: target.unit, quantityFrame: readingFrame,
+        ...(basis !== undefined && basis.effects_at_period_end ? { basis } : {}) }),
+    }) : {}),
     ...(sqReading === 'moved' && statusQuoId !== undefined && withheld.includes(statusQuoId) && goalLabel !== undefined
       ? { [statusQuoId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords([goalLabel]) } } : {}),
   };
