@@ -915,7 +915,8 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "unless it still equals the node's `goal_threshold_raw` exactly (with `quantity_frame` / `target_frame`), so an " +
       "edited target can never be read through an old basis. Its unit and attestation are therefore `goal_threshold_raw`'s " +
       "(`goal_threshold_unit`, `threshold_source`) by equality; nothing reads it as a number. No producer may write it " +
-      "(field-safety CEE-owned roots), and it is outside the analysis hash's node vocabulary (graph-hash.ts).",
+      "(field-safety CEE-owned roots). It enters the analysis hash only inside the whole well-formed basis (graph-hash.ts " +
+      "`projectNode`, Batch C gap 2), so a basis change stales a stored Run; absent, every hash is unchanged.",
   },
   {
     id: "scope-ambiguous:cee.NodeV3::goal_target_basis.period_months",
@@ -927,8 +928,8 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "it is always Olumi's reading of the brief, never presented as the user's. Its one writer refuses it when it " +
       "disagrees with the drafted deadline ('period_conflict'), and the horizon verdict licenses a chance on it only " +
       "when it equals the held months ('basis_at_h'). Read only for the licence's words and that verdict; no producer may " +
-      "write it (field-safety CEE-owned); outside the analysis hash. ⚠ A basis-only change would therefore not stale a " +
-      "result — today the draft door is its only writer and rewrites the whole goal; an edit door (Batch B) must re-run.",
+      "write it (field-safety CEE-owned). It enters the analysis hash inside the whole well-formed basis, only when " +
+      "present (graph-hash.ts `projectNode`, Batch C gap 2): a basis-only change stales a stored Run.",
   },
 ];
 
