@@ -192,12 +192,13 @@ const HANDLER_SRC = readFileSync(HANDLER_PATH, 'utf8');
  * from its source. DERIVED, so a slot added, removed or reordered in
  * `run-analysis.ts` changes this array without anyone remembering to.
  *
- * Scoped deliberately to the suffix run AFTER `${headline ?? template}` — that
- * head is the verdict, not a disclosure, and `compose-site-verdict-consumption.
- * drift.test.ts` already pins the whole line verbatim.
+ * Scoped deliberately to the suffix run AFTER `${template}` — that head is the
+ * locked template (since the producers re-scope, P1, 12 Oct, the summary never
+ * leads with a lead-ladder headline), not a disclosure, and
+ * `compose-site-verdict-consumption.drift.test.ts` already pins the whole line verbatim.
  */
 function extractHandlerAppendOrder(): readonly string[] {
-  const line = /const summary = `\$\{headline \?\? template\}((?:\$\{\w+\})*)`;/.exec(HANDLER_SRC);
+  const line = /const summary = `\$\{template\}((?:\$\{\w+\})*)`;/.exec(HANDLER_SRC);
   if (line === null) return [];
   return [...(line[1] as string).matchAll(/\$\{(\w+)\}/g)].map((m) => m[1] as string);
 }
@@ -216,6 +217,11 @@ const HANDLER_APPEND_ORDER = extractHandlerAppendOrder();
  * grammar — so it is stated, and then bounded on both sides.
  */
 const SLOT_FAMILY: ReadonlyArray<readonly [string, string, 'registered' | 'excluded' | 'exact']> = [
+  // ⭐ The lead ladder's leader-free tails (DL ruling on P1, 12 Oct; `buildAnalysisResultTails`), first, in TAIL_PATTERN's
+  // order: Olumi's legacy figures, the goal-frame sentence, the robustness sentence. None names a leader or states a share.
+  ['legacyFiguresTail', 'LEGACY_FIGURES_DISCLOSURE_RE_SRC', 'registered'],
+  ['goalFrameTail', 'GOAL_FRAME_WITHDRAWN_RE_SRC', 'registered'],
+  ['notRobustTail', 'NOT_ROBUST_RE_SRC', 'registered'],
   // ⭐ AIQ 5895590866 (2): Olumi's goal readings are admitted by EXACT EQUALITY with the forwarder's own rebuild
   // (`goalReadingTailOf`), never by a registered grammar, so they sit in neither the registry nor its exclusions.
   ['goalReadingDisclosure', 'buildGoalReadingDisclosure', 'exact'],

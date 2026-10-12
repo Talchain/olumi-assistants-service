@@ -39,6 +39,7 @@ import type {
 // rendered the runner-up gap as a magnitude; with those retired, the only
 // percentage this file may speak is an option's OWN win share.
 import { formatProbability } from '../../format/format-analysis-value.js';
+import { RUN_SHARE_QUALIFIER, runShareSupportingLabel } from '../../compose/run-share-label.js';
 import { edgeStrengthWords } from '../../format/edge-strength-words.js';
 import type { LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import {
@@ -247,6 +248,12 @@ export function composeRobustnessVerdict(
   rawRobustness: RawRobustnessSignals | null,
   mode: RobustnessVerdictMode,
   defaultedAssumptions: DefaultedAssumptionsSignal | null = null,
+  /**
+   * The win-share class (AIE #94 6133633297): `'label'` — the what_would_flip standing lines say the runner-up's share in
+   * the AIE's credit label; `'omit'` — the explain_results fallback, which supplies an ordinary result reply, says no share
+   * at all. The advice gate passes nothing and keeps its words.
+   */
+  opts: { readonly runShares?: 'label' | 'omit' } = {},
 ): RobustnessVerdict {
   const leading = projection.leading_option;
   const runner = projection.runner_up;
@@ -373,9 +380,18 @@ export function composeRobustnessVerdict(
     // voice: on a withheld turn the gate sees "supported by … runs" (`runs_supported`) and the withheld voice replaces
     // the reply wholesale, so "the next most runs" is said only where the leader is licensed.
     const hasRunnerP = typeof runnerP === 'number' && Number.isFinite(runnerP);
-    const runnerNextMost =
-      `In this model, ${quoteLabel(runner.label)} was supported by the next most runs${hasRunnerP ? ` (${formatProbability(runnerP)})` : ''}.`;
+    // ⭐ The win-share class (AIE #94 6133633297; DL producers re-scope, 12 Oct). `'label'`: the what_would_flip standing
+    // lines say the runner-up's share with the AIE's exact credit label, and that caller says the qualifier once after
+    // them. `'omit'`: the explain_results fallback supplies an ordinary result reply, so its clear and indeterminate arms,
+    // which existed only to state the runner-up's share, say nothing; its near-tie arm states no share and stays. Every
+    // other caller (the advice gate) keeps its words.
+    const runnerShareLabelLine = opts.runShares === 'label' && hasRunnerP
+      ? `${quoteLabel(runner.label)}: ${runShareSupportingLabel(formatProbability(runnerP))}`
+      : null;
+    const runnerNextMost = runnerShareLabelLine
+      ?? `In this model, ${quoteLabel(runner.label)} was supported by the next most runs${hasRunnerP ? ` (${formatProbability(runnerP)})` : ''}.`;
     const runnerStanding = hasRunnerP ? ` was supported by ${formatProbability(runnerP)} of runs` : ' came next';
+    const omitShares = opts.runShares === 'omit';
     if (marginCat === 'near_tie') {
       margin_clause =
         mode === 'explain'
@@ -384,13 +400,13 @@ export function composeRobustnessVerdict(
     } else if (marginCat === 'clear' && finiteMargin !== null) {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)}${runnerStanding}, so the two are clearly separated in this model.`
+          ? (omitShares ? null : `${quoteLabel(runner.label)}${runnerStanding}, so the two are clearly separated in this model.`)
           : runnerNextMost;
     } else {
       // indeterminate: no finite margin and not a near-tie.
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)}${runnerStanding}.`
+          ? (omitShares ? null : `${quoteLabel(runner.label)}${runnerStanding}.`)
           : runnerNextMost;
     }
   }
@@ -537,7 +553,6 @@ export function composeExplainResultsFallback(
     return 'The analysis has finished, but the most-supported option could not be summarised from the available data. Would you like to explore what would change this result?';
   }
 
-  const leading = projection.leading_option;
   const sentences: string[] = [];
 
   // The margin verdict and the stability verdict are ONE claim about result
@@ -552,6 +567,7 @@ export function composeExplainResultsFallback(
     rawRobustness ?? null,
     'explain',
     defaultedAssumptions ?? null,
+    { runShares: 'omit' },
   );
 
   // Staleness caveat is no longer composed here. The handler's
@@ -561,12 +577,10 @@ export function composeExplainResultsFallback(
   // the caveat sentence avoids duplication when prefix + composer both
   // ran, and keeps prose ordering decisions in one place.
 
-  sentences.push(
-    // Principle audit (5 Oct): a finding about this model in the Run headline's verb, never "performs best".
-    // The lead ladder's run-share words (Science d5 #87 6008589328), as the runner-up line beside it says them.
-    `In this model, ${leading.label} was supported by ${formatProbability(leading.probability)} of runs.`,
-  );
-
+  // ⭐ SHARE WORDING AT THE PRODUCERS (DL re-scope P5 as reversed by the AIE, #94 6133633297, 12 Oct): this fallback
+  // supplies an ordinary result reply, so it states NO share of runs and names no leader from one ("In this model, X was
+  // supported by N% of runs." is gone, with no replacement words). Only the what_would_flip standing lines carry the
+  // credit label. The near-tie clause, the drivers, the stability verdict and the disclosures keep their words.
   if (verdict.margin_clause !== null) {
     sentences.push(verdict.margin_clause);
   }
@@ -665,16 +679,17 @@ export function composeWhatWouldFlipFallback(
   // near-tie (including the raw `near_tie.is_tie` override) OR on how the
   // margin verdict and stability verdict resolve together. `flip` mode selects
   // the "what could change it" voice.
-  const verdict = composeRobustnessVerdict(projection, raw, 'flip', defaultedAssumptions ?? null);
+  const verdict = composeRobustnessVerdict(projection, raw, 'flip', defaultedAssumptions ?? null, { runShares: 'label' });
 
   // Staleness caveat is no longer composed here — see the parallel note in
   // composeExplainResultsFallback. The handler's applyStalenessPrefix
   // helper prepends it to the final assistant_text when staleness_reason
   // is set on the projection.
 
-  sentences.push(
-    `In this model, ${quoteLabel(leading.label)} was supported by ${formatProbability(leading.probability)} of runs.`,
-  );
+  // ⭐ The win-share class (AIE #94 6131687656): a tipping-point answer keeps the leading option's share as supporting
+  // reasoning, in the AIE's exact label after the option's name (the per-option "‘X’: …" form; never a dash in prose), with
+  // the fixed qualifier once after the share lines (never the goal chance).
+  sentences.push(`${quoteLabel(leading.label)}: ${runShareSupportingLabel(formatProbability(leading.probability))}`);
 
   // Margin sentence (near-tie "effectively tied" / clear "would need to close"
   // / neutral contender) — routed through the shared verdict so a near-zero gap
@@ -682,6 +697,7 @@ export function composeWhatWouldFlipFallback(
   if (verdict.margin_clause !== null) {
     sentences.push(verdict.margin_clause);
   }
+  sentences.push(RUN_SHARE_QUALIFIER);
 
   // DGAI #341: only materially-influential drivers may carry the "would
   // shift this result the most" claim. The live defect paired that claim

@@ -170,10 +170,11 @@ describe('a capped admission redirects the first-run nudge and leaves the rerun 
     expect(firstRun?.coaching_text).not.toContain('the leading option');
     expect(firstRun?.coaching_text).not.toContain('the most-supported option');
 
-    // GENUINE RE-RUN — the completed comparison survives, leader named.
+    // GENUINE RE-RUN — the re-run arm fires. Since the producers re-scope (P4, DL 12 Oct) its unchanged arm names no
+    // leader and says nothing, on every cap.
     expect(genuineRerun?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
-    expect(genuineRerun?.coaching_text).toContain('The result is unchanged');
-    expect(genuineRerun?.coaching_text).toContain(LEADING_LABEL);
+    expect(genuineRerun?.coaching_text).toBe('');
+    expect(genuineRerun?.coaching_text).not.toContain(LEADING_LABEL);
 
     // …and the two are genuinely different strings on the same input pair. A
     // future edit that collapses the arms makes this line fail even if both
@@ -190,9 +191,10 @@ describe('a capped admission redirects the first-run nudge and leaves the rerun 
 
     expect(firstRun?.coaching_text).toBe(COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}));
     expect(firstRun?.coaching_text).not.toBe(FIRST_ANALYSIS_COMPLETE_PROVISIONAL_TEXT);
-    // The standard first-run copy DOES point at the leading option — which is
-    // precisely what the cap redirects, and why the two copies exist.
-    expect(firstRun?.coaching_text).toContain('the most-supported option');
+    // Since the producers re-scope (P4, DL 12 Oct) the standard first-run copy no
+    // longer points at a leader either; the two copies stay distinct (above).
+    expect(firstRun?.coaching_text).not.toContain('the most-supported option');
+    expect(firstRun?.coaching_text).not.toContain(LEADING_LABEL);
 
     // The rerun arm is byte-identical across the cap: it never read it.
     expect(genuineRerun?.coaching_text).toBe(runBranch([USER_RUN_PRIOR()], false)?.coaching_text);
@@ -248,13 +250,15 @@ describe('the phantom prior is what exposed the rerun arm, and the classifier is
     expect(signal?.coaching_text).not.toContain(LEADING_LABEL);
   });
 
-  it('DISCRIMINATING TWIN: the identical fixture with a USER prior still names the leader under the same cap', () => {
+  it('DISCRIMINATING TWIN: the identical fixture with a USER prior still takes the re-run arm under the same cap', () => {
     // The pair is what binds the previous case to the PROVENANCE of the prior
     // rather than to the cap. One fixture field differs; the outcome inverts.
-    // Neither case alone shows that (CLAUDE.md trap #19).
+    // Neither case alone shows that (CLAUDE.md trap #19). The re-run arm names
+    // no leader since the producers re-scope (P4), so the inversion is the signal.
     const signal = runBranch([USER_RUN_PRIOR()], false);
     expect(signal?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
-    expect(signal?.coaching_text).toContain(LEADING_LABEL);
+    expect(signal?.coaching_text).not.toBe(FIRST_ANALYSIS_COMPLETE_PROVISIONAL_TEXT);
+    expect(signal?.coaching_text).not.toContain(LEADING_LABEL);
   });
 
   it('an uncapped phantom prior is ALSO a first run — the classifier fix is not conditional on the cap', () => {

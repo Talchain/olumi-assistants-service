@@ -1,5 +1,4 @@
 import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
-import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
 import { goalOrderedLinks } from '../../admission/target-testability.js';
 /**
@@ -204,7 +203,7 @@ import {
   partitionScaffoldedByAnalysisPresence,
 } from '../../coaching/scaffold-disclosure.js';
 import {
-  buildAnalysisResultHeadline,
+  buildAnalysisResultTails,
   describeAnalysisHeadline,
   describeGoalFrame,
 } from '../../coaching/analysis-result-headline.js';
@@ -2684,8 +2683,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis: leader withheld — its sign on a multiplied goal is not proven',
       );
     }
-    const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional
-      ? null : buildAnalysisResultHeadline(headlineInput);
+    // ⭐ SHARE WORDING AT THE PRODUCERS (DL re-scope, 12 Oct, after #2976's check; Paul's #87; AIE 6131687656). The Run's
+    // summary, which is also the V5 Run reply on both Run exits, no longer composes the lead ladder
+    // (`buildAnalysisResultHeadline`): every case of it states a share of runs or names a leader ("{label} currently
+    // leads."), and a share of runs is never the Run's headline. Nothing else in a ladder sentence stands alone, so the
+    // existing locked template leads (true: this is a Run), followed by the disclosures as before. A goal-chance line in the
+    // summary is the follow-on with the AIE's copy. `nonlinearIdentityWithhold` and `keptOlumiProvisional` keep their
+    // other readers below.
+    const headline: string | null = null;
     // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
     // objective-contradiction tail below must not say "against your goal" where
     // this headline has withdrawn it, nor assert attainment while the frame is
@@ -3024,14 +3029,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ? (response as Record<string, unknown>).identity_evaluations as unknown[] : undefined;
     const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id, runIdentityEvaluations);
     const identicalArmsDisclosure = buildIdenticalArmsDisclosure(identicalArms);
-    const disclosedHeadline = headline !== null
-      ? appendLegacyFiguresAfterLeaderSentence(headline, legacyFiguresDisclosure) : null;
-    const composedSummary = (() => {
-      const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
-      return disclosedHeadline !== null && headline !== null
-        ? disclosedHeadline + summary.slice(headline.length) : summary;
-    })();
-    const summary = composedSummary;
+    // ⭐ The lead ladder's leader-free tails (DL ruling on P1, 12 Oct): Olumi's legacy-figures provenance, the goal-frame
+    // sentence and the robustness sentence, in the ladder's own order and words, right after the template. Withheld Runs
+    // keep them too.
+    const { legacyFiguresTail, goalFrameTail, notRobustTail } = buildAnalysisResultTails(headlineInput, legacyFiguresDisclosure);
+    const summary = `${template}${legacyFiguresTail}${goalFrameTail}${notRobustTail}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases

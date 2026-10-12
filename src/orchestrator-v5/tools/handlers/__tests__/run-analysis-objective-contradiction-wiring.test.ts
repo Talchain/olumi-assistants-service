@@ -38,6 +38,7 @@ import {
   readObjectiveOptionViews,
 } from '../../../coaching/objective-contradiction.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
+import { storedObjectiveContradictionDisclosure } from '../../../coaching/__tests__/support/stored-objective-contradiction.support.js';
 import { RUN_ANALYSIS_ASSISTANT_TEMPLATES } from '../run-analysis.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -145,7 +146,8 @@ describe('wiring — the run_analysis handler consumes the objective-contradicti
     // and the user would silently receive the locked template with no error
     // anywhere in the system.
     expect(source).toContain(
-      '${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}',
+      // Producers re-scope P1 (DL, 12 Oct): the summary leads with the locked template, never a lead-ladder headline.
+      '${template}${legacyFiguresTail}${goalFrameTail}${notRobustTail}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}',
     );
   });
 
@@ -167,9 +169,29 @@ describe('wiring — the run_analysis handler consumes the objective-contradicti
 // 2. IT REACHES THE WIRE — survives the REAL egress allowlist
 // ============================================================================
 
+// ⭐ PRODUCERS RE-SCOPE P2 (DL, 12 Oct): a NEW Run composes neither arm, so these rows now pin the STORED shape — the
+// tail a pre-fix summary still carries (a stated residual until its scenario re-runs) — built exactly as the pre-P2
+// composer built it, and its admission by the real allowlist. The first row pins that a new Run composes none.
 describe('egress — the sentence actually reaches the user', () => {
+  it('⭐ P2: a NEW Run composes neither arm on the inputs that built each stored tail', () => {
+    const leverAimGraph = {
+      ...PRICING_GRAPH,
+      nodes: (PRICING_GRAPH.nodes as Array<Record<string, unknown>>).map((n) =>
+        n.id === 'goal_mrr' ? { ...n, label: 'Increase our subscription price' } : n,
+      ),
+    };
+    for (const [graph, records] of [
+      [PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY],
+      [leverAimGraph, RECORDS_NO_GOAL_PROBABILITY],
+      [leverAimGraph, RECORDS_WITH_GOAL_PROBABILITY],
+    ] as const) {
+      expect(storedObjectiveContradictionDisclosure(graph, records, true, 'goal_framed')).not.toBe('');
+      expect(composeObjectiveContradictionDisclosure(graph, records, true, 'goal_framed')).toBe('');
+    }
+  });
+
   it('⭐ ARM B on the banked pricing shape: composed, and ADMITTED by the real allowlist', () => {
-    const disclosure = composeObjectiveContradictionDisclosure(
+    const disclosure = storedObjectiveContradictionDisclosure(
       PRICING_GRAPH,
       RECORDS_WITH_GOAL_PROBABILITY,
       true,
@@ -195,7 +217,7 @@ describe('egress — the sentence actually reaches the user', () => {
         n.id === 'goal_mrr' ? { ...n, label: 'Increase our subscription price' } : n,
       ),
     };
-    const disclosure = composeObjectiveContradictionDisclosure(
+    const disclosure = storedObjectiveContradictionDisclosure(
       leverAimGraph,
       RECORDS_NO_GOAL_PROBABILITY,
       true,
@@ -218,7 +240,7 @@ describe('egress — the sentence actually reaches the user', () => {
    * tail — so the slot is genuinely load-bearing.
    */
   it('⭐ THE PRODUCTION SHAPE: a real HEADLINE + the tail is admitted (kills the TAIL_PATTERN mutant)', () => {
-    const disclosure = composeObjectiveContradictionDisclosure(
+    const disclosure = storedObjectiveContradictionDisclosure(
       PRICING_GRAPH,
       RECORDS_WITH_GOAL_PROBABILITY,
       true,
@@ -259,7 +281,7 @@ describe('egress — the sentence actually reaches the user', () => {
   it('⭐ WORST CASE: a long headline + max-length labels still fits the budget (kills the budget mutant)', () => {
     const longLabelA = 'Hold at £49 Per Seat Across All Enterprise And Mid-Market Tiers';
     const longLabelB = 'Raise to £59 Per Seat With Ninety-Day Grandfathering For All';
-    const disclosure = composeObjectiveContradictionDisclosure(
+    const disclosure = storedObjectiveContradictionDisclosure(
       PRICING_GRAPH,
       [
         { option_id: 'opt_hold', option_label: longLabelA.slice(0, 60), win_probability: 0.7067, probability_of_goal: 0 },
@@ -296,7 +318,7 @@ describe('egress — the sentence actually reaches the user', () => {
     );
     expect(options.some((o) => o.probability_of_goal !== undefined)).toBe(true);
 
-    const disclosure = composeObjectiveContradictionDisclosure(
+    const disclosure = storedObjectiveContradictionDisclosure(
       leverAimGraph,
       RECORDS_WITH_GOAL_PROBABILITY,
       true,
@@ -359,7 +381,8 @@ describe('silence — a run with nothing honest to add changes the summary by ZE
    * unusable.
    */
   it('⭐ F3: template + tail is REJECTED, while headline + the SAME tail is admitted', () => {
-    const disclosure = composeObjectiveContradictionDisclosure(
+    // The stored shape (P2: a new Run composes none).
+    const disclosure = storedObjectiveContradictionDisclosure(
       PRICING_GRAPH,
       RECORDS_WITH_GOAL_PROBABILITY,
       true,
@@ -373,13 +396,18 @@ describe('silence — a run with nothing honest to add changes the summary by ZE
   });
 
   it('a WITHHELD headline ships nothing, even when a contradiction exists', () => {
-    // Positive control: there IS something to suppress.
+    // Positive control: there IS something to suppress (the stored shape; P2: a new Run composes none at all).
     expect(
-      composeObjectiveContradictionDisclosure(PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY, true, 'goal_framed'),
+      storedObjectiveContradictionDisclosure(PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY, true, 'goal_framed'),
     ).not.toBe('');
     expect(
-      composeObjectiveContradictionDisclosure(PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY, false, 'goal_framed'),
+      storedObjectiveContradictionDisclosure(PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY, false, 'goal_framed'),
     ).toBe('');
+    for (const named of [true, false]) {
+      expect(
+        composeObjectiveContradictionDisclosure(PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY, named, 'goal_framed'),
+      ).toBe('');
+    }
   });
 
   it('no analysis, one option, or a junk graph ⇒ silence, never a throw', () => {

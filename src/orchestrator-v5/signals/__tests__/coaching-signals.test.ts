@@ -390,7 +390,9 @@ describe('detectCoachingSignal', () => {
       expect(detection?.coaching_text.length).toBeGreaterThan(0);
     });
 
-    it('names the unchanged leader when the delta shows no movement', () => {
+    // ⭐ SHARE WORDING AT THE PRODUCERS (DL re-scope P4, 12 Oct): the Run reply's coaching paragraph names no leader, so
+    // the arms that said "X still leads" / "X scored highest" now say nothing about the leader. The signal still fires.
+    it('an unchanged leader is not named: the signal fires and says nothing', () => {
       const env = runEnvelope({
         options: [
           { id: 'a', label: 'Offshore', win: 0.62 },
@@ -405,11 +407,10 @@ describe('detectCoachingSignal', () => {
         priorFacts: [priorRunAnalysisFactWithEnvelope(env)],
       });
       expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
-      expect(detection?.coaching_text).toContain('unchanged');
-      expect(detection?.coaching_text).toContain('Offshore still leads');
+      expect(detection?.coaching_text).toBe('');
     });
 
-    it('names the delta when the leading option changed', () => {
+    it('says the outcome changed when the leading option changed, naming neither option', () => {
       const priorEnv = runEnvelope({
         options: [
           { id: 'a', label: 'Offshore', win: 0.62 },
@@ -430,8 +431,8 @@ describe('detectCoachingSignal', () => {
         priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
       });
       expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
-      expect(detection?.coaching_text).toContain('Offshore scored highest before');
-      expect(detection?.coaching_text).toContain('Onshore scores highest now');
+      expect(detection?.coaching_text).toBe('This re-run changed the outcome. Ask what changed if you want the detail.');
+      expect(detection?.coaching_text).not.toMatch(/Offshore|Onshore|scor(?:ed|es) highest/);
     });
 
     // ── F2 (same defect class as the comparison pair): the "previous run"
@@ -464,8 +465,10 @@ describe('detectCoachingSignal', () => {
         ],
       });
       expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
-      expect(detection?.coaching_text).toContain('Onshore still leads');
-      expect(detection?.coaching_text).not.toContain('Offshore scored highest before');
+      // Against the NEWEST prior the leader is unchanged, so the arm says nothing; against the array's first it would
+      // have said the outcome changed.
+      expect(detection?.coaching_text).toBe('');
+      expect(detection?.coaching_text).not.toContain('changed the outcome');
     });
 
     // ── F3: a rename is not an outcome change.
@@ -491,7 +494,8 @@ describe('detectCoachingSignal', () => {
       });
       expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
       expect(detection?.coaching_text).not.toContain('scored highest before');
-      expect(detection?.coaching_text).toContain('Offshore (EU) still leads');
+      // Bound by id, the renamed option is the same leader: the unchanged arm, which says nothing (never "changed").
+      expect(detection?.coaching_text).toBe('');
     });
 
     // ⭐ A1 — the rerun composer has the same affirmative-continuity arms as
@@ -527,31 +531,40 @@ describe('detectCoachingSignal', () => {
       expect(text).not.toContain('scored highest before');
       expect(text).not.toContain('widened');
       expect(text).not.toContain('narrowed');
-      // What IS said: this run's leader, and the honest limit.
-      expect(text).toContain('Onshore leads after this re-run');
-      expect(text).toContain('cannot line up');
+      expect(text).not.toContain('changed the outcome');
+      // What IS said: the honest limit only. This run's leader is no longer named (producers re-scope P4).
+      expect(text).toBe('I cannot line up the earlier result with this one, so I have not compared the two.');
+      expect(text).not.toMatch(/Onshore|Offshore|\blead/);
       // Copy safety, same as the sibling arms.
       expect(text).not.toContain('—');
       expect(text).not.toMatch(/0\.\d/);
     });
 
-    it('POSITIVE CONTROL: with ids on both runs the continuity copy still fires', () => {
+    it('POSITIVE CONTROL: with ids on both runs a comparison is still made', () => {
       // Without this, the absence assertions above would pass against a
-      // composer that never makes a continuity claim at all.
-      const env = runEnvelope({
+      // composer that never makes a comparison at all. The unchanged arm says
+      // nothing since the producers re-scope (P4), so the control is the
+      // changed-leader arm on the same id-bound pair shape.
+      const priorEnv = runEnvelope({
         options: [
           { id: 'a', label: 'Offshore', win: 0.62 },
           { id: 'b', label: 'Onshore', win: 0.38 },
         ],
       });
+      const currentEnv = runEnvelope({
+        options: [
+          { id: 'b', label: 'Onshore', win: 0.70 },
+          { id: 'a', label: 'Offshore', win: 0.30 },
+        ],
+      });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
         mayNameLeadingOption: true,
-        outcome: runAnalysisOutcomeWithEnvelope(env),
+        outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
         contextPack: makeContextPack(),
-        priorFacts: [priorRunAnalysisFactWithEnvelope(env)],
+        priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
       });
-      expect(detection?.coaching_text).toContain('Offshore still leads');
+      expect(detection?.coaching_text).toBe('This re-run changed the outcome. Ask what changed if you want the detail.');
     });
 
     it('fires with a NULL contextPack (chip-click path assembles no pack)', () => {

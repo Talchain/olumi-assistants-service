@@ -285,8 +285,23 @@ describe('PRODUCER CONTROL — no post-analysis surface states the lead as a gap
   // ==========================================================================
   // PRECONDITION (b) — the comparison is still being made in the prose
   // ==========================================================================
+  // ⭐ THE ONE ROWED BEHAVIOUR CHANGE (producers re-scope P5 as reversed by the AIE, #94 6133633297, 12 Oct): the
+  // explain_results fallback supplies an ordinary result reply, so its clear arm, which existed to state the runner-up's
+  // share, says nothing, and the runner-up is no longer named there. Rowed here rather than deleted: the site must say
+  // no share and no gap, and every OTHER site must still name the runner-up.
+  const EXPLAIN_FALLBACK = 'composeRobustnessVerdict/explain (composeExplainResultsFallback)';
+  it('ROW (P5): the explain_results fallback names no runner-up and states no share of runs or gap', () => {
+    const explain = samples.filter((s) => s.producer === EXPLAIN_FALLBACK);
+    expect(explain.length).toBe(BANDS.length);
+    for (const s of explain) {
+      expect(s.text).not.toContain(RUNNER_LABEL);
+      expect(s.text).not.toMatch(/was supported by|of runs\b|Share of model runs/);
+    }
+  });
+
   it('PRECONDITION: every site still names the runner-up by its injected label', () => {
     const silent = samples
+      .filter((s) => s.producer !== EXPLAIN_FALLBACK)
       .filter((s) => !s.text.includes(RUNNER_LABEL))
       .map((s) => `${s.producer} @ band=${String(s.band)}`);
     expect(

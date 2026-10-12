@@ -777,6 +777,14 @@ export const REPLY_LENGTH_INSTRUCTION =
   'Length: your words are only part of what the user reads, because Olumi adds its own status, disclosure and receipt lines after them. Stay under 110 words on the turn that builds the model from a brief, under 100 when you explain an analysis result, and under 90 otherwise: these are limits, not targets. Ask at most one question, as your last sentence. On a turn that builds the model or runs the analysis, never ask for the goal\'s target or name it as the next step: Olumi asks for it after your words. To fit, cut restated model contents, process narration and extra questions first; never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure.';
 
 /**
+ * ⭐⭐ REPLACED WHOLE BY THE AIE'S EXACT TEXT (#94 6133633297, 12 Oct; DL producers re-scope). The positive leader
+ * command below ("name it only as 'In this model, N% of runs supported X'" and its last instruction to give the run share
+ * after the goal chances) is gone, not stacked with a conflicting ban: a Run result reply leads with the selected Run's
+ * licensed goal-chance or withholding lines and states no share of model runs and no leader from one; only dedicated
+ * comparative reasoning may report a permitted share, in the approved credit label (`compose/run-share-label.ts`). The
+ * value is copied byte for byte from the post; it reaches both served aliases through AGENT_INSTRUCTIONS. The history
+ * below records what the replaced value said and why, and no longer describes the words.
+ *
  * ⭐ AN OPTION IS NAMED ONLY IN THIS MODEL, AND NEVER "FRAGILE" (WORDING BATCH; DL 0df0e1 lease, 5 Oct ~15:0xZ; Acceptance
  * #87 5996853005 on CEE 0b37e2d). #2588 made Olumi's own Run lines model-relative, but the words the user reads after a Run
  * are this lane's narration, and it said "…scoring highest in about 73% of simulations" and "The finding is fragile…".
@@ -795,16 +803,15 @@ export const REPLY_LENGTH_INSTRUCTION =
  * without win_probability), so with no share the rule makes no claim about how runs fell at all.
  */
 export const MODEL_RELATIVE_NAMING_INSTRUCTION =
-  'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d, '
-  + 'with X its display label and N the share of model runs credited to it, taken from the result; N is never its chance of reaching the goal. '
-  + 'That form holds whichever way the goal points and when runs tie, so use it rather than saying the option scored highest or came out lowest. '
-  + 'When you say what N means, say it as what it is: \u201cThat share is the part of this model\u2019s runs that supported it, not its chance of meeting your target.\u201d '
-  + 'Never write recommend or recommendation in any form, not even to deny it. '
-  + 'If the result gives no such share, make no claim about how runs fell: say what the result rests on instead. Keep any provisional or limit condition the rules above require in that same sentence. '
-  + 'Never name an option as leading, ahead, favoured, on top or winning in other words, and never without \u201cin this model\u201d. '
-  + 'Never call a result, finding, option or link \u201cfragile\u201d: say what the result rests on instead, in the result\u2019s own terms, '
-  + 'such as the assumption its decision_sensitivity names when measured, and whose figure it is. '
-  + "When the result gives options' chances of meeting the goal, lead with those chances as the rules below allow, and give any run share after them as supporting detail; never open with the share.";
+  'Run result replies: lead with the selected Run\'s licensed goal-chance or withholding lines. '
+  + 'Retain their target scope, unscored conditions and provisional, timing and source qualifications. '
+  + 'Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. '
+  + 'Never substitute a relative ranking for an unavailable goal chance. '
+  + 'The separate goal-chance licence governs any comparison of goal chances. '
+  + 'In dedicated comparative reasoning only, you may report a permitted share recorded for the selected Run, using the approved credit label and qualifier; never turn it into a recommendation or the chance of the whole goal. '
+  + 'Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available. '
+  + 'Never write recommend or recommendation, including negated forms. '
+  + 'Never call a result, option or link fragile.';
 
 /**
  * ⭐ D3 step 2, DL 0df0e1 ruling C (6 Oct): step 2 puts each option's licensed chance of meeting the goal in front of the

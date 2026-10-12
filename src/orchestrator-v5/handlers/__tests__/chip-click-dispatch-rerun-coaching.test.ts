@@ -108,6 +108,7 @@ vi.mock('../../tools/registry.js', async () => {
 });
 
 import { dispatchChipClickRunAnalysis } from '../chip-click-dispatch.js';
+import { COACHING_TEXT } from '../../signals/coaching-signals.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -254,11 +255,12 @@ describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () 
 
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
     expect(out.analysisReady?.analysis_admission?.permitted_analysis_mode).toBe('comparative_leader');
-    expect(out.response.assistant_text).toContain('first analysis');
-    expect(out.response.assistant_text).toContain('the most-supported option');
+    // Bound to the production copy. Since the producers re-scope (P4, DL 12 Oct) it names no leader.
+    expect(out.response.assistant_text).toContain(COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}));
+    expect(out.response.assistant_text).not.toContain('the most-supported option');
   });
 
-  it('chip RERUN: RERUN_ANALYSIS_COMPLETE text joins assistant_text and names the unchanged leader', async () => {
+  it('chip RERUN: the RERUN_ANALYSIS_COMPLETE arm runs and names no leader', async () => {
     buildTurnContextStub.priorFacts = [priorRunFact()];
 
     const out = await dispatchChipClickRunAnalysis({
@@ -268,9 +270,10 @@ describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () 
 
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
     expect(out.analysisReady?.analysis_admission?.permitted_analysis_mode).toBe('comparative_leader');
-    // Same envelope both runs → unchanged leader copy from compareRuns.
-    expect(out.response.assistant_text).toContain('unchanged');
-    expect(out.response.assistant_text).toContain('Launch now still leads');
+    // Same envelope both runs → the unchanged arm, which since the producers re-scope (P4, DL 12 Oct) names no leader
+    // and says nothing. The next case proves the re-run signal fired on this path.
+    expect(out.response.assistant_text).not.toContain('still leads');
+    expect(out.response.assistant_text).not.toContain('unchanged');
     // And the rerun turn must NOT claim to be the first analysis.
     expect(out.response.assistant_text).not.toContain('first analysis');
   });
@@ -325,10 +328,9 @@ describe('chip-click admission caps designation, not the completed comparison', 
     expect(out.mayNameLeadingOption).toBe(true); // distinct result entitlement
     expect(out.response.assistant_text).toContain('62% of runs of this model');
     if (hasPrior) {
-      // The admission must not erase a real rerun delta or its explanation.
-      // This same-envelope case is the positive twin to the first-run nudge.
-      expect(out.response.assistant_text).toContain('unchanged');
-      expect(out.response.assistant_text).toContain('Launch now still leads');
+      // The admission must not erase a real rerun comparison: the re-run signal still fires (asserted on the committed
+      // fact below). Its same-envelope (unchanged) arm names no leader since the producers re-scope (P4, DL 12 Oct).
+      expect(out.response.assistant_text).not.toContain('still leads');
       expect(out.response.assistant_text).not.toContain('first analysis');
     } else {
       expect(out.response.assistant_text).toContain('Explore the comparison');
@@ -346,6 +348,9 @@ describe('chip-click admission caps designation, not the completed comparison', 
     expect(committed![1]).toMatchObject({ handler_facts: [expect.objectContaining({
       result: expect.objectContaining({ scenario_id: SCENARIO_ID, leading_option_id: 'opt_launch' }),
     })] });
+    expect((committed![1] as { handler_facts: Array<{ result: { enrichment?: Record<string, unknown> } }> })
+      .handler_facts[0]!.result.enrichment?.coaching_signal_id)
+      .toBe(hasPrior ? 'RERUN_ANALYSIS_COMPLETE' : 'FIRST_ANALYSIS_COMPLETE');
   });
 
   it('unavailable admission preserves the existing permitting first-run behaviour', async () => {
@@ -357,7 +362,7 @@ describe('chip-click admission caps designation, not the completed comparison', 
     });
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
     expect(out.analysisReady).toBeUndefined();
-    expect(out.response.assistant_text).toContain('the most-supported option');
+    expect(out.response.assistant_text).toContain(COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}));
     expect(out.response.assistant_text).toContain('62% of runs of this model');
   });
 

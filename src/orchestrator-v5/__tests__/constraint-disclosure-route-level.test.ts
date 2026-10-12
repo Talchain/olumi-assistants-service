@@ -43,6 +43,7 @@ import type { ScenarioReader } from '../tools/handlers/run-analysis.js';
 // instrument so the route test and the guard cannot drift apart.
 import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
 import { ANY_LEAD_CLAUSE_RE } from './support/lead-clause.support.js';
+import { COACHING_TEXT } from '../signals/coaching-signals.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
@@ -877,25 +878,33 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
     // emitted no coaching at all. These assert the copy IS present on
     // `evaluated_feasible`, so a fix that simply deleted all coaching fails.
 
+    // ⭐ SHARE WORDING AT THE PRODUCERS (DL re-scope, 12 Oct): the Run reply's coaching paragraph names no leader on ANY
+    // verdict, so these controls now pin the adopted copy by identity, and the re-run branch is proved reached by its own
+    // signal rather than by an option name it no longer says. The withholding negatives below are unchanged.
     it('evaluated_feasible, FIRST run: the coaching copy IS still present', () => {
       plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
-        expect(turn.coaching).toMatch(/explore the most-supported option/i);
+        expect(turn.coaching).toBe(COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}));
       });
     });
 
-    it('evaluated_feasible, RE-RUN: the coaching copy names the option', () => {
+    it('evaluated_feasible, RE-RUN: the re-run signal fires and its copy names no option', () => {
       // Also proves the re-run branch is genuinely reached — the first-run copy
-      // is asserted ABSENT, so a fixture that silently fell back to the
-      // first-run signal fails here instead of passing the withhold assertions
-      // below for the wrong reason.
+      // is asserted ABSENT and the re-run signal is asserted FIRED, so a fixture
+      // that silently fell back to the first-run signal fails here instead of
+      // passing the withhold assertions below for the wrong reason.
+      const fired: string[] = [];
+      setTestSink((name, data) => {
+        if (name === 'v5.coaching.signal_fired') fired.push(String(data.signal_id));
+      });
       plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
       seedPriorRun();
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
-        expect(turn.coaching).not.toMatch(/your first analysis is ready/i);
-        expect(turn.coaching).toContain('Hire Marketing Manager');
+        expect(fired).toEqual(['RERUN_ANALYSIS_COMPLETE']);
+        expect(turn.assistantText).not.toMatch(/your first analysis is ready/i);
+        expect(turn.assistantText).not.toContain('Hire Marketing Manager');
       });
     });
   });

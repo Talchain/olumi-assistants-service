@@ -192,7 +192,12 @@ describe('PRODUCER CONTROL — the enforcement scanner sees the repo\'s own temp
       return (m ? m[0] : text).trim();
     };
 
+    // ⭐ Producers re-scope P5 as reversed by the AIE (#94 6133633297, 12 Oct): the explain_results fallback no longer
+    // opens with a leader sentence (it states no share and names no leader from one), so only the what_would_flip
+    // fallback's first sentence (its standing line, in the credit label) is a leader claim to isolate. The explain
+    // fallback's own row is below.
     const unseen = samples
+      .filter((s) => s.producer === 'composeWhatWouldFlipFallback')
       .map((s) => ({ ...s, sentence: firstSentence(s.text) }))
       .filter((s) => !textAssertsLeadingOption(s.sentence))
       .map((s) => `${s.producer} @ ${s.branch}\n      "${s.sentence}"`);
@@ -205,6 +210,16 @@ describe('PRODUCER CONTROL — the enforcement scanner sees the repo\'s own temp
         'that is how this hole survived review. Add the phrasing to ' +
         'LEADER_CLAIM_PATTERNS; do not weaken this assertion.',
     ).toEqual([]);
+  });
+
+  it('ROW (P5): the explain_results fallback states no share of runs and does not open with a leader sentence', () => {
+    const explain = samples.filter((s) => s.producer === 'composeExplainResultsFallback');
+    expect(explain.length).toBeGreaterThan(0);
+    for (const s of explain) {
+      expect(s.text).not.toMatch(/was supported by|of runs\b|Share of model runs/);
+      // A near tie still names both options as tied (no share, no leader); nothing else opens with the leader's name.
+      if (!s.text.includes('effectively tied')) expect(s.text).not.toContain('Standardise on MacBook Pro');
+    }
   });
 
   /**

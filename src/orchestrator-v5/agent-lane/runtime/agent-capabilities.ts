@@ -263,7 +263,7 @@ import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf } from '../..
 import { lastWeekdayNamedIn, readStatedDeadline, readStatedWeekdayDate, sayDate, sayDeadlineFromToday, todayInLondon, weekdayDatedIn, type Weekday } from '../../goal-target/deadline-date.js';
 import { draftReferenceDate } from '../../goal-target/draft-reference.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
-import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
+import { goalChanceLicenceForAgent, goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -1798,6 +1798,24 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   const selectedPermissions = current && g.analysis_result !== undefined && permissions.leader_may_be_named !== true
     ? withNonlinearIdentity(permissions, g.raw, g.identity_evaluated) : permissions;
   const goalFacts = goalChanceFactsForAgent(g.analysis_result, g.raw, current);
+  // ⭐ P7 (DL ruling, 12 Oct; the AIE made it a condition of the run-result reply rule, #94 6133633297: "actual selected
+  // licence/target/notes in their context"). `goalChanceFactsForAgent` hands the licence and its notes over only beside a
+  // displayed chance, so when EVERY option is withheld the model had nothing to retain but `goal_chance.say`. Here, in the
+  // MODEL'S context only, the selected current Run's licence, its notes and its targets ride when that Run is current and
+  // its own licence says EVERY option it covers is withheld (form 'each', withheld ids = option ids). No chance figure
+  // travels (the licence carries form, ids and stored sentence parts, never a percentage), and no comparison permission
+  // does either: a comparison form never reaches the model without the chances it compares (ruling C), and a licence at
+  // odds with what is displayed, or one PLoT withheld run-wide, still hands nothing over. The display, ranges and drivers
+  // keep their gating, and the function's other readers (the canonical view, the screen-line obligations) are untouched:
+  // this changes what the model reads, not what any wire surface owes.
+  const currentLicence = current ? goalChanceLicenceForAgent(g.analysis_result) : undefined;
+  const selectedLicence = currentLicence !== undefined && currentLicence.form === 'each' && currentLicence.option_ids.length > 0
+    && currentLicence.option_ids.every((id) => currentLicence.withheld_option_ids?.includes(id) === true) ? currentLicence : undefined;
+  const selectedLicenceFacts = {
+    ...(selectedLicence !== undefined && goalFacts.goal_chance_licence === undefined ? { goal_chance_licence: selectedLicence } : {}),
+    ...(selectedLicence?.notes !== undefined && goalFacts.goal_chance_notes === undefined ? { goal_chance_notes: selectedLicence.notes } : {}),
+    ...(selectedLicence?.targets !== undefined && goalFacts.goal_targets === undefined ? { goal_targets: selectedLicence.targets } : {}),
+  };
   const goalChanceDisplay = goalFacts.goal_chance_display;
   const legacyRun = !runHasGoalChanceLicenceRecord(g.analysis_result);
   // ⭐ (9) chat and panel quote the same figure: a chance the licence displays at the nearest 5 is handed over as displayed.
@@ -1854,6 +1872,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
     // ⭐ DL 0df0e1 ruling C (6 Oct): where each option's chance reaches the Agent, so does the Run's licence to compare them.
     ...goalFacts,
+    ...selectedLicenceFacts,
     ...(participation !== undefined ? { option_participation: participation } : {}),
   } };
 }

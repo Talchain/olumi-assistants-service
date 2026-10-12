@@ -51,12 +51,13 @@ import { goalDirectionCorrectableByTarget } from '../run-analysis.js';
 import { describe, expect, it } from 'vitest';
 
 import {
-  buildAnalysisResultHeadline,
+  buildAnalysisResultTails,
   describeGoalFrame,
   isAllowedRunAnalysisAssistantText,
   type AnalysisResultHeadlineInput,
 } from '../../../coaching/analysis-result-headline.js';
 import { composeObjectiveContradictionDisclosure } from '../../../coaching/objective-contradiction.js';
+import { storedObjectiveContradictionDisclosure } from '../../../coaching/__tests__/support/stored-objective-contradiction.support.js';
 import { RUN_ANALYSIS_ASSISTANT_TEMPLATES } from '../run-analysis.js';
 
 type Json = Record<string, unknown>;
@@ -136,16 +137,18 @@ function headlineInput(recs: Json[], codes: readonly string[]): AnalysisResultHe
 }
 
 /**
- * Compose EXACTLY what run-analysis.ts composes: the headline, then the tail
- * built from the same persisted graph, the same records, the leader permission
- * and the headline builder's goal-frame verdict for the same input.
+ * Compose EXACTLY what run-analysis.ts composes since the producers re-scope (DL, 12 Oct; AIE #94 6133633297): the
+ * locked template (P1: no lead ladder), the ladder's leader-free goal-frame tail from the same input, then the
+ * objective-contradiction slot, which a new Run never fills (P2). `storedTail` is what a PRE-FIX stored summary carries
+ * for the same inputs (a stated residual), kept so a silent arm below is the fix and not the fixture.
  */
-function composeAsHandler(recs: Json[], codes: readonly string[], rawGraph: Json): { summary: string; tail: string } {
+function composeAsHandler(recs: Json[], codes: readonly string[], rawGraph: Json): { summary: string; tail: string; storedTail: string } {
   // RT-10 B′: the handler's own flag, from the same graph (`goalDirectionCorrectableByTarget`).
   const goalId = ((rawGraph['nodes'] as Json[]).find((n) => n['kind'] === 'goal') ?? {})['id'];
   const input = { ...headlineInput(recs, codes), goal_direction_correctable: goalDirectionCorrectableByTarget(rawGraph, goalId) };
-  const headline = buildAnalysisResultHeadline(input);
+  const headline: string | null = null;
   const goalFrame = describeGoalFrame(input);
+  const { goalFrameTail } = buildAnalysisResultTails(input);
   const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
     rawGraph,
     recs,
@@ -154,10 +157,13 @@ function composeAsHandler(recs: Json[], codes: readonly string[], rawGraph: Json
   );
   const template = RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT;
   return {
-    summary: `${headline ?? template}${''}${''}${''}${objectiveContradictionDisclosure}`,
+    summary: `${template}${goalFrameTail}${''}${''}${''}${objectiveContradictionDisclosure}`,
     tail: objectiveContradictionDisclosure,
+    storedTail: storedObjectiveContradictionDisclosure(rawGraph, recs, true, goalFrame),
   };
 }
+
+const TEMPLATE = RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT;
 
 const HOLD_WITHDRAWN = `${HOLD} was supported by 71% of runs of this model.`;
 const HOLD_FRAMED = `${HOLD} was supported by 71% of runs of this model.`;
@@ -190,23 +196,26 @@ function expectNoContradiction(summary: string, codes: readonly string[]): void 
 // Controls: no code, the arms are exactly as before
 // ============================================================================
 
-describe('CONTROL — with no goal code, both arms keep "against your goal" and are admitted', () => {
-  it('Arm B, framed, on the banked shape', () => {
+describe('CONTROL — with no goal code, a new Run\'s summary is the template alone (P1, P2), and it is admitted', () => {
+  it('Arm B data on the banked shape: no arm, no leader, no share', () => {
     const { summary } = composeAsHandler(ATTAINMENT_CONTRADICTED, [], PRICING_GRAPH);
-    expect(summary).toBe(`${HOLD_FRAMED}${ARM_B_FRAMED}`);
+    expect(summary).toBe(TEMPLATE);
     expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
   });
 
-  it('Arm A, framed, on the lever aim', () => {
+  it('Arm A data on the lever aim: no arm, no leader, no share', () => {
     const { summary } = composeAsHandler(NO_ATTAINMENT, [], LEVER_AIM_GRAPH);
-    expect(summary).toBe(`${HOLD_FRAMED}${ARM_A_FRAMED}`);
+    expect(summary).toBe(TEMPLATE);
     expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
   });
 
-  it('PRECONDITION: each fixture fires the arm it is named for (so silence below is the fix, not the fixture)', () => {
-    expect(composeAsHandler(ATTAINMENT_CONTRADICTED, [], LEVER_AIM_GRAPH).tail).toBe(ARM_B_FRAMED);
-    expect(composeAsHandler(ATTAINMENT_AGREES, [], LEVER_AIM_GRAPH).tail).toBe(ARM_A_FRAMED);
-    expect(composeAsHandler(NO_ATTAINMENT, [], PRICING_GRAPH).tail).toBe('');
+  it('PRECONDITION: each fixture fires the arm it is named for in a PRE-FIX stored summary (so silence is the fix, not the fixture)', () => {
+    expect(composeAsHandler(ATTAINMENT_CONTRADICTED, [], LEVER_AIM_GRAPH).storedTail).toBe(ARM_B_FRAMED);
+    expect(composeAsHandler(ATTAINMENT_AGREES, [], LEVER_AIM_GRAPH).storedTail).toBe(ARM_A_FRAMED);
+    expect(composeAsHandler(NO_ATTAINMENT, [], PRICING_GRAPH).storedTail).toBe('');
+    for (const recs of [ATTAINMENT_CONTRADICTED, ATTAINMENT_AGREES, NO_ATTAINMENT]) {
+      expect(composeAsHandler(recs, [], LEVER_AIM_GRAPH).tail).toBe('');
+    }
   });
 });
 
@@ -229,21 +238,21 @@ const ROWS: readonly ComposedRow[] = [
     recs: ATTAINMENT_CONTRADICTED,
     codes: [DIRECTION, THRESHOLD],
     graph: PRICING_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COMBINED}`,
+    expected: `${TEMPLATE}${COMBINED}`,
   },
   {
     name: 'both codes · Arm B data, lever aim: Arm B silent, Arm A unframed',
     recs: ATTAINMENT_CONTRADICTED,
     codes: [DIRECTION, THRESHOLD],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_UNFRAMED}`,
+    expected: `${TEMPLATE}${COMBINED}`,
   },
   {
     name: 'both codes · no attainment data, lever aim: Arm A unframed',
     recs: NO_ATTAINMENT,
     codes: [DIRECTION, THRESHOLD],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_UNFRAMED}`,
+    expected: `${TEMPLATE}${COMBINED}`,
   },
   // ── THRESHOLD alone ───────────────────────────────────────────────────────
   {
@@ -251,21 +260,21 @@ const ROWS: readonly ComposedRow[] = [
     recs: ATTAINMENT_CONTRADICTED,
     codes: [THRESHOLD],
     graph: PRICING_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COULD_NOT_TEST}`,
+    expected: `${TEMPLATE}${COULD_NOT_TEST}`,
   },
   {
     name: `${THRESHOLD} alone · Arm B data, lever aim: Arm B silent, Arm A unframed`,
     recs: ATTAINMENT_CONTRADICTED,
     codes: [THRESHOLD],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`,
+    expected: `${TEMPLATE}${COULD_NOT_TEST}`,
   },
   {
     name: `${THRESHOLD} alone · no attainment data, lever aim: Arm A unframed`,
     recs: NO_ATTAINMENT,
     codes: [THRESHOLD],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`,
+    expected: `${TEMPLATE}${COULD_NOT_TEST}`,
   },
   // ── DIRECTION alone ───────────────────────────────────────────────────────
   {
@@ -273,42 +282,42 @@ const ROWS: readonly ComposedRow[] = [
     recs: ATTAINMENT_CONTRADICTED,
     codes: [DIRECTION],
     graph: PRICING_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}`,
+    expected: `${TEMPLATE}${DIRECTION_ASSUMED}`,
   },
   {
     name: `⭐ R3-2 ${DIRECTION} alone · Arm B data, lever aim: Arm B silent, so Arm A (unframed) is the tail`,
     recs: ATTAINMENT_CONTRADICTED,
     codes: [DIRECTION],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`,
+    expected: `${TEMPLATE}${DIRECTION_ASSUMED}`,
   },
   {
     name: `⭐ R3-4 ${DIRECTION} alone · ONLY Channel B joint attainment, metric goal: the direction sentence, not "could not test"`,
     recs: JOINT_ONLY,
     codes: [DIRECTION],
     graph: PRICING_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}`,
+    expected: `${TEMPLATE}${DIRECTION_ASSUMED}`,
   },
   {
     name: `⭐ R3-1 ${DIRECTION} alone · no attainment data, metric goal: the combined sentence`,
     recs: NO_ATTAINMENT,
     codes: [DIRECTION],
     graph: PRICING_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COMBINED}`,
+    expected: `${TEMPLATE}${COMBINED}`,
   },
   {
     name: `${DIRECTION} alone · attainment data, leader already best, lever aim: Arm A unframed`,
     recs: ATTAINMENT_AGREES,
     codes: [DIRECTION],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`,
+    expected: `${TEMPLATE}${DIRECTION_ASSUMED}`,
   },
   {
     name: `⭐ ${DIRECTION} alone · no attainment data, lever aim: Arm A unframed (the verifier's composition), combined sentence`,
     recs: NO_ATTAINMENT,
     codes: [DIRECTION],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_UNFRAMED}`,
+    expected: `${TEMPLATE}${COMBINED}`,
   },
 ];
 
@@ -321,15 +330,16 @@ describe('⭐ every code variant × every arm: no "against your goal", no contra
     });
   }
 
-  it('the matrix reaches every shape it claims to: Arm A unframed, all three sentences, and NO Arm B', () => {
+  it('the matrix reaches every shape it claims to: all three goal-frame sentences after the template, and NO arm (P2)', () => {
     const composed = ROWS.map((r) => composeAsHandler(r.recs, r.codes, r.graph).summary);
-    expect(composed.some((s) => s.endsWith(ARM_A_UNFRAMED))).toBe(true);
+    expect(composed.some((s) => s.includes(ARM_A_UNFRAMED.trim()))).toBe(false);
+    expect(composed.every((s) => s.startsWith(TEMPLATE))).toBe(true);
     expect(composed.some((s) => s.endsWith(COULD_NOT_TEST))).toBe(true);
     expect(composed.some((s) => s.endsWith(DIRECTION_ASSUMED))).toBe(true);
     expect(composed.some((s) => s.endsWith(COMBINED))).toBe(true);
     expect(composed.some((s) => s.includes(GLOSS))).toBe(false);
-    // …while the SAME Arm B data does fire the arm with no code (the silence is the fix, not the fixture).
-    expect(composeAsHandler(ATTAINMENT_CONTRADICTED, [], PRICING_GRAPH).tail).toBe(ARM_B_FRAMED);
+    // …while the SAME Arm B data does fire the arm in a PRE-FIX stored summary (the silence is the fix, not the fixture).
+    expect(composeAsHandler(ATTAINMENT_CONTRADICTED, [], PRICING_GRAPH).storedTail).toBe(ARM_B_FRAMED);
   });
 });
 
@@ -360,6 +370,25 @@ describe('egress — each arm shape is admitted only beside the headline it agre
   }
 });
 
+// ⭐ THE TEMPLATE BRANCH (DL ruling on P1, 12 Oct): a new Run's summary is the template then the ladder's leader-free
+// tails, so the template branch now admits each goal-frame sentence (its existing grammar source), and still rejects
+// every objective-contradiction arm (it names a leader: the reasoned exclusion stands).
+describe('egress — the template branch admits each goal-frame tail and no arm', () => {
+  const TEMPLATE_PAIRS: ReadonlyArray<[string, string, boolean]> = [
+    ['template + could-not-test', `${TEMPLATE}${COULD_NOT_TEST}`, true],
+    ['template + direction assumed', `${TEMPLATE}${DIRECTION_ASSUMED}`, true],
+    ['template + combined', `${TEMPLATE}${COMBINED}`, true],
+    ['template + Arm A', `${TEMPLATE}${ARM_A_UNFRAMED}`, false],
+    ['template + Arm B', `${TEMPLATE}${ARM_B_UNFRAMED}`, false],
+    ['template + combined + Arm A', `${TEMPLATE}${COMBINED}${ARM_A_UNFRAMED}`, false],
+  ];
+  for (const [name, text, admitted] of TEMPLATE_PAIRS) {
+    it(`${admitted ? 'ADMITS' : 'REJECTS'} ${name}`, () => {
+      expect(isAllowedRunAnalysisAssistantText(text)).toBe(admitted);
+    });
+  }
+});
+
 // ============================================================================
 // The handler calls it this way (source pin)
 // ============================================================================
@@ -367,10 +396,10 @@ describe('egress — each arm shape is admitted only beside the headline it agre
 describe('wiring — run-analysis.ts feeds the tail the headline builder\'s own goal-frame verdict', () => {
   const source = readFileSync(resolve(HERE, '../run-analysis.ts'), 'utf8');
 
-  it('derives the frame from the SAME headline input the headline was built from', () => {
-    // C46 stage 1: the same input, with the product withhold beside it.
-    expect(source).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional\n      ? null : buildAnalysisResultHeadline(headlineInput);');
+  it('derives the frame and the goal-frame tail from the SAME headline input (P1: no headline is built)', () => {
+    expect(source).toContain('const headline: string | null = null;');
     expect(source).toContain('const goalFrame = describeGoalFrame(headlineInput);');
+    expect(source).toContain('buildAnalysisResultTails(headlineInput, legacyFiguresDisclosure)');
   });
 
   it('passes it to the composer beside the unchanged leader permission', () => {

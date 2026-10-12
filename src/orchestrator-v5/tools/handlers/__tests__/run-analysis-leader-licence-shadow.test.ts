@@ -195,11 +195,14 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
     expect(warningCodes(r.fact)).toEqual(['GOAL_FIGURES_OLUMI_SUPPLIED_LINK', 'GOAL_FIGURES_NO_STATED_TARGET']);
   });
 
-  it('L1-b (SYNTHETIC envelope): a separated comparative_leader Run is `permitted`, names the stored leader, and every live site agrees', async () => {
+  it('L1-b (SYNTHETIC envelope): a separated comparative_leader Run is `permitted` and names the stored leader; only the summary site stays silent', async () => {
     const e = shadowOf(await runOnce(FA027, fa027Legacy, plotDouble('served')));
     expect(e).toMatchObject({ verdict: 'permitted', leader_option_id: LEADER, reason: null, caveats: [],
       admission_mode: 'comparative_leader', claim_reason: null, failed_closed: false });
-    expect(e.disagreements).toEqual([]);
+    // ⭐ Producers re-scope P1 (DL, 12 Oct): the Run's summary never names a leader (no lead ladder), so on a PERMITTED
+    // Run the log-only shadow records the summary site as silent beside a permitting verdict. That is the adopted
+    // behaviour, not a defect: every other live site agrees. (Was: no disagreement at all.)
+    expect(e.disagreements).toEqual([{ site: 'summary_leader', live: false, verdict: true }]);
   });
 
   it('L1-a (a994 class): goal figures withheld on the placeholder path → `withheld`/`goal_figures_withheld`; CV still permits', async () => {
@@ -220,16 +223,16 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
     expect(e.disagreements).toEqual([{ site: 'CV', live: true, verdict: false }]);
   });
 
-  it('L1-d (near tie, SYNTHETIC tie flag): `withheld`/`options_do_not_separate`; the stored leader and summary still name one', async () => {
+  it('L1-d (near tie, SYNTHETIC tie flag): `withheld`/`options_do_not_separate`; the stored leader still names one, the summary no longer does', async () => {
     const r = await runOnce(FA027, fa027Legacy, plotDouble('near_tie'));
     expect(r.fact.result.leading_option_id).toBe(LEADER);
     const e = shadowOf(r);
     expect(e).toMatchObject({ verdict: 'withheld', reason: 'options_do_not_separate', claim_reason: WITHHELD_NEAR_TIE });
-    // The live finding L2 must close: three sites still name a leader the verdict withholds.
+    // The live finding L2 must close: two sites still name a leader the verdict withholds. The summary site no longer does
+    // (producers re-scope P1, 12 Oct: the summary composes no lead ladder).
     expect(e.disagreements).toEqual([
       { site: 'CV', live: true, verdict: false },
       { site: 'stored_leader', live: true, verdict: false },
-      { site: 'summary_leader', live: true, verdict: false },
     ]);
   });
 

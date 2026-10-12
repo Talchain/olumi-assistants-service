@@ -18,6 +18,7 @@ import { buildAnalysisResultHeadline, isAllowedRunAnalysisAssistantText } from '
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 import type { AnalysisProjectionSummary } from '../../context/projection-summaries.js';
 import { composeExplainResultsFallback, composeWhatWouldFlipFallback } from '../../tools/handlers/explanation-fallback.js';
+import { RUN_SHARE_QUALIFIER } from '../../compose/run-share-label.js';
 
 type Copy = string | Readonly<Record<string, string>>;
 const row = (id: string) => POLICY.rows.find(r => r.policy_id === id)! as unknown as {
@@ -140,16 +141,21 @@ describe('explain and flip fallbacks: the leader and runner-up are said in this 
     top_drivers: [{ factor_label: 'Engineering Capacity', sensitivity_value: 0.65 }],
   };
 
-  it('explain fallback: exact leader sentence and the runner-up in its own share', () => {
+  it('explain fallback: no share of runs in any form, and no leader named from one', () => {
+    // Producers re-scope P5 as reversed by the AIE (#94 6133633297, 12 Oct): this fallback supplies an ordinary result
+    // reply, so it OMITS shares; only the what_would_flip standing lines carry the credit label.
     const text = composeExplainResultsFallback(ANALYSIS, null, null);
-    expect(text).toContain('In this model, Hire Senior Engineer was supported by 62% of runs.');
-    expect(text).toContain("'Hire Two Mid-Level' was supported by 27% of runs");
+    expect(text).not.toMatch(/was supported by|of runs\b|Share of model runs/);
+    expect(text).not.toContain(RUN_SHARE_QUALIFIER);
+    expect(text).not.toContain('Hire Senior Engineer');
+    expect(text).not.toContain('Hire Two Mid-Level');
     expect(text).not.toMatch(/performs best|currently leads|second place/);
   });
 
   it('flip fallback: exact leader sentence', () => {
     const text = composeWhatWouldFlipFallback(ANALYSIS, null, null, null);
-    expect(text).toContain("In this model, 'Hire Senior Engineer' was supported by 62% of runs.");
+    // The win-share class (AIE #94 6131687656): the tipping-point surface says the share in the AIE's exact label.
+    expect(text).toContain("'Hire Senior Engineer': Share of model runs credited to this option: 62%.");
     expect(text).not.toMatch(/performs best|currently leads/);
   });
 });

@@ -246,7 +246,8 @@ describe('the phantom prior: a post-draft auto-run is not a result the user saw'
   it('TWIN: a USER-initiated prior still produces the re-run comparison — the suppression is not blanket', () => {
     const signal = runBranch([USER_RUN_PRIOR()]);
     expect(signal?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
-    expect(signal?.coaching_text).toContain('The result is unchanged');
+    // The compared, unchanged arm: since the producers re-scope (P4, DL 12 Oct) it names no leader and says nothing.
+    expect(signal?.coaching_text).toBe('');
   });
 
   it('TWIN: an auto-run fact must not suppress a REAL prior the user saw', () => {

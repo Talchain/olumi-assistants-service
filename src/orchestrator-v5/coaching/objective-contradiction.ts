@@ -1382,30 +1382,19 @@ export function readInterventionViews(rawGraph: unknown): InterventionView[] {
  * being pre-empted by an arm that may not ship.
  */
 export function composeObjectiveContradictionDisclosure(
-  rawGraph: unknown,
-  records: ReadonlyArray<Record<string, unknown>>,
-  leaderWasNamed: boolean,
-  goalFrame: GoalFrame,
-  claims?: { readonly goalCertainty: unknown },
+  _rawGraph: unknown,
+  _records: ReadonlyArray<Record<string, unknown>>,
+  _leaderWasNamed: boolean,
+  _goalFrame: GoalFrame,
+  _claims?: { readonly goalCertainty: unknown },
 ): string {
-  if (!leaderWasNamed) return '';
-  const claimedRecords = claims === undefined ? records : projectGoalProbabilitiesForTransport(
-    { option_comparison: records }, claims.goalCertainty,
-  )?.option_comparison as ReadonlyArray<Record<string, unknown>>;
-  const options = readObjectiveOptionViews(claimedRecords);
-  if (options.length < 2) return '';
-
-  const attainment = attainmentArmMayShip(goalFrame) ? detectGoalAttainmentContradiction(options) : null;
-  if (attainment !== null) {
-    return buildObjectiveContradictionDisclosure(attainment, leaderWasNamed, goalFrame);
-  }
-
-  const directional = detectDirectionalContradiction(
-    readGoalLabel(rawGraph),
-    options,
-    readInterventionViews(rawGraph),
-  );
-  return buildObjectiveContradictionDisclosure(directional, leaderWasNamed, goalFrame);
+  // ⭐ SHARE WORDING AT THE PRODUCERS (DL re-scope, 12 Oct, after #2976's check; Paul's #87; AIE 6131687656). Both arms
+  // lead with a share of runs ("“A” was supported by the most runs, but …", "… was supported by N% of runs.") and the
+  // attainment arm formats raw `probability_of_goal` ("(48% against 0%)"), so a NEW Run's summary composes neither. The
+  // goal-chance line that replaces them is the follow-on with the AIE's copy (#94 6132247742). The detectors and the
+  // builder stay: `projectObjectiveContradictionSummary` still reads a STORED summary's arm (a stated residual until its
+  // scenario re-runs).
+  return '';
 }
 
 /** Existing saved summaries must obey the same recorded certainty as new summaries and option rows. */

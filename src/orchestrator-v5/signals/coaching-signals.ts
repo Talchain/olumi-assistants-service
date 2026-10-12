@@ -56,7 +56,6 @@ import {
   readRunAnalysisEnrichment,
   type MovementDirectionLicence,
 } from '../coaching/movement-direction-licence.js';
-import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
 import { isAnalysisRefusalFact } from '../context/analysis-refusal-continuity.js';
@@ -181,8 +180,10 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
     'This change affects the model. The current analysis may not reflect it. Run the analysis to see updated results.',
   HIGH_SENSITIVITY_EDIT: ({ factorLabel }) =>
     `You're editing ${factorLabel ?? 'a factor'}, which was one of the strongest drivers in the last analysis. Rerunning will show how this changes the picture.`,
+  // ⭐ SHARE WORDING AT THE PRODUCERS (DL re-scope, 12 Oct, after #2976's check): the Run reply's coaching paragraph names
+  // no leader, so the "explore the most-supported option" sentence is gone, with no replacement words.
   FIRST_ANALYSIS_COMPLETE: () =>
-    'Your first analysis is ready. Take a moment to explore the most-supported option and the factors shaping it before acting on the result.',
+    'Your first analysis is ready.',
   // ⭐ The FIRST_ANALYSIS variant for a run whose admission caps DESIGNATION
   // (#1412). It is {@link FIRST_ANALYSIS_COMPLETE_PROVISIONAL_TEXT}, named and
   // exported below rather than inlined at its one call site, so specs can bind to
@@ -351,7 +352,7 @@ function composeRerunText(
   if (sameRecordedModel && interveningChange !== null) {
     const unattributed = composeRerunBody(delta, null, movementLicence, false);
     if (RERUN_ABSTENTION_EXITS.has(unattributed.kind)) return unattributed.text;
-    return `${RERUN_SAME_RECORDED_MODEL_TEXT} ${unattributed.text}`;
+    return `${RERUN_SAME_RECORDED_MODEL_TEXT} ${unattributed.text}`.trim();
   }
   const body = composeRerunBody(
     delta,
@@ -361,7 +362,8 @@ function composeRerunText(
   );
   if (!interveningChangeIsInert) return body.text;
   if (RERUN_ABSTENTION_EXITS.has(body.kind)) return body.text;
-  return `${body.text}${INERT_EDIT_TAIL}`;
+  // An arm with no words left (the producers re-scope) leaves the tail alone, without its leading space.
+  return `${body.text}${INERT_EDIT_TAIL}`.trim();
 }
 
 /**
@@ -420,11 +422,13 @@ function composeRerunBody(
     // a reader infers a comparison — the implication the sentence then
     // explicitly disclaims. Naming the edit beside an unmade comparison is
     // worse than naming nothing, so the attribution never reaches this arm.
+    // ⭐ SHARE WORDING AT THE PRODUCERS (DL re-scope, 12 Oct, after #2976's check): this paragraph names no leader. Every
+    // sentence in this function that said which option "leads", "still leads" or "scored highest", or spoke of "its
+    // lead", is gone, with NO replacement words. An arm left with nothing says nothing (`compose.ts` skips an empty
+    // coaching paragraph); its signal still fires.
     return {
       kind: 'leader_identity_unmatched',
-      text:
-        `${delta.current_leading_label} leads after this re-run. I cannot line up `
-        + 'the earlier result with this one, so I have not compared the two.',
+      text: 'I cannot line up the earlier result with this one, so I have not compared the two.',
     };
   }
 
@@ -440,24 +444,13 @@ function composeRerunBody(
   // rides as {@link INERT_EDIT_TAIL}, applied by the wrapper.
   const since = interveningChangeIsInert ? '' : attributionPrefix(interveningChange);
   const attributed = since.length > 0;
-  // The anaphor must AGREE WITH ITS OWN OPENER. `several` deliberately names no
-  // antecedent, so a singular "that change" after it is a dangling referent AND
-  // makes a claim about one unidentified change when several occurred — the
-  // mirror of the sole-cause-by-omission that `deriveInterveningChange` refuses.
-  const theChange = interveningChange?.kind === 'several' ? 'those changes' : 'that change';
 
   if (delta.leading_option_changed) {
     return {
       kind: 'leader_changed',
       text: attributed
-        ? (
-          `${since}the result has changed: ${delta.prior_leading_label} scored highest before, `
-          + `and ${delta.current_leading_label} scores highest now. Ask what changed if you want the detail.`
-        )
-        : (
-          `This re-run changed the outcome: ${delta.prior_leading_label} scored highest before, `
-          + `and ${delta.current_leading_label} scores highest now. Ask what changed if you want the detail.`
-        ),
+        ? `${since}the result has changed. Ask what changed if you want the detail.`
+        : 'This re-run changed the outcome. Ask what changed if you want the detail.',
     };
   }
   // ⭐⭐ THE DIRECTION IS GATED, AND THIS IS THE P0 OF 2026-09-03.
@@ -477,19 +470,8 @@ function composeRerunBody(
   // licence is REQUIRED rather than optional-defaulting-permitted.
   if (delta.margin_direction === 'widened' || delta.margin_direction === 'narrowed') {
     if (movementLicence.kind === 'licensed') {
-      // Byte-identical to the pre-gate copy on the arm that keeps its claim.
-      return {
-        kind: 'margin_moved',
-        text: delta.margin_direction === 'widened'
-          ? (
-            `${since}${delta.current_leading_label} still leads after this re-run, and its lead `
-            + `has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
-          )
-          : (
-            `${since}${delta.current_leading_label} still leads after this re-run, though its lead `
-            + `has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
-          ),
-      };
+      // The licensed claim was about the leader's lead, so it is gone (producers re-scope, 12 Oct): nothing is said.
+      return { kind: 'margin_moved', text: '' };
     }
     if (movementLicence.kind === 'within_noise') {
       // WE MEASURED THE BAND AND THE MOVEMENT SAT INSIDE IT. That is a finding
@@ -498,8 +480,7 @@ function composeRerunBody(
       return {
         kind: 'margin_moved',
         text:
-          `${since}${delta.current_leading_label} still leads after this re-run. `
-          + 'The figures moved by less than this model varies between runs, so I '
+          'The figures moved by less than this model varies between runs, so I '
           + 'would not read a direction into that movement.',
       };
     }
@@ -509,13 +490,8 @@ function composeRerunBody(
     // not compute, or assert it of a figure that plainly cleared the band
     // (CLAUDE.md trap 13 — an absence claim needs an instrument that could
     // have seen a presence).
-    return {
-      kind: 'margin_moved',
-      text:
-        `${since}${delta.current_leading_label} still leads after this re-run. `
-        + 'I cannot tell whether the movement in the figures is real or just '
-        + 'sampling variation, so treat the size of its lead as unchanged.',
-    };
+    // Its only words were about the leader and "its lead" (producers re-scope, 12 Oct): nothing is said.
+    return { kind: 'margin_moved', text: '' };
   }
   // ⭐⭐ THE MARGIN COULD NOT BE COMPUTED — ITS OWN ARM, BECAUSE IT IS NOT A
   // NULL RESULT. `deriveMargin` returns 'unavailable' when either run's
@@ -528,12 +504,8 @@ function composeRerunBody(
   // not. `since` is empty when nothing is attributable, so the unattributed
   // form is the same sentence without the clause.
   if (delta.margin_direction === 'unavailable') {
-    return {
-      kind: 'margin_unavailable',
-      text:
-        `${since}${delta.current_leading_label} still leads after this re-run. `
-        + 'I could not compare the size of its lead between the two runs.',
-    };
+    // Its only words were about the leader and "its lead" (producers re-scope, 12 Oct): nothing is said.
+    return { kind: 'margin_unavailable', text: '' };
   }
 
   // ⭐ THE UNCHANGED ARM IS THE SCIENTIFIC ONE AND MUST READ AS A FINDING, NOT
@@ -560,16 +532,8 @@ function composeRerunBody(
   // wording to "the leading option", MANUFACTURING the banned leader vocabulary
   // inside our own safety pass. All composed arms are pinned against the real
   // guard by test.
-  return {
-    kind: 'unchanged',
-    text: attributed
-      ? (
-        `${since}the picture has stayed the same: ${delta.current_leading_label} `
-        + `still leads. That is a result in itself: the conclusion held both before `
-        + `and after ${theChange}.`
-      )
-      : `The result is unchanged: ${delta.current_leading_label} still leads.`,
-  };
+  // Its finding was "X still leads" (producers re-scope, 12 Oct): nothing is said.
+  return { kind: 'unchanged', text: '' };
 }
 
 /**

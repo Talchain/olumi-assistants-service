@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
+import { storedObjectiveContradictionDisclosure } from '../../coaching/__tests__/support/stored-objective-contradiction.support.js';
 
 const rows = [
   { option_id: 'hold', option_label: 'Hold at £49', win_probability: 0.7, probability_of_goal: 0 },
   { option_id: 'raise', option_label: 'Raise to £59', win_probability: 0.3, probability_of_goal: 0.48 },
 ];
-const rawDisclosure = composeObjectiveContradictionDisclosure(null, rows, true, 'goal_framed');
+// A PRE-FIX stored summary's tail (producers re-scope P2: a new Run composes none; the stored row's readers stay tested).
+const rawDisclosure = storedObjectiveContradictionDisclosure(null, rows, true, 'goal_framed');
 const unearned = [{ option_id: 'hold', probability_of_goal: 0, earned: false,
   unsized_path: { from: 'price', enters_goal_through: 'subscribers' },
   no_break_even: 'not_an_identity', say: 'Olumi cannot yet say how likely this is.' }];
@@ -50,8 +52,11 @@ describe('same recorded Run certainty governs row, summary and whole public bloc
     const block = buildAnalysisResultBlock(fact);
     expect(block.summary).toContain('(48% against 0%)');
     expect(goalClaimsIn(block).length).toBeGreaterThan(0);
-    expect(composeObjectiveContradictionDisclosure(null, rows, true, 'goal_framed',
+    expect(storedObjectiveContradictionDisclosure(null, rows, true, 'goal_framed',
       { goalCertainty: fact.result.goal_certainty })).toBe(rawDisclosure);
+    // A NEW Run composes no tail on any certainty (P2).
+    expect(composeObjectiveContradictionDisclosure(null, rows, true, 'goal_framed',
+      { goalCertainty: fact.result.goal_certainty })).toBe('');
   });
 
   it('new summary composer reads the identical authority before making its words', () => {

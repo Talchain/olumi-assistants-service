@@ -6,6 +6,7 @@
  * with no named option are left exactly as they were.
  */
 import { describe, it, expect } from 'vitest';
+import { RUN_SHARE_QUALIFIER } from '../../../../compose/run-share-label.js';
 
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
@@ -236,7 +237,10 @@ describe('NO named option ⇒ existing behaviour, untouched', () => {
 
   it('the deterministic composer keeps the generic prose', async () => {
     const out = await handler(makeInvocation({ flipTargetOption: null, sonnetValid: false }));
-    expect(out.assistant_text).toMatch(/In this model, .+ was supported by \d{1,3}% of runs\./);
+    // The win-share class (AIE #94 6133633297): the standing line is the AIE's credit label, with the qualifier once.
+    expect(out.assistant_text).toMatch(/'.+': Share of model runs credited to this option: (?:<1|>99|\d{1,3})%\./);
+    expect(out.assistant_text.split(RUN_SHARE_QUALIFIER)).toHaveLength(2);
+    expect(out.assistant_text).not.toMatch(/was supported by \d{1,3}% of runs/);
     expect(out.assistant_text).toContain('would lead instead');
   });
 });

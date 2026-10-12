@@ -973,6 +973,33 @@ export function describeGoalFrame(input: AnalysisResultHeadlineInput): GoalFrame
 }
 
 /**
+ * ⭐ THE LEAD LADDER'S LEADER-FREE TAILS, WITHOUT THE LADDER (DL producers re-scope P1 and its ruling, 12 Oct; AIE #94
+ * 6133633297: "omission of a ranking sentence is not permission to gut the explanation"). The Run's summary no longer
+ * composes {@link buildAnalysisResultHeadline}: every rung states a share of runs or names a leader. Three of its tails
+ * do neither, and two of them are honesty the Run must keep, so they ride after the locked template in the ladder's own
+ * order and words: Olumi's legacy-figures provenance sentence (built by the caller), the goal-frame sentence (the model
+ * could not test the goal, or assumed its direction), and the robustness sentence. The eliminated-options sentence is
+ * a share sentence and is gone; the status and reduced-samples suffixes are the PARTIAL / UNKNOWN_STATUS /
+ * REDUCED_SAMPLES templates. Said only where the ladder would have composed (a resolvable result), so a run with no
+ * results keeps its bare template. The template branch of {@link isAllowedRunAnalysisAssistantText} admits exactly these
+ * (their existing grammar sources, first in {@link TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS}).
+ */
+export function buildAnalysisResultTails(input: AnalysisResultHeadlineInput, legacyFiguresDisclosure = ''): {
+  readonly legacyFiguresTail: string; readonly goalFrameTail: string; readonly notRobustTail: string;
+} {
+  if (resolveWinner(input.enrichment, input.leading_option_id) === null) {
+    return { legacyFiguresTail: '', goalFrameTail: '', notRobustTail: '' };
+  }
+  const goalFrame = resolveGoalFrame(input.enrichment, input.goal_points_up_as_held === true);
+  return {
+    legacyFiguresTail: legacyFiguresDisclosure,
+    goalFrameTail: (input.goal_direction_correctable === true ? GOAL_FRAME_SENTENCE : GOAL_FRAME_SENTENCE_UNCORRECTABLE)[goalFrame],
+    notRobustTail: isNotRobust(input.enrichment)
+      ? ` ${robustnessHonestySentence(input.enrichment, input.factorIdsSetByEveryOption)}` : '',
+  };
+}
+
+/**
  * The goal frame, decided once from the run's own envelope:
  *
  *   goal_framed          neither GOAL_DIRECTION_UNATTESTED nor
@@ -2626,7 +2653,7 @@ const STATUS_SUFFIX_PATTERN = `(?:${PARTIAL_SUFFIX_RE_SRC}|${UNKNOWN_SUFFIX_RE_S
 // 2.278: an alternation over EVERY variant in NOT_ROBUST_SENTENCES, derived —
 // a variant emitted but absent from the grammar is rejected at egress and the
 // user silently receives the locked template instead.
-const NOT_ROBUST_RE_SRC = NOT_ROBUST_SENTENCES.map(escapeForRegex).join('|');
+export const NOT_ROBUST_RE_SRC = NOT_ROBUST_SENTENCES.map(escapeForRegex).join('|');
 // Moves in lockstep with `eliminatedSentence` — a variant emitted but absent
 // from the grammar is rejected at egress and the user silently receives the
 // locked template instead.
@@ -2634,11 +2661,11 @@ const ELIMINATED_RE_SRC =
   ' \\d{1,3} options are effectively eliminated \\(each supported by under 1% of runs\\)\\.';
 const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // The goal-frame sentence rides FIRST of the tails, mirroring `suffix` in
-// computeHeadline. It is a headline PREFIX family (before the status suffix)
-// and rides only on a composed headline, never on the locked template, so it
-// is not exported and not registered on the template branch. ONE slot, three
-// alternatives: exactly one of the three sentences rides.
-const GOAL_FRAME_WITHDRAWN_RE_SRC = `(?:${[
+// computeHeadline. It is a headline PREFIX family (before the status suffix).
+// Since the producers re-scope (P1, 12 Oct) it also rides after the locked
+// template (`buildAnalysisResultTails`), so it IS exported and registered on the
+// template branch. ONE slot, three alternatives: exactly one of the three sentences rides.
+export const GOAL_FRAME_WITHDRAWN_RE_SRC = `(?:${[
   GOAL_UNTESTED_DISCLOSURE,
   GOAL_DIRECTION_ASSUMED_DISCLOSURE,
   GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE,
@@ -2681,7 +2708,7 @@ const OBJECTIVE_CONTRADICTION_BOUND_RE_SRC =
 // intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
 // in the run_analysis handler.
 /** R8 Science legacy disclosure, immediately after a named leader sentence. */
-const LEGACY_FIGURES_DISCLOSURE_RE_SRC = " Olumi supplied the figures for the links? from ‘[^’]+’ to ‘[^’]+’(?:(?:, | and )from ‘[^’]+’ to ‘[^’]+’){0,2}(?: and [1-9][0-9]* more)?\\. Set your own to see how much (?:it matters|they matter)\\.";
+export const LEGACY_FIGURES_DISCLOSURE_RE_SRC = " Olumi supplied the figures for the links? from ‘[^’]+’ to ‘[^’]+’(?:(?:, | and )from ‘[^’]+’ to ‘[^’]+’){0,2}(?: and [1-9][0-9]* more)?\\. Set your own to see how much (?:it matters|they matter)\\.";
 const TAIL_PATTERN = `(?:${LEGACY_FIGURES_DISCLOSURE_RE_SRC})?(?:${GOAL_FRAME_WITHDRAWN_RE_SRC})?(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_BOUND_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?(?:${IDENTICAL_ARMS_DISCLOSURE_RE_SRC})?`;
 
 /** Insert after the leader sentence, before the headline's already-composed caution/status tails. */
@@ -2749,6 +2776,14 @@ export interface TemplateSuffixDisclosureGrammar {
  * shape this regex recognises.
  */
 export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclosureGrammar[] = [
+  // ⭐ THE LEAD LADDER'S LEADER-FREE TAILS (DL producers re-scope P1 and its ruling, 12 Oct): since the Run's summary
+  // leads with the locked template, these ride on THIS branch, first and in TAIL_PATTERN's order, from their EXISTING
+  // grammar sources (no new words; see `buildAnalysisResultTails`). The test is the one stated below: none makes a claim
+  // the withhold denied. Each names no leader and states no share: Olumi's own figures, the goal the model could not
+  // test (or whose direction it assumed), and that the result is not yet robust. Withheld Runs now keep them too.
+  { name: 'LEGACY_FIGURES_DISCLOSURE_RE_SRC', source: LEGACY_FIGURES_DISCLOSURE_RE_SRC },
+  { name: 'GOAL_FRAME_WITHDRAWN_RE_SRC', source: GOAL_FRAME_WITHDRAWN_RE_SRC },
+  { name: 'NOT_ROBUST_RE_SRC', source: NOT_ROBUST_RE_SRC },
   { name: 'SCAFFOLD_ANY_DISCLOSURE_RE_SRC', source: SCAFFOLD_ANY_DISCLOSURE_RE_SRC },
   { name: 'CONSTRAINT_GAP_DISCLOSURE_RE_SRC', source: CONSTRAINT_GAP_DISCLOSURE_RE_SRC },
   { name: 'INTAKE_OPTION_DISCLOSURE_RE_SRC', source: INTAKE_OPTION_DISCLOSURE_RE_SRC },
@@ -2917,6 +2952,18 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS: readonly TemplateSuffixDiscl
 const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
   `^${TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map(({ source }) => `(?:${source})?`).join('')}$`,
 );
+
+/**
+ * {@link TEMPLATE_SUFFIX_ONLY_REGEX} with the legacy-figures slot bound to the forwarder's own rebuild of that exact
+ * Science sentence when it supplies one, exactly as {@link headlineGrammarRegexes} binds it on the headline branch:
+ * labels are matched as literal strings, never widened into arbitrary prose slots.
+ */
+function templateSuffixOnlyRegex(legacyFiguresDisclosure: string): RegExp {
+  if (legacyFiguresDisclosure === '') return TEMPLATE_SUFFIX_ONLY_REGEX;
+  const exact = escapeForRegex(legacyFiguresDisclosure);
+  return new RegExp(`^${TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map(({ name, source }) =>
+    `(?:${name === 'LEGACY_FIGURES_DISCLOSURE_RE_SRC' ? exact : source})?`).join('')}$`);
+}
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three
 // claim-safe bodies emitted by cautionReasonText. Pinned verbatim so
@@ -3132,11 +3179,12 @@ export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail
   // / raw decimal / forbidden vocabulary is rejected whole, and each builder's
   // own survival probe (safeScaffoldOptionLabel; buildConstraintDisclosure's
   // degrade-to-count-only) is what keeps honest labels out of that trap.
+  const templateSuffixOnly = templateSuffixOnlyRegex(legacyFiguresDisclosure);
   for (const template of RUN_ANALYSIS_LOCKED_TEMPLATES) {
     if (
       text.length > template.length &&
       text.startsWith(template) &&
-      TEMPLATE_SUFFIX_ONLY_REGEX.test(text.slice(template.length))
+      templateSuffixOnly.test(text.slice(template.length))
     ) {
       return passesAssistantTextContentDefences(text);
     }

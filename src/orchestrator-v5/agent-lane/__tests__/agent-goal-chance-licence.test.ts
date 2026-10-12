@@ -466,3 +466,47 @@ describe('#2840: the headline\'s "what would change it" names the licensed CHANC
     expect(whatChangesFaceLine(differ.analysis_result, differ.graph)).toBeNull();
   });
 });
+
+// ⭐ P7 (DL ruling, 12 Oct; the AIE made it a condition of the run-result reply rule, #94 6133633297: "actual selected
+// licence/target/notes in their context"). The model must have something to retain exactly when every option is withheld.
+describe('P7: the selected current Run\'s licence, notes and target scope reach the model, never a chance figure', () => {
+  const NOTE = 'Effects take about six months to show.';
+  const allWithheld = {
+    ...licence, withheld_option_ids: [A, B, C], pct_by_option: {}, display_rounding_by_option: {},
+    chance_words: 'chance of reaching £60k MRR by June', notes: [NOTE],
+    sent_threshold: { value: 60, field: 'goal_threshold', frame: 'delta' },
+  };
+
+  it('ALL WITHHELD: the licence (its target scope inside), its notes are handed over; no chance figure travels', async () => {
+    const view = await saved(fixture([allWithheld]));
+    expect(view.goal_chance_licence).toMatchObject({
+      form: 'each', option_ids: [A, B, C], withheld_option_ids: [A, B, C],
+      chance_words: 'chance of reaching £60k MRR by June', sent_threshold: { value: 60, field: 'goal_threshold', frame: 'delta' },
+    });
+    expect(view.goal_chance_notes).toEqual([NOTE]);
+    expect(view).not.toHaveProperty('goal_chance_display');
+    expect(view).not.toHaveProperty('goal_chance_driver_display');
+    expect(JSON.stringify(view.goal_chance_licence)).not.toMatch(/pct|\d+%/);
+    for (const row of view.saved_run_options ?? []) expect(row).not.toHaveProperty('probability_of_goal');
+  });
+
+  it('ONE CHANCE: unchanged — the licence rides beside its displayed chance exactly as before', async () => {
+    const view = await saved(fixture());
+    expect(view.goal_chance_licence).toEqual({ form: 'each', option_ids: [A, B, C], withheld_option_ids: [C] });
+    expect(view.goal_chance_display).toEqual({ [A]: 'about 45%', [B]: 'about 50%' });
+  });
+
+  it('CONTRAST: a licence that is NOT all-withheld yet shows no chance hands nothing over (no comparison without its chances)', async () => {
+    for (const record of [{ ...licence, pct_by_option: {} }, { ...licence, form: 'all_likely_to_miss', withheld_option_ids: undefined, pct_by_option: {}, display_rounding_by_option: {} }]) {
+      const view = await saved(fixture([record]));
+      for (const key of ['goal_chance_licence', 'goal_chance_display']) expect(view).not.toHaveProperty(key);
+    }
+  });
+
+  it('NOT CURRENT: nothing is handed over (a stale Run speaks for nothing)', async () => {
+    const read = fixture([allWithheld]);
+    read.analysis_state.run_state.kind = 'complete_stale';
+    const view = await saved(read);
+    for (const key of ['goal_chance_licence', 'goal_chance_notes', 'goal_targets', 'goal_chance_display']) expect(view).not.toHaveProperty(key);
+  });
+});

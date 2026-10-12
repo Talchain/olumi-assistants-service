@@ -219,8 +219,12 @@ async function runHandler(
 // The user-facing bytes, spelled here (never imported)
 // ============================================================================
 
-const FRAMED_LEAD = 'Hold at £49 Per Seat was supported by 71% of runs of this model.';
-const WITHDRAWN_LEAD = 'Hold at £49 Per Seat was supported by 71% of runs of this model.';
+// ⭐ PRODUCERS RE-SCOPE (DL, 12 Oct; AIE #94 6133633297). P1: the summary composes no lead ladder, so it leads with the
+// locked template; the ladder's goal-frame sentence still rides right after it (DL ruling on P1: "could not test … your
+// goal" stays). P2: a new Run composes no objective-contradiction arm. So every row below is the template, then the
+// goal-frame sentence its codes earn, and nothing else. Was: the lead-ladder sentence, the goal-frame sentence and the arm.
+const FRAMED_LEAD = 'Ran analysis on your current scenario.';
+const WITHDRAWN_LEAD = FRAMED_LEAD;
 const COULD_NOT_TEST = ' The model could not test whether any option reaches your goal.';
 const DIRECTION_ASSUMED =
   ' In this model I’ve assumed a higher value is better for your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
@@ -262,12 +266,12 @@ const ROWS: ReadonlyArray<[string, DataShape, Codes, string]> = [
   [M, 'contradicted', 'none', FRAMED_LEAD],
   [M, 'agrees', 'none', FRAMED_LEAD],
   [M, 'joint', 'none', FRAMED_LEAD],
-  [L, 'none', 'none', `${FRAMED_LEAD}${ARM_A_FRAMED}`],
+  [L, 'none', 'none', `${FRAMED_LEAD}`],
   // RE-PINNED (same reason, R3 5916385251 / AIQ 5916386753): without the attainment arm, the lever aim's directional
   // arm stays.
-  [L, 'contradicted', 'none', `${FRAMED_LEAD}${ARM_A_FRAMED}`],
-  [L, 'agrees', 'none', `${FRAMED_LEAD}${ARM_A_FRAMED}`],
-  [L, 'joint', 'none', `${FRAMED_LEAD}${ARM_A_FRAMED}`],
+  [L, 'contradicted', 'none', `${FRAMED_LEAD}`],
+  [L, 'agrees', 'none', `${FRAMED_LEAD}`],
+  [L, 'joint', 'none', `${FRAMED_LEAD}`],
   // ── DIRECTION alone: the direction clause always; combined without data ───
   [M, 'none', 'D', `${WITHDRAWN_LEAD}${COMBINED}`],
   // ⭐ RE-PINNED, D3 step 1 (DL 0df0e1 #87 6006078553, PL rec 5 — RED row "missing target"): these goals state NO target, so
@@ -276,28 +280,28 @@ const ROWS: ReadonlyArray<[string, DataShape, Codes, string]> = [
   [M, 'contradicted', 'D', `${WITHDRAWN_LEAD}${COMBINED}`],
   [M, 'agrees', 'D', `${WITHDRAWN_LEAD}${COMBINED}`],
   [M, 'joint', 'D', `${WITHDRAWN_LEAD}${DIRECTION_ASSUMED}`],
-  [L, 'none', 'D', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
-  [L, 'contradicted', 'D', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
-  [L, 'agrees', 'D', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
-  [L, 'joint', 'D', `${WITHDRAWN_LEAD}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`],
+  [L, 'none', 'D', `${WITHDRAWN_LEAD}${COMBINED}`],
+  [L, 'contradicted', 'D', `${WITHDRAWN_LEAD}${COMBINED}`],
+  [L, 'agrees', 'D', `${WITHDRAWN_LEAD}${COMBINED}`],
+  [L, 'joint', 'D', `${WITHDRAWN_LEAD}${DIRECTION_ASSUMED}`],
   // ── THRESHOLD alone: could not test; no direction clause ──────────────────
   [M, 'none', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}`],
   [M, 'contradicted', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}`],
   [M, 'agrees', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}`],
   [M, 'joint', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}`],
-  [L, 'none', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`],
-  [L, 'contradicted', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`],
-  [L, 'agrees', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`],
-  [L, 'joint', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`],
+  [L, 'none', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}`],
+  [L, 'contradicted', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}`],
+  [L, 'agrees', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}`],
+  [L, 'joint', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}`],
   // ── both codes: the combined sentence, whatever the data ──────────────────
   [M, 'none', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}`],
   [M, 'contradicted', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}`],
   [M, 'agrees', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}`],
   [M, 'joint', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}`],
-  [L, 'none', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
-  [L, 'contradicted', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
-  [L, 'agrees', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
-  [L, 'joint', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
+  [L, 'none', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}`],
+  [L, 'contradicted', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}`],
+  [L, 'agrees', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}`],
+  [L, 'joint', 'D+T', `${WITHDRAWN_LEAD}${COMBINED}`],
 ];
 
 describe('⭐ R3-3 — the EXECUTED run_analysis handler composes the untestable-goal summary', () => {
@@ -317,10 +321,15 @@ describe('⭐ R3-3 — the EXECUTED run_analysis handler composes the untestable
   for (const [goal, data, codes, expected] of ROWS) {
     it(`${goal === M ? 'metric goal' : 'lever aim'} · data ${data} · codes ${codes}`, async () => {
       const { summary, assistantText, leadingOptionId, plotCalls } = await runHandler(goal, CODE_SETS[codes], data);
-      // Positive controls: PLoT was reached once and a leader was named.
+      // Positive controls: PLoT was reached once and a leader was STORED (the summary never names it: P1).
       expect(plotCalls).toBe(1);
       expect(leadingOptionId).toBe('opt_hold');
       expect(summary).toBe(expected);
+      expect(summary).not.toContain('Hold at £49 Per Seat');
+      expect(summary).not.toMatch(/of runs|most runs/);
+      // P2: neither objective-contradiction arm is composed for a new Run.
+      expect(summary).not.toContain(ARM_A_FRAMED.trim());
+      expect(summary).not.toContain(ARM_A_UNFRAMED.trim());
       expect(assistantText).toBe(summary);
       expect(isAllowedRunAnalysisAssistantText(summary), `egress rejected: ${summary}`).toBe(true);
       if (codes !== 'none') {

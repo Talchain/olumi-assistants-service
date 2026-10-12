@@ -230,7 +230,7 @@ describe('W3 instruction and discriminating mutants', () => {
     expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
     expect(HOST_TOOL_CONTRACT).toContain('is ahead, or wins in any share of runs');
     expect(HOST_TOOL_CONTRACT).toContain('earned: false permits its exact say sentence, never an inferred 0 or 1');
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never write recommend or recommendation in any form, not even to deny it.');
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never write recommend or recommendation, including negated forms.');
     expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('never rank, order or single');
   });
 

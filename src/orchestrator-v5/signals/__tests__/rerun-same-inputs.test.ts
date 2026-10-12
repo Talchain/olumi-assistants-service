@@ -71,6 +71,10 @@ const OFFSHORE_LEADS_WIDER = runEnvelope([
   { id: 'a', label: 'Offshore', win: 0.72 },
   { id: 'b', label: 'Onshore', win: 0.28 },
 ]);
+const ONSHORE_LEADS = runEnvelope([
+  { id: 'b', label: 'Onshore', win: 0.55 },
+  { id: 'a', label: 'Offshore', win: 0.45 },
+]);
 
 function currentRunOutcome(env: Record<string, unknown>, hash: string | null): SuccessfulHandlerOutcome {
   return {
@@ -168,8 +172,10 @@ describe('a re-run on the SAME analysis inputs attributes nothing to the change'
     expect(text.startsWith(RERUN_SAME_RECORDED_MODEL_TEXT)).toBe(true);
     expect(text).not.toContain(SAME_INPUTS_LEAD_TEXT);
     expect(text).not.toMatch(/same analytical inputs|saved/i);
-    // The observation itself survives: the leader is still reported.
-    expect(text).toContain('Offshore still leads');
+    // Since the producers re-scope (P4, DL 12 Oct) the unchanged arm names no leader and says nothing, so the framing
+    // stands alone.
+    expect(text).toBe(RERUN_SAME_RECORDED_MODEL_TEXT);
+    expect(text).not.toContain('Offshore');
   });
 
   it('RED-FIRST — several changes + equal hashes: no plural attribution either', () => {
@@ -236,41 +242,51 @@ describe('a re-run on the SAME analysis inputs attributes nothing to the change'
 });
 
 describe('contrast — the attributed sentence is unchanged where the inputs DID change or are unknown', () => {
-  const ATTRIBUTED_UNCHANGED =
-    'Since you adjusted a link in the decision model, the picture has stayed the '
-    + 'same: Offshore still leads. That is a result in itself: the conclusion held '
-    + 'both before and after that change.';
+  // ⭐ Since the producers re-scope (P4, DL 12 Oct) the unchanged arm names no leader and says nothing, so the contrast
+  // is bound on the arm that still has words: the changed leader, attributed. On equal hashes the same pair would open
+  // with RERUN_SAME_RECORDED_MODEL_TEXT and drop the attribution (the RED-FIRST cases above).
+  const ATTRIBUTED_CHANGED =
+    'Since you adjusted a link in the decision model, the result has changed. Ask what changed if you want the detail.';
 
   it('different hashes: byte-identical to the shipped attributed sentence', () => {
     const text = rerunText({
       priorFacts: [edgeEditFact(), priorRunFact(OFFSHORE_LEADS, 'hash-before')],
-      currentEnv: OFFSHORE_LEADS,
+      currentEnv: ONSHORE_LEADS,
       currentHash: 'hash-after',
     });
-    expect(text).toBe(ATTRIBUTED_UNCHANGED);
+    expect(text).toBe(ATTRIBUTED_CHANGED);
+    expect(rerunText({
+      priorFacts: [edgeEditFact(), priorRunFact(OFFSHORE_LEADS, 'hash-same')],
+      currentEnv: ONSHORE_LEADS,
+      currentHash: 'hash-same',
+    })).toBe(`${RERUN_SAME_RECORDED_MODEL_TEXT} This re-run changed the outcome. Ask what changed if you want the detail.`);
   });
 
   it('a null hash on either side proves nothing (legacy fact): unchanged behaviour', () => {
     expect(rerunText({
       priorFacts: [edgeEditFact(), priorRunFact(OFFSHORE_LEADS, 'hash-same')],
-      currentEnv: OFFSHORE_LEADS,
+      currentEnv: ONSHORE_LEADS,
       currentHash: null,
-    })).toBe(ATTRIBUTED_UNCHANGED);
+    })).toBe(ATTRIBUTED_CHANGED);
     expect(rerunText({
       priorFacts: [edgeEditFact(), priorRunFact(OFFSHORE_LEADS, null)],
-      currentEnv: OFFSHORE_LEADS,
+      currentEnv: ONSHORE_LEADS,
       currentHash: 'hash-same',
-    })).toBe(ATTRIBUTED_UNCHANGED);
+    })).toBe(ATTRIBUTED_CHANGED);
   });
 
   it('equal hashes but NO intervening change: the plain unattributed sentence, no framing', () => {
     // Nothing was attributed, so there is nothing to withdraw; a pure repeat run
-    // keeps its existing copy byte-identically.
-    const text = rerunText({
+    // keeps its existing copy byte-identically (the unchanged arm: nothing).
+    expect(rerunText({
       priorFacts: [priorRunFact(OFFSHORE_LEADS, 'hash-same')],
       currentEnv: OFFSHORE_LEADS,
       currentHash: 'hash-same',
-    });
-    expect(text).toBe('The result is unchanged: Offshore still leads.');
+    })).toBe('');
+    expect(rerunText({
+      priorFacts: [priorRunFact(OFFSHORE_LEADS, 'hash-same')],
+      currentEnv: ONSHORE_LEADS,
+      currentHash: 'hash-same',
+    })).toBe('This re-run changed the outcome. Ask what changed if you want the detail.');
   });
 });

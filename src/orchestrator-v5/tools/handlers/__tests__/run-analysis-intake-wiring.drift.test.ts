@@ -64,7 +64,8 @@ describe('2.579 wiring — the handler actually consumes the intake axis', () =>
     // allowlist rejects — and the user would silently receive the locked
     // template with no error anywhere.
     expect(source).toContain(
-      '${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}',
+      // Producers re-scope P1 (DL, 12 Oct): the summary leads with the locked template and the ladder's leader-free tails.
+      '${template}${legacyFiguresTail}${goalFrameTail}${notRobustTail}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}',
     );
     expect(occurrences(source, 'buildIntakeOptionDisclosure(')).toBeGreaterThan(0);
   });

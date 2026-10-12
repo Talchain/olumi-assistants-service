@@ -1,8 +1,9 @@
 /**
- * ⭐ AN OPTION IS NAMED ONLY IN THIS MODEL, AND NEVER "FRAGILE" (WORDING BATCH; DL 0df0e1 lease, 5 Oct; Acceptance #87
- * 5996853005). The rule is APPENDED to the served Agent instructions, so the v0.2 template and every host rule are unchanged
- * (the served-bytes rows are in `selected-coach-wiring.test.ts`: the rule is in what the real route SENT on both aliases).
- * It grants nothing: on a withheld turn the rule's own sentence form is still a ranking the wire gate drops.
+ * ⭐ THE RUN-RESULT REPLY RULE, REPLACED WHOLE BY THE AIE'S EXACT TEXT (#94 6133633297, 12 Oct; DL producers re-scope).
+ * The replaced value told the model to name a leader "only as 'In this model, N% of runs supported X'" and to give the run
+ * share after the goal chances; the AIE's text replaces that positive command rather than stacking a conflicting ban. It
+ * is APPENDED to the served Agent instructions as before, so the v0.2 template and every host rule are unchanged (the
+ * served-bytes rows are in `selected-coach-wiring.test.ts`: the rule is in what the real route SENT on both aliases).
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -12,39 +13,42 @@ import { MODEL_RELATIVE_NAMING_INSTRUCTION, REPLY_LENGTH_INSTRUCTION } from '../
 import { enforceAgentLaneLeaderClaimsAtWire, rankingLabelContext, sentenceRanksOptions } from '../withheld-leader-fail-closed.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../leader-final-egress.js';
 
-describe('the model-relative naming rule', () => {
-  it('B15: leads with goal chances and keeps the run share as supporting detail (exact pin)', () => {
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain("When the result gives options' chances of meeting the goal, lead with those chances as the rules below allow, and give any run share after them as supporting detail; never open with the share.");
+/** The AIE's text, copied byte for byte from #94 6133633297 (the spec this constant must equal). */
+const AIE_RUN_RESULT_REPLY_RULE =
+  'Run result replies: lead with the selected Run\'s licensed goal-chance or withholding lines. '
+  + 'Retain their target scope, unscored conditions and provisional, timing and source qualifications. '
+  + 'Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. '
+  + 'Never substitute a relative ranking for an unavailable goal chance. '
+  + 'The separate goal-chance licence governs any comparison of goal chances. '
+  + 'In dedicated comparative reasoning only, you may report a permitted share recorded for the selected Run, using the approved credit label and qualifier; never turn it into a recommendation or the chance of the whole goal. '
+  + 'Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available. '
+  + 'Never write recommend or recommendation, including negated forms. '
+  + 'Never call a result, option or link fragile.';
+
+describe('the run-result reply rule', () => {
+  it('is the AIE\'s exact text, byte for byte', () => {
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toBe(AIE_RUN_RESULT_REPLY_RULE);
   });
 
-  it('names an option only in the one model-relative form, with or without its share of runs', () => {
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('when the rules above let you name a leading option, name it only as “In this model, N% of runs supported ‘X’”');
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('If the result gives no such share, make no claim about how runs fell: say what the result rests on instead.');
-    // Codex r2: a lone option can be named with no share, so no plurality or share is ever asserted without one.
+  it('replaces the positive leader command and the share-after-chances instruction (no stacked ban)', () => {
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).not.toContain('name it only as');
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).not.toContain('runs supported');
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).not.toContain('give any run share after them');
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).not.toContain('the most runs supported');
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never name an option as leading, ahead, favoured, on top or winning in other words, and never without “in this model”.');
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Do not state a share of model runs or name a leader from that share in a result reply');
   });
 
-  it('N is glossed in positive words, and the recommend stem is banned even negated (DL 0df0e1, Acceptance rehearsal 2)', () => {
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('When you say what N means, say it as what it is: \u201cThat share is the part of this model\u2019s runs that supported it, not its chance of meeting your target.\u201d');
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('That form holds whichever way the goal points and when runs tie, so use it rather than saying the option scored highest or came out lowest.');
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never write recommend or recommendation in any form, not even to deny it.');
-    // The served gloss this replaces must not be modelled by the rule itself.
+  it('the recommend stem stays banned even negated, and the rule models no negated gloss', () => {
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never write recommend or recommendation, including negated forms.');
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).not.toContain('not a recommendation');
   });
 
-  it('N is the share of runs credited to the option, never its chance of reaching the goal (#35 keeps that meaning)', () => {
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('N the share of model runs credited to it, taken from the result; N is never its chance of reaching the goal.');
+  it('the per-option headline stays the chance of meeting the goal (#35 keeps that meaning)', () => {
     expect(HOST_TOOL_CONTRACT).toContain('the per-option headline is its chance of meeting the goal, in this model, on current information');
   });
 
-  it('never "fragile": says what the result rests on, and names an assumption only when sensitivity was measured', () => {
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never call a result, finding, option or link “fragile”: say what the result rests on instead');
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('such as the assumption its decision_sensitivity names when measured, and whose figure it is.');
-  });
-
-  it('keeps the provisional and limit conditions the host rules require, in the same sentence', () => {
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Keep any provisional or limit condition the rules above require in that same sentence.');
+  it('never "fragile"', () => {
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never call a result, option or link fragile.');
   });
 
   it('is APPENDED after the reply-length sentence in the route source: no swap, the template and every host rule unchanged', () => {
@@ -66,7 +70,9 @@ describe('the model-relative naming rule', () => {
   });
 });
 
-describe('the rule’s own sentence through the served wire gates (post-check rows)', () => {
+// The replaced rule's own sentence form ("In this model, N% of runs supported X") is no longer requested, but raw model
+// prose can still say it: the served wire gates keep dropping it on a withheld turn.
+describe('a share-naming sentence (the replaced rule\'s form) through the served wire gates (post-check rows)', () => {
   const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
   const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
   const labels = rankingLabelContext(graph, analysisReady);
@@ -81,7 +87,7 @@ describe('the rule’s own sentence through the served wire gates (post-check ro
       : { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
   ).response.assistant_text as string;
 
-  it('CATCH TWIN FIRST: on a withheld turn the rule’s sentence form is a ranking, and the wire gate drops it', () => {
+  it('CATCH TWIN FIRST: on a withheld turn the share-naming form is a ranking, and the wire gate drops it', () => {
     expect(sentenceRanksOptions(NAMED, labels)).toBe(true);
     const out = wire(false);
     expect(out).not.toContain('runs supported');

@@ -57,7 +57,8 @@ function tailSuffixFamilies(): string[] {
 
 /** The suffix variables, in the order `run-analysis.ts` concatenates them. */
 function compositionOrder(): string[] {
-  const line = RUN_ANALYSIS_SRC.split('\n').find((l) => l.includes('const summary = `${headline'));
+  // The summary leads with the locked template since the producers re-scope (P1, 12 Oct).
+  const line = RUN_ANALYSIS_SRC.split('\n').find((l) => l.includes('const summary = `${template}'));
   if (line === undefined) return [];
   return [...line.matchAll(/\$\{([a-zA-Z]+Disclosure)\}/g)].map((m) => m[1] as string);
 }

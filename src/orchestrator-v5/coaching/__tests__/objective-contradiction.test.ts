@@ -493,12 +493,16 @@ describe('the goal frame the headline builder decided', () => {
     it(`⭐ R3-2 ${frame}: the composer never falls back to Arm B, and with no directional aim it ships nothing`, () => {
       // Arm B's data is present (the positive control above), the goal states no
       // direction over a lever, so the only arm that could fire is Arm B.
-      expect(
-        composeObjectiveContradictionDisclosure(PRICING_GRAPH, PRICING_OPTIONS_WITH_GOAL_PROBABILITY as unknown as Array<Record<string, unknown>>, true, 'goal_framed'),
-      ).toContain('is more likely to reach your stated target');
-      expect(
-        composeObjectiveContradictionDisclosure(PRICING_GRAPH, PRICING_OPTIONS_WITH_GOAL_PROBABILITY as unknown as Array<Record<string, unknown>>, true, frame),
-      ).toBe('');
+      // ⭐ P2 (producers re-scope, DL 12 Oct): a NEW Run's composer ships neither arm on ANY frame, goal_framed included,
+      // so the positive control moves to the builder, which still holds the sentence a stored summary may carry.
+      expect(buildObjectiveContradictionDisclosure(ATTAINMENT(), true, 'goal_framed')).toContain(
+        'is more likely to reach your stated target',
+      );
+      for (const f of ['goal_framed', frame] as const) {
+        expect(
+          composeObjectiveContradictionDisclosure(PRICING_GRAPH, PRICING_OPTIONS_WITH_GOAL_PROBABILITY as unknown as Array<Record<string, unknown>>, true, f),
+        ).toBe('');
+      }
     });
   }
 

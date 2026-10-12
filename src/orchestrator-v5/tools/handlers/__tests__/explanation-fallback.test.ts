@@ -12,6 +12,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { RUN_SHARE_QUALIFIER } from '../../../compose/run-share-label.js';
 
 import type {
   AnalysisProjectionSummary,
@@ -74,22 +75,21 @@ function expectNaturalProse(text: string) {
 }
 
 describe('composeExplainResultsFallback', () => {
-  it('cites leading option label, probability as percentage, the runner-up and its OWN win share, and top drivers with raw sensitivity values', () => {
+  it('states NO share of runs and names no leader from one, and keeps the top drivers and the stability verdict', () => {
     const text = composeExplainResultsFallback(ANALYSIS);
     expectNaturalProse(text);
-    expect(text).toContain('Hire Senior Engineer');
-    // Phase 2 workstream C: probabilities render as percentages, not raw
-    // decimals. 0.62 → "62%". The legacy raw-decimal form must not appear
-    // alongside the probability prose.
-    expect(text).toContain('62%');
+    // ⭐ Producers re-scope P5 as reversed by the AIE (#94 6133633297, 12 Oct): this fallback supplies an ordinary
+    // result reply, so it says no share of runs in any form (neither the old sentence nor the credit label) and names
+    // no leader or runner-up from one. Was: "In this model, Hire Senior Engineer was supported by 62% of runs." and the
+    // runner-up's own share.
+    expect(text).not.toContain('Hire Senior Engineer');
+    expect(text).not.toContain('Hire Two Mid-Level');
+    expect(text).not.toContain('62%');
+    expect(text).not.toContain('27%');
+    expect(text).not.toMatch(/was supported by|of runs\b|Share of model runs/);
+    expect(text).not.toContain(RUN_SHARE_QUALIFIER);
     expect(text).not.toContain('probability of 0.62');
     expect(text).not.toContain('per cent');
-    // ROADMAP 2.1067 — this pin required '35 percentage points', the retired
-    // runner-up GAP statistic. The runner-up is still named; what it now
-    // carries is its OWN win share, so the reader gets 62% and 27% rather than
-    // their subtraction.
-    expect(text).toContain('Hire Two Mid-Level');
-    expect(text).toContain("'Hire Two Mid-Level' was supported by 27% of runs");
     expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivity values rendered as bucketed
     // lead-framing prose (formatSensitivityDirection composes adverb
@@ -116,7 +116,9 @@ describe('composeExplainResultsFallback', () => {
       margin_pp: null,
     });
     expectNaturalProse(text);
-    expect(text).toContain('Hire Senior Engineer');
+    // P5 (AIE #94 6133633297): no share and no leader from one; the reply is never blank.
+    expect(text).not.toContain('Hire Senior Engineer');
+    expect(text).toContain('Would you like to explore what would change this result?');
     expect(text).not.toContain('runner_up');
   });
 
@@ -161,7 +163,7 @@ describe('composeExplainResultsFallback', () => {
     expect(text).not.toContain('clearly separated in this model');
   });
 
-  it('keeps the "clearly separated in this model" framing for a decisive margin (12pp), WITHOUT stating the gap', () => {
+  it('a decisive margin (12pp) is never stated, as a gap or as the runner-up\'s share (P5: the separation clause went with it)', () => {
     const text = composeExplainResultsFallback({
       ...ANALYSIS,
       margin_pp: 12,
@@ -172,7 +174,9 @@ describe('composeExplainResultsFallback', () => {
     // This pin previously required '12 percentage points'; asserting its
     // ABSENCE here is what stops the fix being quietly reverted on the one arm
     // whose whole purpose is the decisive case.
-    expect(text).toContain('clearly separated in this model');
+    // P5 (AIE #94 6133633297): the clear arm existed to state the runner-up's share, so it is gone whole.
+    expect(text).not.toContain('clearly separated in this model');
+    expect(text).not.toMatch(/was supported by|of runs\b/);
     expect(text).not.toContain('12 percentage points');
     expect(text).not.toMatch(/percentage points?/i);
     expect(text).not.toContain('effectively tied');
@@ -253,7 +257,8 @@ describe('explain/flip near-tie agreement at the SSOT threshold boundary', () =>
     const explain = composeExplainResultsFallback(justAbove);
     const flip = composeWhatWouldFlipFallback(justAbove);
     expect(explain).not.toContain('effectively tied');
-    expect(explain).toContain('clearly separated in this model');
+    // P5: the explain fallback's clear arm says nothing (it stated the runner-up's share).
+    expect(explain).not.toContain('clearly separated in this model');
     expect(flip).not.toContain('effectively tied');
   });
 });
@@ -298,7 +303,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     const explain = composeExplainResultsFallback(WIDE_OVERRIDE, null, null);
     const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, null);
     expect(explain).not.toContain('effectively tied');
-    expect(explain).toContain('clearly separated in this model');
+    expect(explain).not.toContain('clearly separated in this model'); // P5: the clear arm says nothing
     expect(flip).not.toContain('effectively tied');
   });
 
@@ -326,7 +331,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     // request/routed paths (which pass no raw signal) are unchanged.
     const legacy = composeExplainResultsFallback(WIDE_OVERRIDE, null);
     expect(legacy).not.toContain('effectively tied');
-    expect(legacy).toContain('clearly separated in this model');
+    expect(legacy).not.toContain('clearly separated in this model'); // P5: the clear arm says nothing
     expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, undefined)).toBe(legacy);
     expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, null)).toBe(legacy);
   });
@@ -345,7 +350,10 @@ describe('composeWhatWouldFlipFallback', () => {
     // ROADMAP 2.1067 — this pin required '35 percentage points' ("the lead of
     // 35 percentage points would need to close"). The contender is named with
     // its OWN share instead; the subtraction is gone.
-    expect(text).toContain("'Hire Two Mid-Level' was supported by the next most runs (27%)");
+    // The win-share class (AIE #94 6131687656): on this tipping-point surface each share is said in the AIE's exact label,
+    // after the option's name, with the fixed qualifier once.
+    expect(text).toContain("'Hire Two Mid-Level': Share of model runs credited to this option: 27%.");
+    expect(text.split(RUN_SHARE_QUALIFIER)).toHaveLength(2);
     expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivities as bucketed lead-framing
     // prose. Thresholds align to bandFromMagnitude. No raw decimals.
@@ -624,7 +632,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     // When the margin is non-finite, never "lead of Not available would need to close" (the bug improvement 1
     // fixed).
     expect(text).not.toMatch(/lead of .* would need to close/i);
-    expect(text).toMatch(/was supported by the next most runs/i);
+    expect(text).toContain("'Hire Marketing Manager': Share of model runs credited to this option: 43%.");
   });
 
   it('Infinity margin: same neutral runner-up fallback, no broken numeric copy', () => {
@@ -638,7 +646,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     );
     expect(text).not.toMatch(/lead of .* would need to close/i);
     expect(text).not.toMatch(/Not available/i);
-    expect(text).toMatch(/was supported by the next most runs/i);
+    expect(text).toContain("'Hire Marketing Manager': Share of model runs credited to this option: 43%.");
   });
 
   it('unknown projected band with no raw signal: omits closing robustness sentence', () => {
@@ -1071,7 +1079,7 @@ describe('composeWhatWouldFlipFallback — label-quoting + hedge-consolidation p
     const text = composeWhatWouldFlipFallback(ANALYSIS);
     expect(text).not.toMatch(/performing best/i);
     expect(text).not.toMatch(/\bbest\b/i);
-    expect(text).toMatch(/In this model, .+ was supported by \d{1,3}% of runs/);
+    expect(text.startsWith("'Hire Senior Engineer': Share of model runs credited to this option: 62%.")).toBe(true);
   });
 
   it('near-tie + fragile: the lead drops its trailing "could shift" hedge (one caveat only)', () => {

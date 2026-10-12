@@ -1804,7 +1804,12 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // C46 stage 1: the headline is ALSO withheld when the leader's sign on a multiplied goal is not proven —
     // still "withheld-able headline, else a locked template".
     // An unadopted Olumi suggestion retained provisionally also cannot produce a leader headline.
-    expect(RUN_ANALYSIS).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional\n      ? null : buildAnalysisResultHeadline(headlineInput);');
+    // ⭐ PRODUCERS RE-SCOPE P1 (DL, 12 Oct, after #2976's check; AIE #94 6133633297): the Run's summary composes NO
+    // lead-ladder headline at all (every rung states a share of runs or names a leader), so `summary` is the locked
+    // template followed by the ladder's leader-free tails and the disclosures. The `gated` stance holds more strongly:
+    // no verdict is needed to withhold a leader the summary never names. Pinned exactly, not loosened.
+    expect(RUN_ANALYSIS).toContain('const headline: string | null = null;');
+    expect(RUN_ANALYSIS).not.toContain('buildAnalysisResultHeadline(headlineInput)');
     // ROADMAP 2.579 added a THIRD disclosure slot, appended after the
     // constraint-gap one. The `gated` stance is unaffected and the pin is
     // updated rather than loosened: `summary` is still "withheld-able headline,
@@ -1890,7 +1895,8 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       // ⭐ Olumi's GOAL-READING tail (AIQ 5895590866 (2)) sits straight after the headline/template: the egress admits it
       // only by exact equality with the forwarder's own rebuild (`goalReadingTailOf`), at that position, never a pattern.
       // It names no option and asserts no leader, so the `gated` stance is unaffected.
-      'const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;',
+      // P1 (12 Oct): the template leads, then the lead ladder's leader-free tails (`buildAnalysisResultTails`).
+      'const summary = `${template}${legacyFiguresTail}${goalFrameTail}${notRobustTail}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather

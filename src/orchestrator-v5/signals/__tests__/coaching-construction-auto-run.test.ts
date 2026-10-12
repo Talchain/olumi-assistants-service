@@ -215,9 +215,12 @@ describe('the NEXT explicit Run never compares against a leader confinement with
     for (const o of OPTIONS) expect(text).not.toContain(o.label);
   });
 
-  it('CONTRAST: after a user-initiated run the comparison names the leader', () => {
+  it('CONTRAST: after a user-initiated run the comparison is made (its unchanged arm, which names no leader)', () => {
+    // Since the producers re-scope (P4, DL 12 Oct) no arm names the leader, so the contrast is the comparison itself:
+    // the user-initiated prior gets the compared (unchanged) arm, never the comparison-free acknowledgement above.
     const text = runBranch([USER_PRIOR()])?.coaching_text ?? '';
-    expect(text).toMatch(/still leads/i);
-    expect(text).toContain(OPTIONS[0]!.label);
+    expect(text).toBe('');
+    expect(text).not.toBe(runBranch([CONSTRUCTION_PRIOR()])?.coaching_text ?? '');
+    for (const o of OPTIONS) expect(text).not.toContain(o.label);
   });
 });

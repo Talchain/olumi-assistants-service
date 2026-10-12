@@ -141,7 +141,9 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     });
 
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price was supported by 62% of runs of this model/);
+    // Producers re-scope P1 (DL, 12 Oct): the Run's summary never leads with a share of runs or a leader; it is the
+    // locked template (true: this is a Run), here with nothing else to disclose.
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
     expect(outcome.handler_facts).toHaveLength(1);
     const fact = outcome.handler_facts[0]!;
     expect(fact.fact_type).toBe('run_analysis');
@@ -157,7 +159,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price was supported by 62% of runs of this model/);
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
   });
 
   it('analysis_status="completed" succeeds with Case D headline', async () => {
@@ -166,7 +168,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price was supported by 62% of runs of this model/);
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
   });
 
   it('analysis_status="partial" succeeds with Case D headline + partial caveat suffix', async () => {
@@ -179,8 +181,9 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price was supported by 62% of runs of this model/);
-    expect(outcome.assistant_text).toContain('provisional');
+    // P1: the partial caveat rides on the locked PARTIAL template (no headline to carry a status suffix).
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.PARTIAL);
+    expect(outcome.assistant_text).toContain('treat with caution');
     // Card/chat parity: summary equals assistant_text.
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type === 'run_analysis') {
@@ -219,7 +222,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price was supported by 62% of runs of this model/);
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.UNKNOWN_STATUS);
     expect(outcome.assistant_text).toContain('treat the result with caution');
 
     const warnCall = warnSpy.mock.calls.find((c) => {

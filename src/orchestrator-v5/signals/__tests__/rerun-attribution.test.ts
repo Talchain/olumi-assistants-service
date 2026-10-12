@@ -293,60 +293,50 @@ describe('PR2 L2 — deriveInterveningChange (the fact-log join)', () => {
 });
 
 describe('PR2 L2 — the attributed consequence sentence', () => {
-  it('UNCHANGED reads as a FINDING, not an apology (the null arm is the scientific one)', () => {
+  // ⭐ SHARE WORDING AT THE PRODUCERS (DL re-scope P4, 12 Oct, after #2976's check): the Run reply's coaching paragraph
+  // names no leader. The unchanged, widened, narrowed and unavailable arms said only that "X still leads" (and how its
+  // lead moved), so they now say NOTHING, with no replacement words; the changed-leader arm keeps its attributed opener
+  // and names neither option. The signal still fires on every arm (`rerunText` asserts it).
+  it('UNCHANGED: the arm named the leader, so it now says nothing (never "still leads")', () => {
     const facts = [edgeEditFact(), priorRunFact(OFFSHORE_LEADS)];
     const text = rerunText({ priorFacts: facts, currentEnv: OFFSHORE_LEADS });
-    // ⭐ OBSERVATIONAL, NOT A ROBUSTNESS CLAIM. "does not hinge on that change"
-    // asserted causal INDEPENDENCE, which C2_unpaired cannot license. "held both
-    // before and after" states only what was observed at the two time points.
-    expect(text).toBe(
-      'Since you adjusted a link in the decision model, the picture has stayed the '
-      + 'same: Offshore still leads. That is a result in itself: the conclusion held '
-      + 'both before and after that change.',
-    );
+    expect(text).toBe('');
   });
 
-  it('LEADER CHANGED is attributed and still names both options', () => {
+  it('LEADER CHANGED is attributed and names neither option', () => {
     const facts = [edgeEditFact(), priorRunFact(OFFSHORE_LEADS)];
     const text = rerunText({ priorFacts: facts, currentEnv: ONSHORE_LEADS });
     expect(text).toBe(
-      'Since you adjusted a link in the decision model, the result has changed: '
-      + 'Offshore scored highest before, and Onshore scores highest now. Ask what changed if you want the detail.',
+      'Since you adjusted a link in the decision model, the result has changed. Ask what changed if you want the detail.',
     );
+    expect(text).not.toMatch(/Offshore|Onshore|scor(?:ed|es) highest/);
   });
 
-  it('WIDENED keeps the computed magnitude, read from the two runs', () => {
+  it('WIDENED: the licensed arm was about the leader\'s lead, so it now says nothing', () => {
     const facts = [edgeEditFact(), priorRunFact(OFFSHORE_LEADS)];
     const text = rerunText({ priorFacts: facts, currentEnv: OFFSHORE_LEADS_WIDER });
-    expect(text).toBe(
-      'Since you adjusted a link in the decision model, Offshore still leads after '
-      + 'this re-run, and its lead has widened by about 20 percentage points.',
-    );
+    expect(text).toBe('');
   });
 
-  it('NARROWED keeps the computed magnitude, read from the two runs', () => {
+  it('NARROWED: the licensed arm was about the leader\'s lead, so it now says nothing', () => {
     const facts = [edgeEditFact(), priorRunFact(OFFSHORE_LEADS)];
     const text = rerunText({ priorFacts: facts, currentEnv: OFFSHORE_LEADS_NARROWER });
-    expect(text).toBe(
-      'Since you adjusted a link in the decision model, Offshore still leads after '
-      + 'this re-run, though its lead has narrowed by about 18 percentage points.',
-    );
+    expect(text).toBe('');
   });
 
-  it('SEVERAL × unchanged agrees with its own plural opener, BYTE-EXACTLY', () => {
+  it('SEVERAL × changed leader agrees with its own plural opener, BYTE-EXACTLY', () => {
     // ⚠ ROUND 1 ASSERTED ONLY THE OPENER PREFIX AND TWO not.toContains, SO THE
     // SECOND SENTENCE WAS NEVER READ — and it shipped "…does not hinge on THAT
     // CHANGE" under a plural opener that deliberately names no antecedent: a
     // dangling referent, and non-dependence asserted about an unidentified
     // single change when several occurred (the mirror of this module's own
     // several ⇒ name-none rule). Binding the WHOLE sentence is the fix.
+    // Since the producers re-scope (P4) the unchanged arm says nothing, so the plural opener is bound on the one arm
+    // that still has words: the changed leader.
     const facts = [factorEditFact('Customer churn'), edgeEditFact(), priorRunFact(OFFSHORE_LEADS)];
-    const text = rerunText({ priorFacts: facts, currentEnv: OFFSHORE_LEADS });
-    expect(text).toBe(
-      'Since your recent changes, the picture has stayed the same: Offshore still '
-      + 'leads. That is a result in itself: the conclusion held both before and '
-      + 'after those changes.',
-    );
+    expect(rerunText({ priorFacts: facts, currentEnv: OFFSHORE_LEADS })).toBe('');
+    const text = rerunText({ priorFacts: facts, currentEnv: ONSHORE_LEADS });
+    expect(text).toBe('Since your recent changes, the result has changed. Ask what changed if you want the detail.');
     expect(text).not.toContain('a link in the decision model');
     expect(text).not.toContain('Customer churn');
   });
@@ -362,10 +352,8 @@ describe('PR2 L2 — the attributed consequence sentence', () => {
       priorFacts: [edgeEditFact(), priorRunFact(MARGIN_UNAVAILABLE)],
       currentEnv: MARGIN_UNAVAILABLE,
     });
-    expect(text).toBe(
-      'Since you adjusted a link in the decision model, Offshore still leads after '
-      + 'this re-run. I could not compare the size of its lead between the two runs.',
-    );
+    // Its only words were about the leader and "its lead" (producers re-scope P4): it says nothing.
+    expect(text).toBe('');
     expect(text).not.toContain('the picture has stayed the same');
     expect(text).not.toContain('held both before and after');
   });
@@ -388,10 +376,7 @@ describe('PR2 L2 — the attributed consequence sentence', () => {
       priorFacts: [priorRunFact(MARGIN_UNAVAILABLE)],
       currentEnv: MARGIN_UNAVAILABLE,
     });
-    expect(text).toBe(
-      'Offshore still leads after this re-run. I could not compare the size of '
-      + 'its lead between the two runs.',
-    );
+    expect(text).toBe('');
     expect(text).not.toContain('The result is unchanged');
     expect(text).not.toContain('Since');
   });
@@ -408,13 +393,14 @@ describe('PR2 L2 — the attributed consequence sentence', () => {
         'Since you changed the decision model, '],
     ];
     for (const [change, opener] of cases) {
+      // The changed-leader arm: since the producers re-scope (P4) it is the one comparable arm that still has words.
       const text = COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
         runDelta: {
           comparable: true,
-          leading_option_changed: false,
+          leading_option_changed: true,
           leader_identity_basis: 'option_id',
           prior_leading_label: 'Offshore',
-          current_leading_label: 'Offshore',
+          current_leading_label: 'Onshore',
           margin_direction: 'unchanged',
           margin_shift_pp: 0,
           driver_rank_changes: [],
@@ -440,11 +426,9 @@ describe('PR2 L2 — where attribution must NOT appear', () => {
       ])),
     ];
     const text = rerunText({ priorFacts: facts, currentEnv: OFFSHORE_LEADS });
-    expect(text).toBe(
-      'Offshore leads after this re-run. I cannot line up the earlier result with '
-      + 'this one, so I have not compared the two.',
-    );
+    expect(text).toBe('I cannot line up the earlier result with this one, so I have not compared the two.');
     expect(text).not.toContain('Since you');
+    expect(text).not.toContain('Offshore');
   });
 
   it('WITHHELD LEADER: attribution cannot outlive its host sentence', () => {
@@ -470,18 +454,13 @@ describe('PR2 L2 — where attribution must NOT appear', () => {
     // exception is pinned byte-exactly by "UNATTRIBUTED unavailable margins get
     // the same arm" above — an exception a test asserts is honest; an exception
     // a title hides is the drift this file keeps guarding against.
+    // Since the producers re-scope (P4) the unchanged, widened and narrowed arms name no leader and say nothing.
     const prior = [priorRunFact(OFFSHORE_LEADS)];
-    expect(rerunText({ priorFacts: prior, currentEnv: OFFSHORE_LEADS }))
-      .toBe('The result is unchanged: Offshore still leads.');
+    expect(rerunText({ priorFacts: prior, currentEnv: OFFSHORE_LEADS })).toBe('');
     expect(rerunText({ priorFacts: prior, currentEnv: ONSHORE_LEADS }))
-      .toBe('This re-run changed the outcome: Offshore scored highest before, and Onshore '
-        + 'scores highest now. Ask what changed if you want the detail.');
-    expect(rerunText({ priorFacts: prior, currentEnv: OFFSHORE_LEADS_WIDER }))
-      .toBe('Offshore still leads after this re-run, and its lead has widened by '
-        + 'about 20 percentage points.');
-    expect(rerunText({ priorFacts: prior, currentEnv: OFFSHORE_LEADS_NARROWER }))
-      .toBe('Offshore still leads after this re-run, though its lead has narrowed by '
-        + 'about 18 percentage points.');
+      .toBe('This re-run changed the outcome. Ask what changed if you want the detail.');
+    expect(rerunText({ priorFacts: prior, currentEnv: OFFSHORE_LEADS_WIDER })).toBe('');
+    expect(rerunText({ priorFacts: prior, currentEnv: OFFSHORE_LEADS_NARROWER })).toBe('');
   });
 });
 
@@ -534,26 +513,35 @@ describe('PR2 L2 — the sentence is TEMPORAL, never CAUSAL', () => {
   // — "Since"→"Because" REDs BOTH, "Since"→"After" REDs only the second.
   it('no branch of the attributed copy contains a causal connective', () => {
     let composed = 0;
+    let worded = 0;
     for (const priorFacts of PRIOR_SETS) {
       for (const currentEnv of ENVS) {
         const text = rerunText({ priorFacts, currentEnv });
         for (const pattern of CAUSAL) expect(text).not.toMatch(pattern);
+        composed += 1;
+        // An arm with no words (the producers re-scope, P4) has nothing to attribute.
+        if (text === '') continue;
         // Non-vacuity, bound to the PROPERTY rather than to a word: attribution
         // demonstrably changed this sentence, so the loop cannot pass by
         // composing nothing attributable. Robust to a wording change, which the
         // literal-token control was not.
         expect(text).not.toBe(unattributed(currentEnv));
-        composed += 1;
+        worded += 1;
       }
     }
     expect(composed).toBe(16);
+    // The changed-leader arm, once per prior set.
+    expect(worded).toBe(4);
   });
 
   it('the attributed opener is the TEMPORAL connective "Since"', () => {
     for (const priorFacts of PRIOR_SETS) {
       for (const currentEnv of ENVS) {
-        expect(rerunText({ priorFacts, currentEnv }).startsWith('Since ')).toBe(true);
+        const text = rerunText({ priorFacts, currentEnv });
+        // An arm with no words (the producers re-scope, P4) opens with nothing.
+        if (text !== '') expect(text.startsWith('Since ')).toBe(true);
       }
+      expect(rerunText({ priorFacts, currentEnv: ONSHORE_LEADS }).startsWith('Since ')).toBe(true);
     }
   });
 
@@ -563,7 +551,8 @@ describe('PR2 L2 — the sentence is TEMPORAL, never CAUSAL', () => {
     // rather than rewritten (rewriting it would misname the thing changed).
     const text = rerunText({
       priorFacts: [factorEditFact('Because-rate assumption'), priorRunFact(OFFSHORE_LEADS)],
-      currentEnv: OFFSHORE_LEADS,
+      // The changed-leader arm: the one comparable arm with words since the producers re-scope (P4).
+      currentEnv: ONSHORE_LEADS,
     });
     expect(text.startsWith('Since you changed Because-rate assumption, ')).toBe(true);
     // The product's own template contributes no causal connective: strip the

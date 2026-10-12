@@ -141,12 +141,9 @@ describe('run_analysis handler — happy path', () => {
 
     // Headline derived from happy fixture: leader = Option A, margin 24pp to
     // the runner-up, top driver = Price (highest |elasticity| × confidence).
-    // No fragility resolvable (no from_label/to_label/from_node_id/to_node_id
-    // on the lone fragile edge, no graph nodes to map against), so the
-    // driver-with-margin shape (Case B) fires.
-    expect(outcome.assistant_text).toBe(
-      'Option A was supported by 62% of runs of this model because Price is the strongest driver.',
-    );
+    // Producers re-scope P1 (DL, 12 Oct): the summary composes no lead ladder; it is the locked template.
+    // Was: the driver-with-margin lead ladder (Case B), "Option A was supported by 62% of runs of this model because …".
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.summary).toBe(outcome.assistant_text);  // card/chat parity
@@ -282,9 +279,10 @@ describe('run_analysis handler — reduced-samples disclosure', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(
-      `Option A was supported by 62% of runs of this model because Price is the strongest driver.${REDUCED_SUFFIX}`,
-    );
+    // Producers re-scope P1 (DL, 12 Oct): the summary composes no lead ladder; it is the locked template. The reduced-samples disclosure rides on
+    // its locked template (the same words as the ladder's suffix).
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.REDUCED_SAMPLES);
+    expect(outcome.assistant_text.endsWith(REDUCED_SUFFIX)).toBe(true);
   });
 
   it('template path: headline-ineligible results select the REDUCED_SAMPLES locked template', async () => {
@@ -315,9 +313,8 @@ describe('run_analysis handler — reduced-samples disclosure', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(
-      'Option A was supported by 62% of runs of this model because Price is the strongest driver.',
-    );
+    // Producers re-scope P1 (DL, 12 Oct): the summary composes no lead ladder; it is the locked template.
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
   });
 });
 
@@ -642,9 +639,9 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('oc_a');
-    // option_comparison shape yields a Case D headline (winner + probability,
-    // no driver/fragility data in this synthetic fixture).
-    expect(outcome.assistant_text).toContain('OC A was supported by');
+    // Producers re-scope P1 (DL, 12 Oct): the summary composes no lead ladder; it is the locked template. The leader is stored, never said.
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    expect(outcome.assistant_text).not.toContain('OC A');
   });
 
   it('record with only option_label (no option_id) uses the label as id', async () => {
@@ -875,10 +872,9 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    // Single option at 100% → Case D headline (winner + probability).
-    expect(outcome.assistant_text).toBe(
-      'X was supported by 100% of runs of this model. Run the follow-up checks before treating this as final.',
-    );
+    // Producers re-scope P1 (DL, 12 Oct): the summary composes no lead ladder; it is the locked template.
+    // Was: "X was supported by 100% of runs of this model. Run the follow-up checks before treating this as final."
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
   });
 
   it('args validation failure (scenario_id non-string) → cause_kind=args_validation_failed', async () => {
@@ -1158,8 +1154,9 @@ describe('run_analysis handler — golden fixture coverage (R5)', () => {
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('opt_only');
-    // Minimal fixture has a single option at 1.0 → Case D headline.
-    expect(outcome.assistant_text).toContain('was supported by 100% of runs of this model');
+    // Producers re-scope P1 (DL, 12 Oct): the summary composes no lead ladder; it is the locked template.
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    expect(outcome.assistant_text).not.toMatch(/of runs/);
   });
 
   it('larger fixture (3 options) selects the top-prob option deterministically', async () => {
@@ -1423,7 +1420,8 @@ describe('run_analysis handler — numeric integrity guard', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toContain('Option A was supported by');
+    // Producers re-scope P1 (DL, 12 Oct): the summary composes no lead ladder; it is the locked template.
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
     expect(findInvalidNumericEvent()).toBeUndefined();
   });
 });
@@ -1537,10 +1535,16 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     });
     const outcome = await handler(makeInvocation());
     // The engine's constraint warning alone must NOT change the message when
-    // the user ratified nothing — this is the byte-parity guarantee, and it
-    // is what proves the assertions in the next test are not vacuous.
-    expect(outcome.assistant_text).toMatch(ANY_LEAD_CLAUSE_RE);
+    // the user ratified nothing — this is the byte-parity guarantee.
+    // ⭐ Producers re-scope P1 (DL, 12 Oct): no Run's summary leads with a lead clause any more, so the presence the
+    // withheld test below discriminates against is the DISCLOSURE (absent here, present there), and the leader the
+    // withheld Run must not name is still STORED here (the data exists; the words never say it).
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(outcome.assistant_text).not.toContain('could not be checked');
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(fact.result.leading_option_id).not.toBeNull();
   });
 
   it('(a) withholds leading-option language, (b) names the unevaluated condition, (c) promises no unproved repair', async () => {
@@ -1609,8 +1613,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(
-      'Option A was supported by 62% of runs of this model because Price is the strongest driver.',
-    );
+    // Producers re-scope P1 (DL, 12 Oct): the summary composes no lead ladder; it is the locked template.
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
   });
 });
