@@ -122,9 +122,10 @@ describe('D2: the served capacity status quo, read in its own frame (run 3, norm
 });
 
 /**
- * D2 FLOAT TOLERANCE (DL 12 Oct, recovery Batch D). The 11 Oct capacity Run (served CEE 50530b5f): carrying on held 0.4 on
- * every draw, and the engine reported std 5.551115123125783e-17 with mean 0.4000000000000001. That is float residue, not a
- * spread; read as one, the status quo said "doesn't match … as it stands today". A real spread, however small, still moves.
+ * D2 EXACT SAME-FRAME EQUALITY (AIE 6129749753 AMEND, PL 6130375396, 12 Oct; replaces the 16ε float tolerance and C's 1e-9
+ * floor, both rejected). The 11 Oct capacity Run (served CEE 50530b5f): carrying on reported std 5.551115123125783e-17 with
+ * mean 0.4000000000000001. Nothing shows that producer gave a constant result, so the checking reading stays: it moved.
+ * Exactly today's figure, with no spread, is "No change, by assumption" in any unit.
  */
 const FLOAT = JSON.parse(readFileSync('tests/fixtures/batch-d/served-capacity-float-std-20261011T233643Z.json', 'utf8')) as {
   envelope: Rec; graph: Rec; served_licence: Rec & { sent_threshold: SentGoalThreshold } };
@@ -139,7 +140,7 @@ const floatEnvelope = (outcome?: Rec): Rec => {
 };
 const floatLicence = (env: Rec) => goalChanceLicenceOf(env, FLOAT.graph, GOAL, earned, FLOAT.served_licence.sent_threshold, FLOAT.graph, {});
 
-describe('D2 float tolerance: float residue in the status-quo row is no spread (11 Oct capacity Run)', () => {
+describe('D2 exact same-frame equality (11 Oct capacity Run, and run 4\'s capacity row)', () => {
   it('precondition: the wire row is 0.4 on every draw with a float-residue std, and the Run recorded its normalised field', () => {
     const sq = (FLOAT.envelope.option_comparison as Rec[]).find((o) => o.option_id === SQ)!;
     expect(sq.outcome).toMatchObject({ p10: 0.4, p50: 0.4, p90: 0.4, mean: 0.4000000000000001, std: 5.551115123125783e-17 });
@@ -147,37 +148,49 @@ describe('D2 float tolerance: float residue in the status-quo row is no spread (
     expect((FLOAT.graph.nodes as Rec[]).find((n) => n.id === GOAL)!.observed_state).toMatchObject({ value: 0.4, raw_value: 80, cap: 200 });
   });
 
-  it('RED → GREEN: a std of 5.6e-17 is zero spread, so carrying on is "No change, by assumption", never "moved"', () => {
-    const l = floatLicence(floatEnvelope());
-    expect(reasonOf(l)?.reason).not.toBe('reference_moved');
-    expect(l!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
+  it('AMENDED: the residue row (std 5.6e-17, mean one ulp above 0.4) reads moved; its exact twin is "No change, by assumption"', () => {
+    expect(reasonOf(floatLicence(floatEnvelope()))).toMatchObject({ reason: 'reference_moved' });
+    expect(floatLicence(floatEnvelope({ std: 0, mean: 0.4 }))!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
+    // Each half on its own: the std alone, and the centre alone.
+    expect(reasonOf(floatLicence(floatEnvelope({ mean: 0.4 })))).toMatchObject({ reason: 'reference_moved' });
+    expect(reasonOf(floatLicence(floatEnvelope({ std: 0 })))).toMatchObject({ reason: 'reference_moved' });
+  });
+
+  it('CONTRAST (the AIE\'s real small spread): std 4ε·|0.4| with split deciles reads moved', () => {
+    const tiny = 4 * Number.EPSILON * 0.4;
+    expect(reasonOf(floatLicence(floatEnvelope({ std: tiny, mean: 0.4, p10: 0.4 - tiny, p50: 0.4, p90: 0.4 + tiny })))).toMatchObject({ reason: 'reference_moved' });
   });
 
   it('CONTRAST: a genuinely nonzero std, or deciles genuinely apart, still reads as moved', () => {
     expect(reasonOf(floatLicence(floatEnvelope({ std: 0.001 })))).toMatchObject({ reason: 'reference_moved' });
-    // A std of 1e-12·|centre|: far above representation error at that centre.
     expect(reasonOf(floatLicence(floatEnvelope({ std: 1e-12 * 0.4, mean: 0.4, p10: 0.4, p50: 0.4, p90: 0.4 })))).toMatchObject({ reason: 'reference_moved' });
     expect(reasonOf(floatLicence(floatEnvelope({ p10: 0.39, p90: 0.41 })))).toMatchObject({ reason: 'reference_moved' });
   });
 
-  it('CONTRAST (no unit floor): a tiny-scale quantity (centre 1e-6) with a real std of 1e-12 moves; at std 0 it is today', () => {
+  it('a tiny-scale quantity (centre 1e-6): any positive std moves; at std 0 and exactly today it is today', () => {
     const tiny = structuredClone(FLOAT.graph);
     ((tiny.nodes as Rec[]).find((n) => n.id === GOAL)!.observed_state as Rec).value = 1e-6;
     const at = (std: number) => goalChanceLicenceOf(floatEnvelope({ std, mean: 1e-6, p10: 1e-6, p50: 1e-6, p90: 1e-6 }), tiny, GOAL, earned,
       FLOAT.served_licence.sent_threshold, tiny, {});
     expect(reasonOf(at(1e-12))).toMatchObject({ reason: 'reference_moved' });
-    // The floor discriminator: std 1e-16 at centre 1e-6 is a relative spread of 1e-10, far above representation error,
-    // so it moves; a unit floor (max(1, scale)) would have called it zero.
     expect(reasonOf(at(1e-16))).toMatchObject({ reason: 'reference_moved' });
     expect(at(0)!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
   });
 
-  it('UNIT-RESCALED: the same row in raw units (×200, read against raw_value 80) gives the same verdicts', () => {
+  it('UNIT-RESCALED: in raw units (read against raw_value 80) exactly 80 with no spread is today; the residue row still moves', () => {
     const raw = { value: 100, field: 'goal_threshold_raw', frame: 'delta' } as const;
     const scaled = (outcome: Rec) => goalChanceLicenceOf(floatEnvelope(outcome), FLOAT.graph, GOAL, earned, raw, FLOAT.graph, {});
+    expect(scaled({ p10: 80, p50: 80, p90: 80, mean: 80, std: 0 })!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
     const sq = (FLOAT.envelope.option_comparison as Rec[]).find((o) => o.option_id === SQ)!.outcome as Record<string, number>;
     const x200 = Object.fromEntries(['p10', 'p50', 'p90', 'mean', 'std'].map((k) => [k, sq[k]! * 200]));
-    expect(scaled(x200)!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
-    expect(reasonOf(scaled({ ...x200, std: 1e-12 * 80 }))).toMatchObject({ reason: 'reference_moved' });
+    expect(reasonOf(scaled(x200))).toMatchObject({ reason: 'reference_moved' });
+  });
+
+  it('RUN 4\'s capacity status-quo row (served, exact 0.16 with std 0) is "No change, by assumption" under exact equality', () => {
+    const served = JSON.parse(readFileSync('src/orchestrator-v5/compose/__tests__/fixtures/run4-capacity-turn3-response-body.json', 'utf8')) as Rec;
+    const row = (((served.blocks as Rec[])[0]!.enrichment as Rec).option_comparison as Rec[]).find((o) => o.option_id === SQ)!.outcome as Rec;
+    expect(row).toMatchObject({ p10: 0.16, p50: 0.16, p90: 0.16, mean: 0.16, std: 0 });
+    // On run 3's recorded Run fields (the same capacity template; run 4's transport strips the licence's own fields).
+    expect(licence(runEnvelope(row), RECORDED)!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
   });
 });
