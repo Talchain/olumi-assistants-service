@@ -314,6 +314,17 @@ export function targetChanceWords(args: {
   return `${x} ${up ? 'increasing' : 'decreasing'} by ${more} ${sayFigureAsWritten(size, unit)} from today${time}`;
 }
 
+/**
+ * ⭐ AIE 6129011591 (D2/S12, 12 Oct): the validated target phrase a zero-spread option says ("Falls short of the target:
+ * {phrase}, if today’s figures hold."): `targetChanceWords`' own frame, comparator, sign and period logic, without the "being"
+ * that follows "chance of". `undefined` exactly where those words cannot be said.
+ */
+export function targetPhraseWords(args: Parameters<typeof targetChanceWords>[0]): string | undefined {
+  const words = targetChanceWords(args);
+  const x = `‘${args.label.trim()}’`;
+  return words !== undefined && words.startsWith(`${x} being `) ? `${x} ${words.slice(`${x} being `.length)}` : words;
+}
+
 const isPercentUnit = (unit: string): boolean => /^%$|^percent$/i.test(unit.trim());
 
 /** Amendment 1: every paired frame reads the status quo as unchanged; disclosed for every frame, the status quo row by assumption. */

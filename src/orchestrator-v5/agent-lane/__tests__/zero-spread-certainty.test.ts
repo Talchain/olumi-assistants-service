@@ -66,8 +66,8 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     expect(lineOf(bound, short, evaluated)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: 'Falls short of £20,000 a month by month 12 if today’s rates hold.' });
     const noHorizon = structuredClone(graph);
     delete noHorizon.nodes.find((n: Rec) => n.id === 'mrr').goal_horizon_months;
-    expect(lineOf(noHorizon, fixedRates).line).toBe('Meets £20,000 a month if today’s figures hold.');
-    expect(lineOf(noHorizon, short).line).toBe('Falls short of £20,000 a month if today’s figures hold.');
+    expect(lineOf(noHorizon, fixedRates).line).toBe('Meets the target: ‘MRR’ at least £20,000 a month, if today’s figures hold.');
+    expect(lineOf(noHorizon, short).line).toBe('Falls short of the target: ‘MRR’ at least £20,000 a month, if today’s figures hold.');
     expect(lineOf(graph, short).line).toBe('Not shown yet: needs month-by-month changes');
     // CONTRAST: an exact 1 withheld for an UNSIZED path (spread present, not earned) carries no zero-spread reason.
     const spread = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 1, 400, 22500) : r));

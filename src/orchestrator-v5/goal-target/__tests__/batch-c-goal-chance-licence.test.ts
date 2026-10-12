@@ -594,7 +594,7 @@ const capacityWireRun = (): Rec => ({ option_comparison: [
   { option_id: 'carry_on', probability_of_goal: 0, probability_of_goal_precision: wilson(0, 0), outcome: { mean: 0.75, std: 0, p10: 0.75, p50: 0.75, p90: 0.75 } },
 ] });
 /** The status quo's typed zero-spread line (Science §(ab)(2)), its true reading when the frame is unknown. */
-const ZERO_SPREAD_LINE = 'Falls short of 85% if today’s figures hold.';
+const ZERO_SPREAD_LINE = 'Falls short of the target: ‘Development capacity’ at least 85%, if today’s figures hold.';
 /** The field this Run records for itself (run-analysis.ts: `sentGoalThresholdOf` beside `withGoalChanceLicence`). */
 const recordedField = (run: Rec, g: Rec) => sentGoalThresholdOf(run, g, 'capacity', () => false);
 const wireLicence = (g: Rec = capacityGraph(), run: Rec = capacityWireRun()) => goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {});
@@ -1619,5 +1619,47 @@ describe('R5 at the producer — the licence target carries the validated readin
     const l = capacityLicence(capacityGraph({ goal: { goal_target_basis: { ...CAPACITY_LEVEL_BASIS, target_raw: 80 } } }));
     expect(l).not.toBeNull();
     expect(l!.target).not.toHaveProperty('frame');
+  });
+});
+
+// ── AIE 6129011591 (D2/S12, 12 Oct): a zero-spread option says the VALIDATED target ────────────────────────────────────────
+describe('AIE 6129011591: a zero-spread option\'s line says the validated target, never target.value + target.unit alone', () => {
+  const zeroSpreadRun = (p: 0 | 1): Rec => ({ option_comparison: [
+    { option_id: 'hire_a_tech_lead', probability_of_goal: 0.46 },
+    { option_id: 'hire_two_developers', probability_of_goal: p, outcome: { mean: 4, std: 0, p10: 4, p50: 4, p90: 4 } },
+    { option_id: 'carry_on', probability_of_goal: 0 },
+  ] });
+  const lineOf = (g: Rec, p: 0 | 1 = 0): unknown => goalChanceLicenceOf(zeroSpreadRun(p), g, 'productivity', () => false, undefined, g, hiringConstraints(g))
+    ?.withheld_reason_by_option?.hire_two_developers;
+  const level = (goal: Rec): Rec => hiringGraph({ label: 'Development capacity', quantity_frame: 'level',
+    observed_state: { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction', extractionType: 'explicit' }, ...goal });
+  const LEVEL_BASIS = { ...HIRING_BASIS, quantity_frame: 'level', denominator: 'today’s development capacity (75%)',
+    effect_unit: 'percentage points of capacity per added person, at month three' };
+  const falls = (phrase: string): Rec => ({ reason: 'zero_spread', side: 'falls_short', line: `Falls short of the target: ${phrase}, if today’s figures hold.` });
+  it('productivity (a quantity measured AS a change, +10% of today): "at least 10% higher than today"; both sides', () => {
+    expect(lineOf(hiringGraph(), 0)).toEqual(falls('‘Productivity’ at least 10% higher than today at three months'));
+    expect(lineOf(hiringGraph(), 1)).toEqual({ reason: 'zero_spread', side: 'meets',
+      line: 'Meets the target: ‘Productivity’ at least 10% higher than today at three months, if today’s figures hold.' });
+  });
+  it('capacity (a percentage LEVEL, +10 points): "at least 10 percentage points higher than today", never "10%"', () => {
+    expect(lineOf(level({ goal_target_basis: LEVEL_BASIS }))).toEqual(falls('‘Development capacity’ at least 10 percentage points higher than today at three months'));
+  });
+  it('a RELATIVE +10% on a level quantity: "10% higher than today", never "10 percentage points"', () => {
+    const line = lineOf(level({ goal_threshold_frame: 'change_rel', goal_threshold_raw: 0.1, goal_threshold: 0.1,
+      goal_target_basis: { ...LEVEL_BASIS, target_frame: 'change_rel', target_raw: 0.1, effect_unit: '% of today’s capacity per added person, at month three' } }));
+    expect(line).toEqual(falls('‘Development capacity’ at least 10% higher than today at three months'));
+    expect(JSON.stringify(line)).not.toMatch(/percentage point/);
+  });
+  it('a decrease (at most, −5% of today): its own sign and bound, "at least 5% lower than today"', () => {
+    expect(lineOf(hiringGraph({ goal_threshold_raw: -5, goal_threshold: -0.05, goal_direction: '<=', goal_target_basis: { ...HIRING_BASIS, target_raw: -5 } })))
+      .toEqual(falls('‘Productivity’ at least 5% lower than today at three months'));
+  });
+  it('NEGATIVE — the target cannot be said (no goal label): the option stays withheld with NO zero-spread line, never a bare percentage', () => {
+    const g = hiringGraph({ label: '' });
+    const l = goalChanceLicenceOf(zeroSpreadRun(0), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
+    expect(l).not.toBeNull();
+    expect(l.withheld_option_ids).toContain('hire_two_developers');
+    expect(l.withheld_reason_by_option?.hire_two_developers).toBeUndefined();
+    expect(JSON.stringify(l)).not.toMatch(/(?:Meets|Falls short of) (?:the target: )?\d/);
   });
 });

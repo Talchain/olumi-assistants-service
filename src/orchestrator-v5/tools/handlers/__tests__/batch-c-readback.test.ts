@@ -501,7 +501,8 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
     expect(licence.status_quo).toBeUndefined();
     expect(licence.withheld_option_ids).toContain('carry_on_with_the_current_team');
     expect(licence.withheld_reason_by_option?.carry_on_with_the_current_team).toEqual({ reason: 'zero_spread', side: 'falls_short',
-      line: 'Falls short of 10% if today’s figures hold.' });
+      // AIE 6129011591 (D2/S12): the validated +10-point target, never the bare "10%" it read before.
+      line: 'Falls short of the target: ‘Development capacity’ at least 10 percentage points higher than today at three months, if today’s figures hold.' });
     expect(JSON.stringify(licence)).not.toMatch(/by assumption|doesn’t match/);
     // Its row is the Run's own, intervals kept: none is removed for an assumption that is not claimed.
     expect((result.enrichment.option_comparison as Rec[]).find((r) => r.option_id === 'carry_on_with_the_current_team')!.outcome)
