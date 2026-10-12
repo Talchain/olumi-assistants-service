@@ -620,3 +620,35 @@ describe('P45 slice 3: Bias check is a standing typed model check', () => {
     });
   });
 });
+
+/**
+ * SYS2 S1 · A STRENGTHEN PRESS WITH NOTHING TO SIZE ENDS WITH THE ASK THE RESULT IS WAITING ON (core system 7; AIE APPROVE
+ * 6115647793). Paul's hiring transcript: every link sized, the chance withheld for a missing baseline, and Strengthen
+ * answered only the sentence below; his next message was "You're talking about links, but what about missing data from
+ * this decision?". The ask is the exact persisted `currentLevelQuestion` (served words, hiring/turns/04.json).
+ */
+describe('SYS2 S1 · Strengthen with nothing to size', () => {
+  const NOTHING = 'There is nothing to strengthen in this step: every link on your goal’s path already has a size.';
+  const LEVEL_ASK = "What's today's level of productivity?";
+  const sized = () => actionFactsOf(ran(legacyD3(), { permitted: true, separation: 'separated' }));
+  it('RED on 50530b5f: the model is waiting for today\'s level → the reply ends with that exact ask', () => {
+    const d = decidePress({ id: 'agent-next-strengthen' }, { ...sized(), currentLevelQuestion: LEVEL_ASK });
+    expect(d.kind).toBe('reply');
+    if (d.kind !== 'reply') return;
+    expect(d.reply.reason).toBe('nothing_in_scope');
+    expect(d.reply.text.startsWith(NOTHING)).toBe(true);
+    expect(d.reply.text.trimEnd().endsWith(LEVEL_ASK)).toBe(true);
+  });
+  it('CONTRAST: no ask pending → byte-identical to today', () => {
+    const d = decidePress({ id: 'agent-next-strengthen' }, { ...sized(), currentLevelQuestion: null });
+    expect(d).toMatchObject({ kind: 'reply', reply: { reason: 'nothing_in_scope', text: NOTHING } });
+  });
+  it('CONTRAST: a suggested change waiting for a yes keeps the reply unchanged (same gate as the level offer)', () => {
+    const d = decidePress({ id: 'agent-next-strengthen' }, { ...sized(), currentLevelQuestion: LEVEL_ASK, approvalWaiting: true });
+    expect(d).toMatchObject({ kind: 'reply', reply: { reason: 'nothing_in_scope', text: NOTHING } });
+  });
+  it('CONTRAST: a disabled Strengthen (no current analysis) keeps its own reason and words', () => {
+    const d = decidePress({ id: 'agent-next-strengthen' }, { ...actionFactsOf(preRun(legacyD3())), currentLevelQuestion: LEVEL_ASK });
+    expect(d).toMatchObject({ kind: 'reply', reply: { reason: 'needs_current_analysis', text: 'I can’t strengthen the model yet: it needs a current analysis first.' } });
+  });
+});
