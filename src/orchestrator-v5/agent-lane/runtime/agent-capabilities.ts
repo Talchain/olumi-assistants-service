@@ -4,6 +4,8 @@ import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
+import { capacityPartsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
+  planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
 /**
@@ -162,6 +164,14 @@ const NOT_A_FACTOR_NOTE =
   'These were named but are not factors (for example a risk), so no starting value can be set on them and they are ' +
   'NOT in this proposal. Tell the user plainly, before they approve, that each was left out and why; describe its ' +
   'effect through the factors it acts on instead. Never present the starting point as complete while any is listed here.';
+
+/**
+ * E5: the hiring-times op. Its member of the operation union is the EBD builder's one-writer edit to `proposal.ts` (DL,
+ * 12 Oct), landing with `record.ts`'s exhaustive entry; until then the literal is cast here, never a second union.
+ */
+const SET_HIRING_TIMES = 'set_hiring_times' as string as StructuredProposal['operations'][number]['op'];
+/** E5: the applied hiring-times card's follow-up (DL ACK of SYS1-E5-STRINGS §3 pending). */
+const HIRING_TIMES_APPLIED = 'The hiring times are now in the model, with Olumi’s estimates labelled where the user gave none. Run the analysis now so each option’s chance uses them; never state a chance before it returns.';
 
 /** The approval-facing disclosure of what was left out (empty when nothing was). */
 function leftOutClause(notAFactor: readonly { label: string; kind: string }[]): string {
@@ -1486,9 +1496,12 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       ...(str(e.origin) ? { origin: e.origin } : {}),
     };
   });
+  // ⭐ E5: each option's start times and pace as the model holds them, with whose each figure is (`hiring-times.ts`).
+  const hiringTimes = goals.length === 1 && isEventShareForecast(g.raw) ? hiringTimesSummaryOf(g.raw, goals[0]!.id) : [];
   return {
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
+    ...(hiringTimes.length === 0 ? {} : { hiring_times: { use: HIRING_TIMES_USE, options: hiringTimes } }),
     links,
     ...(leftOut.length === 0 ? {} : { left_out_of_run: leftOut }),
     readiness: readinessViewOf(g.raw),
@@ -3345,6 +3358,53 @@ export function createAgentCapabilities(
   };
 
   /**
+   * ⭐ E5: the pressed hiring-times card. It stands while its own fields do (`hiringTimesStillApply`: the parts it was
+   * offered against, unchanged, under the same deadline); the postimage is built from THIS read and registered whole with
+   * compare-and-set on both of this read's hashes, under an operation id of that base and this card (a retry replays; a
+   * conflict writes nothing). Set only when the stored model holds every planned start, figure and link strength.
+   */
+  const applyHiringTimes = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const pid = parent.proposal_id, a = parent.operations[0]!.value as ApprovedHiringTimes;
+    const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
+    if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'These hiring times are set only by pressing their own card, so nothing was changed.');
+    if (hiringTimesHeld(before.raw, a)) {
+      proposals.markApplied(pid, []);
+      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: HIRING_TIMES_APPLIED };
+    }
+    if (!hiringTimesStillApply(a, before.raw)) {
+      return notApplied('superseded', 'The hiring times in the model changed after this card was offered, so nothing was set. Offer it again only if it still applies.');
+    }
+    const postimage = withHiringTimes(before.raw, a) as Record<string, unknown>;
+    const operationId = constructionOperationId(ctx.scenario_id, `hiring_times:${before.graph_identity_hash}:${pid}`);
+    const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+      graph: { ...postimage },
+      expected_graph_hash: before.graph_hash, expected_graph_identity_hash: before.graph_identity_hash, operation_id: operationId,
+    });
+    if (reg.status !== 200) {
+      const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+      return /STALE/.test(code)
+        ? notApplied('superseded', 'The model changed just before the hiring times were written, so nothing was set. Offer it again only if it still applies.')
+        : notApplied('not_applied', `The hiring times could not be saved (http ${reg.status}), so nothing was set.`);
+    }
+    // ⛔ CONFIRMED FROM STATE: every option holds exactly its planned starts, figures and recomputed link strengths.
+    const after = await readGraph(ctx.scenario_id);
+    if (after === null || !hiringTimesHeld(after.raw, a)) {
+      return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+        detail: 'The hiring times were sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+          + 'offer to check the model again, and never say they were set or that they were not.' };
+    }
+    const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+    const receipts: ReceiptSummary[] = mv !== undefined && mv !== null && typeof mv.version_id === 'string'
+      ? [{ version: Number(mv.version_number), version_id: mv.version_id, mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '',
+        source_turn_id: registrationTurnId(ctx.scenario_id, operationId) }]
+      : [];
+    proposals.markApplied(pid, receipts);
+    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts, follow_up: HIRING_TIMES_APPLIED };
+  };
+
+  /**
    * ⭐ B RESTATED GOAL (`draft-replacement.ts`; DL ruling (B), PL 6116779075, AIE 0244): the three gates over ONE read, at
    * the offer and again at the approval. `allowed` = the message turns the offer already bound (none at the offer; the
    * typed goal's turn at the approval). What was found, in plain words; empty = an unreviewed draft whose only human
@@ -5194,6 +5254,72 @@ export function createAgentCapabilities(
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined);
     },
 
+    /**
+     * ⭐ E5 (Paul's manual test, 12 Oct): the hiring times the user states, per option, on ONE card. Each start is the
+     * user's quote, in THIS message, in a sentence naming that option; the months are read from the quote (`hiring-times.ts`),
+     * never from the model's arguments, and mapped per the S8 rule set with whose each figure is. Nothing is written here.
+     */
+    async proposeHiringTimes(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const text = typeof ctx.user_turn_text === 'string' ? ctx.user_turn_text : '';
+      const refuse = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
+      const asked = Array.isArray(args?.options) ? args.options : [];
+      if (asked.length === 0) return refuse('hiring_times_missing', 'No hiring time was given for any option, so nothing was prepared.');
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
+      if (part === null || deadline === undefined) {
+        return refuse('deadline_not_held', 'First type and confirm the deadline, for example "7 April 2027". Then give the hiring times again.');
+      }
+      const reference = todayInLondon((opts.now ?? (() => new Date()))());
+      if (reference >= deadline) return refuse('deadline_passed', 'That deadline has passed. Type a future deadline and confirm it, then give the hiring times again.');
+      const goalId = String(part.goal.id), planned: PlannedOption[] = [];
+      for (const o of asked) {
+        const id = typeof o?.option_id === 'string' ? o.option_id : '';
+        const option = g.nodes.find(n => n.id === id && n.kind === 'option');
+        if (option === undefined) return refuse('unknown_option', `"${id}" is not an option in this model. Nothing was prepared.`);
+        const label = String(option.label);
+        if (planned.some(p => p.option_id === id)) return refuse('option_twice', `‘${label}’ is given twice, so nothing was prepared. Give each option’s starts once.`);
+        const held = capacityPartsOf(g.raw, id, goalId), estimate = olumiEstimateOf(held);
+        if (held.length === 0 || estimate === null) return refuse('adds_no_people', `‘${label}’ adds no people in this model, so it has no start time. Nothing was prepared.`);
+        const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
+        for (const quote of quotes) {
+          const stated = quoteStatedFor(text, quote, label);
+          if (stated === 'not_stated') return refuse('hiring_time_not_stated', `"${quote}" is not in the user's message, so nothing was prepared. Ask them for the hiring time in their own words.`);
+          if (stated === 'not_for_option') return refuse('hiring_time_not_for_option', `"${quote}" is not said about ‘${label}’ in the user's message, so nothing was prepared. Ask which option that time is for.`);
+        }
+        const plan = planStarts(quotes, estimate, held.length);
+        if (!('parts' in plan)) {
+          const detail = {
+            start_unreadable: `Olumi could not read one start time in "${plan.quote}", so nothing was prepared. Ask for it in months, for example "at least 3 months" or "within 2 months".`,
+            first_start_relative: `The first start for ‘${label}’ is said as later than another ("${plan.quote}"), so nothing was prepared. Ask when the first person would start.`,
+            too_many_starts: `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly.`,
+            fewer_starts_than_held: `‘${label}’ already has ${held.length} start times in the model, so nothing was prepared. Ask for a time for each.`,
+            least_beyond_latest: `The user said at least ${plan.months} months for ‘${label}’, later than Olumi's latest estimate (${plan.latest} months), so nothing was prepared. Ask the user for the latest time it could take.`,
+          }[plan.refusal];
+          return refuse(plan.refusal, detail);
+        }
+        planned.push({ option_id: id, label, part_ids: held.map(n => String(n.id)), expected: held.map(n => n.observed_state.extra_share_by_date),
+          olumi_estimate: estimate, parts: plan.parts, quotes });
+      }
+      const a: ApprovedHiringTimes = { goal_id: goalId, deadline, reference_date: reference, options: planned };
+      if (hiringTimesHeld(g.raw, a)) return refuse('already_held', 'Those hiring times are already in the model. Nothing was changed.');
+      // The postimage must hold exactly what the card says before it is offered, never only after the press.
+      if (!hiringTimesHeld(withHiringTimes(g.raw, a), a)) return refuse('not_supported', 'Olumi could not prepare these hiring times in this model, so nothing was prepared.');
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_HIRING_TIMES, path: goalId, value: a }],
+        provenance: { authored_by: 'user_stated', basis: text },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: hiringTimesCard(a, part.deliverable) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === SET_HIRING_TIMES)) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+        note: 'Nothing has changed yet. The hiring times are ready for review on ONE card. Tell the user what the card says, in its words; never the ids. '
+          + 'Call authorise_change only for the approval bound to this card; a typed ‘yes’ alone is not that approval.' };
+    },
+
     async proposeModelChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
@@ -6772,6 +6898,7 @@ export function createAgentCapabilities(
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === SET_HIRING_TIMES) return applyHiringTimes(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);

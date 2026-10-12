@@ -139,7 +139,7 @@ describe('S2b draft -> canonical forecast parts', () => {
     expect(schema.properties.options.items.properties.added_capacity.anyOf[1].required)
       .toEqual(['monthly_share_pct', 'lead_months_low', 'lead_months_high']);
     expect(BUILD_INSTRUCTIONS).toContain('QUANTITY with a deadline');
-    expect(AGENT_TOOLS.find(t => t.name === 'propose_team_time')?.parameters.required).toEqual(['low_months', 'high_months']);
+    expect(AGENT_TOOLS.find(t => t.name === 'propose_team_time')?.parameters.required).toEqual(['quote', 'low_months', 'high_months']);
   });
   it('served brief + stubbed event drafter: persisted skeleton, then exactly the held canonical sum', async () => {
     const g = await build();

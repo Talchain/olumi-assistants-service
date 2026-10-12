@@ -16,6 +16,8 @@
 import { extraShareMoments } from './event-by-date-share.js';
 import { timeBetween } from './deadline-date.js';
 import { withEventShareDate } from './event-by-date-model.js';
+import { goalDeadlineFromRecord } from './goal-kind.js';
+import { isDeepStrictEqual } from 'node:util';
 
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -204,6 +206,19 @@ function sameFigure(held: unknown, f: Figure): boolean {
     && Object.keys(held).length === Object.keys(f).length;
 }
 
+/**
+ * The card's own precondition, scoped to its fields (DL: ONE field-scoped mechanism, `scoped_precondition_holds`): every
+ * option still has the parts the card was offered against, with the same carriers, under the same deadline. The carriers
+ * are outside the analysis hash, so a graph hash alone cannot see a change to them.
+ */
+export function hiringTimesStillApply(a: ApprovedHiringTimes, graph: unknown): boolean {
+  return goalDeadlineFromRecord(graph, a.goal_id) === a.deadline && a.options.every((o) => {
+    const held = capacityPartsOf(graph, o.option_id, a.goal_id);
+    return held.length === o.part_ids.length
+      && held.every((n, i) => n.id === o.part_ids[i] && isDeepStrictEqual(n.observed_state.extra_share_by_date, o.expected[i]));
+  });
+}
+
 /** Read-back: every approved option holds exactly its planned starts, figures and recomputed link strengths. */
 export function hiringTimesHeld(after: unknown, a: ApprovedHiringTimes): boolean {
   if (!rec(after) || !Array.isArray(after.edges)) return false;
@@ -229,4 +244,47 @@ export function figureOf(carrier: unknown, bound: 'lead_low' | 'lead_high' | 'mo
   const f = rec(carrier.figures) ? carrier.figures[bound] : undefined;
   return rec(f) && f.value === carrier[bound] && f.origin === 'user' && typeof f.quote === 'string' && f.quote !== ''
     ? { value: carrier[bound], origin: 'user', quote: f.quote } : { value: carrier[bound], origin: 'olumi' };
+}
+
+const figure = (x: number): string => x.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+const span = (p: PlannedPart): string => p.lead_low.value === p.lead_high.value ? figure(p.lead_low.value)
+  : `${figure(p.lead_low.value)}–${figure(p.lead_high.value)}`;
+
+/** Olumi's start figures said as Olumi's: only where one differs from the user's own figure for the same start. */
+export function olumiStartBounds(p: Pick<PlannedPart, 'lead_low' | 'lead_high'>): { kind: 'soonest' | 'latest'; value: number }[] {
+  const out: { kind: 'soonest' | 'latest'; value: number }[] = [];
+  if (p.lead_low.origin === 'olumi' && !(p.lead_high.origin === 'user' && p.lead_high.value === p.lead_low.value)) out.push({ kind: 'soonest', value: p.lead_low.value });
+  if (p.lead_high.origin === 'olumi' && !(p.lead_low.origin === 'user' && p.lead_low.value === p.lead_high.value)) out.push({ kind: 'latest', value: p.lead_high.value });
+  return out;
+}
+
+/** The ONE card for every option's hiring times (DL ACK of SYS1-E5-STRINGS §2 pending). */
+export function hiringTimesCard(a: ApprovedHiringTimes, deliverable: string): string {
+  const lines = a.options.map((o) => {
+    const said = `you said “${o.quotes.join('”, then “')}”`;
+    const olumiNotes = o.parts.flatMap(olumiStartBounds).map(b => `; ${figure(b.value)} months is Olumi’s estimate of the ${b.kind} start`).join('');
+    if (o.parts.length === 1) return `‘${o.label}’: starts after ${span(o.parts[0]!)} months (${said}${olumiNotes}).`;
+    return `‘${o.label}’: one person after ${span(o.parts[0]!)} months and another after ${span(o.parts[1]!)} months (${said}${olumiNotes}); `
+      + `Olumi’s estimate of its pace, ${figure(o.olumi_estimate.monthly_share)}% of ${deliverable} a month, is split equally between them.`;
+  });
+  return `Use your hiring times? ${lines.join(' ')}`;
+}
+
+/** How the model summary says whose each figure is (DL ACK of SYS1-E5-STRINGS §3 pending). */
+export const HIRING_TIMES_USE = 'Each option’s start times and pace as the model holds them, with whose each figure is. Say a figure is the user’s only where whose is "yours"; never present Olumi’s estimates as theirs.';
+const whose = (f: Figure | null): Record<string, unknown> | undefined => f === null ? undefined
+  : { value: f.value, whose: f.origin === 'user' ? 'yours' : 'Olumi’s estimate', ...(f.quote === undefined ? {} : { quote: f.quote }) };
+
+/** Every option's capacity parts as the model holds them: each start's soonest and latest months and its pace, with whose. */
+export function hiringTimesSummaryOf(graph: unknown, goalId: string): Record<string, unknown>[] {
+  if (!rec(graph) || !Array.isArray(graph.nodes)) return [];
+  return graph.nodes.filter((n: Rec) => n.kind === 'option' && typeof n.id === 'string').flatMap((o: Rec) => {
+    const parts = capacityPartsOf(graph, o.id, goalId);
+    if (parts.length === 0) return [];
+    return [{ option_id: o.id, option: o.label, starts: parts.map((p) => {
+      const c = p.observed_state.extra_share_by_date;
+      return { soonest_months: whose(figureOf(c, 'lead_low')), latest_months: whose(figureOf(c, 'lead_high')),
+        pace_percent_a_month: whose(figureOf(c, 'monthly_share')) };
+    }) }];
+  });
 }
