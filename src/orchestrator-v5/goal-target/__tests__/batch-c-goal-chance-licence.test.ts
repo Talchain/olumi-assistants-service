@@ -6,7 +6,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, nearestFiveGoalChancesForAgent, withGoalChanceLicence } from '../goal-chance-licence.js';
+import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, nearestFiveGoalChancesForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence } from '../goal-chance-licence.js';
+import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { targetChanceWords } from '../goal-target-basis.js';
 import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
@@ -164,6 +165,21 @@ describe('estimate_only (ruling 9; amendments 7 and 10)', () => {
     const l = goalChanceLicenceOf(mrrRun, g, 'mrr', () => false, undefined, g)!;
     expect(l.estimate_only).toBeUndefined();
     expect(l.notes![0]).toBe('Using £20,000 / month as today’s ‘MRR’.');
+  });
+
+  // RE-SCOPE 2 (DL AMEND item 2, position: the base of a RELATIVE change): `estimate_only` says Olumi's base, once — the census
+  // never counts it a second time; an UNVERIFIED base is neither Olumi's estimate_only nor the person's: it is the note.
+  it('RE-SCOPE 2: Olumi\'s change_rel base is said once (estimate_only) — never counted again, never the unverified note', () => {
+    const l = goalChanceLicenceOf(mrrRun, mrrGraph('cee_inference'), 'mrr', () => false, undefined, mrrGraph('cee_inference'))! as unknown as Rec;
+    expect(l).not.toHaveProperty('olumi_estimate_value_count');
+    expect(unverifiedNotes(l)).toBe(0);
+  });
+  it('RE-SCOPE 2: an UNVERIFIED change_rel base → not estimate_only, the note said once', () => {
+    const g = mrrGraph('something_else');
+    const l = goalChanceLicenceOf(mrrRun, g, 'mrr', () => false, undefined, g)! as unknown as Rec;
+    expect(l.estimate_only).toBeUndefined();
+    expect(unverifiedNotes(l)).toBe(1);
+    expect(l).not.toHaveProperty('olumi_estimate_value_count');
   });
 
   it('NEGATIVE: no starting value at all → no licence (a base is never guessed)', () => {
@@ -681,6 +697,76 @@ describe('independent check r1 — item 6: provisional from EVERY Olumi input (a
   });
 });
 
+// ── RE-SCOPE 2 (R5-2; DL AMEND, AIE #94 6119326092 item 1): THREE provenance states — HUMAN only by positive attestation, AI
+// ORIGIN only for a recognised AI source, anything else UNVERIFIED: never counted as Olumi's, never read as the person's, and
+// never "zero estimates" — disclosed ONCE beside the result in the AIE's minimal existing-notes wording.
+const UNVERIFIED = 'This result uses inputs whose sources have not been verified.';
+/** A read-only view of a licence record in assertions. */
+type Loose = Record<string, any>;
+const unverifiedNotes = (l: Rec | null): number => ((l?.notes as string[] | undefined) ?? []).filter((n) => n === UNVERIFIED).length;
+describe('RE-SCOPE 2 (R5-2): an input whose source is unverified is disclosed once — never "zero estimates", never Olumi\'s', () => {
+  const unverifiedFactor = (os: Rec): Rec => capacityGraph({ factorOs: os });
+  it('the exported note is the AIE\'s minimal wording, by identity', () => {
+    expect(UNVERIFIED_SOURCES_NOTE).toBe(UNVERIFIED);
+  });
+  it.each([
+    ['no source at all', { value: 0.6, raw_value: 6, cap: 10, unit: 'people' }],
+    ['user material the receipt gate could not verify', { value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'brief_extraction', user_material_unverified: true }],
+    ['an unrecognised source', { value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'something_else' }],
+  ])('RED on e58b8dbd: a starting value with %s on the goal path → licensed, the note said once, not provisional, no Olumi count', (_name, os) => {
+    const g = unverifiedFactor(os);
+    const l = capacityLicence(g)! as unknown as Loose;
+    expect(Object.keys(l.pct_by_option)).toEqual(['lead', 'two']);
+    expect(unverifiedNotes(l)).toBe(1);
+    expect(l.provisional).toBeUndefined();
+    expect(l).not.toHaveProperty('olumi_estimate_value_count');
+    // The screen's face is the ordinary one (no estimate words): the note, not a count, says it.
+    const env = withGoalChanceLicence(capacityRun(), g, 'capacity', () => false, undefined, g, {});
+    const result = { type: 'analysis_result', enrichment: env };
+    expect(goalChanceCellFacesForAgent(result, g, true).get('lead')).toBe('‘Hire a tech lead’: about 46% chance of meeting your goal, in this model.');
+    // The Agent's chat and the canonical view's `detail.notes` (`canonical-analysis-view.ts`, `facts.goal_chance_notes`) say it too.
+    expect(goalChanceNotesForAgent(result, g, true).filter((n) => n === UNVERIFIED)).toHaveLength(1);
+    expect(goalChanceFactsForAgent(result, g, true).goal_chance_notes).toEqual(l.notes);
+  });
+  it('RED on e58b8dbd: a SETTING with no source (not the event-by-date switch) → the note, on that option\'s Run; never Olumi\'s', () => {
+    const l = capacityLicence(capacityGraph({ setting: { value: 0.6, raw_value: 6, target_match: { node_id: 'devs' } } }))! as unknown as Loose;
+    expect(unverifiedNotes(l)).toBe(1);
+    expect(l).not.toHaveProperty('olumi_estimate_settings_by_option');
+    expect(l.provisional).toBeUndefined();
+  });
+  it('CONTROL: admission\'s own goal-level stamp (`brief_extraction`, no extraction type) and every attested input → no note', () => {
+    const l = capacityLicence()! as unknown as Loose;
+    expect(unverifiedNotes(l)).toBe(0);
+    expect(l.provisional).toBeUndefined();
+  });
+  it('CONTROL: a recognised AI source is Olumi\'s (counted), never the unverified note', () => {
+    const l = capacityLicence(unverifiedFactor({ value: 0.6, raw_value: 6, cap: 10, unit: 'people', source: 'cee_inference', extractionType: 'inferred' }))! as unknown as Loose;
+    expect(l.olumi_estimate_value_count).toBe(1);
+    expect(unverifiedNotes(l)).toBe(0);
+  });
+  // AIE R5 item 2: the existing stronger rule is kept for the scored goal's OWN level — admission never admits Olumi's own
+  // estimate of it, so a level chance on Olumi's goal level is withheld, never relabelled provisional. Not a new human-only
+  // rule: a goal level whose source is unverified is disclosed by the note, like any other input.
+  it('RED on e58b8dbd: the scored goal\'s own LEVEL as Olumi\'s estimate → no chance licensed (refusal kept)', () => {
+    const os = { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'cee_inference', extractionType: 'inferred' };
+    expect(capacityLicence(capacityGraph({ goal: { observed_state: os } }))).toBeNull();
+  });
+  it.each([
+    ['no source', { source: undefined }],
+    ['unverified user material', { user_material_unverified: true }],
+  ])('RED on e58b8dbd: the scored goal\'s own LEVEL with %s → licensed, the note said once (never refused by a human-only rule)', (_name, over) => {
+    const os = { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'brief_extraction', ...over };
+    const l = capacityLicence(capacityGraph({ goal: { observed_state: os } }))! as unknown as Loose;
+    expect(Object.keys(l.pct_by_option)).toEqual(['lead', 'two']);
+    expect(unverifiedNotes(l)).toBe(1);
+    expect(l).not.toHaveProperty('olumi_estimate_value_count');
+  });
+  it('CONTROL: an ACCEPTED Olumi estimate of the goal\'s level (`user_assumption` + a confirm review) keeps its existing reading', () => {
+    const os = { value: 0.75, baseline: 0.75, raw_value: 75, cap: 100, unit: '%', source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } };
+    expect(capacityLicence(capacityGraph({ goal: { observed_state: os } }))).not.toBeNull();
+  });
+});
+
 describe('independent check r1 — item 7: a withheld joint says truly why, with a next step', () => {
   it('a joint figure without its precision is not "not calculated": it says what is missing and what to do', () => {
     const l = licenceFor(marketingRun({ probability_of_joint_goal_precision: undefined }))!;
@@ -1091,5 +1177,96 @@ describe('RE-SCOPE r1 (DL item 3): a SENT figure that is not the stored one is n
 
   it('CONTROL: the same figure sent and stored → licensed as before', () => {
     expect(licenceFor(marketingRun(), marketingGraph())!.targets!.joint.status).toBe('licensed');
+  });
+});
+
+// ── RE-SCOPE 2 (DL ruling on marginals, (B); DL AMEND item 3 — EVENT SCOPE): each figure keeps the dependency set of the event
+// it MEASURES. The joint rests on the union; the goal's own figure on the goal's upstream set alone; each target's own chance
+// ("On its own, …") on its own condition's — and says so in ONE note when it rests on any Olumi estimate, in the points' count
+// words, naming the options only where their counts differ. No new field: the licence's existing `notes` carry it (the UI's
+// `goalChanceDetailLines` and the Agent's `goalChanceNotesForAgent` say notes verbatim, after the "On its own" lines).
+const wordsOf = (l: Loose, id: string): string => (l.targets.per_target as Rec[]).find((t) => t.constraint_id === id)!.words as string;
+const marginalNotes = (l: Loose): string[] => ((l.notes as string[] | undefined) ?? []).filter((n) => n.startsWith('On its own, the chance of '));
+const MARGINAL = (words: string, counts: string): string => `On its own, the chance of ${words} rests on Olumi's estimates: ${counts}.`;
+/** The goal's own figure on the same graph: the goal alone, no condition sent (its own dependency set). */
+const goalAlone = (g: Rec): Loose => { const h = structuredClone(g); h.goal_constraints = []; return licenceFor(marketingRun(), h)! as unknown as Loose; };
+
+describe('RE-SCOPE 2 (marginals, (B)): each target\'s own chance says what it rests on; the joint the union; the goal its own', () => {
+  it('RED on e58b8dbd: an Olumi input feeding ONLY the second target → the joint provisional + THAT marginal\'s note; the goal\'s own figure unchanged', () => {
+    const g = marketingWithInputs({ target: 'conversion_rate', kind: 'value' });
+    const l = licenceFor(marketingRun(), g)! as unknown as Loose;
+    expect(l.targets.joint.status).toBe('licensed');
+    expect(l.provisional).toBe(true);
+    expect(l.olumi_estimate_value_count).toBe(1);
+    expect(marginalNotes(l)).toEqual([MARGINAL(wordsOf(l, 'target:conversion_rate'), '1 starting value')]);
+    // The goal's own figure rests on the goal's own upstream set: ‘Ad quality’ is not on it.
+    const alone = goalAlone(g);
+    expect(Object.keys(alone.pct_by_option)).toEqual(['hire_manager', 'ai_plus_ads']);
+    expect(alone.provisional).toBeUndefined();
+    expect(alone).not.toHaveProperty('olumi_estimate_value_count');
+    // The same words reach the Agent's chat and the canonical view's `detail.notes`, verbatim.
+    const env = withGoalChanceLicence(marketingRun(), g, 'new_customers', () => false, undefined, g,
+      { storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints) });
+    const result = { type: 'analysis_result', enrichment: env };
+    expect(goalChanceNotesForAgent(result, g, true)).toContain(MARGINAL(wordsOf(l, 'target:conversion_rate'), '1 starting value'));
+    expect(goalChanceFactsForAgent(result, g, true).goal_chance_notes).toEqual(l.notes);
+  });
+
+  it('RED on e58b8dbd: an Olumi input feeding ONLY the goal → the goal alone AND the joint provisional; the goal\'s marginal note, none on the second target\'s', () => {
+    const g = marketingWithInputs({ target: 'new_customers', kind: 'value' });
+    const l = licenceFor(marketingRun(), g)! as unknown as Loose;
+    expect(l.provisional).toBe(true);
+    expect(l.olumi_estimate_value_count).toBe(1);
+    expect(marginalNotes(l)).toEqual([MARGINAL(wordsOf(l, 'target:new_customers'), '1 starting value')]);
+    const alone = goalAlone(g);
+    expect(alone.provisional).toBe(true);
+    expect(alone.olumi_estimate_value_count).toBe(1);
+  });
+
+  it('RED on e58b8dbd: an option\'s own Olumi setting on the second target\'s path → that marginal names THAT option (counts differ)', () => {
+    const l = licenceFor(marketingRun(), marketingWithInputs({ target: 'conversion_rate', kind: 'setting' }))! as unknown as Loose;
+    expect(marginalNotes(l)).toEqual([
+      `On its own, the chance of ${wordsOf(l, 'target:conversion_rate')} rests on Olumi's estimates for ‘AI planning plus advertising’: 1 option setting.`,
+    ]);
+  });
+
+  it('a SHARED input feeding both targets is counted once on the joint, and said on each marginal it feeds', () => {
+    const g = marketingWithInputs();
+    (g.nodes as Rec[]).push({ id: 'demand', kind: 'factor', label: 'Market demand', observed_state: OLUMIS_LEVEL(50, 'points') });
+    (g.edges as Rec[]).push({ from: 'demand', to: 'new_customers', ...USERS_LINK }, { from: 'demand', to: 'conversion_rate', ...USERS_LINK });
+    const l = licenceFor(marketingRun(), g)! as unknown as Loose;
+    expect(l.olumi_estimate_value_count).toBe(1);
+    expect(marginalNotes(l)).toEqual([
+      MARGINAL(wordsOf(l, 'target:new_customers'), '1 starting value'),
+      MARGINAL(wordsOf(l, 'target:conversion_rate'), '1 starting value'),
+    ]);
+  });
+
+  it('CONTRAST: an Olumi input upstream of NO condition (downstream of the goal) → nothing said anywhere', () => {
+    const g = marketingWithInputs();
+    (g.nodes as Rec[]).push({ id: 'morale', kind: 'factor', label: 'Team morale', observed_state: OLUMIS_LEVEL(50, 'points') });
+    (g.edges as Rec[]).push({ from: 'new_customers', to: 'morale', ...USERS_LINK });
+    const l = licenceFor(marketingRun(), g)! as unknown as Loose;
+    expect(l.provisional).toBeUndefined();
+    expect(marginalNotes(l)).toEqual([]);
+    expect(unverifiedNotes(l)).toBe(0);
+  });
+
+  it('a withheld joint still says what each marginal it keeps rests on', () => {
+    const l = licenceFor(marketingRun({ probability_of_joint_goal_precision: undefined }), marketingWithInputs({ target: 'conversion_rate', kind: 'value' }))! as unknown as Loose;
+    expect(l.targets.joint.status).toBe('withheld');
+    expect(marginalNotes(l)).toEqual([MARGINAL(wordsOf(l, 'target:conversion_rate'), '1 starting value')]);
+  });
+
+  it('UNVERIFIED on the second target\'s path only → the note once on the joint; no estimate count, no marginal estimate note', () => {
+    const g = marketingWithInputs();
+    const { source: _s, extractionType: _e, ...bare } = (g.nodes as Rec[]).find((n) => n.id === 'ad_quality')!.observed_state as Rec;
+    (g.nodes as Rec[]).find((n) => n.id === 'ad_quality')!.observed_state = bare;
+    const l = licenceFor(marketingRun(), g)! as unknown as Loose;
+    expect(l.targets.joint.status).toBe('licensed');
+    expect(unverifiedNotes(l)).toBe(1);
+    expect(l.provisional).toBeUndefined();
+    expect(marginalNotes(l)).toEqual([]);
+    expect(unverifiedNotes(goalAlone(g))).toBe(0);
   });
 });

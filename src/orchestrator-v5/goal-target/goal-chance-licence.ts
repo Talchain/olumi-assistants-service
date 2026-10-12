@@ -569,7 +569,9 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   const basis = c.basis !== undefined && c.basis.effects_at_period_end ? c.basis : undefined;
   const alsoRequired = c.basis?.also_required ?? [];
   // Amendment 7: any Olumi input (a starting value, an option setting or an effect size) on the path makes it provisional.
+  // (R5-2: an unverified input is not Olumi's — it is disclosed by its own note, never by this label.)
   const provisional = c.estimateOnly || c.olumiInputs;
+  const unverified = c.unverifiedInputs ? [UNVERIFIED_SOURCES_NOTE] : [];
   // Amendment 1, every frame: the status quo's own line, by assumption — never a figure or an interval.
   const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
     ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel) } } : {};
@@ -595,7 +597,7 @@ function withBatchCWords(single: GoalChanceLicence, c: {
     // status quo's line where it is shown, and amendment 7's label; plus the several-targets block if the Run sent target rows.
     return withSeveralTargets({
       ...single,
-      ...(assumed.length + plainCovers.length > 0 ? { notes: [...assumed, ...plainCovers] } : {}),
+      ...(assumed.length + plainCovers.length + unverified.length > 0 ? { notes: [...assumed, ...plainCovers, ...unverified] } : {}),
       ...statusQuo,
       ...(provisional ? { provisional: true as const } : {}),
     }, { ...c, basis, alsoRequired });
@@ -609,7 +611,8 @@ function withBatchCWords(single: GoalChanceLicence, c: {
     ...(basis !== undefined ? { basis } : {}),
   });
   if (words === undefined) {
-    return withSeveralTargets({ ...single, ...(assumed.length + plainCovers.length > 0 ? { notes: [...assumed, ...plainCovers] } : {}), ...statusQuo,
+    return withSeveralTargets({ ...single, ...(assumed.length + plainCovers.length + unverified.length > 0
+      ? { notes: [...assumed, ...plainCovers, ...unverified] } : {}), ...statusQuo,
       ...(provisional ? { provisional: true as const } : {}) }, { ...c, basis, alsoRequired });
   }
   const notes: string[] = [];
@@ -627,6 +630,7 @@ function withBatchCWords(single: GoalChanceLicence, c: {
   if (effects !== undefined) notes.push(effects);
   // Amendment 4 (see `covers`): every limit the Run did not include and every retained condition.
   notes.push(...covers(goalLabel));
+  notes.push(...unverified);
   const out: GoalChanceLicence = {
     ...single,
     target: { ...single.target, ...(changeFrame !== undefined ? { frame: changeFrame } : {}) },
@@ -771,7 +775,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   const notes: string[] = [];
   let assumptionSaid = false;
   for (const n of l.notes ?? []) {
-    if (n.startsWith('This chance covers ')) continue;
+    if (n.startsWith('This chance covers ') || n === UNVERIFIED_SOURCES_NOTE) continue;
     if (n.startsWith('This assumes carrying on as now')) {
       if (assumedNames.length > 0 && !assumptionSaid) { notes.push(statusQuoAssumptionWords(assumedNames, c.basis)); assumptionSaid = true; }
       continue;
@@ -821,6 +825,8 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   }
   if (block.joint.status === 'licensed') {
     const quoted = block.joint.pct_by_option;
+    // R5-2: one note, beside the result, when the joint or any marginal said rests on an unverified input.
+    if (unverifiedOn(je, Object.keys(quoted)) || marginalUnverified) notes.push(UNVERIFIED_SOURCES_NOTE);
     // ⛔ Re-scope (r2 BLOCKING 4): the joint rests on every input feeding ANY of its targets: it is provisional, and says on
     // what, from the one census over the union of their paths — each quoted option's own Olumi settings only.
     const { olumi_estimate_link_count: _k, olumi_estimate_value_count: _v, olumi_estimate_settings_by_option: _s, provisional: _p,
@@ -846,6 +852,8 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
       targets: block,
     };
   }
+  // A withheld joint quotes no option: only the marginals (and the goal's own kept figure) are said beside it.
+  if (marginalUnverified) notes.push(UNVERIFIED_SOURCES_NOTE);
   const { withheld_option_ids: _w, chance_words: _words, ...rest } = kept;
   return { ...rest, form: 'each', pct_by_option: {}, withheld_option_ids: [...c.option_ids], ...(notes.length > 0 ? { notes } : {}),
     ...statusQuo, ...moved, targets: block };

@@ -23,7 +23,7 @@ import { shareOptionEstimateWords } from '../goal-target/share-by-date-run.js';
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { sayDate } from '../goal-target/deadline-date.js';
-import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
+import { shortfallNoteLabel, UNVERIFIED_SOURCES_NOTE } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
@@ -195,6 +195,13 @@ export function goalChanceNotesForAgent(result: unknown, graph: unknown, current
   }
   if (facts.goal_chance_status_quo !== undefined) out.push(facts.goal_chance_status_quo.line);
   for (const note of facts.goal_chance_notes ?? []) out.push(note);
+  // ⛔ RE-SCOPE 2 (R5-2): a range resting on an unverified input says so once too (never "zero estimates"), unless said already.
+  const ranges = rangeCensusOf(facts, graph);
+  const rangeIds = Object.keys(facts.goal_chance_range_display ?? {});
+  if (ranges !== undefined && !out.includes(UNVERIFIED_SOURCES_NOTE)
+    && (ranges.unread || ranges.unverifiedValues > 0 || rangeIds.some((id) => (ranges.unverifiedSettingsByOption[id] ?? 0) > 0))) {
+    out.push(UNVERIFIED_SOURCES_NOTE);
+  }
   return out;
 }
 

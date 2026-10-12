@@ -29,7 +29,7 @@ import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { goalChanceTargetCause } from '../../../goal-target/goal-chance-gate.js';
 import { groupedGoalPathLinks } from '../../../compose/grouped-link-sizing.js';
 import { naturalAmountUnitsOf } from '../../../../cee/magnitude/frame-defaulted-links.js';
-import { goalChanceLicenceForAgent, withGoalChanceLicence } from '../../../goal-target/goal-chance-licence.js';
+import { goalChanceLicenceForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence } from '../../../goal-target/goal-chance-licence.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
@@ -349,8 +349,13 @@ describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "
     expect(sq).not.toHaveProperty('probability_of_goal_precision');
     expect(sq.outcome).toEqual({ mean: 0, p50: 0 });
     // Provisional (amendment 7): both effect sizes into the goal are Olumi's (9% per tech lead, 4% per developer, drafted
-    // ai_proposed); every starting value is the user's 0 and each option's own setting (1 lead, 2 developers) is the user's.
+    // ai_proposed); each option's own setting (1 lead, 2 developers) is the user's.
+    // ⛔ RE-SCOPE 2 (R5-2; DL AMEND) — CHANGED EXPECTATION (an added note; the faces are unchanged): the two starting values
+    // (0 tech leads, 0 developers today) were drafted as the user's but admission could not verify them against a brief
+    // (`user_material_unverified`, stored here with no brief). Neither Olumi's nor attested as the user's: UNVERIFIED, said once
+    // beside the result — before, they were silently treated as nobody's ("zero estimates").
     expect(licence.provisional).toBe(true);
+    expect(licence.notes!.filter((n) => n === UNVERIFIED_SOURCES_NOTE)).toHaveLength(1);
     const faces = goalChanceCellFacesForAgent(view, reloaded, true);
     expect([...faces]).toEqual([
       ['hire_a_tech_lead', '‘Hire a tech lead’: about 46% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi\'s estimates for 2 relationships (see Check estimates).'],
