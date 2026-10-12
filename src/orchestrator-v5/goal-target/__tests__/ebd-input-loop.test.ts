@@ -381,6 +381,81 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     expect(await approve(w, hiring.proposal_id)).toMatchObject({ ok: false, refusal: 'superseded' });
     expect(w.graph()).toEqual(changed);
   });
+
+  /**
+   * ⭐ B2-c CONFIRMATION (DL re-scope, 12 Oct, after the third free-text attribution failure; PL #94 6131809231; AIE #94
+   * 6132054663): a duration the user did not type as this whole answer is ONLY a confirmation card — the quote proved verbatim
+   * in their own words, the complete source line on the card, and only the press records it as their selected forecast.
+   */
+  const PAUL_QUOTE = "they're going to be a month late delivering the next feature (so, 7 months)";
+  const earlier = (said: string): Rec => ({ ...ctx('Here is what I know.'), user_text: [said, 'Here is what I know.'].join('\n') });
+  const noPress = (w: ReturnType<typeof world>, id: string, other?: string) =>
+    w.caps.authoriseChange({ ...ctx('Yes'), ...(other !== undefined ? { typed_approval_of: other } : {}) } as never, { proposal_id: id }) as Promise<Rec>;
+  it('B2-c RED→GREEN: Paul\'s earlier sentence is a confirmation card (refused at E), worded by the AIE; nothing is his until the press', async () => {
+    const w = world();
+    const before = JSON.stringify(w.graph());
+    const card = await w.caps.proposeTeamTime!(earlier(PAUL_TEAM) as never, { quote: PAUL_QUOTE, low_months: 7, high_months: 7 }) as Rec;
+    expect(card.ok).toBe(true);
+    expect(card.public_label).toBe(`From your message: ‘${PAUL_TEAM}’ Do you want to use 7 months as your forecast for today's team to finish next feature launch? `
+      + 'Olumi’s assumed 3.5–10.5-month range informs this approximate calculation; modelled outcomes can fall outside those time bounds. '
+      + 'You described low confidence in that forecast.');
+    expect(card.public_label).not.toMatch(/your 7-month forecast|your team forecast/);
+    expect(card.team_time).toMatchObject({ forecast_months: 7, low_months: 3.5, high_months: 10.5, range_origin: 'olumi_estimate', range_rule: 'low_confidence',
+      confirmation: { source: PAUL_TEAM, quote: PAUL_QUOTE } });
+    // No press: refused, nothing written — the Agent's authorise, and a press of ANOTHER card.
+    expect(await noPress(w, card.proposal_id)).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+    expect(await noPress(w, card.proposal_id, 'prop_00000000000000000000000000000000')).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+    expect(JSON.stringify(w.graph())).toBe(before);
+    expect(w.rows).toHaveLength(0);
+    // The press: a NEW selected forecast, linked to his source line and to Olumi's reading of it; the source is unchanged.
+    expect(await approve(w, card.proposal_id)).toMatchObject({ ok: true, applied: true });
+    expect(draftedTeamPartOf(w.graph())!.team.observed_state.stated_time).toEqual({ quantity: 'months_to_finish', low: 3.5, high: 10.5, unit: 'months',
+      deadline: '2027-04-12', reference_date: '2026-10-12', forecast: 7, forecast_origin: 'user_confirmed', forecast_words: PAUL_QUOTE,
+      range_origin: 'olumi_estimate', range_rule: 'low_confidence', selection: { by: 'user_press', interpretation: 'olumi', source: PAUL_TEAM, quote: PAUL_QUOTE } });
+  });
+  it('B2-c: a range in the words is the existing full-range card, with the source line (never a midpoint); a bound is asked', async () => {
+    const w = world();
+    const range = await w.caps.proposeTeamTime!(earlier('The team say it will take 6–9 months, honestly.') as never, { quote: '6–9 months', low_months: 6, high_months: 9 }) as Rec;
+    expect(range.public_label).toMatch(/^From your message: ‘The team say it will take 6–9 months, honestly\.’ Use 6–9 months for today's team\? By 12 April 2027 that is about \d+% of next feature launch\.$/);
+    expect(range.team_time).not.toHaveProperty('forecast_months');
+    for (const [said, q] of [['It’ll take at least 7 months.', '7 months'], ['The team need no more than 8 months.', '8 months'], ['Within 9 months, I think.', '9 months']] as const) {
+      expect(await w.caps.proposeTeamTime!(earlier(said) as never, { quote: q, low_months: Number(q[0]), high_months: Number(q[0]) }), said)
+        .toMatchObject({ ok: false, refusal: 'team_time_not_stated' });
+    }
+  });
+  it('B2-c anti-fabrication: a quote not in the user\'s typed words, or a figure the quote does not state, is refused', async () => {
+    const w = world();
+    for (const [said, q, n] of [['The team say 7 months.', 'the team say 8 months', 8], ['The team say 7 months.', 'the team say 7 months', 8],
+      ['Recruitment is slow.', '7 months', 7]] as const) {
+      expect(await w.caps.proposeTeamTime!(earlier(said) as never, { quote: q, low_months: n, high_months: n }), `${said} | ${q}`)
+        .toMatchObject({ ok: false, refusal: 'team_time_not_stated' });
+    }
+  });
+  it('B2-c GENERATIVE NEGATIVE: whatever the sentence says (the check\'s five misbinds, other subjects, negation, condition, history), no path writes a forecast without the press', async () => {
+    const SAID: readonly string[] = [
+      'Recruitment, the team think, will take 7 months.', 'Procurement (the team say) takes [7 months].',
+      'I do not believe the team will finish in 7 months.', 'If we hire a contractor, the team will finish in 7 months.',
+      'Last project, the team said 7 months.', 'The team are late (7 months).', '7 months? I am sure it is not.',
+      'The team will finish in 9 months; recruitment takes (7 months)', 'procurement takes 7 months', PAUL_TEAM,
+      ...['Hiring', 'Onboarding', 'The notice period', 'Legal review', 'The vendor', 'Security sign-off'].map((s) => `${s} takes 7 months.`),
+    ];
+    let cards = 0;
+    for (const said of SAID) for (const where of ['now', 'earlier'] as const) for (const q of ['7 months', said.includes('(so, 7 months)') ? PAUL_QUOTE : '7 months']) {
+      const w = world();
+      const before = JSON.stringify(w.graph());
+      const c = where === 'now' ? ctx(said) : earlier(said);
+      const card = await w.caps.proposeTeamTime!(c as never, { quote: q, low_months: 7, high_months: 7 }) as Rec;
+      if (card.ok !== true) { expect(card, said).toMatchObject({ ok: false, mutated: false }); continue; }
+      cards += 1;
+      // The card shows the complete line, verbatim, and never calls it the user's forecast before the press.
+      expect(String(card.public_label).startsWith(`From your message: ‘${said}’ `), said).toBe(true);
+      expect(card.public_label, said).not.toMatch(/your 7-month forecast|your team forecast/);
+      expect(await noPress(w, card.proposal_id), said).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+      expect(JSON.stringify(w.graph()), said).toBe(before);
+      expect(w.rows, said).toHaveLength(0);
+    }
+    expect(cards, 'positive control: the generated sentences do reach the card').toBeGreaterThan(SAID.length);
+  });
 });
 
 describe('E2 — a range line never calls Olumi\'s range "yours" (AIE 6122738619 words)', () => {
