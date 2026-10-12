@@ -3544,34 +3544,32 @@ export function createAgentCapabilities(
     const accepted = sent.filter((l) => storedSizing(l) === 'olumi_accepted').map((l) => acceptedOlumiEstimateSentence(quotedLabel(l.from), quotedLabel(l.to)));
     // Olumi's estimates as STORED (Codex pre-review 3 P1): a model-proposed link the sizer never marked (`unmarked`) is no one's.
     const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate'].includes(storedSizing(l))).length;
-    const reviewsOnly = sent.every((l) => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder');
     const placeholderChangesOnly = sent.every((l) => l.intent === 'set' && storedSizing(l) === 'placeholder');
     /**
-     * \u2b50 A MIXED SET IS COUNTED FROM THE STORED OUTCOME (Batch A live check (b) FAIL, PL 6115623359): "Recorded these 6 link
-     * strengths" when two of the six were only reviews of links nobody has sized. Strengths sized, changes to links still
-     * unsized, and reviews are counted apart, each from the link as STORED; reviewed links that are still unsized say so,
-     * with their own values unchanged (never the model's: other links were sized), then A's next step once.
+     * ⭐ A SET IS COUNTED FROM THE STORED OUTCOME, AND EVERY REVIEW-ONLY LINK SAYS SO (Batch A live (b) FAIL, PL 6115623359;
+     * AIE text contract #94 6115788987; A′ check round 1). "Recorded these 6 link strengths" when two of the six were only
+     * reviews of links nobody has sized, and "Recorded your review of this link" with no word that it is still unsized.
+     * Strengths sized, changes to links still unsized, and reviews are counted apart, each from the link as STORED; each
+     * review-only link, in ANY set (one review, all reviews, with changes, with strengths), says it is still unsized with
+     * its own values unchanged (never the model's: other links may have been sized), then the next action once.
      */
     const reviewedUnsizedAt = (l: (typeof sent)[number]): boolean => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder';
     const changedUnsized = sent.filter((l) => l.intent === 'set' && storedSizing(l) === 'placeholder').length;
     const reviewedUnsized = sent.filter(reviewedUnsizedAt);
-    const mixed = !reviewsOnly && !placeholderChangesOnly && changedUnsized + reviewedUnsized.length > 0;
-    // AIE text contract (#94 6115788987): each review-only link by its labels, "unchanged" scoped to that link, and the
-    // supported next action once. Its review is said in its own sentence, so the list keeps the links that changed.
-    const mixedTail = !mixed ? ''
-      : reviewedUnsized.map((l) => ` ${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)}: Review recorded; this link is still unsized. Its values are unchanged.`).join('')
-        + ' Give a figure, or ask Olumi to estimate it.';
+    const counted = reviewedUnsized.length > 0 || (!placeholderChangesOnly && changedUnsized > 0);
+    const listed = parts.filter((_, i) => !reviewedUnsizedAt(sent[i]!));
+    const countedTail = reviewedUnsized.map((l) => ` ${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)}: Review recorded; this link is still unsized. Its values are unchanged.`).join('')
+      + ' Give a figure, or ask Olumi to estimate it.';
     const accepts = (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
       + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : '');
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
-      follow_up: mixed
-        ? `Recorded ${mixedLinkSetHeading(sent.length - changedUnsized - reviewedUnsized.length, changedUnsized, reviewedUnsized.length)}. `
-          + `${parts.filter((_, i) => !reviewedUnsizedAt(sent[i]!)).join('; ')}.${accepts}${mixedTail}`
-        : `Recorded ${reviewsOnly ? (sent.length === 1 ? 'your review of this link' : `your reviews of these ${sent.length} links`)
-        : placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
+      follow_up: counted
+        ? `Recorded ${mixedLinkSetHeading(sent.length - changedUnsized - reviewedUnsized.length, changedUnsized, reviewedUnsized.length)}.`
+          + `${listed.length > 0 ? ` ${listed.join('; ')}.` : ''}${accepts}${countedTail}`
+        : `Recorded ${placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
         : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.${accepts}`,
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
@@ -4572,10 +4570,9 @@ export function createAgentCapabilities(
         operations: ops,
         provenance: { authored_by: shown.every((x) => x.yours) ? 'user_stated' : 'model_proposed', basis: String(args?.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${reviewOnlyLinks.length === shown.length
-          ? `Review ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
-          : unsizedChanges.length === shown.length ? `Change ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
-          // A mixed set is counted as the receipt will count it (`mixedLinkSetHeading`), never as N link strengths.
+        public_label: `${unsizedChanges.length === shown.length ? `Change ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+          // Any set holding a review, or a change beside strengths, is counted as the receipt will count it
+          // (`mixedLinkSetHeading`), never as N link strengths.
           : unsizedChanges.length + reviewOnlyLinks.length > 0
             ? `Record ${mixedLinkSetHeading(shown.length - unsizedChanges.length - reviewOnlyLinks.length, unsizedChanges.length, reviewOnlyLinks.length)}`
           : `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}`}: `
