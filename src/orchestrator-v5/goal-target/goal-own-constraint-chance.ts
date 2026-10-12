@@ -109,6 +109,21 @@ export function sentRunScoresHeldChange(sent: SentRunInputs | undefined, graph: 
     && (held.comparator === undefined || held.comparator === stated) && stated === sentOperatorOf(sent!);
 }
 
+/**
+ * ⭐ G / D2 (AIE #94 6133027121: "a selected Run recorded in some other or unknown frame cannot be called paired merely because the
+ * goal's target says change"): the PRODUCER scored THIS Run's goal as the PAIRED change — each option minus carrying on, on
+ * the same draw — read from what CEE SENT for the Run, never from the goal as it stands now, a figure, or an assumed flag.
+ * ISL `robustness_analyzer_v2.py` at 0b3321d1, `_goal_threshold_plan` (:7345-7350) and `_resolve_change_threshold`
+ * (:7837-7846): a node that measures a change (its quantity frame is 'change') with a `change_abs` or `level` target is "the paired
+ * change with today = 0"; a `delta` target is compared on the raw samples, and `change_rel` on it is refused. No sent Run
+ * (unknown) or any other sent frame is false.
+ */
+export function sentRunPairsChange(sent: SentRunInputs | undefined, goalId: unknown): boolean {
+  const sentGoal = sentGoalOf(sent, goalId);
+  const frame = sentGoal === undefined ? undefined : readGoalRecord(sent!.graph, goalId as string)?.target?.frame;
+  return sentGoal !== undefined && sentGoal.quantity_frame === 'change' && (frame === 'change_abs' || frame === 'level');
+}
+
 /** AIE 6129564354 (AMENDED), verbatim: a deadline Run that did not test the target saved in the model shows no option's chance. */
 export const SENT_TARGET_NOT_HELD_WORDS = 'Not shown. This analysis did not test the target saved in your model, so its figures cannot describe your chance of reaching that target.';
 /** AIE 6129564354: appended ONLY where revision evidence proves the saved target changed after that analysis. */

@@ -45,7 +45,7 @@ import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
-import { goalOwnConstraintChanceRecords, sentRunScoresHeldChange, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
+import { goalOwnConstraintChanceRecords, sentRunPairsChange, sentRunScoresHeldChange, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
 import { periodEndAssumptionNote, statedPartialOrLateEffect } from './period-end-assumption.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
@@ -462,9 +462,13 @@ export function goalChanceLicenceOf(
   const readingFrame = basis?.quantity_frame;
   const changeQuantity = changeFrame !== undefined && readingFrame === 'change';
   const timing = ordinaryTimingOf(horizonGraph, envelope);
+  // ⭐ G / D2 (AIE #94 6133027121): a change goal is read as paired only where the PRODUCER scored this Run's sent goal as the
+  // paired change, and that sent goal is the held one — never because the goal's target says change.
+  const pairedChange = changeQuantity && sentRunPairsChange(constraints.sentRun, goalId)
+    && sentRunScoresHeldChange(constraints.sentRun, graph, goalId, held);
   const sqReading: StatusQuoReading = share !== null || statusQuoId === undefined || goal === undefined ? 'unknown'
     : statusQuoReadingOf({
-      paired: timing.ordinary && (changeQuantity || pairedLevelFacts(graph, goal, basis)),
+      paired: timing.ordinary && (changeQuantity ? pairedChange : pairedLevelFacts(graph, goal, basis)),
       forecast: timing.forecast,
       row: sqRow,
       // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in

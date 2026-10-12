@@ -181,6 +181,28 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     }
   });
 
+  it('D2 PAIRING FROM THE PRODUCER (AIE 6133027121): a Run recorded in another or unknown frame is not read as paired', () => {
+    // The at-period-end reading (effects stated), so the conditional's own identity check is not what decides here.
+    const g = withGoal(FX.graph, (goal) => { goal.goal_target_basis = { ...goal.goal_target_basis, effects_at_period_end: true }; });
+    const licenceWith = (sentRun?: Rec): Rec => goalChanceLicenceOf(FX.envelope, g, GOAL, earned, undefined, g,
+      { storedConstraints: g.goal_constraints, sentConstraints: g.goal_constraints, ...(sentRun !== undefined ? { sentRun } : {}) }) as Rec;
+    // The producer scored the PAIRED change (ISL 0b3321d1: a change node with a change_abs target): no change, by assumption.
+    const sent = sentRunOf(g);
+    expect(licenceWith(sent).status_quo).toEqual({ option_id: SQ, line: DOING_NOTHING });
+    const others: [string, Rec | undefined][] = [
+      ['unknown: no sent Run', undefined],
+      ['another frame: the raw samples (delta)', { ...sent, graph: withGoal(sent.graph, (x) => { x.goal_threshold_frame = 'delta'; }) }],
+      ['another quantity frame: a level node', { ...sent, graph: withGoal(sent.graph, (x) => { delete x.quantity_frame; }) }],
+    ];
+    for (const [why, sentRun] of others) {
+      const l = licenceWith(sentRun);
+      expect(l.status_quo, why).toBeUndefined();
+      // No claim either way: never "no change, by assumption", and never "moved" from a frame the Run did not record.
+      expect(l.withheld_reason_by_option?.[SQ], why).toBeUndefined();
+      expect(JSON.stringify(l), why).not.toMatch(/by assumption|carrying on as now leaves/);
+    }
+  });
+
   it('NEGATIVE (c): a stated PARTIAL effect by the period withholds with E\'s sentence', () => {
     expectWithheld(runAsTheHandlerDoes({ brief: `${FX.brief} We'd expect only half the productivity gain by month 3.` }), 'partial');
   });

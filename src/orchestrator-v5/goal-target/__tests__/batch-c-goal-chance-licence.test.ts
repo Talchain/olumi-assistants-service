@@ -48,7 +48,10 @@ const hiringRun = (): Rec => ({
     { option_id: 'carry_on', probability_of_goal: 0 },
   ],
 });
-const hiringConstraints = (g: Rec) => ({ storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints) });
+// ⛔ CHANGED EXPECTATION (G / D2, AIE #94 6133027121): a change goal's status quo is read as paired only from what the PRODUCER
+// scored — the goal CEE SENT for this Run (`sentRunPairsChange`), never the goal's own frame — so the Run's request rides here.
+const hiringConstraints = (g: Rec) => ({ storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints),
+  sentRun: { graph: g } });
 
 describe('hiring — a change of +10% from today has its ruled sentence (ruling 20) and its disclosures (amendments 1, 2, 4)', () => {
   it('RED: licensed per option, worded "productivity being at least 10% higher than today at three months"', () => {
