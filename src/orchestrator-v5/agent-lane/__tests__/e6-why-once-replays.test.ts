@@ -25,7 +25,8 @@ type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[
 type Kind = 'construction' | 'turn' | 'run' | 'edit' | 'press_strengthen' | string;
 type Reply = { turn: number; graph: Graph; policy?: string; variant?: string; item?: string; key?: string; why: number; action: boolean };
 const STRENGTHEN = 'RC-STRENGTHEN-ITEM';
-const WHY = '<summary>Why?</summary>';
+/** R3-1 (trial merge of B and R3): the Why? is R3's plain final paragraph, "Why? <science>", never <details> markup. */
+const WHY = '\n\nWhy? ';
 const REPLY = 'Here is what the model shows so far.';
 
 /** One reply per turn, as the route builds it: select on the readback, compose the Why? and action, record the answer. */

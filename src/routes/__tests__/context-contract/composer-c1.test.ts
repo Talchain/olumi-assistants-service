@@ -180,8 +180,9 @@ describe('E6 Why-once on the route: a second Strengthen item on the same state c
     const [a, b] = [first, second].map(w => object(object(w.response.guidance).slot1));
     expect([a.policy_id, a.variant, b.policy_id, b.variant]).toEqual(['RC-STRENGTHEN-ITEM', 'S1', 'RC-STRENGTHEN-ITEM', 'S1']);
     expect(b.item, 'the next item is offered').not.toBe(a.item);
-    expect(String(first.response.assistant_text)).toContain(`<details>\n<summary>Why?</summary>\n\n${row('RC-STRENGTHEN-ITEM').science_basis.summary}\n\n</details>`);
-    expect(String(second.response.assistant_text)).not.toContain('<summary>Why?</summary>');
+    // R3-1 (trial merge of B and R3): the Why? ships as R3's plain final paragraph, never as <details> markup.
+    expect(String(first.response.assistant_text).endsWith(`\n\nWhy? ${row('RC-STRENGTHEN-ITEM').science_basis.summary}`)).toBe(true);
+    expect(String(second.response.assistant_text)).not.toContain('Why?');
     expect(array(object(second.response._answer_shape).bullets)).toContain(object(b.primary_action).label);
     expect(object(carriers(second)[0]).why, 'the model is told the same method; only the display changes').toBe(row('RC-STRENGTHEN-ITEM').science_basis.summary);
   });
