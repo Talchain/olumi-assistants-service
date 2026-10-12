@@ -293,13 +293,17 @@ describe('ONE reply contract through the build route', () => {
     // The historical capture retains its display grammar, with §(ad)'s retired chance-free horizon clause removed.
     expect(body.assistant_text, 'no widening preserves the existing reply apart from the retired horizon clause').toBe([
       "Not shown: how MRR is worked out isn't confirmed",
-      // ONE CENSUS (DL 12 Oct, last check BLOCKING 4): Check estimates lists every Olumi figure the result rests on, from the
-      // chance face's own census — here the three starting values AND the Olumi-sized link Pro plan price → Monthly churn,
-      // which the old panel walk left out.
-      "• Olumi's estimates: 4, see Check estimates.",
-      'Olumi built your pricing model.',
-      // Q-c (DL 87114): one horizon-limit statement per surface.
-      "This model doesn't yet say whether any option gets there within 12 months.",
+      [
+        // R4 (DL 12 Oct; score runs 2/3): with the chance withheld, the reply's own lines are the answer, so they join the
+        // face after the existing face lines and before the estimates line (they were under More detail).
+        '• Olumi built your pricing model.',
+        // Q-c (DL 87114): one horizon-limit statement per surface.
+        "• This model doesn't yet say whether any option gets there within 12 months.",
+        // ONE CENSUS (DL 12 Oct, last check BLOCKING 4): Check estimates lists every Olumi figure the result rests on, from the
+        // chance face's own census — here the three starting values AND the Olumi-sized link Pro plan price → Monthly churn,
+        // which the old panel walk left out.
+        "• Olumi's estimates: 4, see Check estimates.",
+      ].join('\n'),
       "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from. The rest of this Run's results still stand.",
       GOAL_CHANCE_CAPTURE,
     ].join('\n\n'));
