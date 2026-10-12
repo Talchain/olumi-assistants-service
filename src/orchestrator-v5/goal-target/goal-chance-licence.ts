@@ -33,7 +33,7 @@ export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js
  */
 import {
   GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
-  readOptionResultSources,
+  goalFiguresWithheldWarnings, readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures, withholdStatusQuoIntervals } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
@@ -331,6 +331,46 @@ function zeroSpreadReasons(
   return out;
 }
 
+/**
+ * ⭐ Post-B (DL 12 Oct; AIE #94 6123937762 item 3): the goal's stated target was not sent to the engine as specified
+ * (`targetSent`, R5-5 (b)). ONE predicate: the licence refuses on it, and the Run says why ({@link withholdForUnsentGoalTarget})
+ * instead of saying nothing. Only where the run-wide target is otherwise readable (`goalChanceTargetCause` null), so another
+ * cause keeps its own words. A goal with several targets whose own figure was sent keeps the joint's line (`jointWithheldLine`).
+ */
+export function goalTargetNotSent(graph: unknown, goalId: unknown, constraints: GoalChanceConstraintInputs = {}): boolean {
+  if (goalChanceTargetCause(graph, goalId) !== null) return false;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  return goal !== undefined && statedGoalTargetOf(graph as Rec, goal) !== null && !targetSent(graph as Rec, goal, constraints);
+}
+
+/** The AIE's words for one target (#94 6123937762 item 3): true for a target left out and for one sent with a changed figure. */
+export function unsentGoalTargetWords(label: string): string {
+  return `Your stated target for ‘${label}’ was not used as specified in this analysis, so its chance is not shown.`;
+}
+
+/**
+ * The Run says why the licence refused ({@link goalTargetNotSent}) through the ONE goal-figure seam, with the existing reason
+ * (`figure_not_preserved`): the outcome and the ordering stay. No ask is added. Every earlier withhold keeps its own reason.
+ */
+export function withholdForUnsentGoalTarget<E>(envelope: E, graph: unknown, goalId: unknown, constraints: GoalChanceConstraintInputs = {}): E {
+  if (!isRec(envelope) || !goalTargetNotSent(graph, goalId, constraints) || goalFiguresWithheldWarnings(envelope).length > 0) return envelope;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const label = typeof goal?.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'your goal';
+  const scored = [...new Set(readOptionResultSources(envelope).flat().flatMap((r) => {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    return id === undefined ? [] : [id];
+  }))];
+  if (scored.length === 0) return envelope;
+  const words = unsentGoalTargetWords(label);
+  // `detail.reason` is CEE-local (as `goal_level_olumi_estimate`); the UI renders `message` for this code.
+  return withholdOptionGoalFigures(envelope, new Set(scored), {
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: words, say: words,
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: 'figure_not_preserved' },
+  }, { keepOutcome: true, keepOrdering: true });
+}
+
 /** R5-5 (b): whether the Run sent the threshold of the target the goal states (see the guard in `goalChanceLicenceOf`). */
 function targetSent(graph: Rec, goal: Rec, constraints: GoalChanceConstraintInputs): boolean {
   if (finite(goal.goal_threshold_raw)) return finite(goal.goal_threshold);
@@ -372,7 +412,7 @@ export function goalChanceLicenceOf(
   // (`targetSent`): a figure the goal node holds is sent as its finite normalised threshold on the graph this Run scored (none:
   // a reading refused for its conditions, or a cap that could not be resolved); a target that is the goal's own limit row is
   // sent as that row (checked where the Run's request is known).
-  if (goal === undefined || !targetSent(graph as Rec, goal, constraints)) return null;
+  if (goal === undefined || goalTargetNotSent(graph, goalId, constraints)) return null;
   const basis: GoalTargetBasis | undefined = goal === undefined ? undefined : goalTargetBasisOf(goal);
   // ⛔ Ruling 12 / amendment 2: a change's "at three months" needs its effects stated at that month; never steady state.
   // D3: where the basis holds they are NOT stated, the Run says why (`withholdForPeriodEndEffects`), never a silent gap.

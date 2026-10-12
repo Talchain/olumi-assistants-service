@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
+import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, goalTargetNotSent, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForUnsentGoalTarget } from '../goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { conditionsRefusedBasis, CONDITIONS_NOT_KEPT, targetChanceWords } from '../goal-target-basis.js';
@@ -1490,6 +1490,81 @@ describe('RE-SCOPE 2 R5-5 (b): no chance is licensed for a stated target the Run
     expect(l.targets!.joint).toMatchObject({ status: 'withheld', reason: 'figure_not_preserved' });
     expect(JSON.stringify(l.targets)).not.toMatch(/stated as a change/);
     expect(l.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:conversion_rate']);
+  });
+});
+
+// ── Post-B (DL 12 Oct; AIE #94 6123937762 item 3): the single-target refusal above is SAID in the AIE's words, through the
+// existing reason (`figure_not_preserved`) and the ONE goal-figure seam. Before this the licence returned null and nothing said
+// why. No new parser; no ask. A goal whose own figure was sent keeps the joint's own line.
+describe('post-B: a single stated target the Run did not send as specified is said, never a silent gap; the joint keeps its own line', () => {
+  const AIE = 'Your stated target for ‘Development capacity’ was not used as specified in this analysis, so its chance is not shown.';
+  const notTestable = (env: Rec): Rec[] => ((env.inference_warnings ?? []) as Rec[]).filter((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+  const ownRow = (): Rec => {
+    const g = capacityGraph({ goal: { goal_threshold_raw: undefined, goal_threshold: undefined } });
+    g.goal_constraints = [{ constraint_id: 'capacity:>=', node_id: 'capacity', operator: '>=', value: 85, unit: '%', value_frame: 'level' }];
+    return g;
+  };
+  const RED: readonly (readonly [string, () => Rec, unknown])[] = [
+    ['no threshold sent', () => capacityGraph({ goal: { goal_threshold: undefined } }), undefined],
+    ['a cap that could not be resolved', () => capacityGraph({ goal: { goal_threshold: undefined, goal_threshold_cap: undefined } }), undefined],
+    ['the goal\'s own target row not in the request', ownRow, []],
+  ];
+  for (const [name, graph, sent] of RED) {
+    it(`RED (single, ${name}): the licence refuses, and the Run says the AIE's sentence with the existing reason`, () => {
+      const g = graph();
+      const constraints = { storedConstraints: g.goal_constraints, sentConstraints: sent };
+      expect(goalChanceLicenceOf(capacityRun(), g, 'capacity', () => false, undefined, g, constraints), 'its reason: the licence refuses this target').toBeNull();
+      expect(goalTargetNotSent(g, 'capacity', constraints)).toBe(true);
+      const out = withholdForUnsentGoalTarget(capacityRun(), g, 'capacity', constraints) as Rec;
+      expect(notTestable(out)).toEqual([{ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', severity: 'warning', message: AIE, say: AIE,
+        node_ids: ['capacity'], option_ids: ['lead', 'two', 'carry_on'], detail: { reason: 'figure_not_preserved' },
+        // The seam's own record: the claims against the target only; no win share, so no leader is withheld (RT-10 B′ R2).
+        withheld_claims: ['goal_probability', 'joint_probability', 'downside'] }]);
+      // AIE item 3: the unsent target's own chance stays withheld; the outcome and the ordering stay.
+      for (const r of out.option_comparison as Rec[]) {
+        expect(r).not.toHaveProperty('probability_of_goal');
+        expect(r).toHaveProperty('outcome.p50');
+      }
+    });
+  }
+  it('CONTROL (single): the threshold sent → licensed, nothing said, the envelope untouched', () => {
+    const env = capacityRun();
+    expect(goalTargetNotSent(capacityGraph(), 'capacity', {}), 'its reason: the target was sent').toBe(false);
+    expect(withholdForUnsentGoalTarget(env, capacityGraph(), 'capacity', {})).toBe(env);
+    expect(capacityLicence()).not.toBeNull();
+  });
+  it('CONTROL (single, own row): the row sent, or no request known → read as before, nothing said', () => {
+    for (const sent of [wireGoalConstraints(ownRow().goal_constraints), undefined]) {
+      const g = ownRow(); const env = capacityRun();
+      const constraints = { storedConstraints: g.goal_constraints, sentConstraints: sent };
+      expect(goalTargetNotSent(g, 'capacity', constraints), 'its reason: the row was sent, or no request is known').toBe(false);
+      expect(withholdForUnsentGoalTarget(env, g, 'capacity', constraints)).toBe(env);
+    }
+  });
+  it('JOINT keeps its own line: a second target the Run did not send → the joint\'s figure line, and no single-target sentence', () => {
+    const g = marketingGraph();
+    const sent = (wireGoalConstraints(g.goal_constraints) as Rec[]).filter((r) => r.constraint_id !== 'target:conversion_rate');
+    const constraints = { storedConstraints: g.goal_constraints, sentConstraints: sent };
+    expect(goalTargetNotSent(g, 'new_customers', constraints), 'its reason: the goal\'s own figure was sent').toBe(false);
+    const env = marketingRun();
+    expect(withholdForUnsentGoalTarget(env, g, 'new_customers', constraints)).toBe(env);
+    const joint = licenceFor(marketingRun(), g, sent)!.targets!.joint as Rec;
+    expect([joint.reason, joint.line]).toEqual(['figure_not_preserved',
+      'The chance of meeting both together isn’t shown: this analysis did not use every stated target as specified.']);
+  });
+  it('CONTROL: another run-wide cause keeps its own words (no comparator held → the gate\'s cause, never this sentence)', () => {
+    const g = capacityGraph({ goal: { goal_threshold: undefined, goal_direction: undefined } });
+    const env = capacityRun();
+    expect(goalTargetNotSent(g, 'capacity', {}), 'its reason: the gate has its own cause').toBe(false);
+    expect(withholdForUnsentGoalTarget(env, g, 'capacity', {})).toBe(env);
+  });
+  it('CONTROL: an earlier withhold keeps its own reason (a reading refused for its conditions): one reason, never two', () => {
+    const g = capacityGraph({ goal: { goal_threshold: undefined } });
+    const held = withholdForOpenTargetQuestion(capacityRun(), g, 'capacity') as Rec;
+    const earlier: Rec = { ...held, inference_warnings: [{ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', severity: 'warning',
+      message: `Not shown. ${CONDITIONS_NOT_KEPT}`, node_ids: ['capacity'], option_ids: ['lead', 'two', 'carry_on'], detail: { reason: 'conditions_not_kept' } }] };
+    expect(goalTargetNotSent(g, 'capacity', {}), 'the same unsent target').toBe(true);
+    expect(withholdForUnsentGoalTarget(earlier, g, 'capacity', {})).toBe(earlier);
   });
 });
 
