@@ -1552,6 +1552,38 @@ export interface FailClosedProseResult {
   readonly droppedSentences: number;
 }
 
+/** One sentence the gate read as ranking: why (its codes), whether it asked, and its length. Never its words. */
+export interface RankingSentenceTrace {
+  readonly codes: readonly string[];
+  readonly interrogative: boolean;
+  readonly length: number;
+}
+export interface FailClosedProseTrace extends FailClosedProseResult {
+  readonly dropped: readonly RankingSentenceTrace[];
+  /** Questions read as ranking but kept (`questionCarriesNoClaim`). */
+  readonly questionsKept: readonly RankingSentenceTrace[];
+}
+
+/**
+ * ⭐ R4 (DL ruling 12 Oct; score run 3, hiring step 12; §7.3 C: stop the filter deleting the product's own explanation):
+ * a QUESTION holding no digit, percentage, currency, comparator or leader word cannot carry a figure or a leader claim,
+ * so it passes this gate unchanged. Served (CEE 3fdf0f38), "I need one clarification before I can prepare a faithful
+ * update." reached the user with no question: this gate had dropped one sentence of about 74 characters first.
+ * A question with any such word, and every statement, still goes through every rule here.
+ */
+const INTERROGATIVE = /\?[\s"'”’)\]*_]*$/;
+const CLAIM_BEARING_IN_A_QUESTION: readonly RegExp[] = [
+  /\d/,
+  /%|\bper\s?cent\b/i,
+  /[£$€¥]|\b(?:gbp|usd|eur|pounds?|dollars?|euros?)\b/i,
+  /\b(?:than|more|less|fewer|better|worse|higher|lower|greater|larger|smaller|bigger|stronger|weaker|superior|inferior|beats?|beating|beaten|outperform\w*|versus|vs|compar\w*)\b/i,
+  /\b(?:best|winners?|win|wins|winning|won|lead|leads|leading|led|leaders?|recommend\w*|ahead|top|favou?r\w*|strongest|highest|lowest|most|least)\b/i,
+];
+export function questionCarriesNoClaim(sentence: string): boolean {
+  const s = sentence.trim();
+  return INTERROGATIVE.test(s) && !CLAIM_BEARING_IN_A_QUESTION.some((re) => re.test(s));
+}
+
 /**
  * Drop every ranking sentence and keep every other sentence byte-identical. A line left empty is
  * removed with the SHORTER of its two separators, so a list or paragraph break survives; a list
@@ -1565,7 +1597,16 @@ export interface FailClosedProseResult {
 const CITATION_ONLY = /^\s*(?:\[\d+\]\s*)+$/;
 
 export function dropRankingSentences(text: string, labels: RankingLabelContext = NO_LABELS, protectedExactLine?: string | readonly string[]): FailClosedProseResult {
-  if (typeof text !== 'string' || text.length === 0) return { text, droppedSentences: 0 };
+  const traced = dropRankingSentencesTraced(text, labels, protectedExactLine);
+  return { text: traced.text, droppedSentences: traced.droppedSentences };
+}
+
+const traceOf = (unit: string, codes: readonly string[]): RankingSentenceTrace =>
+  ({ codes: [...new Set(codes)], interrogative: INTERROGATIVE.test(unit.trim()), length: unit.trim().length });
+
+/** `dropRankingSentences`, with what it read in each sentence it dropped or kept (codes, interrogative, length; no words). */
+export function dropRankingSentencesTraced(text: string, labels: RankingLabelContext = NO_LABELS, protectedExactLine?: string | readonly string[]): FailClosedProseTrace {
+  if (typeof text !== 'string' || text.length === 0) return { text, droppedSentences: 0, dropped: [], questionsKept: [] };
   type Seg = Segment;
   const segs: Seg[] = [];
   for (const unit of splitIntoRedactableUnits(text)) {
@@ -1614,12 +1655,16 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
       });
     });
   }
+  // Why each unit goes (the rules' codes): for the trace only, never the text.
+  const why: string[][][] = segs.map(() => []);
   const drops: boolean[][] = segs.map((seg, r) => {
     if ('sep' in seg) { prior += seg.sep; return []; }
     return seg.units.map((u, j) => {
-      const ranks = forced.has(`${r}:${j}`) || pairDrop.has(`${r}:${j}`) || (/\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && sentenceRanksOptions(u, labels, prior));
+      const codes = [...(forced.has(`${r}:${j}`) ? ['ranking_as_a_whole'] : []), ...(pairDrop.has(`${r}:${j}`) ? ['share_split_passage'] : []),
+        ...(/\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) ? rankingCodesIn(u, labels, prior) : [])];
+      why[r]![j] = codes;
       prior += u;
-      return ranks;
+      return codes.length > 0;
     });
   });
   /**
@@ -1642,7 +1687,7 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
     if (list.length > 1 && list.some((i) => drops[i]!.some(Boolean))) {
       for (const i of list) {
         const seg = segs[i] as { units: string[] };
-        seg.units.forEach((u, j) => { if (!drops[i]![j] && isRankedListItem(u, j === 0, labels)) drops[i]![j] = true; });
+        seg.units.forEach((u, j) => { if (!drops[i]![j] && isRankedListItem(u, j === 0, labels)) { drops[i]![j] = true; why[i]![j] = ['ranked_list_item']; } });
       }
     }
     if (list.length > 0) r = k - 1;
@@ -1653,16 +1698,24 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
    * strongest |"). Each figure cell is read as the list item "- <first cell>: <cell>", so the list's own test decides it,
    * and a row of several ("| Two developers | 34.6% | 41.8% |") goes when any of them is a share.
    */
+  const dropRow = (i: number): void => { drops[i] = drops[i]!.map((d, j) => { if (!d) why[i]![j] = ['table_row']; return true; }); };
   for (const rows of tableRuns(segs)) {
     const unitsAt = (i: number): string[] => (segs[i] as { units: string[] }).units;
-    for (const i of rows) if (drops[i]!.some(Boolean)) drops[i] = drops[i]!.map(() => true);
+    for (const i of rows) if (drops[i]!.some(Boolean)) dropRow(i);
     const body = rows.length > 1 && TABLE_SEPARATOR.test(unitsAt(rows[1]!).join('')) ? rows.slice(2) : rows;
     if (!body.some((i) => drops[i]!.some(Boolean))) continue;
     for (const i of body) {
       const cells = unitsAt(i).join('').split('|').map((c) => c.trim()).filter((c) => c !== '');
-      if (cells.slice(1).some((c) => isRankedListItem(`- ${cells[0]!}: ${c}`, true, labels))) drops[i] = drops[i]!.map(() => true);
+      if (cells.slice(1).some((c) => isRankedListItem(`- ${cells[0]!}: ${c}`, true, labels))) dropRow(i);
     }
   }
+  // ⭐ R4 (DL ruling 12 Oct): a question that can carry no figure or leader claim is kept, whichever rule above read it.
+  const questionsKept: RankingSentenceTrace[] = [];
+  segs.forEach((seg, r) => {
+    if ('units' in seg) seg.units.forEach((u, j) => {
+      if (drops[r]![j] === true && questionCarriesNoClaim(u)) { drops[r]![j] = false; questionsKept.push(traceOf(u, why[r]![j] ?? [])); }
+    });
+  });
   // Classify against the ORIGINAL prose, including the typed warning's option names: a later bare
   // 71%/29% split can depend on that context. Only after every contextual rule has run do we keep
   // the exact standalone warning line itself, without excusing neighboring model-authored claims.
@@ -1677,12 +1730,14 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
       }
     });
   }
+  const droppedTrace: RankingSentenceTrace[] = [];
   const lines: Array<Seg | null> = segs.map((seg, r) => {
     if ('sep' in seg) return seg;
     const drop = drops[r]!;
     const n = drop.filter(Boolean).length;
     if (n === 0) return seg;
     dropped += n;
+    seg.units.forEach((u, i) => { if (drop[i]) droppedTrace.push(traceOf(u, why[r]![i] ?? [])); });
     const kept = seg.units.filter((_, i) => !drop[i]);
     if (!kept.some((u) => /\S/.test(u) && !CITATION_ONLY.test(u))) return null;
     let line = kept.join('');
@@ -1693,7 +1748,7 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
     if (drop[drop.length - 1] === true) line = line.replace(/[ \t]+$/, '');
     return { units: [line] };
   });
-  if (dropped === 0) return { text, droppedSentences: 0 };
+  if (dropped === 0) return { text, droppedSentences: 0, dropped: [], questionsKept };
 
   const leading = segs[0] !== undefined && 'sep' in segs[0] ? segs[0].sep : '';
   let body = '';
@@ -1710,7 +1765,7 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
     pending = null;
     started = true;
   }
-  return { text: started ? leading + body : '', droppedSentences: dropped };
+  return { text: started ? leading + body : '', droppedSentences: dropped, dropped: droppedTrace, questionsKept };
 }
 
 /**
@@ -1801,8 +1856,14 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         ? readbackSay : null;
       const protectedLines = [...(typedSay !== null && !typedSay.includes('\n') ? [typedSay] : []),
         ...(opts.protectedHostLines ?? []).filter((line) => line !== '' && !line.includes('\n'))];
-      const projected = dropRankingSentences(projectionInput, rankingLabelContext(opts.graph, opts.analysisReady),
+      const projected = dropRankingSentencesTraced(projectionInput, rankingLabelContext(opts.graph, opts.analysisReady),
         protectedLines.length > 0 ? protectedLines : undefined);
+      // R4 (DL ruling): a question the gate kept is a row in the next witness: its codes and length, never its words.
+      if (projected.droppedSentences === 0 && projected.questionsKept.length > 0) {
+        log.info({ event: 'agent_lane.withheld_leader_question_kept', request_id: opts.requestId, exit_path: opts.exitPath,
+          withheld_reason: withheldReason ?? null, questions_kept: projected.questionsKept },
+        'agent-lane: the leader is withheld; a question that carries no figure or leader word was kept');
+      }
       if (projected.droppedSentences > 0) {
         droppedSentences = projected.droppedSentences;
         /**
@@ -1849,6 +1910,9 @@ export function enforceAgentLaneLeaderClaimsAtWire(
             // Lengths only, never the prose: this is the user's own decision content.
             original_length: text.length,
             projected_length: next.assistant_text.length,
+            // R4 (DL ruling): per sentence, the codes that read it as ranking, whether it asked, and its length; no words.
+            dropped: projected.dropped,
+            questions_kept: projected.questionsKept,
           },
           'agent-lane: the leader is withheld, so ranking sentences were dropped from the reply',
         );
