@@ -222,7 +222,7 @@ import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 import { preconditionRiskIds } from '../../../graph/inert-risk.js';
-import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, isStatedLevelRange, levelRangePointBasis, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_QUOTE_MAX, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
+import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, isStatedLevelRange, isUserStatedRange, levelRangePointBasis, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_QUOTE_MAX, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
@@ -2676,7 +2676,11 @@ export function createAgentCapabilities(
         const cap = (os as { cap?: unknown }).cap;
         sentences.push(`Added "${String(f.label ?? fid)}" as a factor, affecting ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
           + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, ${confirmedIds.has(fid) ? 'as you confirmed' : 'as you said'}.`);
-        if (typeof cap === 'number' && Number.isFinite(cap) && cap > 1) rangesAdded.push({ factor: String(f.label ?? fid), value: statedRaw, range: cap });
+        // ⭐ Recovery Batch E (run 4 hiring step 13, B5/U5): a factor that holds the range the user stated is never said to
+        // have a range "not yours" (`isUserStatedRange`).
+        if (typeof cap === 'number' && Number.isFinite(cap) && cap > 1 && !isUserStatedRange((os as { range?: unknown }).range)) {
+          rangesAdded.push({ factor: String(f.label ?? fid), value: statedRaw, range: cap });
+        }
         continue;
       }
       if (todayIds.has(fid) && heldFigureOwnerOf(os) === 'brief' && typeof statedRaw === 'number') {
