@@ -33,7 +33,7 @@ import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { admitStoredProductDeclaration, type StoredProductDeclarationRefusal } from '../agent-lane/admit-model.js';
 import { proposeProductIdentity, todaysLevelFor, type IdentityPartLevel, type IdentityProposal } from '../agent-lane/identity-proposal.js';
 import { identityConfirmBaseIsWritable } from './editable-graph.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { plotResolvesFrame } from '../../cee/graph-readiness/identity-frames.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { normaliseAbsenceOnly } from '../persisted-graph-projection.js';
@@ -199,7 +199,7 @@ export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: re
     // ⛔ ONLY THE USER'S FIGURE IS A LEVEL HERE (DL correction, 8 Oct; Paul's 2 Oct brief §9 check 1: "With unknown
     // subscribers, do not invent that result"; Science §(p): an Olumi estimate needs a basis). B1 9f32a4b4's 250 is the
     // drafter's, with no basis (levels carry no basis field yet), so it is MISSING: the reading never computes from it.
-    const owner = classifyValueSource(os?.source);
+    const owner = valueClassOf(os);
     const usersLevel = typeof os?.value === 'number' && Number.isFinite(os.value) && (owner === 'user_stated' || owner === 'user_ratified');
     // Today's level read through the user's figure counts only where the part has NO value of its own: that is the only
     // case `todaysWrite` writes it (#2851 buddy r1 P1-2: an Olumi value with no raw figure passed here and was kept).

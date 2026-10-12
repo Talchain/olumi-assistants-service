@@ -92,7 +92,16 @@ function produced(envelope = producerEnvelope(), graph = READ.graph): Rec {
     screen_lines: goalChanceScreenLinesForAgent(currentResult, graph, true) };
 }
 
-const AMENDMENT_7 = { olumi_estimate_value_count: 1, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true };
+// ⛔ RE-SCOPE 2 (R5-1/R5-2, DL AMEND: three provenance states) — CHANGED EXPECTATION: two more starting values on the goal's
+// paths — ‘price_rise’ 0 and ‘new_starter_subscribers’ 0, stamped `cee_inference` with NO extraction type. F1 defers that stamp
+// to the extraction type and read them `unknown`, so e58b8dbd counted nothing for them and said nothing ("zero estimates");
+// `cee_inference` is a recognised AI source (AIE R5 item 1; the UI's `classifyValueProvenance` reads it 'ai'): Olumi's.
+const STARTER_RANGE = '‘Launch starter tier’: between about 95% and 99% chance of meeting your goal, in this model, '
+  + 'using Olumi\'s estimates for 3 starting values, 2 option settings and 2 relationships (see Check estimates).';
+// DL 12 Oct (LABEL-ONLY, last check BLOCKING 1): this capture's goal level and 'Starter support cost per subscriber' are
+// type-less `brief_extraction` — the person's by their stamp alone — so the result also carries the unverified note, once.
+const AMENDMENT_7 = { olumi_estimate_value_count: 3, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true,
+  notes: ['Provisional: this result uses inputs whose sources have not been verified.'] };
 const withoutAmendment7 = (record: Rec): Rec => Object.fromEntries(Object.entries(record).filter(([key]) => !Object.hasOwn(AMENDMENT_7, key)));
 const withoutAmendment7InRecord = (enrichment: Rec): Rec => ({ ...enrichment, inference_warnings: enrichment.inference_warnings
   .map((warning: Rec) => (warning.code === GOAL_CHANCE_LICENSED ? withoutAmendment7(warning) : warning)) });
@@ -156,8 +165,10 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expectKeepZeroSpread(output.canonical_view);
     // The old wire predates #2878's fixed withheld face and separate why.
     // Starter's stored range dominates its point in the independent staging control.
-    expect(JSON.stringify(otherwise(output.canonical_view)))
-      .toBe(JSON.stringify(otherwise(STAGING_CONTROL.canonical_view)));
+    // Batch C: condition 6 / r1 item 6 (DL, 12 Oct) — that range rests on Olumi's inputs and says so; nothing else moves.
+    const view = structuredClone(STAGING_CONTROL.canonical_view) as Rec;
+    view.options.find((row: Rec) => row.option_id === STARTER).cell.face = STARTER_RANGE;
+    expect(JSON.stringify(otherwise(output.canonical_view))).toBe(JSON.stringify(otherwise(view)));
     expect(JSON.stringify(output)).not.toMatch(/Each option’s chance|has the highest|have similar chances|more likely to miss/);
     const forAgent = analysisResultForAgent({ ...sourceBlock, enrichment: output.public_enrichment }, READ.graph) as Rec;
     expect(JSON.stringify(forAgent)).not.toMatch(/Each option’s chance|has the highest|have similar chances|more likely to miss/);
@@ -205,11 +216,28 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expect(JSON.stringify(withoutAmendment7InRecord(output.enrichment))).toBe(JSON.stringify(STAGING_CONTROL.enrichment));
     expect(JSON.stringify(withoutAmendment7InRecord(output.public_enrichment))).toBe(JSON.stringify(STAGING_CONTROL.public_enrichment));
     expect(JSON.stringify(output.agent_facts)).toBe(JSON.stringify(STAGING_CONTROL.agent_facts));
-    expect(JSON.stringify(output.screen_lines)).toBe(JSON.stringify(STAGING_CONTROL.screen_lines));
+    // Batch C: condition 6 / r1 item 6 (DL, 12 Oct). Starter's range rests on the same Olumi inputs as its point, so it says
+    // so in the point's own words. Exactly that clause (and its count field) is added; every other byte stays staging's.
+    const lines = structuredClone(STAGING_CONTROL.screen_lines) as Rec[];
+    lines[0] = { ...lines[0], chance: STARTER_RANGE, olumi_estimate_link_count: 2 };
+    expect(JSON.stringify(output.screen_lines)).toBe(JSON.stringify(lines));
     expect(licenceRecord(output.enrichment)!.withheld_reason_by_option).toEqual({ [KEEP]: keepReason });
-    expect(JSON.stringify(otherwise(output.canonical_view)))
-      .toBe(JSON.stringify(otherwise(STAGING_CONTROL.canonical_view)));
+    const view = structuredClone(STAGING_CONTROL.canonical_view) as Rec;
+    view.options.find((row: Rec) => row.option_id === STARTER).cell.face = STARTER_RANGE;
+    expect(JSON.stringify(otherwise(output.canonical_view))).toBe(JSON.stringify(otherwise(view)));
     expectKeepZeroSpread(output.canonical_view);
+  });
+
+  it('CONTROL (condition 6, per option): a range whose OWN settings are the user\'s names only the shared Olumi inputs', () => {
+    // Batch C (DL, 12 Oct): Starter's two settings re-attributed to the brief; the starting value and relationships stay Olumi's.
+    const graph = structuredClone(READ.graph);
+    const starter = graph.nodes.find((node: Rec) => node.id === STARTER);
+    for (const cell of Object.values(starter.interventions) as Rec[]) cell.source = 'brief_extraction';
+    // …and ANOTHER option's setting made Olumi's: never said on Starter's range.
+    graph.nodes.find((node: Rec) => node.id === 'raise_prices_10').interventions.price_rise.source = 'cee_hypothesis';
+    const range = produced(producerEnvelope(true), graph).screen_lines.find((line: Rec) => line.option_id === STARTER);
+    expect(range.chance).toBe('‘Launch starter tier’: between about 95% and 99% chance of meeting your goal, in this model, '
+      + 'using Olumi\'s estimates for 3 starting values and 2 relationships (see Check estimates).');
   });
 
   it('no zero-spread option and none licensed: keeps the null/no-new-record control unchanged', () => {

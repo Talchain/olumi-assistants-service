@@ -432,7 +432,8 @@ it('C spread words: a user-stated monthly change says "about a quarter"; an Olum
   const why = () => goalStockMethodWhyLine(graph, [{ interventions: { [price.id]: 59 } }]);
   expect(why()).toBe(WHY);
   const inflow = graph.nodes.find((n: Rec) => n.id === carrierOf(graph).nonlinear_identity.factor_ids[2]);
-  inflow.observed_state.source = 'cee_inference';
+  // ONE PROVENANCE AUTHORITY: Olumi's estimate carries its AI marker, not the brief's `explicit` beside the stamp.
+  Object.assign(inflow.observed_state, { source: 'cee_inference', extractionType: 'inferred' });
   expect(why()).toBe(WHY.replace('give or take about a quarter', 'give or take about half'));
   expect(why()).not.toContain('about a quarter');
 });

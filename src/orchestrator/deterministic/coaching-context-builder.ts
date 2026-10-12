@@ -15,6 +15,7 @@ import type {
 import type { SessionState } from "./session-state.js";
 import { log } from "../../utils/telemetry.js";
 import { selectFragilityPriorityRow } from "../shared/fragile-edge-authority.js";
+import { valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
 
 // ============================================================================
 // Types
@@ -296,11 +297,12 @@ function computeProvenance(ctx: DeterministicTurnContext): {
       }
       if (node.kind !== 'factor') continue;
       total++;
-      const observed = node.observed_state as Record<string, unknown> | undefined;
-      const extractionType = observed?.extractionType as string | undefined;
-      if (extractionType === 'inferred') {
+      // ⭐ ONE PROVENANCE AUTHORITY: Olumi's estimate, or the person's verified figure, by `provenanceOf`; a value whose
+      // origin is not established (or a structural definition) is neither, never counted as the user's.
+      const p = valueProvenanceOf(node.observed_state);
+      if (p.origin === 'ai' && !p.structural) {
         aiEstimated++;
-      } else {
+      } else if (p.origin === 'human' && p.role === 'verified') {
         userProvided++;
       }
     }

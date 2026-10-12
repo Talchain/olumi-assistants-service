@@ -382,7 +382,9 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     expect(b._action?.science).toBeUndefined();
     expect(b.assistant_text.startsWith('Checked: Narrow framing, Anchoring.')).toBe(true);
     expect(b.assistant_text).toContain("Narrow framing: where the pattern could bite: ‘Phased GCP migration’, ‘Switch to GCP’. One test: press ‘More options’.");
-    expect(b.assistant_text).toContain("Anchoring: where the pattern could bite: ‘Migration preparation effort’. One test: press ‘Anchoring’.");
+    // ONE PROVENANCE AUTHORITY: the served 'GCP workload share' (absent-type cee_inference) is Olumi's starting figure on every
+    // reader now (the disclosure already counted it), so it is the first figure Anchoring names (591cc1a0: 'Migration preparation effort').
+    expect(b.assistant_text).toContain("Anchoring: where the pattern could bite: ‘GCP workload share’. One test: press ‘Anchoring’.");
     const claim = resolveDskClaimProvenance('DSK-B-001')!;
     expect(b.assistant_text).toContain(`Decision-science claim: ${claim.claim_title} · ${claim.evidence_strength} evidence`);
     expect(b.assistant_text).not.toMatch(/\b(best|winner|recommend|ahead|beats|leader|top|most)\b|you are biased|\d/i);

@@ -115,7 +115,7 @@ describe('products over an accumulation reconcile against S₀, never S_N', () =
     const g = graph();
     g.nodes = g.nodes.filter((n: Rec) => n.id !== STOCK);
     node(g, AT12).observed_state.raw_value = 250;
-    node(g, AT12).observed_state.source = 'brief_extraction';
+    { node(g, AT12).observed_state.source = 'brief_extraction'; delete node(g, AT12).observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
     expect(proposeProductIdentity(g)).toBeNull();
     expect(goalCoherenceAsk(g, { nodeId: PRICE })).toBeNull();
   });
@@ -126,7 +126,7 @@ describe('products over an accumulation reconcile against S₀, never S_N', () =
     expect(proposeProductIdentity(g)).toBeNull();
     node(g, AT12).observed_state.raw_value = 250;
     expect(proposeProductIdentity(g)).not.toBeNull();
-    node(g, AT12).observed_state.source = 'brief_extraction';
+    { node(g, AT12).observed_state.source = 'brief_extraction'; delete node(g, AT12).observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
     expect(goalCoherenceAsk(g, { nodeId: PRICE })).toMatchObject({ implied: 12250 });
     node(g, AT12).observed_state.raw_value = 999;
     expect(goalCoherenceAsk(g, { nodeId: PRICE })).toBeNull();

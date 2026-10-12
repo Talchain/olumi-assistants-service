@@ -24,7 +24,7 @@
  * risk's OCCURRENCE is never a route's doubt for this rule (occurrence is not existence): only drawn link existence covers.
  */
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
-import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { isUserStatedLink } from '../../cee/provenance/provenance-of.js';
 import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { sameUnit } from '../agent-lane/same-unit.js';
 import { isRetainedExcluded } from '../tools/handlers/run-analysis-participation-guard.js';
@@ -214,16 +214,8 @@ const DEFINITIONAL_STD = 0.01;
 /** The z-width of a 90% range: 2 × 1.645. */
 const RANGE_90_WIDTH_Z = 3.29;
 
-/**
- * The licence's "the user's link" class: the user sized it, or their brief stated it WITH its evidence. Science d5 #87
- * 6008444863: a `brief_extraction` edge without its `source_quote` may be a drafter-invented mediator, never "your link".
- */
-export function isUserStatedLink(e: unknown): boolean {
-  if (!isRec(e)) return false;
-  if (linkSizing(e) === 'user') return true;
-  const p = e.provenance;
-  return isRec(p) && p.source === 'brief_extraction' && typeof p.source_quote === 'string' && p.source_quote.trim() !== '';
-}
+/** The licence's "the user's link" class — moved verbatim to the ONE provenance authority (`provenance-of.ts`). */
+export { isUserStatedLink };
 
 /**
  * The hold for one edge, or `null`.

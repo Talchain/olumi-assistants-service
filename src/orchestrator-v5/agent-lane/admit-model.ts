@@ -68,7 +68,7 @@ import { sayFigure } from './say-figure.js';
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
-import { admitGoalTargetBasis, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
+import { admitGoalTargetBasis, conditionsRefusedBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
 import {
   admitCandidateConstraints,
   canonicalProvenance,
@@ -80,6 +80,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
+import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, briefWritesGoalLevel, quoteBindsFactorFigure, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
@@ -809,10 +810,12 @@ export function framedObservedState(f: {
   // `estimatedObservedState` and `withdrawUnstatedBaselineStamps` (#2076). "Today is 100 % of today" is a definition,
   // not evidence for a user's measured level; construction attribution requires the verified receipt.
   // Construction always passes a receipt verdict. The two typed human doors use this
-  // formatter after verifying the figure themselves; preserve their trusted carrier shape.
+  // formatter after verifying the figure themselves (`figureTheUserWrote`), so they WRITE the attestation (DL 12 Oct): a
+  // type-less `brief_extraction` is the person's by its stamp alone (`stampOnly`) and the chance discloses it as unverified;
+  // the verified figure carries `explicit`, so its chance carries no such note.
   const base = verifiedCurrentLevel === undefined ? {
     ...(f.unit ? { unit: f.unit } : {}),
-    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' }
+    ...(f.provenance === 'explicit' ? { source: 'brief_extraction', extractionType: 'explicit' }
       : f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {} : { source: 'cee_inference' }),
   } : {
     ...(f.unit ? { unit: f.unit } : {}),
@@ -2905,9 +2908,12 @@ export function admitStatedGoalChange(
    * starting value as `estimate_only`, and (c) says the reference and period beside the chance.
    */
   const quantityFrame = goal.quantity_frame === 'change' ? 'change' : 'level';
-  const basisVerdict = admitGoalTargetBasis({
-    drafted: goal.basis, quantityFrame, targetFrame: frame, targetRaw: stored, horizonMonths: goal.horizon_months,
-  });
+  const basisArgs = { drafted: goal.basis, quantityFrame, targetFrame: frame, targetRaw: stored, horizonMonths: goal.horizon_months } as const;
+  const basisVerdict = admitGoalTargetBasis(basisArgs);
+  // ⛔ RE-SCOPE 2 (R5-5 (a)): a reading refused for its conditions persists that refusal in the stored reading's own
+  // `open_question` (`CONDITIONS_NOT_KEPT`), so no Run — before or after a reopen — shows a chance without them.
+  const refusedForConditions = conditionsRefusedBasis(basisArgs, basisVerdict);
+  const keptRefusal = refusedForConditions === undefined ? {} : { goal_target_basis: refusedForConditions };
   const basis = 'basis' in basisVerdict ? basisVerdict.basis : null;
   const withBasis = (n: Partial<AdmittedNode>): Partial<AdmittedNode> => (basis === null ? n : { ...n, goal_target_basis: basis });
   if (quantityFrame === 'change') {
@@ -2924,7 +2930,7 @@ export function admitStatedGoalChange(
     };
     const refusal = frame !== 'change_abs' ? 'frame' as const : 'refused' in basisVerdict ? basisVerdict.refused
       : basis === null ? 'denominator' as const : !goal.unit ? 'frame' as const : null;
-    if (refusal !== null) return { node: changeNode, withheld: goalTargetBasisRefusalWords(goal.metric, refusal) };
+    if (refusal !== null) return { node: { ...changeNode, ...keptRefusal }, withheld: goalTargetBasisRefusalWords(goal.metric, refusal) };
     const resolvedChange = stored !== 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(stored), goal.unit, undefined) : null;
     if (resolvedChange === null) {
       return { node: changeNode, withheld: `A change of ${raw}${goal.unit ? ` ${goal.unit}` : ''} in "${goal.metric}" does not sit on a scale Olumi can read, so no chance of reaching it is shown.` };
@@ -2937,6 +2943,10 @@ export function admitStatedGoalChange(
       goal_target_basis: basis!,
     } };
   }
+  // ⛔ Re-scope (r2 BLOCKING 2): a change of a LEVEL quantity whose reading is refused while the drafter retained conditions
+  // refuses the whole goal reading, with why (a change quantity's refusal above already writes no threshold and says why).
+  const conditionsRefused = goalReadingRefusedWords(goal.metric, basisVerdict, goal.basis);
+  if (conditionsRefused !== undefined) return { node: { ...node, ...keptRefusal }, withheld: conditionsRefused };
   const sign = raw > 0 ? '+' : '';
   const change = frame === 'change_rel' ? `${sign}${raw}%` : `${sign}${raw}${unit ? ` ${unit}` : ''}`;
   const today = goal.baseline_value;
@@ -3475,7 +3485,8 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
       const original = option?.interventions?.find(iv => canonicalLabel(iv.factor_label) === canonicalLabel(factor.description ?? factor.label));
       const value = original?.value ?? setting.raw_value ?? setting.value;
       const unit = original?.unit ?? setting.unit ?? factor.observed_state?.unit ?? '';
-      const author = setting.source === 'brief_extraction' ? 'Your stated setting' : 'Drafted option setting';
+      // ONE PROVENANCE AUTHORITY: "Your stated setting" only for the person's own setting (`provenanceOf`).
+      const author = settingProvenanceOf(setting, factor).origin === 'human' ? 'Your stated setting' : 'Drafted option setting';
       const detail = `${author}: ${factor.description ?? factor.label} = ${value}${unit ? ` ${unit}` : ''}. Kept for review; the deadline forecast uses this option's added-capacity estimate.`;
       loss.push({ field_path: `nodes[${n.id}].event_forecast_not_modelled`, before: { factor, setting, original },
         after: { description: detail }, severity: 'warn', reason: detail } as RepairEntry);
@@ -3831,15 +3842,23 @@ function admitOnce(
         }
         // Recovery Batch C (rulings 18, 22; amendment 5): a LEVEL target's stated period and reference, held for the words
         // and the horizon verdict. An invalid or absent basis changes nothing here: the level path is exactly as before.
-        const levelBasis = admitGoalTargetBasis({
+        const levelBasisArgs = {
           drafted: model.goal.basis, quantityFrame: model.goal.quantity_frame === 'change' ? 'change' : 'level',
           targetFrame: 'level', targetRaw: raw, horizonMonths: model.goal.horizon_months,
-        });
+        } as const;
+        const levelBasis = admitGoalTargetBasis(levelBasisArgs);
+        // ⛔ Recovery Batch C re-scope (r2 BLOCKING 2): goal conditions are never silently dropped. A reading refused while
+        // the drafter retained conditions beside the target would lose them here (the plain sentence names none), so the
+        // whole goal reading is refused instead: no threshold (no chance), and why is said. The user's level is kept.
+        const conditionsRefused = goalReadingRefusedWords(model.goal.metric, levelBasis, model.goal.basis);
+        if (conditionsRefused !== undefined) withheld(conditionsRefused);
+        // ⛔ RE-SCOPE 2 (R5-5 (a)): the refusal itself persists (the stored reading's `open_question`, `CONDITIONS_NOT_KEPT`).
+        const levelRefusal = conditionsRefusedBasis(levelBasisArgs, levelBasis);
         return {
           ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
           goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
           goal_threshold_raw: raw,
-          ...(resolved !== null
+          ...(resolved !== null && conditionsRefused === undefined
             ? {
                 goal_threshold_cap: resolved.cap,
                 goal_threshold_cap_provenance: resolved.provenance,
@@ -3847,7 +3866,8 @@ function admitOnce(
               }
             : {}),
           ...(observed_state !== undefined ? { observed_state } : {}),
-          ...('basis' in levelBasis && levelBasis.basis !== null ? { goal_target_basis: levelBasis.basis } : {}),
+          ...('basis' in levelBasis && levelBasis.basis !== null ? { goal_target_basis: levelBasis.basis }
+            : levelRefusal !== undefined ? { goal_target_basis: levelRefusal } : {}),
         };
       })(),
     },
@@ -4676,8 +4696,7 @@ function admitOnce(
     const edge = linkResult.edges.find(e => e.from === link.from && e.to === link.to);
     const ends = labelUnits.has(link.from) || labelUnits.has(link.to)
       ? { source: nodeOf.get(link.from)?.label ?? '', target: nodeOf.get(link.to)?.label ?? '' } : undefined;
-    if (edge?.provenance?.magnitude === 'user_stated'
-      && edge.provenance.natural_effect !== undefined
+    if (edge !== undefined && hasUserStatedSize(edge) && edge.provenance?.natural_effect !== undefined
       && (statedEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends)
         || statedSwitchEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends))) edge.provenance.source_quote = sentence;
   }

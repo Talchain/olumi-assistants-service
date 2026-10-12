@@ -41,6 +41,7 @@ import { canReachAnyGoal, type ReachabilityEdge } from '../../../graph/reachabil
 import { isDirectedEdge } from '../../../schemas/graph.js';
 import { effectiveLinkExistenceProbability, endsOfGraph } from '../../goal-target/held-user-links.js';
 import { isRetainedExcluded } from './run-analysis-participation-guard.js';
+import { isUsersLevelOrApproved } from '../../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, unknown>;
 
@@ -107,8 +108,8 @@ export function levelLimitReadsOnNodeCap(graph: unknown, c: Rec, node: Rec, os: 
 
 /** The level's author is known: the user's own figure, or Olumi's in the form the run discloses. */
 function levelHasAnAuthor(node: Rec, os: Rec): boolean {
-  const source = typeof os.source === 'string' ? os.source : undefined;
-  if (source !== undefined && (source === 'brief_extraction' || source.startsWith('user'))) return true;
+  // ONE PROVENANCE AUTHORITY: the user's own figure (or Olumi's they approved), by `provenanceOf`.
+  if (isUsersLevelOrApproved(os)) return true;
   return deriveInferredValues({ nodes: [node] }).length === 1;
 }
 

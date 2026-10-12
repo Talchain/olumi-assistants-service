@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { classifyValueSource, valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
 import { timeClassOf } from '../goal-target/time-class.js';
 import { readCount, readUnitParts, statedTailParts, words } from './same-unit.js';
@@ -86,7 +86,7 @@ export function recogniseCeilingStock(graph: unknown, brief: string | null | und
   const writtenAmounts = findStatedAmounts(brief);
   const rows = nodes.flatMap(n => {
     const os = n.observed_state;
-    if (n.kind !== 'factor' || !rec(os) || classifyValueSource(os.source) !== 'user_stated'
+    if (n.kind !== 'factor' || !rec(os) || valueClassOf(os) !== 'user_stated'
       || typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value) || typeof os.unit !== 'string') return [];
     const parsed = readUnitParts(os.unit);
     if (parsed === null || !['count', 'currency'].includes(parsed.kind)) return [];

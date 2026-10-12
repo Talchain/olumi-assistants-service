@@ -7,7 +7,7 @@ import { readUnitParts } from '../agent-lane/same-unit.js';
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { sayDate } from './deadline-date.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/projector.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { timeClassOf, unsupportedTimeSentence } from './time-class.js';
 
 type Rec = Record<string, unknown>;
@@ -115,7 +115,7 @@ const positiveInflow = (node: Rec): boolean => {
  * user-stated or confirmed amount ("about a quarter" at 90%), σ 0.246 for Olumi's estimate ("about half").
  */
 const inflowSpreadWords = (node: Rec): string => {
-  const source = classifyValueSource(rec(node.observed_state)?.source);
+  const source = valueClassOf(node.observed_state);
   return source === 'user_stated' || source === 'user_ratified' ? 'about a quarter' : 'about half';
 };
 

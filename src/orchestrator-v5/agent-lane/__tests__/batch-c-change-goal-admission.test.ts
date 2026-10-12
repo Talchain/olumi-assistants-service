@@ -134,6 +134,42 @@ describe('hiring — a change QUANTITY with change_abs +10 needs no level today 
   });
 });
 
+// ── Re-scope (DL after independent check r2, BLOCKING 2): a refused reading never drops the conditions it retained ─────────
+describe('a refused reading that retained conditions refuses the WHOLE goal reading, with why (never a target without them)', () => {
+  const level = (basis: Rec): CandidateModel => hiring({ frame: 'level', quantity_frame: 'level', value: 120, unit: 'points',
+    baseline_known: true, baseline_value: 80, baseline_provenance: 'explicit', basis } as never);
+  const levelChange = (basis: Rec): CandidateModel => hiring({ frame: 'change_abs', quantity_frame: 'level', value: 40, unit: 'points',
+    baseline_known: true, baseline_value: 80, baseline_provenance: 'explicit', basis } as never);
+  const reasons = (m: { loss?: readonly unknown[] }): string => goalLoss(m).map((l) => l.reason).join(' ');
+
+  it.each([
+    ['a LEVEL target', level],
+    ['a change of a LEVEL quantity', levelChange],
+  ])('RED on 2ecbae5 (r2 BLOCKING 2): %s whose reading is refused while it retained 2 conditions → no threshold, and why', (_name, build) => {
+    const m = admitCandidateModel(build({ ...BASIS, effect_unit: null }), {}, undefined, () => true);
+    const g = goalOf(m);
+    expect(g.goal_threshold).toBeUndefined();
+    expect(g.goal_target_basis).toBeUndefined();
+    expect(reasons(m)).toContain('Olumi needs the unit each option\'s effect on it is stated in, and will not guess it. '
+      + 'No chance is shown without the 2 conditions you set beside it.');
+  });
+
+  it.each([
+    ['a LEVEL target', level],
+    ['a change of a LEVEL quantity', levelChange],
+  ])('CONTROL: %s whose refused reading retained NO condition is admitted exactly as before (threshold written)', (_name, build) => {
+    const m = admitCandidateModel(build({ ...BASIS, effect_unit: null, also_required: null }), {}, undefined, () => true);
+    expect(typeof goalOf(m).goal_threshold).toBe('number');
+    expect(reasons(m)).not.toContain('conditions you set beside it');
+  });
+
+  it('CONTROL: a valid LEVEL reading keeps its threshold and every condition', () => {
+    const g = goalOf(admitCandidateModel(level({ ...BASIS, denominator: null }), {}, undefined, () => true));
+    expect(typeof g.goal_threshold).toBe('number');
+    expect(goalTargetBasisOf(g)?.also_required).toEqual(['code quality maintained', 'spend within £200,000']);
+  });
+});
+
 describe('a relative change on Olumi\'s starting value is estimate_only (ruling 9, amendments 7 and 10)', () => {
   const mrr = (goal: Partial<CandidateModel['goal']>): CandidateModel => {
     const base = hiring();

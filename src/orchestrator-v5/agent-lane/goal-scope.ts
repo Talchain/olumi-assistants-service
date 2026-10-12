@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { hasUserStatedSize } from '../../cee/provenance/provenance-of.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { GOAL_SCOPE_UNRESOLVED_REASON, GoalScopeSchema, goalScopeMeaning, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose, sameUnit, readMoneyTotal } from './reconciling-product.js';
 import { figureTheUserWrote } from './stated-by-user.js';
@@ -15,7 +16,7 @@ export const scopeOf = (v: unknown): GoalScope | undefined => { const p = GoalSc
 const native = (n: Rec | undefined): { value: number; unit: string; source: string } | undefined => {
   const os = rec(n?.observed_state) ? n.observed_state : undefined;
   if (!os || typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value) || typeof os.unit !== 'string'
-    || classifyValueSource(os.source) !== 'user_stated') return undefined;
+    || valueClassOf(os) !== 'user_stated') return undefined;
   return { value: os.raw_value, unit: os.unit, source: String(os.source) };
 };
 
@@ -175,7 +176,7 @@ export function untypedScopeComponents(graph: unknown, goalId: string): readonly
     const onPath = edges.filter(e => typeof e.from === 'string' && typeof e.to === 'string' && (e.from === id || reached.has(e.from)) && reachesGoal(e.to));
     const userPlaced = onPath.some(e => {
       const p = rec(e.provenance) ? e.provenance : {};
-      if (p.magnitude !== 'user_stated' || typeof p.source_quote !== 'string') return false;
+      if (!hasUserStatedSize(e) || typeof p.source_quote !== 'string') return false;
       const quoteWords = contentWordsOf(p.source_quote);
       return goalWords.size > 0 && [...goalWords].every(w => quoteWords.has(w));
     });

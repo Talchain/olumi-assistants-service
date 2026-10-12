@@ -2215,6 +2215,9 @@ export async function buildModelFromBrief(
     }
     const declaredAccumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
     const accumulated = inTimeClass ? admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges) : declaredAccumulated;
+    // ⭐ Recovery Batch C (adjudication (c), served c85817f2): the goal's OWN target row no longer refuses the fit
+    // (`goalOwnRows`, as F4's retirement passes it): it holds the raw figure, and the widen rescales the goal's threshold,
+    // level and spread with every link it touches, so the user's size fits and nothing moves in natural units.
     const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).

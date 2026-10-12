@@ -59,7 +59,7 @@ import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-displa
  */
 import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOfStateOrStamp } from '../../cee/provenance/provenance-of.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import { deterministicBlockId } from '../compose/block-id.js';
 import { readRatifiedConstraints, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
@@ -98,8 +98,8 @@ export interface EstimatedLimit {
 }
 
 /** Whose figure a level is, from the one value-source authority. The user's own, or unknown → null. */
-function whoseLevel(source: unknown): EstimatedLimit['whose'] | null {
-  const klass = classifyValueSource(source);
+function whoseLevel(observed: unknown): EstimatedLimit['whose'] | null {
+  const klass = valueClassOfStateOrStamp(observed);
   switch (klass) {
     case 'ai_drafted':
     case 'system_repaired':
@@ -118,7 +118,7 @@ function whoseLevel(source: unknown): EstimatedLimit['whose'] | null {
 
 function levelOf(observed: Record<string, unknown> | null): { level: string; whose: EstimatedLimit['whose'] } | null {
   if (observed === null || isUnverifiedUserMaterial(observed)) return null;
-  const whose = whoseLevel(observed.source);
+  const whose = whoseLevel(observed);
   if (whose === null) return null;
   const raw = observed.raw_value;
   const unit = typeof observed.unit === 'string' ? observed.unit.trim() : '';

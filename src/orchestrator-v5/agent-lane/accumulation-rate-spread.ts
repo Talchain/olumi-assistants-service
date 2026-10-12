@@ -1,4 +1,4 @@
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 
 // Science §(ab): a user-stated or user-ratified rate has ±25% spread at 90%.
 const USER_RATE_SIGMA_LOG = 0.136;
@@ -11,7 +11,7 @@ const isRec = (value: unknown): value is Rec => typeof value === 'object' && val
 function rateSigma(node: Rec | undefined): number | undefined {
   const state = node?.observed_state;
   if (!isRec(state) || typeof state.value !== 'number' || !Number.isFinite(state.value)) return undefined;
-  const source = classifyValueSource(state.source);
+  const source = valueClassOf(state);
   return source === 'user_stated' || source === 'user_ratified' ? USER_RATE_SIGMA_LOG : OLUMI_RATE_SIGMA_LOG;
 }
 

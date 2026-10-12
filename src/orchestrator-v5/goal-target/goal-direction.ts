@@ -86,9 +86,9 @@
  */
 
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
-import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { readGoalRecord } from './goal-record.js';
+import { isPersonsOwnValue } from '../../cee/provenance/provenance-of.js';
 
 /** The only sense this module will ever put on the wire. */
 export type EmittedGoalDirection = 'minimise';
@@ -173,7 +173,8 @@ function ceilingTargetIsALevelOnItsNode(graph: unknown, goalNodeId: unknown): bo
   // proven a level here: nothing is sent.
   if (!ceilingTargetUnitMayBeALevel(targetUnit)) return false;
   // The user's own figure: stated in the brief (`brief_extraction`) or given in chat and approved (`USER_EDIT_SOURCE`).
-  return (level.source === 'brief_extraction' || level.source === USER_EDIT_SOURCE)
+  // ONE PROVENANCE AUTHORITY: the person's own figure (`isPersonsOwnValue`), never a confirmation of Olumi's.
+  return isPersonsOwnValue(level)
     && typeof level.raw_value === 'number' && Number.isFinite(level.raw_value)
     && targetUnit !== null && unit(level.unit) === targetUnit;
 }

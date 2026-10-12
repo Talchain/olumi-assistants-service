@@ -13,7 +13,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from '../../../utils/currency-alphabet.js';
 import { limitCardArm, type LimitCardArm } from '../../coaching/limit-unchecked-card.js';
 import { extractCompoundGoals, normaliseConstraintUnits, toGoalConstraints } from '../../../cee/compound-goal/extractor.js';
 import { GoalConstraintSchema } from '../../../schemas/assist.js';
-import { classifyValueSource, DECLARED_VALUE_SOURCE_STAMPS } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { classifyValueSource, DECLARED_VALUE_SOURCE_STAMPS, valueClassOf } from '../../../cee/graph-readiness/obligation-provenance.js';
 import { deriveConstraintVerdict, readRatifiedConstraints } from '../../../orchestrator/context/constraint-feasibility.js';
 import { rebindCapture, rebindRecordedAnalysisHash } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 const hash = '0123456789abcdef';
@@ -720,9 +720,11 @@ const hiringWith = (mutateEdge: (e: Record<string, any>) => void, extra: (g: Rec
 };
 for (const [why, mutate, assumed] of [
  ['a link the user set (user_specified), even still stamped defaulted', (e: any)=>{ e.provenance={source:'user_specified'}; }, false],
- ['a user override', (e: any)=>{ e.provenance={source:'user_override'}; }, false],
- ['an UNKNOWN source (never asserted as Olumi\'s)', (e: any)=>{ e.provenance={source:'composer'}; }, false],
- ['no provenance at all', (e: any)=>{ delete e.provenance; }, false],
+ // ⭐ ONE PROVENANCE AUTHORITY: whoever DREW the link, a defaulted size on the door constants is linkSizing's placeholder —
+ // a size nobody chose, Olumi's starting assumption (Science 393023 LICENCE (b)); the census and the panel already say so.
+ ['a user override (off-contract drawing stamp; the size is the door default)', (e: any)=>{ e.provenance={source:'user_override'}; }, true],
+ ['an UNKNOWN drawing source (the size is the door default)', (e: any)=>{ e.provenance={source:'composer'}; }, true],
+ ['no provenance at all (the size is the door default)', (e: any)=>{ delete e.provenance; }, true],
  ['not defaulted (every number stated)', (e: any)=>{ delete e.defaulted; }, false],
  ['defaulted:false', (e: any)=>{ e.defaulted=false; }, false],
  ['a brief-stated link whose numbers Olumi projected (brief_extraction + defaulted)', (e: any)=>{ e.provenance={source:'brief_extraction'}; }, true],
@@ -931,8 +933,11 @@ test('ESTIMATED LIMIT — RATIFIED: Paul\'s served churn level (user_assumption,
 test('ESTIMATED LIMIT — whose figure comes from classifyValueSource for EVERY declared stamp: Olumi\'s → estimate words; ratified → ratified words; the user\'s own or unknown → no card',()=>{
  const seen={olumi:0,ratified:0,silent:0};
  for (const stamp of [...DECLARED_VALUE_SOURCE_STAMPS,'mystery_stamp',undefined]) {
-  const klass=classifyValueSource(stamp);
-  const est=estCards(estCase('evaluated_feasible',undefined,withChurnLevel(stamp))) as any[];
+  // ONE PROVENANCE AUTHORITY: whose the level is, read off the WHOLE observed_state the card sees (its extraction type
+  // decides for the stamps that defer to it), never the stamp alone.
+  const graph=withChurnLevel(stamp);
+  const klass=valueClassOf(graph.nodes.find((m: any)=>m.id==='monthly_churn').observed_state);
+  const est=estCards(estCase('evaluated_feasible',undefined,graph)) as any[];
   if (klass==='ai_drafted'||klass==='system_repaired') {
    assert.equal(est.length,1,String(stamp)); seen.olumi++;
    assert.equal(est[0].body,"Your limit on “Monthly churn” was checked against Olumi's estimate that it is about 4% today, not a figure you gave. If you know the real figure, it is worth saying.",String(stamp));

@@ -1,4 +1,5 @@
 import { confirmedCeilingStockOf } from '../agent-lane/ceiling-stock-carrier.js';
+import { isUserSetBand } from '../../cee/provenance/provenance-of.js';
 import { linkList } from '../agent-lane/unsized-path-cause.js';
 import { evaluatedIdentityCarriers, exactIdentityOperandLinks, identityCanCarryExactLinks } from './identity-evaluations.js';
 /**
@@ -514,8 +515,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     const mean = isRec(edge?.strength) ? edge.strength.mean : undefined;
     // The band edit's own stamp (`adjust-edge-strength.ts`): `source: 'user_specified'` + `provenance_display: 'user_set'`, and
     // no stated size. A link the user only DREW carries the source but not the display, so it is never "set as" a band.
-    const userBand = linkSizing(edge) === 'user' && isRec(edge?.provenance) && edge?.provenance_display === 'user_set'
-      && edge.provenance.magnitude !== 'user_stated' && edge.provenance.natural_effect === undefined;
+    const userBand = isUserSetBand(edge);
     return userBand && typeof mean === 'number' && Number.isFinite(mean) ? edgeStrengthWords(edge) : null;
   })();
   const askedAfterTheBand = (question: string): string => bandTheUserSet === null ? question

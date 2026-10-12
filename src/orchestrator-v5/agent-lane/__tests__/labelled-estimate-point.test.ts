@@ -103,6 +103,9 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
   });
   it('the Run stores RC4 attribution with its licence and reload reads the same count', () => {
     const g = graph();
+    // ⛔ RE-SCOPE 2 (R5-5 (b), DL ruling) — CHANGED FIXTURE: a goal stating £20,000 / month with NO threshold sent (no
+    // `goal_threshold`, no cap) is never licensed. This Run sends the threshold it scores: £20,000 on a £25,000 frame.
+    Object.assign(g.nodes[0], { goal_threshold: 0.8, goal_threshold_cap: 25000 });
     const run = withGoalChanceLicence({ option_comparison: [
       { option_id: 'raise', probability_of_goal: 0.67 }, { option_id: 'hold', probability_of_goal: 0.43 },
     ] }, g, 'mrr');
