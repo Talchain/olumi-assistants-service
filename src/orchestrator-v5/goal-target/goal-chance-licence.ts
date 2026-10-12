@@ -44,7 +44,7 @@ import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
-import { goalOwnConstraintChanceRecords, type SentRunInputs } from './goal-own-constraint-chance.js';
+import type { SentRunInputs } from './goal-own-constraint-chance.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
@@ -393,11 +393,8 @@ export function goalChanceLicenceOf(
   // ONE predicate with the Run's refusal words (`withholdForOlumiGoalLevel`, below: why, and the next step).
   if (goalLevelIsOlumisEstimate(graph, goalId)) return null;
   const statusQuoId = nodes.find((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string')?.id as string | undefined;
-  // The Run's own option records, current-first: the first carrier that has any is the comparison. DL (b1): where PLoT gave
-  // no `probability_of_goal` at threshold 1, the goal's OWN constraint, bound by identity, is the figure (never over a withhold).
-  const engine = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find((s) => s.length > 0) ?? [],
-    constraints.sentRun);
-  const records = engine.records;
+  // The Run's own option records, current-first: the first carrier that has any is the comparison.
+  const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
   // ⭐ AIE status-quo disposition (12 Oct, #94 6117119450; PL 6117155350) — amendment 1 is PARTIAL by design. Whether
   // carrying on is "no change, by assumption" is decided by the EXISTING checked facts about how this Run reads the goal,
   // never by a summary statistic of the Run's row (`statusQuoReadingOf`): the same-draw reference (paired) → by assumption,
@@ -919,7 +916,7 @@ export function sentGoalThresholdOf(
   const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
   if (goal === undefined || !isRec(envelope)) return undefined;
-  const records = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find(s => s.length > 0) ?? [], sentRun).records;
+  const records = readOptionResultSources(envelope).find(s => s.length > 0) ?? [];
   const candidates: SentGoalThreshold[] = [];
   for (const field of ['goal_threshold_raw', 'goal_threshold'] as const) {
     const value = goal[field];

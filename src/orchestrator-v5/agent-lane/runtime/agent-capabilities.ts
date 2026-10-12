@@ -2,7 +2,7 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { bindTeamTimeQuote, teamTimeCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
@@ -3617,12 +3617,6 @@ export function createAgentCapabilities(
       expected_graph_identity_hash: v.base_identity,
       operation_id: v.operation_id,
     });
-    if (reg.status !== 200) {
-      const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
-      return code === 'GRAPH_STALE'
-        ? notApplied('superseded', 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
-        : notApplied('not_applied', `The revised draft could not be saved (http ${reg.status}), so nothing was replaced.`);
-    }
     /**
      * ⛔ CONFIRMED FROM STATE, THE WHOLE GRAPH (AIE 0452 AMEND 3): the read-back's canonical identity must be the identity the
      * registration acknowledged for the bytes it stored from this exact candidate (`graph_identity_hash`, "the server has the
@@ -5250,21 +5244,19 @@ export function createAgentCapabilities(
       };
     },
 
-    /**
-     * The current-team duration, from the user's words in ANY of their messages, bound by quote (EBD E2,
-     * `bindTeamTimeQuote`); a single time carries Olumi's labelled range from it, on the same card.
-     */
+    /** Parse and propose this turn's current-team duration; a singleton is only the most likely time. */
     async proposeTeamTime(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const bound = bindTeamTimeQuote({ now: ctx.user_turn_text, conversation: ctx.user_text }, args as never);
-      if (bound.kind === 'refused') return { ok: false, mutated: false, refusal: 'team_time_not_stated', detail: bound.detail };
-      const stated = bound.time;
+      const stated = readTeamTime(ctx.user_turn_text);
+      if (stated === null || !teamTimeArgumentsMatch(ctx.user_turn_text, args, stated)) {
+        return { ok: false, mutated: false, refusal: 'team_time_not_stated',
+          detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
+      }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
-        // AIE 6122738619, verbatim.
-        detail: 'No team-time change was prepared because the deadline is not confirmed. Keep the supplied team-time quote; resolve and confirm the deadline, then prepare the team time from the same verified human statement.' };
+        detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
       const read = teamTimeReadDigest(g.raw);
       const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
         reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}) };
@@ -5277,7 +5269,7 @@ export function createAgentCapabilities(
       }
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
-        provenance: { authored_by: 'user_stated', basis: bound.quote },
+        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {

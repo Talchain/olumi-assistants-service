@@ -308,15 +308,9 @@ describe('CONTROLS — what the user did not write a ceiling for is exactly as b
       expect(directionLogs(), id).toEqual([]);
       if (id === 'A-0') {
         expect(goal.goal_direction).toBe('>=');
-        // AIE 6124148847 (the point-only reframe, ACKed): the user's £75,000 level binds the frame only to contain it, so
-        // Olumi widens it (125,000 → 500,000) to keep its own £49-per-subscriber estimate at full size. The level and the
-        // £100,000 target stay exact; only the coordinates move (÷4).
         expect(goal.observed_state).toStrictEqual({
-          value: 0.15, baseline: 0.15, unit: 'GBP/month', source: 'brief_extraction', raw_value: 75000, cap: 500000,
+          value: 0.6, baseline: 0.6, unit: 'GBP/month', source: 'brief_extraction', raw_value: 75000, cap: 125000,
         });
-        expect([goal.goal_threshold_raw, goal.goal_threshold, goal.goal_threshold_cap_provenance]).toStrictEqual([100000, 0.2, 'stated_effect_fit']);
-        const sized = graph.edges.find((e) => e.from === 'pro_paying_subscribers' && e.to === goal.id) as { provenance?: Rec } | undefined;
-        expect(sized?.provenance).toMatchObject({ magnitude: 'olumi_estimate', natural_effect: { amount: 49, per_source_change: 1 } });
       }
     }
   });

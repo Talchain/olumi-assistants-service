@@ -262,26 +262,4 @@ describe('marketing L20 → press → the revised draft (DL question 3: do the n
     if (process.env.SYS1_EVIDENCE) writeFileSync(`${process.env.SYS1_EVIDENCE}/l20-revised-draft-sizes.json`, JSON.stringify(reading, null, 2));
     expect(reading.incoming.length).toBeGreaterThan(0);
   }, ROUTE_MS);
-
-  it('DL rule (AIE PENDING): the goal holds only a level (0 new customers), so Olumi widens its frame 25 → 200 and the goal link is SIZED at Olumi\'s estimate', async () => {
-    const w = world();
-    const turn = await route(w);
-    const l20 = randomUUID();
-    const offer = await turn({ turn_id: l20, message: L20 }, l20Script({ derived_from: {} }, { derived_from: {} }));
-    w.said(l20);
-    const proposal = (offer._agent.tool_calls as Rec[]).find(c => c.name === 'propose_goal_target' && c.ok === true)!;
-    const yes = (offer.suggested_actions as Rec[]).find(c => c.id === approvalChipIdFor(String(proposal.proposal_id)))!;
-    await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: offer._agent.session_id });
-    const g = w.read();
-    const goal = (g.nodes as Rec[]).find(n => n.id === 'new_customers')!;
-    expect(resolveMagnitudeFrame(goal as never)).toBe(200);
-    // The user's figures stay exact: today's 0 and the target of 20 customers.
-    expect(goal.observed_state).toMatchObject({ raw_value: 0, unit: 'customers' });
-    expect((g.goal_constraints as Rec[]).find(r => r.node_id === 'new_customers')).toMatchObject({ value: 20, unit: 'customers' });
-    const link = (g.edges as Rec[]).find(e => e.from === 'conversion_rate' && e.to === 'new_customers')!;
-    // β = 2 customers per point × 100 / 200 = 1: representable, at Olumi's own (provisional) estimate, its natural size unchanged.
-    expect(link.strength.mean).toBeCloseTo(1, 12);
-    expect(link.provenance).toMatchObject({ magnitude: 'olumi_estimate', natural_effect: { amount: 2, amount_unit: 'customers', per_source_change: 1 } });
-    expect(link.provenance.mean_projected).toBeUndefined();
-  }, ROUTE_MS);
 });

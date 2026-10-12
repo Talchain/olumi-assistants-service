@@ -202,10 +202,9 @@ describe('S2b draft -> canonical forecast parts', () => {
 });
 
 describe('S2b team-time door', () => {
-  // EBD E2 (AIE 6122738619): a single time (about 8 months) is the user's forecast, with Olumi's assumed range from it (0.75 × to 1.25 ×).
-  it.each([['It’ll take 6–10 months', 6, 10, 6, 10], ['6 to 10 months', 6, 10, 6, 10], ['about 8 months', 8, 8, 6, 10]])('THIS message: %s', async (text, argLow, argHigh, low, high) => {
+  it.each([['It’ll take 6–10 months', 6, 10], ['6 to 10 months', 6, 10], ['about 8 months', 8, 8]])('THIS message: %s', async (text, low, high) => {
     const w = world();
-    const r = await w.caps.proposeTeamTime!(ctx(text) as never, { low_months: argLow, high_months: argHigh }) as Rec;
+    const r = await w.caps.proposeTeamTime!(ctx(text) as never, { low_months: low, high_months: high }) as Rec;
     expect(r.ok).toBe(true); expect(r.team_time).toMatchObject({ low_months: low, high_months: high });
     expect(part(w.graph()).team.observed_state?.value).toBeUndefined();
   });
@@ -631,16 +630,12 @@ describe('DL accepted root rows and controls', () => {
     } finally { uncappedDisplay.mockRestore(); }
   });
   it('S1-single-most-likely-range-pending with range control', async () => {
-    // EBD E2: the door now widens a single time; a single most likely time is reachable only from a card approved before
-    // that rule, so it is written here through the one writer exactly as that card would land.
-    const w = world(), g0 = w.graph();
-    const legacy = applyTeamShareEdit(g0, { ...approved(g0), low_months: 6, high_months: 6 }, computeAnalysisAffectingGraphHash(g0 as never)!);
-    if (legacy.kind !== 'mutated') throw new Error('legacy single');
-    w.replace(legacy.mutatedGraph);
-    const saved = { ok: true, follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' };
+    const w = world(), r = await w.caps.proposeTeamTime!(ctx('about 6 months') as never, { low_months: 6, high_months: 6 }) as Rec;
+    const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
+    const saved = await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id }) as Rec;
     expect(saved.ok).toBe(true);
     expect(eventShareCarrierOf(w.graph())!.provenance.share_by_date.stated_time).toMatchObject({ most_likely: 6, quantity: 'months_to_finish' });
-    expect(part(w.graph()).team.observed_state).toBeUndefined(); // never held a range: nothing to delete (EBD E2 (b))
+    expect(part(w.graph()).team.observed_state).toBeUndefined();
     const parsed = GraphV3.parse(w.graph());
     expect(eventShareCarrierOf(parsed)!.provenance.share_by_date.stated_time).toMatchObject({ most_likely: 6 });
     const store = createMockSessionStore({ loadGraph: async () => w.graph(), loadGraphAndBriefText: async () => ({ graph: w.graph(), briefText: null }) });
@@ -660,9 +655,8 @@ describe('DL accepted root rows and controls', () => {
     expect(saved.follow_up).toBe(ask);
     expect(decisionInputAsk(w.graph(), askContext)).toBe(ask);
     expect(decisionInputAsk(w.graph(), { ...askContext, recentReplies: [ask] })).toBeNull();
-    // EBD E2: typed again, the single time is offered with Olumi's range from it (not "already held").
-    const again = await w.caps.proposeTeamTime!(ctx('about 6 months') as never, { low_months: 6, high_months: 6 }) as Rec;
-    expect(again).toMatchObject({ ok: true, team_time: { low_months: 4.5, high_months: 7.5, forecast_months: 6, range_origin: 'olumi_estimate' } });
+    const held = await w.caps.proposeTeamTime!(ctx('about 6 months') as never, { low_months: 6, high_months: 6 }) as Rec;
+    expect(held.refusal).toBe('already_held'); expect(held.detail).toContain('soonest and latest');
     const range = await w.caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
     expect((await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: range.proposal_id } as never, { proposal_id: range.proposal_id }) as Rec).ok).toBe(true);
     expect(part(w.graph()).team.observed_state.stated_time).toMatchObject({ low: 6, high: 10 });
@@ -808,8 +802,7 @@ describe('singleton recovery at the atomic door', () => {
     const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
     expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ applied: false, refusal: 'not_confirmed' });
     expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, applied: true, mutated: false });
-    // EBD E2: the single 8 months is held as the user's forecast beside Olumi's assumed range, on the team part.
-    expect(w.rows).toHaveLength(1); expect(part(w.graph()).team.observed_state.stated_time.forecast).toBe(8);
+    expect(w.rows).toHaveLength(1); expect(eventShareCarrierOf(w.graph())!.provenance.share_by_date.stated_time.most_likely).toBe(8);
     expect(await w.commit(w.commits[0]!)).toMatchObject({ status: 'committed', already_applied: true });
     expect(w.rows).toHaveLength(1);
   });
