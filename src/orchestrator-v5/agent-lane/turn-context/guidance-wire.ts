@@ -153,7 +153,8 @@ export interface EligibleIntervention {
   readonly why: string;
   readonly trigger: string;
 }
-export const ELIGIBLE_INTERVENTION_INSTRUCTION = 'Only name the scientific method in CURRENT MODEL STATE.eligible_intervention. If absent, give a direct grounded answer without a named method. Write next moves as plain action bullets of at most eight words each. Keep useful questions and user figures. Olumi supplies the Why? disclosure; do not write it.';
+/** Technique (c): the last two sentences are the AIE's words (#94 6131186479), byte for byte. */
+export const ELIGIBLE_INTERVENTION_INSTRUCTION = 'Only name the scientific method in CURRENT MODEL STATE.eligible_intervention. If absent, give a direct grounded answer without a named method. Write next moves as plain action bullets of at most eight words each. Keep useful questions and user figures. Olumi shows the method\'s Why? with its guidance row; do not repeat it in an ordinary reply. When the user asks about the method itself, explain the reason supplied with that method in your answer.';
 /**
  * ⛔ A ROW'S SCIENCE SENTENCE IS NOT ALWAYS TRUE OF EVERY VARIANT (SYS2 G1, served 11 Oct). RC-WIDEN's sentence ("Decisions
  * framed with a single alternative ('whether or not') fail more often…") describes W2 only, the one-proposed-route case

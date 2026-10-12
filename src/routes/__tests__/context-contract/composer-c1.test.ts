@@ -1,6 +1,6 @@
 /** C1 acceptance: real Fastify route; storage/snapshot ports and scripted HTTP provider only. */
 import { it, expect, vi, describe, beforeAll } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { capture, object, array, valueAt, fixture, type Obj, type Snapshot } from './provider-harness.js';
 import c2Base from './fixtures/composer-c2-base.json';
 import policy from '../../../orchestrator-v5/agent-lane/guidance/reasoning-interventions.json';
@@ -13,6 +13,8 @@ const row = (id: string) => policy.rows.find(r => r.policy_id === id)!;
 // SYS2 G1: this fixture's W6 offer sits beside several real options, so its Why? is W6's own reason. RC-WIDEN's science
 // sentence ("a single alternative") holds for W2Z/W2 only; that negative is `sys2-why-matches-variant.test.ts`.
 const why = (row('RC-WIDEN').why_now as unknown as Readonly<Record<string, string>>).W6!;
+/** The AIE's technique (c) sentences, as posted (#94 6131186479). */
+const TECHNIQUE_C = readFileSync(new URL('../../../orchestrator-v5/agent-lane/__tests__/fixtures/aie-technique-c-6131186479.txt', import.meta.url), 'utf8');
 const message = 'Our churn is 3%. What should we examine next?';
 const reply = 'Our churn is 3%.\n\n- Name another risk.\n- Test it with customer evidence.\n\nWhich risk could change your plan?';
 const response = (text = reply): Obj => ({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }] });
@@ -75,6 +77,26 @@ it('A1 recorded conversation: one W6 carrier, science verbatim, short actions, u
   // W6's own why is the row's visible why; no science sentence is true of W6 (SYS2 G1), so the row carries none.
   expect(object(object(object(w.response.guidance).slot1).copy).why).toBe(why);
   expect(object(object(w.response.guidance).slot1)).not.toHaveProperty('science');
+  // Technique (c), AIE #94 6131186479: the model is told the row shows the Why?, and to explain it only when asked.
+  expect(w.calls[0]!.sentBody, 'the model is sent the AIE\'s sentences').toContain(JSON.stringify(TECHNIQUE_C).slice(1, -1));
+});
+/**
+ * Technique (c) (AIE #94 6131186479): a user who asks about the method itself gets its reason. No classifier and no extra
+ * call: the selected method's reason is in the model's context (eligible_intervention.why) beside the AIE's instruction,
+ * the model's answer ships whole, and the guidance row carries the same reason as its detail. The scripted provider
+ * stands for the model here: whether a live model follows the instruction is not measured by this row (UNVERIFIED).
+ */
+it('C-ASK an explicit question about the method: its reason is in the model\'s context with the instruction; the answer ships whole; the row carries it', async () => {
+  const science = row('RC-STRENGTHEN-ITEM').science_basis.summary;
+  const answer = `It comes from assumption-based planning. ${science}`;
+  const w = await run('S1', { payload: { message: 'Why does this method matter for my decision?' }, providerReply: () => response(answer) });
+  expect(w.calls).toHaveLength(1);
+  expect(w.calls[0]!.sentBody, 'the model is sent the AIE\'s sentences').toContain(JSON.stringify(TECHNIQUE_C).slice(1, -1));
+  expect(object(carriers(w)[0]).why, 'the reason, in the model\'s context').toBe(science);
+  expect(String(w.response.assistant_text).startsWith(answer), String(w.response.assistant_text)).toBe(true);
+  expect(String(w.response.assistant_text).split(science)).toHaveLength(2);
+  expect(String(w.response.assistant_text)).not.toContain('Why?');
+  expect(object(object(w.response.guidance).slot1).science, 'the visible row\'s detail').toBe(science);
 });
 it('A2 no trigger: no carrier, no Why?, direct grounded answer', async () => {
   const w = await run('none', { providerReply: () => response('Our churn is 3%.') });
