@@ -140,8 +140,11 @@ function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFact
     return { text: `${CANT_YET[action]}: ${BECAUSE[reasonKey]}`, reason: reasonKey, exits: exits.length > 0 ? exits : runExits(f) };
   }
   // Not offered at all on this state: its typed contract has nothing in scope here.
+  // SYS2 S1: every link is sized, yet the result may still wait on the user's current level; end with that ask, in the
+  // exact persisted words the `set_current_level` press says (same gate as its offer in rank.ts), never a dead end.
+  const levelAsk = f.currentLevelQuestion !== null && !f.approvalWaiting ? f.currentLevelQuestion : null;
   return action === 'strengthen'
-    ? { text: 'There is nothing to strengthen in this step: every link on your goal’s path already has a size.', reason: 'nothing_in_scope',
+    ? { text: ['There is nothing to strengthen in this step: every link on your goal’s path already has a size.', ...(levelAsk !== null ? [levelAsk] : [])].join('\n\n'), reason: 'nothing_in_scope',
       exits: otherOffers(bar, action, 2).length > 0 ? otherOffers(bar, action, 2) : runExits(f) }
     : { text: `${CANT_YET[action]}: it has nothing to act on in this model.`, reason: 'nothing_in_scope',
       exits: otherOffers(bar, action, 2).length > 0 ? otherOffers(bar, action, 2) : runExits(f) };
