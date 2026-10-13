@@ -115,6 +115,20 @@ describe('result-first on retry, lost response and failed explanation (live rout
     expect(replay.suggested_actions.filter(c => isRunExplanationChip(c.id))).toEqual([]);
     expect(runs).toBe(1); expect(modelCalls).toBe(1);
   });
+  it.each(['same', 'missing-key'] as const)('B2l: proposal IDs stay hidden on committed Run replay after restart: %s', async kind => {
+    const id = randomUUID();
+    const first = (await runTurn(id)).json() as Body;
+    const answer = rows.find(r => r.turn_id === id)!;
+    answer.assistantMessage = 'Discuss prop_abcdef123456 before acting.';
+    if (kind === 'same') answer.suggested_actions_run_key = first.narration!.run_key;
+    await app.close(); app = await freshApp();
+    const saved = structuredClone(rows);
+    const replay = (await runTurn(id)).json() as Body;
+    expect(replay.assistant_text).toBe('Discuss this proposal before acting.');
+    expect(replay.narration).toEqual(kind === 'same' ? first.narration : { status: 'stale', run_key: '' });
+    expect(rows).toEqual(saved);
+    expect(runs).toBe(1); expect(modelCalls).toBe(1);
+  });
   it.each(['same', 'newer', 'stale', 'missing-key'] as const)('saved Run identity after cold restart: %s', async kind => {
     const id = randomUUID();
     const first = (await runTurn(id)).json() as Body;

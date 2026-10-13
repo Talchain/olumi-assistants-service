@@ -2067,6 +2067,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         : undefined;
       const forwardedBody = withEstimateGoalPointsAtEgress(forwarded.json, {
         analysisResult: forwardedState?.analysisResult, graph: forwardedState?.graph,
+        preserveLicensedWords: true,
         current: (forwardedState?.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
         userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedByUser(body) ? [message] : [])]),
@@ -2379,8 +2380,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
       if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
       for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
+      // Sanitize the shared replay words before both composition and the committed-text branch.
+      replayText = withoutProposalIds(replayText);
       const composedReplay = composeDirectAnswerResponse({
-        assistant_text: committedRunReplay ? replayText : withoutProposalIds(replayText),
+        assistant_text: withoutProposalIds(replayText),
         stage: 'frame',
         answerKind: 'substantive',
         // The bound Explain control is re-derived from the canonical readback above, so it is valid by construction.
@@ -3833,7 +3836,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       premortemPassed = settled.passed;
       text = settled.reply;
       premortemNarration = text;
-      premortemReply = settled.artefact_reply ?? text; // Worksheet facts are separate from reply narration.
+      premortemReply = text;
       // Nothing the call produced survives: its record is rebuilt ONCE at its explicit boundary from the final wire text
       // (below), and an earlier turn is never touched (CODEX_CLI_OVERFLOW P1 #3).
       result = { ...result, assistant_text: text, items: [], tool_calls: [], tool_results: [] };

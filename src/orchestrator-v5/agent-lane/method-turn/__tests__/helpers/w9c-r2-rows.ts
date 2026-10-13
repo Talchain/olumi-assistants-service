@@ -112,7 +112,7 @@ for (const [phrase, failed] of Object.entries({
     assert.deepEqual(result.failed, failed, phrase);
     assert.ok(!result.reply.includes(phrase), phrase);
     assert.equal(result.passed, true, phrase);
-    assert.equal(checkMethodTurn('RC-PREMORTEM', result.artefact_reply ?? result.reply, out.check_inputs, true).pass, true, phrase);
+    assert.equal(checkMethodTurn('RC-PREMORTEM', result.reply, out.check_inputs, true).pass, true, phrase);
   };
 }
 r2Rows['P2-6: the whole-ban label Leader cannot mask a leader assertion'] = () => {
@@ -209,14 +209,14 @@ r2Rows['P2: near-tie C WHOLE turn, check_inputs, directive and exact fallback/se
   // Science 393023 LICENCE (a)/(b), 7 Oct: two → four unsized grounding links; fallback and settlement stay pinned.
   assert.equal(JSON.stringify({ ...out, directive: undefined }), JSON.stringify({ ...reclassifiedCTurn(pinned.C.turn), directive: undefined }));
   assert.equal(fallbackReply(out.context), pinned.C.fallback);
-  assert.equal(JSON.stringify({ ...settleMethodTurn(out, ''), reply: undefined }), JSON.stringify({ ...pinned.C.settled, reply: undefined }));
+  assert.equal(JSON.stringify(settleMethodTurn(out, '')), JSON.stringify(pinned.C.settled));
 };
 r2Rows['P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical'] = () => {
   const rb = recordedReadback('draw1');
   const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, rb));
   assert.equal(JSON.stringify({ ...out, directive: undefined }), JSON.stringify({ ...base.draw1.turn, directive: undefined }));
   assert.equal(fallbackReply(out.context), base.draw1.fallback);
-  assert.equal(JSON.stringify({ ...settleMethodTurn(out, ''), reply: undefined }), JSON.stringify({ ...base.draw1.settled, reply: undefined }));
+  assert.equal(JSON.stringify(settleMethodTurn(out, '')), JSON.stringify(base.draw1.settled));
   const draft = `Two ways this went badly.\n1. Price rise MRR uplift and monthly recurring revenue diverged. Watch for: early feedback. Mitigate: check it.\n2. Customer losses from price rise materialised. Watch for: cancellations. Mitigate: prepare a response.\nOutside the model: what else could blindside this?`;
   assert.equal(JSON.stringify(settleMethodTurn(out, draft)), JSON.stringify(settleMethodTurn(base.draw1.turn, draft)));
   // The original licensed W9 checker allowed non-probability quantities and plain leader vocabulary.

@@ -39,7 +39,7 @@ let buildBrief = FX.brief;
 let buildWidened: WidenCounts | undefined;
 let withoutRun = false;
 let _lastComposeInput: unknown;
-let _withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['_withholdDisclosureFor'];
+let _withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['withholdDisclosureFor'];
 let lastBuildPayload: Rec;
 let saved: Graph = { nodes: [], edges: [] };
 let askedToBuild = false;

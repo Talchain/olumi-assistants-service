@@ -80,9 +80,9 @@ for (const name of ['w9b-2', 'w9b-3']) {
       const settled = settleMethodTurn(out, draft);
       assert.equal(settled.passed, false);
       const rechecked = settleMethodTurn(out, settled.reply);
-      assert.equal(rechecked.passed, false, JSON.stringify(rechecked.failed));
-
-
+      assert.equal(rechecked.passed, true, JSON.stringify(rechecked.failed));
+      assert.equal(settled.reply.split('Watch for:').length - 1, 2);
+      assert.equal(settled.reply.split('Mitigate:').length - 1, 2);
       assert.ok(!settled.reply.includes('Start with'));
       assert.equal(cardCallFor(settled.target, c.graph), null);
     }

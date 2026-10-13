@@ -19,6 +19,8 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   analysisResult: unknown; graph: unknown; current: boolean;
   /** Exact user-authored text from the turn/history, never a narration guess about whose words these are. */
   userAuthoredTexts?: readonly string[];
+  /** Forwarded replies already own their wording; only a failing numerical licence may replace it. */
+  preserveLicensedWords?: boolean;
 }): T {
   const licence = rec(agentLicenceRecordOf(context.analysisResult)) ?? {};
   if (!context.current || typeof body.assistant_text !== 'string') return body;
@@ -203,7 +205,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         if (namedOptions.length === 0 && bareChance) {
           if (lines.length === 1) {
             const [l] = lines;
-            if (exactFigure(figures, l!.figure) && !hasOlumiEstimates(l!)) continue;
+            if (exactFigure(figures, l!.figure) && (context.preserveLicensedWords || !hasOlumiEstimates(l!))) continue;
             const replacement = said.has(l!.option_id) ? '' : l!.chance;
             said.add(l!.option_id);
             edits.push({ start, end, replacement });
@@ -256,7 +258,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
           edits.push({ start, end, replacement: '' }); // A matching number alone never licenses a goal claim or option attribution.
           continue;
         }
-        if (exactFigure(figures, matched[0]!.figure) && !hasOlumiEstimates(matched[0]!)) continue;
+        if (exactFigure(figures, matched[0]!.figure) && (context.preserveLicensedWords || !hasOlumiEstimates(matched[0]!))) continue;
         const replacement = matched.filter(l => !said.has(l.option_id)).map(l => { said.add(l.option_id); return l.chance; }).join(' ');
         edits.push({ start, end, replacement });
       }

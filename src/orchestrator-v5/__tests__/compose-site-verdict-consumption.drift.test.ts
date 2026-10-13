@@ -224,10 +224,10 @@ const UNSCANNED_COMPOSE_FILES: Readonly<
   //
   // ⚠ NO LONGER EMPTY AS OF 2026-09-22, AND THE COST IS WRITTEN DOWN.
   'routes/agent-v1-turn.ts': {
-    // 3 since the whole-turn replay (olumi-programme-docs#63 5788656586): the
-    // third site composes the ORIGINAL stored Agent text for an exact retry by
-    // turn_id — same stance as the other two, no validator verdict on this path.
-    siteCount: 3,
+    // Four sites: preview refusal, malformed-approval refusal (deniedApproval),
+    // exact-turn replay of the stored Agent text, and the final live reply.
+    // No v5 validator verdict exists on these agent-lane paths.
+    siteCount: 4,
     keyable: true,
     why:
       'The agent lane composes an answer the OpenAI Agent produced, not one the ' +
@@ -239,11 +239,9 @@ const UNSCANNED_COMPOSE_FILES: Readonly<
       'stance on a question the code never asks, which is worse than declaring ' +
       'the gap. ' +
       'THE COST, stated plainly: `ungated: []` below no longer speaks for every ' +
-      'compose site in src/ — it speaks for every site MINUS these two. The two ' +
-      'sites are the substantive turn reply and the refusal for a non-message ' +
-      'turn kind. Both are gated by their own lane tests (the disclosure is ' +
-      'deterministic and Olumi-authored; the read-only refusal is asserted in ' +
-      'three independent layers). ' +
+      'compose site in src/ — it speaks for every site MINUS these four: the ' +
+      'preview refusal, malformed-approval refusal (deniedApproval), exact-turn ' +
+      'replay, and final live reply. These are gated by their own lane tests. ' +
       'This entry should be DELETED, not grown, when the agent lane either ' +
       'adopts the validator path or is removed.',
   },

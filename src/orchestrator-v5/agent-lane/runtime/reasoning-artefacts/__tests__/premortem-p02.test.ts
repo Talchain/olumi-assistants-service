@@ -123,7 +123,7 @@ describe('P02 ROW 4: the directive carries the goal\'s approved horizon, never "
     const settled = settleMethodTurn(turn, ELIG3.assistant_text.replace('It is a year later and this decision', 'This decision'));
     expect(settled.passed).toBe(true);
     const composed = settleMethodTurn(turn, ELIG3.assistant_text.replace('Outside the model: Could', 'Outside the model: The best? Could'));
-
+    expect(composed.reply.split('\n')[0]).toBe('Imagine it is 31 March 2027 and this decision has gone badly. Failure stories to test:');
     expect(composed.passed).toBe(true);
   });
 });
@@ -140,11 +140,11 @@ describe('P02 ROW 5: a refused story is replaced by the server-built story, neve
     expect(settled.reply).not.toBe(fallbackReply(turn.context));
     expect(settled.passed).toBe(true);
     expect(settled.server_stories).toEqual([1]);
-
+    expect(settled.reply).toContain(`2. ${story(2).failure} Watch for: ${story(2).watch} Mitigate: ${story(2).mitigate}`);
     expect(settled.reply).not.toMatch(/came out ahead/u);
     const c = candidates();
     c[0] = { ...c[0], failure_way: winner(c[0].failure_way) };
-    const out = diagnose(settled.artefact_reply ?? settled.reply, c, r);
+    const out = diagnose(settled.reply, c, r);
     expect(out.worksheet).toBeDefined();
     expect(out.worksheet!.rows.map(row => row.source)).toEqual(['server_built', 'olumi_drafted']);
     expect(out.worksheet!.rows[0].risk_request).toBeUndefined();
@@ -153,8 +153,8 @@ describe('P02 ROW 5: a refused story is replaced by the server-built story, neve
   it('CONTROL: a passing draft is sent as written; an all-refused draft still gets RC\'s fallback', () => {
     const turn = turnOf(read());
     expect(settleMethodTurn(turn, ELIG3.assistant_text)).toMatchObject({ reply: ELIG3.assistant_text, passed: true, failed: [] });
-    const _allBad = ELIG3.assistant_text.replaceAll('eroded the revenue gain.', 'came out ahead.').replace('short of the goal.', 'short of the goal and lost: the price rise wins.');
-
+    const allBad = ELIG3.assistant_text.replaceAll('eroded the revenue gain.', 'came out ahead.').replace('short of the goal.', 'short of the goal and lost: the price rise wins.');
+    expect(settleMethodTurn(turn, allBad).reply).toBe(fallbackReply(turn.context));
   });
   it('a dropped candidate keeps option_id only when it IS a model option (#2740 Codex P2-1)', () => {
     const out = diagnose(ELIG3.assistant_text, [{ ...candidates()[0], option_id: 'my private words', grounding: { kind: 'bogus' } }, candidates()[1]]);

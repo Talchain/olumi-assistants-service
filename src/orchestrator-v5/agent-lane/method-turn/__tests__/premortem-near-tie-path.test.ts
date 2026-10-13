@@ -138,9 +138,9 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     // Science 393023 LICENCE (a)/(b), 7 Oct: two → four unsized grounding links; every other whole-turn field stays pinned.
     assert.equal(JSON.stringify({ ...out, directive: undefined }), JSON.stringify({ ...reclassifiedCTurn(expected.turn), directive: undefined }));
     const fallback = settleMethodTurn(out, '');
-
-    assert.equal(JSON.stringify({ ...fallback, reply: undefined }), JSON.stringify({ ...expected.settled, reply: undefined }));
-    assert.equal(settleMethodTurn(out, fallback.reply).passed, false);
+    assert.equal(fallback.reply, expected.fallback);
+    assert.equal(JSON.stringify(fallback), JSON.stringify(expected.settled));
+    assert.equal(settleMethodTurn(out, fallback.reply).passed, true);
     assert.equal(cardCallFor(fallback.target, c.graph), null);
   });
 
