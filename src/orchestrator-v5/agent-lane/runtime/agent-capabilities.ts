@@ -1,7 +1,7 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
-import { linkBandTheUserStated } from '../../goal-target/input-claim-context.js';
+import { latestLinkBands } from '../../goal-target/input-claim-context.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
@@ -4770,8 +4770,9 @@ export function createAgentCapabilities(
      * updates", then named the bands himself for eight links; four permissions recorded ONE link, because
      * `propose_link_strength` holds one link and refuses a band the user did not type.
      *
-     * Each link here is the user's estimate when verified conversation words bind its band to BOTH resolved ends,
-     * and otherwise OLUMI'S ESTIMATE: the approval adopts it and the writer stamps it as Olumi's size
+     * Each link here is the user's estimate when their latest statement about it names that band: words binding both
+     * resolved ends, or this message's words naming an end of the link the request selects (`latestLinkBands`).
+     * Otherwise it is OLUMI'S ESTIMATE: the approval adopts it and the writer stamps it as Olumi's size
      * (`olumi_estimate`), never as the user's. A strength that is already the user's own is never replaced by an
      * estimate. Directions are kept (a reversal is one link, in the user's words). One proposal, one chip, one commit.
      */
@@ -4875,19 +4876,14 @@ export function createAgentCapabilities(
           heldFigures.push(userFigureHeldRefusalText(heldFigure, linkBandWord(band)));
           continue;
         }
-        // Retained words must name both ends. Shorthand can use only this request's bound link
-        // and the CURRENT user's band; history must never supply an omitted end.
-        const drawn = ctx.drawn_link;
-        const drawnPress = parseDrawnLinkPress(drawn?.press_id);
-        const drawnHere = drawn !== undefined && drawnPress !== null
-          && drawnPress.from === drawn.from && drawnPress.to === drawn.to
-          && drawn.from === from.id && drawn.to === to.id;
-        // Selecting two nodes does not identify a directed link. Use the host-resolved link carrier.
-        const selectedHere = ctx.grounded_selection?.unresolved === 'none'
-          && (ctx.grounded_links ?? []).some(link => link.from === from.id && link.to === to.id);
-        const currentBoundBand = bandTheUserWrote(band, ctx.user_turn_text) && (selectedHere || drawnHere);
-        // Verified human evidence outranks model-authored from_words / user_stated declarations.
-        if (linkBandTheUserStated(band, ctx.user_text, g.nodes, from.id, to.id) || currentBoundBand) {
+        // The user's LATEST statement for this exact link decides. THIS message first: words naming both ends, or
+        // shorthand naming an end of the link this request's selection binds (the host-resolved carrier; two
+        // selected nodes identify no directed link). Earlier verified words count only when they name both ends,
+        // and never outrank the model's explicit `user_stated: false` (its own estimate). History never supplies an end.
+        const bound = ctx.grounded_selection?.unresolved === 'none' ? ctx.grounded_links ?? [] : [];
+        const stated = latestLinkBands(ctx.user_turn_text, g.nodes, from.id, to.id, bound)
+          ?? (l.user_stated === false ? null : latestLinkBands(ctx.user_text, g.nodes, from.id, to.id));
+        if (stated?.includes(band) === true) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)
           // and never credits. Only a band that MOVES the link is theirs, and a placeholder has no band to sit in (D1).

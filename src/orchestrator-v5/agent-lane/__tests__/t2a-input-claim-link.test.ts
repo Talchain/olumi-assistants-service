@@ -61,11 +61,19 @@ async function journey(from: string, overrides: Record<string, unknown> = {}, ve
 }
 
 describe('T2-A retained input_claim on the exact link through proposal, approval, canonical writer and JSON readback', () => {
-  it.each([{}, { user_stated: false, basis: 'Model estimate' }])('(a) earlier verified words win over model flags: %j', async overrides => {
-    const result = await journey('Price', overrides);
+  it('(a) earlier verified words naming both ends credit the exact link', async () => {
+    const result = await journey('Price');
     expect((result.op.value as { author: string }).author).toBe('user_stated');
     expect(result.edge.provenance.source).toBe('user_specified');
     expect(result.edge.strength.mean).toBe(0.1);
+  });
+  // T2A3 (DL, #2993 check blocking 2): history credit never overrides the model's explicit "not the user's" flag.
+  it('(a) earlier words never outrank the model\u2019s explicit user_stated:false', async () => {
+    const result = await journey('Price', { user_stated: false, basis: 'Model estimate' });
+    expect((result.op.value as { author: string }).author).toBe('model_proposed');
+    expect(result.edge.provenance.source).toBe('cee_hypothesis');
+    expect(result.edge.provenance.magnitude).toBe('olumi_estimate');
+    expect(result.proposal.public_label).toBe('Record this link strength: "Price" \u2192 "MRR" as slight, Olumi\u2019s estimate');
   });
   it.each([{}, { user_stated: false, basis: 'Model estimate' }, { from_words: history }])('(b) a different existing link stays Olumi’s: %j', async overrides => {
     const result = await journey('Quality', overrides);
@@ -83,6 +91,12 @@ describe('T2-A retained input_claim on the exact link through proposal, approval
     'Price is weakly affected by MRR', 'Price gets a weak contribution from MRR',
     'Price has a weak effect on Quality; Quality affects MRR.', 'Does Price have a weak effect on MRR?',
     'Price does not have a weak effect on MRR', 'Price has a strong effect on MRR; Quality has a weak effect on MRR',
+    // T2A3: the user reporting or disputing Olumi's claim is not stating it.
+    'Olumi says Price has a weak effect on MRR. Is that right?', 'You suggested Price has a weak effect on MRR; I disagree.',
+    'According to Olumi, Price has a weak effect on MRR.', 'You suggested: Price has a weak effect on MRR.',
+    'Price has a weak effect on MRR. Is that right?',
+    // Superseded: the latest statement for the pair wins.
+    'Price has a weak effect on MRR. Actually, Price has a strong effect on MRR.',
   ])('no credit from another pair, clause or band: %s', text => {
     expect(linkBandTheUserStated('weak', text, nodes, 'price', 'mrr')).toBe(false);
   });
@@ -130,14 +144,69 @@ describe('T2A2 current interaction supplies the exact link, never an end from hi
     expect((result.op.value as { author: string }).author).toBe('model_proposed');
     expect(result.edge.provenance.source).toBe('cee_hypothesis');
   });
+});
+
+const author = (result: Awaited<ReturnType<typeof journey>>) => (result.op.value as { author: string }).author;
+const bothReview = {
+  grounded_selection: { element_ids: [], unresolved: 'none' as const },
+  grounded_links: [{ from: 'price', to: 'mrr' }, { from: 'quality', to: 'mrr' }],
+};
+describe('T2A3 (#2993 check): a bound link still needs the user’s words to name an end of it', () => {
+  it.each([{}, { from_words: 'Quality is strong.' }])('blocking 1: Price → MRR selected, "Quality is strong." stays Olumi’s: %j', async overrides => {
+    const result = await journey('Price', { strength: 'strong', ...overrides }, 'Quality is strong.',
+      { ...priceReview, user_turn_text: 'Quality is strong.' }, 0.3);
+    expect(author(result)).toBe('model_proposed');
+    expect(result.edge.provenance.source).toBe('cee_hypothesis');
+    expect(result.proposal.public_label).toBe('Record this link strength: "Price" → "MRR" as strong, Olumi’s estimate');
+  });
+  it('blocking 1, two links selected: "Quality is strong." credits Quality → MRR only', async () => {
+    for (const [from, want] of [['Price', 'model_proposed'], ['Quality', 'user_stated']] as const) {
+      const result = await journey(from, { strength: 'strong' }, 'Quality is strong.',
+        { ...bothReview, user_turn_text: 'Quality is strong.' }, 0.3);
+      expect(author(result), from).toBe(want);
+      expect(result.edge.provenance.source, from).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
+    }
+  });
   it.each([
-    { press_id: 'agent-drawn-link:price>mrr', from: 'price', to: 'mrr', author: 'user_stated' },
-    { press_id: 'agent-drawn-link:quality>mrr', from: 'quality', to: 'mrr', author: 'model_proposed' },
-    { press_id: 'agent-drawn-link:quality>mrr', from: 'price', to: 'mrr', author: 'model_proposed' },
-  ])('only a validated current drawn pair grounds the band: %j', async ({ author, ...drawn_link }) => {
-    const result = await journey('Price', { strength: 'strong' }, 'Price is strong.',
-      { user_turn_text: 'Price is strong.', drawn_link }, 0.3);
-    expect((result.op.value as { author: string }).author).toBe(author);
-    expect(result.edge.provenance.source).toBe(author === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
+    ['an end both selected links share', 'MRR is strong.', bothReview],
+    ['another entity in the same clause', 'Price is fine but Quality is strong.', priceReview],
+  ] as const)('no credit for %s', async (_case, words, review) => {
+    const result = await journey('Price', { strength: 'strong' }, words, { ...review, user_turn_text: words }, 0.3);
+    expect(author(result)).toBe('model_proposed');
+    expect(result.edge.provenance.source).toBe('cee_hypothesis');
+  });
+});
+
+describe('T2A3 (#2993 check): reporting or disputing Olumi’s claim is not the user’s statement', () => {
+  const later = 'OK, record your estimates for the links.';
+  it.each([
+    'Olumi says Price has a weak effect on MRR. Is that right?',
+    'You suggested Price has a weak effect on MRR; I disagree.',
+    'According to Olumi, Price has a weak effect on MRR.',
+  ])('blocking 2: "%s" then a later estimate stays Olumi’s, flagged or not', async earlier => {
+    for (const overrides of [{}, { user_stated: false, basis: 'Model estimate' }]) {
+      const result = await journey('Price', overrides, `${earlier}\n${later}`, { user_turn_text: later });
+      expect(author(result), JSON.stringify(overrides)).toBe('model_proposed');
+      expect(result.edge.provenance.source).toBe('cee_hypothesis');
+      expect(result.edge.provenance.magnitude).toBe('olumi_estimate');
+    }
+  });
+  it('control: the same words as the user’s own statement are credited', async () => {
+    const result = await journey('Price', {}, `Price has a weak effect on MRR.\n${later}`, { user_turn_text: later });
+    expect(author(result)).toBe('user_stated');
+    expect(result.edge.provenance.source).toBe('user_specified');
+  });
+});
+
+describe('T2A3: a later statement supersedes an earlier one for the same link', () => {
+  it.each([['weak', 'model_proposed'], ['strong', 'user_stated']] as const)('"weak", then "Actually … strong": %s is %s', async (strength, want) => {
+    const words = 'Price has a weak effect on MRR.\nActually, Price has a strong effect on MRR.';
+    const result = await journey('Price', { strength }, words, { user_turn_text: 'Please prepare the link.' }, strength === 'weak' ? 0.55 : 0.3);
+    expect(author(result)).toBe(want);
+  });
+  it('this message’s shorthand for the selected link supersedes an earlier band', async () => {
+    const result = await journey('Price', { strength: 'weak' }, `${history}\nPrice is strong.`,
+      { ...priceReview, user_turn_text: 'Price is strong.' });
+    expect(author(result)).toBe('model_proposed');
   });
 });

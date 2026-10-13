@@ -511,10 +511,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const before = projectedPriceRevenue();
     const hashBefore = currentHash();
     const words = 'Price is strong.';
+    // The user has the drawn link selected (DGAI `selected_elements` → the host-resolved `grounded_links`).
     const drawn = edge('capacityQuality');
-    const { caps, ctx, store } = agent(words, undefined, { drawn_link: {
-      press_id: `agent-drawn-link:${drawn.from}>${drawn.to}`, from: drawn.from, to: drawn.to,
-    } });
+    const { caps, ctx, store } = agent(words, undefined, { grounded_selection: { element_ids: [], unresolved: 'none' },
+      grounded_links: [{ from: drawn.from, to: drawn.to }] });
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue',
       strength: 'strong', from_words: words }], rationale: words });
     expect(p.ok, JSON.stringify(p)).toBe(true);
