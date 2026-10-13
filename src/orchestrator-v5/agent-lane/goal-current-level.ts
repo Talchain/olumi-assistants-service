@@ -813,12 +813,12 @@ export async function proposeGoalCurrentLevel(
   if (!structural.ok) return refuse(structural.refusal, structural.detail);
   const original = args.source_quote ?? (inWords.ok ? inWords.quote ?? '' : '');
   const origin = statementOrigin(inWords.ok && (args.source_quote === undefined || (ctx.user_text ?? '').includes(args.source_quote)),
-    figureTheUserWrote(structural.raw, goalUnit ?? args.unit, ctx.unverified_user_text), ctx.user_text_complete, args.user_stated === false);
+    figureTheUserWrote(structural.raw, goalUnit ?? args.unit, ctx.unverified_user_text), ctx.user_text_complete, args.user_stated === false && typeof args.basis === 'string' && args.basis.trim() !== '');
   const claim: InputClaim = { origin, basis: args.basis ?? '', source_quote: original };
   // The claim extension is optional for legacy verified-human calls. Preserve their
   // exact record/card shape; explicit claim metadata and every AI estimate retain it.
   const carriesClaim = origin !== 'human' || args.basis !== undefined || args.source_quote !== undefined;
-  if (origin === 'unknown') return refuse('origin_unknown', 'The current-level source is unknown. Its words are retained; supply the original source or propose a new Olumi estimate.',
+  if (origin === 'unknown') return refuse(args.basis === undefined && args.source_quote === undefined ? 'figure_not_in_users_words' : 'origin_unknown', !inWords.ok ? inWords.detail : `The current-level source for "${goal.label}" is unknown. Nothing was prepared; ask the user for the original figure and source, or propose a new Olumi estimate.`,
     { input_claim: claim, proposed_value: value, unit: args.unit, goal: goal.label });
   const stated = { ...structural, statedUnit: String(args.unit ?? ''), quote: inWords.ok ? inWords.quote : null };
   const raw = structural.raw;

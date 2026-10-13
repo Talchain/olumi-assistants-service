@@ -273,7 +273,7 @@ export function levelRangePointBasis(os: Readonly<Record<string, unknown>>): 'st
   // Unverified user material can carry an inference stamp; origin belongs to the provenance authority.
   if (provenanceOf({ value: os }).origin === 'human' && isStatedLevelRange(os.range, os)) return 'stated_figure';
   const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
-  const olumis = provenanceOf({ value: os }).origin === 'ai';
+  const olumis = provenanceOf({ value: os }).origin === 'ai' && os.source === 'cee_inference';
   return olumis && figure === rangePointEstimate({ min: parsed.data.low, max: parsed.data.high }) ? 'midpoint' : undefined;
 }
 

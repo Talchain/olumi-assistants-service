@@ -243,13 +243,13 @@ describe('saved effects timing: only the host can attest complete source (PL 613
     ['flag true, readable source', { ...ctx, user_text_complete: true }, 'complete'],
   ] as const)('%s → %s', async (_name, c, expected) => {
     const caps = createAgentCapabilities(product(hiring()).d, new ProposalStore());
-    const r = await caps.proposeEffectsTiming(c as never, claim as never) as Record<string, any>;
+    const r = await caps.proposeEffectsTiming!(c as never, claim as never) as Record<string, any>;
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.effects_timing_record.source_status).toBe(expected);
   });
   it('a non-complete status the AI reports passes through unchanged', async () => {
     const caps = createAgentCapabilities(product(hiring()).d, new ProposalStore());
-    const r = await caps.proposeEffectsTiming({ ...ctx } as never, { ...claim, source_status: 'conflicting' } as never) as Record<string, any>;
+    const r = await caps.proposeEffectsTiming!({ ...ctx } as never, { ...claim, source_status: 'conflicting' } as never) as Record<string, any>;
     expect(r.effects_timing_record.source_status).toBe('conflicting');
   });
 });

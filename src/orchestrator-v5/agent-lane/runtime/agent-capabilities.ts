@@ -4240,11 +4240,14 @@ export function createAgentCapabilities(
       const band = args.strength;
       // ⛔ Recorded as the user's only when the user named the band, or approves Olumi's reading of their own words
       // (`bandGrounding`); the writer stamps it as theirs.
-      const grounding = bandGrounding(band, args.from_words, ctx.user_turn_text);
-      const origin = statementOrigin(grounding !== null, bandTheUserWrote(band, ctx.unverified_user_text ?? ''), ctx.user_text_complete, args.user_stated === false);
+      const verifiedWords = ctx.user_text ?? ctx.user_turn_text;
+      const grounding = args.from_words !== undefined && !wordsTheUserWrote(args.from_words, verifiedWords)
+        ? null : bandGrounding(band, args.from_words, verifiedWords);
+      const origin = statementOrigin(grounding !== null, bandTheUserWrote(band, ctx.unverified_user_text ?? '') || wordsTheUserWrote(args.from_words, ctx.unverified_user_text), ctx.user_text_complete, args.user_stated === false && typeof args.rationale === 'string' && args.rationale.trim() !== '');
       const claim: InputClaim = { origin, basis: String(args.rationale ?? ''), source_quote: String(args.from_words ?? '') };
-      if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', input_claim: claim, proposed_link: { from: args.from_label, to: args.to_label, strength: band },
-        detail: UNKNOWN_ORIGIN_DETAIL + ' The link proposal and original words are retained here; identify their source or supply a new estimate.' };
+      const carriesClaim = origin !== 'human' || args.user_stated !== undefined;
+      if (origin === 'unknown') return { ok: false, mutated: false, refusal: args.user_stated === undefined ? 'strength_not_stated' : 'origin_unknown', input_claim: claim, proposed_link: { from: args.from_label, to: args.to_label, strength: band },
+        detail: UNKNOWN_ORIGIN_DETAIL + ' Ask them how strong they think it is: slight, moderate, strong or very strong. The link proposal and original words are retained here; identify their source or supply a new estimate.' };
       const interpretation = grounding?.kind === 'reading' ? grounding.interpretation : undefined;
       const yourWords = interpretation === undefined ? '' : `, Olumi\u2019s reading of your "${interpretation.from_words}"`;
       const g = await readGraph(ctx.scenario_id);
@@ -4341,7 +4344,7 @@ export function createAgentCapabilities(
       const ownEnds = [from.label, to.label];
       const namesAnotherNode = replaceClause !== null && otherLabels.some((l) => mentionsLabel(replaceClause, l)
         && !ownEnds.some((end) => mentionsLabel(replaceClause, end) && mentionsLabel(end, l)));
-      const replacesFigure = heldNow !== null && (currentBand !== band || replaceClause !== null && bandTheUserWrote(band, replaceClause) && !namesAnotherNode);
+      const replacesFigure = heldNow !== null && (replaceClause !== null && bandTheUserWrote(band, replaceClause) && !namesAnotherNode);
       if (replacesFigure && reverses) {
         return { ok: false, mutated: false, refusal: 'replace_keeps_direction',
           detail: `Nothing was prepared. Tell the user exactly this: "${REPLACE_KEEPS_DIRECTION_TEXT}"` };
@@ -4360,7 +4363,7 @@ export function createAgentCapabilities(
       }
       const magnitude = confirm ? Math.abs(mean) : bandMidpoint(band);
       const value = {
-        input_claim: claim, expected_edge: edge,
+        ...(carriesClaim ? { input_claim: claim, expected_edge: edge } : {}),
         magnitude,
         intent: confirm ? 'confirm_current' : 'set',
         direction_intent: confirm || args.direction === undefined ? 'preserve' : wanted,
@@ -4383,7 +4386,7 @@ export function createAgentCapabilities(
           ? `Replace your figure (\u2018${heldFigure.quote}\u2019) on "${from.label}" \u2192 "${to.label}" with ${linkBandWord(band)}, as ${origin === 'human' ? 'your own estimate' : 'Olumi’s estimate'}`
           : confirm
           ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}${keptIsTheirs ? ', as your own estimate' : ''} (its strength stays as it is)`
-          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as ${origin === 'human' ? 'your own estimate' : 'Olumi’s estimate'}${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`) + ` · Basis: ${claim.basis} · Source: ${claim.source_quote}`,
+          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as ${origin === 'human' ? 'your own estimate' : 'Olumi’s estimate'}${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`) + (carriesClaim ? ` · Basis: ${claim.basis} · Source: ${claim.source_quote}` : ''),
         ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
@@ -5107,7 +5110,8 @@ export function createAgentCapabilities(
       if (!g) return { ok: false, mutated: false, refusal: 'not_found' };
       const goals = g.nodes.filter(n => n.kind === 'goal');
       if (goals.length !== 1) return { ok: false, mutated: false, refusal: 'goal_not_resolved' };
-      const parsed = SavedEffectsTimingSchema.safeParse({ ...args, goal_id: goals[0]!.id,
+      const sourceComplete = args.source_status === 'complete' && ctx.user_text_complete === true && (ctx.user_text ?? '').trim() !== '';
+      const parsed = SavedEffectsTimingSchema.safeParse({ ...args, interpretation: sourceComplete ? args.interpretation : null, goal_id: goals[0]!.id,
         // PL 6135017311 (11:16Z): only an explicit host attestation of complete, readable, non-empty source permits
         // 'complete'; a missing/undefined flag never inherits the model's claim. Other statuses pass through unchanged.
         source_status: args.source_status === 'complete' && !(ctx.user_text_complete === true && (ctx.user_text ?? '').trim() !== '')
@@ -5115,11 +5119,14 @@ export function createAgentCapabilities(
         source: ctx.user_text ?? '', option_ids: g.nodes.filter(n => n.kind === 'option').map(n => n.id).sort(), graph_revision: g.graph_hash });
       if (!parsed.success) return { ok: false, mutated: false, refusal: 'unreadable_timing', detail: 'Supply a typed interpretation, source status and basis. Nothing was prepared.' };
       const record = parsed.data;
+      const targetBasis = goalTargetBasisOf(goals[0]);
+      const targetPeriod = targetBasis === undefined ? goalDeadlineFromRecord(g.raw, goals[0]!.id) ?? 'not recorded'
+        : `${targetBasis.period_kind === 'over_period' ? 'over the first' : 'at'} ${targetBasis.period_months} month${targetBasis.period_months === 1 ? '' : 's'}${targetBasis.reference === 'launch' ? ' after launch' : ''}`;
       const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'update_node', path: goals[0]!.id, value: { effects_timing_record: record, previous: g.raw.effects_timing_record ?? null } }],
         provenance: { authored_by: 'model_proposed', basis: record.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record Olumi’s timing interpretation: ${record.interpretation}; source ${record.source_status}. Basis: ${record.basis}. Source: ${record.source}` });
+        public_label: `Record timing for “${goals[0]!.label}”. Target period: ${targetPeriod}. Options: ${g.nodes.filter(n => n.kind === 'option').map(n => n.label).join(', ') || 'none recorded'}. Interpretation: ${record.interpretation === null ? 'unresolved' : record.interpretation === 'in_place_by_period' ? 'effects in place by the target period' : record.interpretation === 'later_or_partial' ? 'effects later or only partly in place' : 'timing not stated in the complete source'}. Source status: ${record.source_status}. Basis: ${record.basis}. Source: ${record.source}. Limits: ${record.interpretation === null ? 'source is not complete and readable; no timing conclusion is available' : 'Olumi’s reading of the retained source; not evidence that the effects will occur'}.` });
       proposals.put(p);
       return { ok: true, mutated: false, proposal_id: p.proposal_id, public_label: p.public_label, effects_timing_record: record };
     },
@@ -5233,12 +5240,13 @@ export function createAgentCapabilities(
       const origin = statementOrigin(
         figureTheUserWroteFor(derived?.base ?? value, unit, ctx.user_text, scopeIn(g, goal.label)) && (args.source_quote === undefined || (ctx.user_text ?? '').includes(args.source_quote)),
         figureTheUserWrote(derived?.base ?? value, unit, ctx.unverified_user_text)
-          || figureTheUserWrote(derived?.base ?? value, unit, g.brief_text), ctx.user_text_complete, args.user_stated === false);
+          || figureTheUserWrote(derived?.base ?? value, unit, g.brief_text), ctx.user_text_complete, args.user_stated === false && typeof args.rationale === 'string' && args.rationale.trim() !== '');
+      const carriesClaim = origin !== 'human' || args.user_stated !== undefined || args.source_quote !== undefined;
       const inputClaim: InputClaim = { origin, basis: String(args.rationale ?? ''),
         source_quote: typeof args.source_quote === 'string' ? args.source_quote : quoteOfFigure(derived?.base ?? value, unit, ctx.user_text) ?? '' };
-      if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown',
+      if (origin === 'unknown') return { ok: false, mutated: false, refusal: args.user_stated === undefined && args.source_quote === undefined ? 'target_not_stated' : 'origin_unknown',
         input_claim: inputClaim, proposed_value: value, unit, goal: goal.label,
-        detail: UNKNOWN_ORIGIN_DETAIL + ' The proposed target and its source are retained in this reply; provide its original source or propose a new estimate.' };
+        detail: UNKNOWN_ORIGIN_DETAIL + ' The proposed target and its source are retained in this reply; ask the user for the original figure and source, or propose a new estimate.' };
       /**
        * ⭐ THE GOAL'S LEVEL TODAY, WHEN THE USER STATED IT BESIDE THE TARGET — on THIS card, written on THIS approval
        * (AIQ #75 5913873948 row G6, 5913897396, 5913952911; DL 5913935708). R3's run: "We have secured £0 so far and need
@@ -5305,13 +5313,13 @@ export function createAgentCapabilities(
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
-        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit, input_claim: inputClaim, ...(currentLevel !== undefined ? { current_level: currentLevel } : {}) } }],
+        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit, ...(carriesClaim ? { input_claim: inputClaim } : {}), ...(currentLevel !== undefined ? { current_level: currentLevel } : {}) } }],
         provenance: { authored_by: origin === 'human' ? 'user_stated' : 'model_proposed', basis: inputClaim.basis },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         // AIQ's words for the one card (5913952911): both figures, the user's own.
         public_label: (today === undefined
           ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}${derived === null ? '' : ` (${derived.multiplier} × your ${targetFigure(derived.base, unit)})`}`
-          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`) + replaces + ` · Author: ${origin === 'human' ? 'user' : 'Olumi'} · Basis: ${inputClaim.basis} · Source: ${inputClaim.source_quote}`,
+          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`) + replaces + (carriesClaim ? ` · Author: ${origin === 'human' ? 'user' : 'Olumi'} · Basis: ${inputClaim.basis} · Source: ${inputClaim.source_quote}` : ''),
       });
       proposals.put(proposal);
       return {
@@ -5480,14 +5488,13 @@ export function createAgentCapabilities(
             ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date.statement
             : undefined;
           const heldOlumi = retained?.source === 'model_proposed' || retained?.pairing?.authored_by === 'model_proposed';
-          return statementOrigin(pairings[i] !== undefined || quoteStatedFor(texts, quote, label) === 'ok' || (retained !== undefined && !heldOlumi),
+          return statementOrigin(pairings[i] !== undefined || quoteStatedFor(texts, quote, label) === 'ok' || (isHumanStatementSource(retained) && !heldOlumi),
             !heldOlumi && (quoteSpansIn(plainWords(ctx.unverified_user_text ?? ''), plainWords(quote)).length > 0
               || quoteSpansIn(plainWords(g.brief_text ?? ''), plainWords(quote)).length > 0), ctx.user_text_complete,
-            heldOlumi || (quote === '' && typeof starts[i]?.months === 'number'));
+            heldOlumi);
         });
         if (origins.includes('unknown')) return refuse('origin_unknown', UNKNOWN_ORIGIN_DETAIL);
-        // An empty source plus explicit months is a NEW Olumi estimate, never an old quote relabelled.
-        quotes.forEach((quote, i) => { if (quote === '' && origins[i] === 'ai' && typeof starts[i]?.months === 'number') quotes[i] = `in ${starts[i]!.months} months`; });
+        // Retain established authorship; bare months without an estimate basis cannot establish a new author.
         const plan = planStarts(quotes, estimate, held.length, quotes.map((quote, i) => {
           const prior = starts[i]?.months === undefined && heldQuotes.includes(quote)
             ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date
@@ -5692,10 +5699,9 @@ export function createAgentCapabilities(
 
       for (const given of input) {
         let a = given;
-        // AIE #94 6140145484: incomplete source never supplies a missing authorship declaration.
         // Keep retains the recorded Olumi estimate; it cannot claim a new human origin.
-        if (ctx.user_text_complete === false && (typeof a?.user_stated !== 'boolean'
-          || (a.keep === true && a.user_stated !== false))) {
+        // New figures below use the one origin function: verified evidence wins over a declaration.
+        if (a?.keep === true && a.user_stated !== false) {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         const requested = String(a?.factor_label ?? '');
@@ -5834,7 +5840,7 @@ export function createAgentCapabilities(
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
         if (statementOrigin(writtenAbout || quote !== null,
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
-          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, a.user_stated === false && a.revise !== true) === 'unknown') {
+          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, a.user_stated === false && a.revise !== true && typeof a.basis === 'string' && a.basis.trim() !== '') === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         adopted.push({
@@ -6325,10 +6331,10 @@ export function createAgentCapabilities(
         }
 
         // A rejected range has no bearing on the ordinary level or its authorship.
-        const userWrote = claimedByUser && (likelyRange !== undefined
-          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
+        const userWrote = likelyRange !== undefined
+          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
         if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
-          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false) === 'unknown') {
+          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false && typeof i.basis === 'string' && i.basis.trim() !== '') === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });

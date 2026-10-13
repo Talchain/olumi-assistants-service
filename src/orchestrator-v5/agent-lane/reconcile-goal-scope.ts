@@ -1,7 +1,7 @@
 import { statementOrigin } from '../../cee/provenance/provenance-of.js';
 import type { InputClaim } from '../../schemas/assist.js';
 import { GoalScopeReadingSchema, GoalScopeSchema, type GoalScopeReading as GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
-import { goalScopeCheck, scopeQuestion, reconciliationPending, scopeOf, scopeOfGoal, scopeSourcesAreUserWords, scopeReconciliationKey, scopeReadyToApprove, scopeCanRecord, nodesOf } from './goal-scope.js';
+import { goalScopeCheck, scopeQuestion, reconciliationPending, scopeOf, scopeOfGoal, scopeSourcesAreUserWords, scopeShareAnswerCanBind, scopeReconciliationKey, scopeReadyToApprove, scopeCanRecord, nodesOf } from './goal-scope.js';
 import { proposeGoalCurrentLevel, type GoalLevelRead } from './goal-current-level.js';
 import type { ProposalStore } from './proposal.js';
 import type { PendingAction } from '../session/pending-action.js';
@@ -43,9 +43,16 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   }
   if (!GoalScopeReadingSchema.safeParse(scope).success) return fail('invalid_scope', 'The scope must have valid ids, kinds and a finite share from zero to one.');
   const previousScope = prior?.scope ?? scopeOfGoal(goal);
+  // A bare share may answer only the live, uniquely bound question. A full scope argument cannot bypass it.
+  if (scope.component?.share !== undefined && scope.component.share !== previousScope?.component?.share
+    && !words.toLowerCase().includes(scope.component.label.toLowerCase())
+    && !scopeShareAnswerCanBind(pendings, goal.id)) {
+    return { ...fail('share_not_bound', 'Name the component whose share this is, or answer a current scope question. Nothing was prepared.'),
+      ...(previous ? { pending_action: previous } : {}) };
+  }
   const wordsVerified = scopeSourcesAreUserWords(scope, ctx.user_text ?? words, previousScope?.stated_in_brief ? previousScope : undefined);
   const origin = statementOrigin(wordsVerified, [scope.source.quote, scope.component?.source.quote, scope.component?.basis_source?.quote]
-    .some(q => !!q && (ctx.unverified_user_text ?? '').includes(q)), ctx.user_text_complete, args.user_stated === false || scope.stated_in_brief === false);
+    .some(q => !!q && (ctx.unverified_user_text ?? '').includes(q)), ctx.user_text_complete, args.user_stated === false && typeof args.basis === 'string' && args.basis.trim() !== '');
   const claim: InputClaim = { origin, basis: args.basis ?? '', source_quote: [scope.source.quote, scope.component?.source.quote, scope.component?.basis_source?.quote].filter(Boolean).join('\n') };
   if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', input_claim: claim, scope,
     detail: 'The scope source is unknown. Its words and proposed reading are retained here; provide the original source or a new Olumi reading.' };

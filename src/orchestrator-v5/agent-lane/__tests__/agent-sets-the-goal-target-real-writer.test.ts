@@ -769,4 +769,86 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     expect(currentSavedEffectsTiming({ ...saved, effects_timing_record: { ...saved.effects_timing_record, source_status: 'unknown' } }, analysisHash(saved)!, 'goal_mrr')).toBeNull();
   });
 
+  it.each([
+    [true, 'Price has a weak effect on MRR.', 'human'],
+    [false, 'Price has a weak effect on MRR.', 'human'],
+    [false, 'We are reviewing the price relationship.', 'ai'],
+  ] as const)('T2f earlier-turn link: flag %s, source %s → %s through canonical read', async (user_stated, words, origin) => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [() => say('Retained.')];
+    await turn({ message: words });
+    const claim = { origin, basis: 'Test the price relationship.', source_quote: 'Price has a weak effect on MRR.' };
+    let proposed: any;
+    script = [() => fnCall('propose_link_strength', { from_label: 'Price', to_label: 'MRR', strength: 'weak', user_stated,
+      from_words: claim.source_quote, rationale: claim.basis }), body => { proposed = toolOutput(body); return say(proposed.public_label ?? proposed.detail); }];
+    const response = await turn({ message: 'Please record that.' });
+    expect(proposed.input_claim).toEqual(claim);
+    const chip = approveChipOf(response)[0]!;
+    expect(chip).toBeDefined();
+    expect(proposed.public_label).toBe(`Record "Price" → "MRR" as slight, as ${origin === 'human' ? 'your own estimate' : 'Olumi’s estimate'} · Basis: ${claim.basis} · Source: ${claim.source_quote}`);
+    const approved = await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    expect(approved._agent.tool_calls).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    const edge = (graphNow() as any).edges.find((e: any) => e.from === 'fac_price' && e.to === 'goal_mrr');
+    expect(edge.provenance.input_claim).toEqual(claim);
+    expect(edge.provenance.source).toBe(origin === 'human' ? 'user_specified' : 'cee_hypothesis');
+    let canonical: any;
+    script = [() => fnCall('get_canonical_state', {}), body => { canonical = toolOutput(body); return say('Read.'); }];
+    await turn({ message: 'Read the saved link.' });
+    expect(canonical.links.find((e: any) => e.from === 'fac_price' && e.to === 'goal_mrr').input_claim).toEqual(claim);
+  });
+
+  it.each([[true, true], [true, false], [undefined, true]] as const)('T2f complete source %s: claimed human %s → exact origin across the route', async (complete, user_stated) => {
+    // Isolate the T1 completeness attestation while retaining the real proposal/card/writer/canonical path.
+    const { HistoryStore } = await import('../history-store.js');
+    const original = HistoryStore.prototype.authorshipWords;
+    const spy = vi.spyOn(HistoryStore.prototype, 'authorshipWords').mockImplementation(function (this: InstanceType<typeof HistoryStore>, id) {
+      return { ...original.call(this, id), complete: complete as boolean };
+    });
+    try {
+      graphOf.set(SCENARIO, seedGraph());
+      script = [() => say('Ready.')];
+      await turn({ message: 'Review our planning assumptions.' });
+      let proposed: any;
+      const claim = { origin: user_stated ? 'unknown' : 'ai', basis: 'A genuinely new conditional estimate.', source_quote: 'New estimate.' };
+      script = [() => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 65000, unit: '£', user_stated,
+        rationale: claim.basis, source_quote: claim.source_quote }), body => { proposed = toolOutput(body); return say(proposed.public_label ?? proposed.detail); }];
+      const response = await turn({ message: 'Prepare the target.' });
+      expect(proposed.input_claim).toEqual(claim);
+      if (user_stated) {
+        expect(proposed.refusal).toBe('origin_unknown');
+        expect(approveChipOf(response)).toEqual([]);
+        expect(graphNow()).toEqual(seedGraph());
+      } else {
+        const chip = approveChipOf(response)[0]!;
+        expect(chip).toBeDefined();
+        await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+        expect(graphNow().goal_constraints!.find(c => c.node_id === 'goal_mrr')!.input_claim).toEqual(claim);
+        let canonical: any;
+        script = [() => fnCall('get_canonical_state', {}), body => { canonical = toolOutput(body); return say('Read.'); }];
+        await turn({ message: 'Read the saved target.' });
+        expect(canonical.goal.target.input_claim).toEqual(claim);
+      }
+    } finally { spy.mockRestore(); }
+  });
+
+  it('T2f unknown timing: exact stored card on the chip, nullable interpretation and no Run reading', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    let proposed: any;
+    script = [() => fnCall('propose_effects_timing', { interpretation: 'not_stated', source_status: 'unknown', basis: 'Earlier timing source is unreadable.' }),
+      body => { proposed = toolOutput(body); return say(proposed.public_label ?? proposed.detail); }];
+    const response = await turn({ message: 'Retain the unresolved timing question.' });
+    expect(proposed.ok).toBe(true);
+    expect(proposed.effects_timing_record.interpretation).toBeNull();
+    const chip = approveChipOf(response)[0]!;
+    expect((chip as any).detail).toBe(proposed.public_label);
+    expect(proposed.public_label).toContain('MRR');
+    expect(proposed.public_label).toContain('Target period:');
+    expect(proposed.public_label).toContain('Options:');
+    expect(proposed.public_label).toContain('Source: Retain the unresolved timing question.');
+    await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    const { currentSavedEffectsTiming } = await import('../../goal-target/saved-effects-timing.js');
+    expect((graphNow() as any).effects_timing_record).toEqual(proposed.effects_timing_record);
+    expect(currentSavedEffectsTiming(graphNow(), analysisHash(graphNow())!, 'goal_mrr')).toBeNull();
+  });
+
 });

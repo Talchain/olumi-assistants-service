@@ -42,13 +42,13 @@ type Rec = Record<string, unknown>;
  * Resolve a proposed statement from the host's existing source verification.
  * Verified human evidence wins. Retained material of unknown origin stays
  * unknown even when the caller declares an estimate. An explicit new estimate
- * can supply its own origin when the verified history is incomplete.
+ * with its own basis can supply AI origin. History completeness is never authorship evidence.
  * Approval is deliberately not an input: consent never changes authorship.
  */
 export function statementOrigin(
-  verified: boolean, unknown: boolean, sourceComplete = true, ownEstimate = false,
+  verified: boolean, unknown: boolean, _sourceComplete = false, ownEstimate = false,
 ): 'human' | 'unknown' | 'ai' {
-  return verified ? 'human' : unknown || (!sourceComplete && !ownEstimate) ? 'unknown' : 'ai';
+  return verified ? 'human' : unknown || !ownEstimate ? 'unknown' : 'ai';
 }
 
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);

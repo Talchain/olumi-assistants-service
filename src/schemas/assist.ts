@@ -401,14 +401,15 @@ export const CorrectionsSummarySchema = z.object({
 /** Optional, additive source record; older constraint readers strip it. */
 /** Outside goal_target_basis: no keys are added to an older strict payload. */
 export const SavedEffectsTimingSchema = z.object({
-  interpretation: z.enum(['in_place_by_period', 'later_or_partial', 'not_stated']),
+  interpretation: z.enum(['in_place_by_period', 'later_or_partial', 'not_stated']).nullable(),
   source_status: z.enum(['complete', 'incomplete', 'unread', 'unknown', 'conflicting']),
   source: z.string(),
   basis: z.string(),
   goal_id: z.string().min(1),
   option_ids: z.array(z.string().min(1)).refine(ids => new Set(ids).size === ids.length),
   graph_revision: z.string().min(1),
-}).strict();
+}).strict().refine(record => record.source_status !== 'complete' || (record.source.trim() !== '' && record.basis.trim() !== '' && record.interpretation !== null),
+  { message: 'Complete timing requires readable source, basis and interpretation.' });
 export type SavedEffectsTiming = z.infer<typeof SavedEffectsTimingSchema>;
 
 export const InputClaimSchema = z.object({

@@ -20,3 +20,12 @@ describe('approved timing current reader', () => {
     expect(currentSavedEffectsTiming({ nodes: graph.nodes }, 'r1', 'goal')).toBeNull();
   });
 });
+
+ it.each(['source', 'basis'])('T2f complete record rejects empty or unreadable %s', async field => {
+   const { SavedEffectsTimingSchema } = await import('../saved-effects-timing.js');
+   for (const value of ['', '  ', null, {}, undefined]) {
+     const invalid = { ...record, [field]: value };
+     expect(SavedEffectsTimingSchema.safeParse(invalid).success).toBe(false);
+     expect(currentSavedEffectsTiming({ ...graph, effects_timing_record: invalid }, 'r1', 'goal')).toBeNull();
+   }
+ });
