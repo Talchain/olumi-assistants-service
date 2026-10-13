@@ -126,7 +126,7 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
     const start = sent.length;
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: scenarioId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
     const runRows = first.json()._provider_calls as Row[];
-    expect(runRows).toHaveLength(2);
+    expect(runRows).toHaveLength(1);
     runRows.forEach((row, i) => {
       expect(row.prompt_alias).toBe('agent.converse');
       expect(row.prompt_sha256).toBe(sha(sent[start + i]!.instructions));

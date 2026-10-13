@@ -143,9 +143,9 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: run.message, source: 'chip', chip: { id: run.id, action_type: run.action_type },
     } });
-    expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path).toBeUndefined();
+    expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path).toBe('run');
     expect(runs).toBe(1);
-    expect(modelBodies).toHaveLength(2);
+    expect(modelBodies).toHaveLength(1);
     expect(modelBodies[0]?.tool_choice).toEqual({ type: 'function', name: 'run_analysis' });
     modelBodies = [];
     await explainRun(app, SCENARIO, r);

@@ -82,7 +82,7 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } }));
     expect(r.statusCode).toBe(200);
-    expect(modelBodies, 'two Run loop calls and one Explain call').toHaveLength(3);
+    expect(modelBodies, 'one pre-tool Run call and one Explain call').toHaveLength(2);
     for (const body of modelBodies) {
       expect(String(body.instructions)).toContain(`${ANCHOR} ${CLAUSE}`);
       expect(String(body.instructions)).not.toContain(REPLACED);

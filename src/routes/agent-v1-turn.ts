@@ -2453,7 +2453,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ...[rootNow, owedNow.find((l) => l !== say && l !== askNow && l !== rootNow && !indexNow.includes(l) && !l.includes('?'))]
               .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text): FaceObligation => ({ role: 'evidence', text })),
             // The live turn types its decision lines and break-even arithmetic as host parts (a line that asks is the ask).
-            ...lines.filter((l) => !l.includes('?')).map((text): FaceObligation => ({ role: 'host', text })),
+            ...lines.filter((l) => !l.includes('?')).flatMap(sentencesOf).map((text): FaceObligation => ({ role: 'host', text })),
             ...(breakEvenNow !== null ? [{ role: 'host' as const, text: breakEvenLine(breakEvenNow, { afterIdentityAsk: false }) }] : []),
             // The live turn's typing of the same lines (one finding = chance + depends; lead: true).
             ...screenNow.flatMap((l): FaceObligation[] => [
@@ -3980,7 +3980,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
             ...(methodTurn?.kind === 'run' || widenRun !== undefined || risksRun !== undefined ? { maxHops: 1 } : {}),
             // Before the widen and chip forcings below, which win if both were ever set.
-            ...(runPress ? { firstCallTool: 'run_analysis' } : {}),
+            ...(runPress ? { firstCallTool: 'run_analysis', stopAfterSuccessfulRun: () => {
+              fastPath = 'run';
+              return RUN_RESULT_READY_TEXT;
+            } } : {}),
             ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
             ...(levelAnswerTool !== undefined ? { firstCallTool: levelAnswerTool } : {}),
             ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
@@ -4939,7 +4942,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const explanationChip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult });
     if (fastPath === 'run' || firstAnalysisResultFirst) narrationStatus = explanationChip !== null
       && resultFirstRunCompleted ? 'pending' : 'unavailable';
-    if (runPress && resultFirstRunCompleted) narrationStatus = explanationChip !== null
+    if (runPress && fastPath !== 'run' && resultFirstRunCompleted) narrationStatus = explanationChip !== null
       && result.stopped_reason === 'answered' && result.assistant_text.trim() !== '' ? 'ready' : 'unavailable';
     const narrationKey = fastPath === 'explain' && typeof explanationId === 'string'
       ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : explanationChip?.id.slice(RUN_EXPLANATION_PREFIX.length);
@@ -5341,7 +5344,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // A host line that carries the open-questions segment is typed up to it: the segment has its own place (detail,
         // DGAI's questions toggle), and a part spanning it could not be located as one unit.
         // The first automatic result uses the same server-authored ready line as an explicit uninterpreted Run.
-        ...[...(uninterpretedRun || firstAnalysisResultFirst ? [RUN_RESULT_READY_TEXT, ...decisionLines] : []), ...owed.filter((l) => l !== goalChanceOwed), guidedReplyText.progress, narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
+        // Keep each named risk, while the existing composer states their identical exclusion sentence once.
+        ...[...(uninterpretedRun || firstAnalysisResultFirst ? [RUN_RESULT_READY_TEXT,
+          ...decisionLines.flatMap(line => line.includes('?') ? [line] : sentencesOf(line))] : []), ...owed.filter((l) => l !== goalChanceOwed), guidedReplyText.progress, narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
           .map((l) => (typeof l === 'string' ? (openQuestionsSegment(l)?.lead ?? l).trim() : l))
           .filter((l): l is string => typeof l === 'string' && l !== '')
           .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),

@@ -1,3 +1,4 @@
+import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
@@ -489,7 +490,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect(text.split(A7).length - 1).toBe(1);
     // Approved 5471d752 correction: a contract reply already within its face ships as written.
     expect(reply._answer_shape).toBeUndefined();
-    expect(text).toBe([modelSays, A7, ASK].join('\n\n'));
+    expect(text).toBe([RUN_RESULT_READY_TEXT, A7, ASK].join('\n\n'));
     expect(text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
     expect(textAtRest(text)).toContain(ASK_QUESTION);
     expect((text.match(/\?/gu) ?? [])).toHaveLength(1);
