@@ -1,3 +1,4 @@
+import { RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
 import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
@@ -31,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import * as currentLevel from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { CURRENT_LEVEL_TOOL, goalLevelAskOf } from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { assertIdentityYes, WORDS } from './helpers/goal-reach-confirm-reading.js';
-const RUN_INTERPRETATION = 'The model result is provisional.';
+const RUN_INTERPRETATION = RUN_RESULT_READY_TEXT;
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../orchestrator-v5/routing/answer-shape.js';
 
 const { port, source } = vi.hoisted(() => ({
@@ -235,7 +236,7 @@ describe('GOAL-REACH row 2 through the real doors', () => {
       } });
       expect(response.statusCode, response.body).toBe(200);
       const card = response.json();
-      expect(card._diagnostic_trace?.fast_path).toBeUndefined();
+      expect(card._diagnostic_trace?.fast_path).toBe('run');
       expect(runRequests).toHaveLength(1);
       expect(runRequests[0]).toMatchObject({ stage: 'analyse', chip: { action_type: 'run_analysis' } });
       expect(issue).toHaveBeenCalledWith(
@@ -251,7 +252,7 @@ describe('GOAL-REACH row 2 through the real doors', () => {
         outcome_id: 'mrr', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], words: WORDS,
       } });
       expect(runRequests, 'Yes records the reading without running analysis').toHaveLength(1);
-      expect(modelCalls, 'two Run-loop calls; approval adds no model call').toBe(2);
+      expect(modelCalls, 'pre-tool Run interpretation; approval adds no model call').toBe(1);
     } finally { issue.mockRestore(); writer.mockRestore(); }
   });
   it('row 2 RED: withheld Run bar has one enabled confirm_reading, press → held card → Yes → saved/reloaded identity → NEXT Run wire', async () => {
@@ -327,7 +328,7 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
         chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
       expect(response.statusCode, response.body).toBe(200);
       const body = response.json();
-      expect(body._diagnostic_trace?.fast_path).toBeUndefined();
+      expect(body._diagnostic_trace?.fast_path).toBe('run');
       return body as { assistant_text: string; _answer_shape?: AnswerShape };
     };
     setThresholdRefused('non_finite_conversion_input');

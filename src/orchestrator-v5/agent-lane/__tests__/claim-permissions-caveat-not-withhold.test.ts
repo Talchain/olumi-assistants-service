@@ -90,7 +90,7 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
   it('RED: the explicit Run\u2019s interpreting call carries the provisional wording rule', async () => {
     bodies = [];
     await explainRun(app, '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } }));
-    expect(bodies).toHaveLength(2);
+    expect(bodies).toHaveLength(1);
     expect(String(bodies.find((b) => b.tool_choice === 'none')!['instructions'])).toContain(PROVISIONAL_RULE);
     // …and the run it interprets carries the provisional permission, read from the run's own verdict.
     const run = explanationContext(bodies.find((b) => b.tool_choice === 'none')!['input']) as { canonical_state: { run_explanation: { claim_permissions?: { leader_may_be_named?: boolean; provisional?: true } } } };

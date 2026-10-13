@@ -76,7 +76,7 @@ describe('the Run interpreting call has a deadline', () => {
       payload: { kind: 'message', scenario_id: scenarioId, message: 'Run the analysis please', source: 'chip_click', chip: { action_type: 'run_analysis' } },
     });
     // Run completes through its loop; the optional Explain remains independently deadline-bound.
-    expect(runModelCalls).toBe(2);
+    expect(runModelCalls).toBe(1);
     expect(interpretCalls, 'the Explain provider has not been called yet').toBe(0);
     expect((first.json() as { _agent?: { tool_calls?: { name: string }[] } })._agent?.tool_calls?.map((c) => c.name)).toEqual(['run_analysis']);
     const started = Date.now();
