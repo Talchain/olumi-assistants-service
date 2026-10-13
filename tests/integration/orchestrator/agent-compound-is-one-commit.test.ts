@@ -1,3 +1,4 @@
+import { provenanceOf } from '../../../src/cee/provenance/provenance-of.js';
 import { createProposal } from '../../../src/orchestrator-v5/agent-lane/proposal.js';
 /**
  * ⛔ A COMPOUND APPROVAL IS ONE COMMIT (Canonical #70 5849037691: "the last two-commit path in the Agent lane").
@@ -154,6 +155,117 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: 'Use a starting point.' } };
   };
   const nodeOf = (id: string) => (persisted as { nodes: { id: string; observed_state?: Record<string, unknown>; interventions?: Record<string, Record<string, unknown>> }[] }).nodes.find((n) => n.id === id)!;
+
+  it.each(['human', 'ai'] as const)('T2 complete contract: %s starting point keeps child authorship through the actual whole writer', async origin => {
+    const { caps, ctx } = agent();
+    if (origin === 'human') ctx.user_text = 'Monthly churn rate is 5%. Under Raise to £59 at release, Pro plan monthly price is £59 per month.';
+    const p = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'A new 5% planning assumption for monthly SaaS churn.' }],
+      option_levels: [{ user_stated: false, option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59,
+        basis: 'A new £59 price scenario aligned with the raise option.' }],
+    });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(provenanceOf({ value: nodeOf('fac_churn').observed_state }).origin).toBe(origin);
+    expect(provenanceOf({ setting: nodeOf('opt_raise').interventions?.fac_price }).origin).toBe(origin);
+    expect(nodeOf('opt_raise').interventions?.fac_price?.raw_value).toBe(59);
+    if (origin === 'ai') {
+      expect(nodeOf('fac_churn').observed_state?.basis).toBe('A new 5% planning assumption for monthly SaaS churn.');
+      expect(nodeOf('opt_raise').interventions?.fac_price?.reasoning).toBe('A new £59 price scenario aligned with the raise option.');
+    }
+    const cold = await agent().caps.getCanonicalState(ctx);
+    const entities = cold.entities as Array<{ id: string; value_provenance?: { basis?: string }; levels?: Array<{basis?: string}> }>;
+    if (origin === 'ai') {
+      expect(entities.find(n => n.id === 'fac_churn')?.value_provenance?.basis).toBe('A new 5% planning assumption for monthly SaaS churn.');
+      expect(entities.find(n => n.id === 'opt_raise')?.levels?.[0]?.basis).toBe('A new £59 price scenario aligned with the raise option.');
+    }
+    const saved = structuredClone(persisted);
+    await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(rows.size).toBe(1); expect(persisted).toEqual(saved);
+  });
+
+  it.each(['user_stated', 'model_proposed'] as const)('T2 complete contract: approval of a legacy missing child origin cannot borrow %s parent authorship', async authored_by => {
+    const { caps, ctx, store } = agent();
+    const p = createProposal({ scenario_id: SCENARIO_ID, user_id: 'user-a', base_graph_identity_hash: currentHash(),
+      operations: [{ op: 'set_factor_value', path: 'fac_churn', value: { value: 5, unit: '%' } }],
+      provenance: { authored_by, basis: 'Legacy source is missing.' },
+      validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Review the retained figure' });
+    store.put(p);
+    const before = structuredClone(persisted);
+    const out = await caps.authoriseChange(ctx, { proposal_id: p.proposal_id });
+    expect(out.refusal).toBe('origin_unknown'); expect(out.mutated).toBe(false);
+    expect(rows.size).toBe(0); expect(persisted).toEqual(before);
+  });
+
+  it('T2 complete contract: retaining an AI value keeps its original basis rather than the acceptance rationale', async () => {
+    nodeOf('fac_churn').observed_state = { value: 0.05, raw_value: 5, cap: 100, unit: '%', source: 'cee_inference',
+      extractionType: 'inferred', basis: 'Original churn estimate from the planning model.' };
+    const { caps, ctx } = agent();
+    const p = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly churn rate',
+      value: 99, unit: '%', user_stated: false, keep: true, basis: 'Accept the retained estimate.' }] });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    expect(nodeOf('fac_churn').observed_state?.raw_value).toBe(5);
+    expect(nodeOf('fac_churn').observed_state?.basis).toBe('Original churn estimate from the planning model.');
+    expect(provenanceOf({ value: nodeOf('fac_churn').observed_state }).origin).toBe('ai');
+    const saved = structuredClone(persisted);
+    await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(rows.size).toBe(1); expect(persisted).toEqual(saved);
+  });
+
+  it('T2 complete contract: a concurrent value change refuses the whole declared starting point and can retry', async () => {
+    const before = structuredClone(persisted);
+    let race = true;
+    const { caps, ctx } = agent({ beforeCommit: () => {
+      if (race) Object.assign(nodeOf('fac_price').observed_state!, { raw_value: 51, value: 51 / 200 });
+    } });
+    const p = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'A new monthly churn planning assumption.' }],
+      option_levels: [{ user_stated: false, option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, basis: 'A new price scenario.' }],
+    });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(false); expect(out.mutated).toBe(false); expect(rows.size).toBe(0);
+    const raced = structuredClone(before) as typeof persisted & { nodes: Array<{ id: string; observed_state?: Record<string, unknown> }> };
+    Object.assign(raced.nodes.find(n => n.id === 'fac_price')!.observed_state!, { raw_value: 51, value: 51 / 200 });
+    expect(persisted).toEqual(raced);
+    race = false; persisted = before;
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    const saved = structuredClone(persisted);
+    await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(rows.size).toBe(1); expect(persisted).toEqual(saved);
+  });
+
+  it('T2 complete contract: an invalid declared level leaves every compound child unwritten', async () => {
+    const { caps, ctx } = agent(); const before = structuredClone(persisted);
+    const p = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'A new monthly churn planning assumption.' }],
+      option_levels: [
+        { user_stated: false, option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, basis: 'A new price scenario.' },
+        { user_stated: false, option_label: RAISE, factor_label: 'Word of mouth', value: 0.4, basis: 'A new planning estimate for word of mouth.' },
+      ],
+    });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok).toBe(false); expect(out.mutated).toBe(false);
+    expect(rows.size).toBe(0); expect(persisted).toEqual(before);
+  });
+
+  it('T2 complete contract: child declarations do not replace bound permission for a gap statement', async () => {
+    withGap(); const { caps, ctx } = agent(); const before = structuredClone(persisted);
+    const p = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'A new monthly churn planning assumption.' }],
+      option_levels: [{ user_stated: false, option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59,
+        basis: 'A new price scenario.', unmodelled_mechanisms: [] }],
+    });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const denied = await caps.authoriseChange({ ...ctx, user_text: 'Do not change the model.' }, { proposal_id: String(p.proposal_id) });
+    expect(denied.refusal).toBe('approval_required'); expect(denied.ok).toBe(false); expect(denied.mutated).toBe(false);
+    expect(rows.size).toBe(0); expect(persisted).toEqual(before);
+    expect((await caps.authoriseChange({ ...ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    expect(rows.size).toBe(1);
+  });
 
   it('RED: success — churn\'s starting value and the raise option\'s level land in ONE commit, with ONE receipt', async () => {
     const { caps, ctx } = agent();

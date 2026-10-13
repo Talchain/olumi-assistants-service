@@ -29,6 +29,7 @@ export interface ApprovedAdoption {
   readonly targetId: string;
   /** The approved figure, in the factor's own units — what the proposal stored. */
   readonly rawValue: number;
+  readonly basis?: string;
 }
 
 /** The contract's literal for a value the user adopted rather than authored (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */
@@ -80,6 +81,7 @@ export interface ApprovedLevelAdoption {
   readonly factorId: string;
   /** The approved level on the model scale — exactly what the write sends. */
   readonly modelValue: number;
+  readonly basis?: string;
 }
 
 /** Olumi's own level, adopted: the contract's model-authored member. */
@@ -162,4 +164,15 @@ export function approvedLinkAdoptionFor(
   if (typeof magnitude !== 'number' || !Number.isFinite(magnitude)) return undefined;
   const a = adoptions.find(x => x.scenarioId === scenarioId && x.from === from && x.to === to && x.magnitude === Math.abs(magnitude));
   return a === undefined ? undefined : { band: a.band };
+}
+
+/** The existing approved identity also retains the new estimate's own explanation. */
+export function approvedAdoptionBasisFor(scenarioId: string, targetId: string, rawValue: unknown): string | undefined {
+  const basis = approvedAdoptionSourceFor(scenarioId, targetId, rawValue) === undefined ? undefined : store.getStore()?.basis;
+  return typeof basis === 'string' && basis.trim() !== '' ? basis : undefined;
+}
+export function approvedLevelBasisFor(scenarioId: string, optionId: string, factorId: string, modelValue: unknown): string | undefined {
+  if (approvedLevelSourceFor(scenarioId, optionId, factorId, modelValue) === undefined) return undefined;
+  return levelStore.getStore()?.find(a => a.scenarioId === scenarioId && a.optionId === optionId && a.factorId === factorId
+    && a.modelValue === modelValue)?.basis;
 }

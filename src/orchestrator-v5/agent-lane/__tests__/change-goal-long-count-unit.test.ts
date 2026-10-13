@@ -57,8 +57,7 @@ describe('W2 — generate units within the shared 40-character reading contract'
     const tool = AGENT_TOOLS.find(t => t.name === TOOL)!;
     const unit = (tool.parameters as { properties: { unit: { type: string; maxLength?: number; description: string } } }).properties.unit;
     expect(unit).toMatchObject({ type: 'string', maxLength: 40 });
-    expect(unit.description).toContain('at most 40 characters');
-    expect(unit.description).toContain(`"${SHORT_UNIT}"`);
+    expect(unit.description).toBe("The native physical unit of this metric, including its applicable period/reference; do not substitute a normalised coordinate value. Keep the existing field length limit.");
     expect(SHORT_UNIT).toHaveLength(35);
     // The declared bound reaches the same tool in each mode that exposes the level writer.
     expect(toolsFor('full').find(t => t.name === TOOL)).toBe(tool);

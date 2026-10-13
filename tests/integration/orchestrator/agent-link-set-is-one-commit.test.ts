@@ -1,3 +1,4 @@
+import { provenanceOf } from '../../../src/cee/provenance/provenance-of.js';
 /**
  * ⭐ A SET OF LINK STRENGTHS IS ONE APPROVAL AND ONE COMMIT, END TO END (DL #72 5871594233; seam Canonical 5871633483,
  * DL 5871661097; rows Canonical's five).
@@ -131,6 +132,48 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     });
     return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText } };
   };
+
+  it.each([true, false])('T2 complete contract: retained same-link human wins flag %s through the actual batch writer', async user_stated => {
+    const words = 'Delegable routine workload has a weak effect on Routine-work hours delegated.';
+    const { caps, ctx } = agent(words);
+    ctx.user_turn_text = 'Please record that earlier statement.';
+    const before = structuredClone(edge('workloadHours'));
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: L.workloadHours[0], to_label: L.workloadHours[1],
+      strength: 'weak', user_stated }], rationale: 'Record the retained statement.' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    expect(provenanceOf({ link: edge('workloadHours') }).origin).toBe('human');
+    expect(edge('workloadHours').strength.mean).toBe(0.1);
+    expect((edge('workloadHours').provenance as Record<string, unknown>).replaced_input).toEqual(before);
+    const saved = structuredClone(persisted);
+    await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(rows.size).toBe(1); expect(persisted).toEqual(saved);
+  });
+
+  it('T2 complete contract: a new grounded link estimate retains its own basis after one approved write', async () => {
+    const { caps, ctx } = agent('Please propose a new estimate for review.');
+    const basis = 'Delegable workload constrains delegated hours; this is a weak initial planning estimate.';
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: L.workloadHours[0], to_label: L.workloadHours[1],
+      strength: 'weak', user_stated: false, basis }], rationale: 'Review a new estimate.' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect((p.links as Array<{input_claim: unknown}>)[0].input_claim).toEqual({ origin: 'ai', basis, source_quote: '',
+      subject: { from: L.workloadHours[0], to: L.workloadHours[1] } });
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    expect(provenanceOf({ link: edge('workloadHours') }).origin).toBe('ai');
+    expect(edge('workloadHours').provenance?.reasoning).toBe(basis);
+    const saved = structuredClone(persisted);
+    await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(rows.size).toBe(1); expect(persisted).toEqual(saved);
+  });
+
+  it('T2 complete contract: an unrelated retained band cannot author a different link', async () => {
+    const { caps, ctx } = agent('AI assistant use has a weak effect on Delegation quality.');
+    ctx.user_turn_text = 'Record the other link.';
+    const before = structuredClone(persisted);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: L.workloadHours[0], to_label: L.workloadHours[1],
+      strength: 'weak', user_stated: false }], rationale: 'Record it.' });
+    expect(p.refusal).toBe('origin_unknown'); expect(rows.size).toBe(0); expect(persisted).toEqual(before);
+  });
 
   it('RED (Paul\'s delegated set: "I\'m aligned with these. Please make these updates."): ONE proposal, ONE commit, every placeholder sized as Olumi\'s accepted estimate (D1)', async () => {
     const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');

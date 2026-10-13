@@ -132,25 +132,16 @@ describe('T2sm authorship at the real agent route', () => {
     expect(writes).toBe(0);
   });
 
-  it.each([undefined, false])('T2sm3 (b): another link stays unknown with user_stated=%s', async user_stated => {
+  it.each([undefined, false])('T2sm3 (b): another link without its own basis prepares no number with user_stated=%s', async user_stated => {
     await turn('Price has a weak effect on MRR.');
+    const before = structuredClone(graph);
     queue('propose_link_strength', { ...linkArgs, from_label: 'Product quality', user_stated });
     const offered = await turn('Prepare the other link for review.');
-    expect(lastResult().ok).toBe(true);
-    expect(lastResult().input_claim.origin).toBe('unknown');
-    const card = offered.suggested_actions.find((c: Rec) => c.id === `agent-approve-proposal:${lastResult().proposal_id}`);
-    const saved = await turn(card.message, { source: 'chip', chip: { id: card.id } });
-    expect(saved._agent.tool_calls.map((c: Rec) => ({ name: c.name, ok: c.ok }))).toEqual([{ name: 'authorise_change', ok: true }]);
-    const read = (await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${sid}/graph`, payload: {} })).json();
-    const edge = read.graph.edges.find((e: Rec) => e.from === 'f-quality' && e.to === 'g-revenue');
-    expect(edge.strength.mean).toBe(0.1);
-    expect(edge.provenance.source).toBe('cee_hypothesis');
-    expect(edge.provenance.magnitude).toBeUndefined();
-    expect(edge.provenance.input_claim.origin).toBe('unknown');
-    expect(provenanceOf({ link: edge }).origin).toBe('unknown');
-    expect(writes).toBe(1);
-    await turn(card.message, { source: 'chip', chip: { id: card.id } });
-    expect(writes).toBe(1);
+    expect(lastResult().ok).toBe(false);
+    expect(lastResult().refusal).toBe('strength_not_stated');
+    expect(offered.suggested_actions.filter((c: Rec) => c.id.startsWith('agent-approve-proposal:'))).toEqual([]);
+    expect(graph).toEqual(before);
+    expect(writes).toBe(0);
   });
 
   it('T2sm3 (b): a declared estimate for another link stays AI through approval/readback', async () => {

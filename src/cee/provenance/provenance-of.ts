@@ -36,6 +36,8 @@ import {
   type KnownObservedStateSourceLiteral,
 } from '@talchain/schemas';
 
+import { DraftOptionWidening, DraftRiskWidening } from '../../schemas/cee-v3.js';
+
 type Rec = Record<string, unknown>;
 
 /** Verified human evidence wins; completeness and approval never establish authorship.
@@ -755,6 +757,8 @@ export interface Provenance {
    * receipt), which never carries this flag. Present only when true.
    */
   readonly stampOnly?: true;
+  /** Positive server receipt plus explicit pending participation; absence is not non-adoption. */
+  readonly unadopted?: true;
 }
 
 export type Role = 'verified' | 'unverified' | 'n/a';
@@ -773,15 +777,30 @@ export function isUnverifiedProvenance(p: Provenance): boolean {
 }
 
 export type ProvenanceSubject =
+  | { readonly node: unknown }
   | { readonly value: unknown }
   | { readonly setting: unknown; readonly target?: unknown }
   | { readonly link: unknown; readonly context?: LinkContext };
 
 /** THE one question, for a starting value (`observed_state`), an option setting (its cell, and the node it sets) or a link. */
 export function provenanceOf(subject: ProvenanceSubject): Provenance {
+  if ('node' in subject) return nodeIntroductionOf(subject.node);
   if ('value' in subject) return valueProvenanceOf(subject.value);
   if ('setting' in subject) return settingProvenanceOf(subject.setting, subject.target);
   return linkProvenanceOf(subject.link, subject.context);
+}
+
+/** Structural introduction, never scalar authorship. Only the server widening receipt is evidence.
+ * The widening producer keeps this receipt through admission/persistence; the existing adoption writer
+ * changes participation to included. Missing receipts (including the legacy capacity capture) stay unknown.
+ */
+export function nodeIntroductionOf(node: unknown): Provenance {
+  const n = rec(node);
+  const receipt = n?.kind === 'risk' ? DraftRiskWidening.safeParse(n.draft_widening)
+    : n?.kind === 'option' ? DraftOptionWidening.safeParse(n.draft_widening) : undefined;
+  if (receipt?.success !== true) return P('unknown');
+  return P('ai', { structural: true, accepted: n?.kind === 'option' && n.analysis_participation === 'included',
+    ...(n?.analysis_participation === 'retained_excluded' && n.proposed_by === 'olumi' ? { unadopted: true as const } : {}) });
 }
 
 // ── Starting values ─────────────────────────────────────────────────────────

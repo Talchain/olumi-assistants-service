@@ -487,6 +487,13 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         );
       }
 
+      const approvedInput = approvedLinkInputFor(invocation.payload.scenario_id, invocation.payload.turn_id, parsed.from, parsed.to);
+      if (!reviewOnly && approvedInput && (approvedInput.claim.origin === 'unknown'
+        || (approvedInput.claim.origin === 'ai' && approvedInput.claim.basis.trim() === '')
+        || approvedInput.claim.subject.from !== fromLabel || approvedInput.claim.subject.to !== toLabel)) {
+        throw new D1HandlerError('PARAMETER_INVALID', 'The approved link has no supported source for this subject.',
+          { userGuidance: 'Nothing was changed. Prepare a supported statement or a new estimate with its own basis.' });
+      }
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const edge = clone.edges.find(
           (e) => e.from === parsed.from && e.to === parsed.to,
@@ -582,8 +589,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           } as typeof edge.provenance;
           edge.provenance_display = 'user_set';
         }
-        const approvedInput = approvedLinkInputFor(invocation.payload.scenario_id, invocation.payload.turn_id, parsed.from, parsed.to);
-        if (approvedInput) {
+        if (approvedInput && !reviewOnly) {
           edge.provenance = { ...edge.provenance,
             source: sourceForLinkInput(approvedInput.claim),
             magnitude: approvedInput.claim.origin === 'unknown' ? undefined : approvedInput.claim.origin === 'ai' ? 'olumi_estimate' : 'user_stated',

@@ -209,7 +209,11 @@ export function amendAgentProposal(record: ProposalRecord, original: StructuredP
     const keeps = Number.isFinite(currentMagnitude) && e.band === strengthBandFromEdgeBand(edgeBandFromMagnitude(currentMagnitude));
     const magnitude = keeps ? currentMagnitude : EDGE_STRENGTH_MIDPOINTS[edgeBandFromStrengthBand(e.band!)];
     if (keeps) reviewed.add(key);
-    return { ...o, value: { ...o.value, magnitude, band: edgeBandFromStrengthBand(e.band!), intent: keeps ? 'confirm_current' : 'set', author: 'user_stated' } };
+    return { ...o, value: { ...o.value, magnitude, band: edgeBandFromStrengthBand(e.band!), intent: keeps ? 'confirm_current' : 'set', author: 'user_stated',
+      // The bound form edit is a new human band; the old AI claim cannot describe it.
+      // Its prior proposal remains in user_edits. Re-selecting the stored band remains review only.
+      ...(!keeps ? { input_claim: { origin: 'human', basis: '', source_quote: '',
+        subject: { from: f.from_label, to: f.to_label } } } : {}) } };
   });
   const userEdits: UserEdit[] = record.fields.map(f => {
     const e = wanted.get(f.field_id);

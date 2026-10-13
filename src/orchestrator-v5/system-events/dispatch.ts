@@ -3375,6 +3375,7 @@ export type CommitOptionLevelsInput = {
     readonly value: number;
     /** Whose level: an Olumi level is stamped through the server-side adoption authority, never from this string alone. */
     readonly author: 'user_specified' | 'model_proposed';
+    readonly basis?: string;
     /** The level as the user gave it, and the range it was normalised on — kept on the cell (all three, or none). */
     readonly raw_value?: number;
     readonly unit?: string;
@@ -3392,6 +3393,7 @@ export type CommitOptionLevelsInput = {
     readonly unit?: string;
     /** Whose value: an Olumi value is stamped as the user's assumption by the writer's adoption authority. */
     readonly author: 'user_specified' | 'model_proposed';
+    readonly basis?: string;
   }[];
   /** Ranges for factors holding a bare amount and no range ("a range taken from your figure"), in the SAME commit. */
   readonly frames?: readonly { readonly factor_id: string; readonly cap: number }[];
@@ -3401,6 +3403,8 @@ export type CommitOptionLevelsInput = {
    * a moved link or an in-use definitional link refuses the whole set (`refused.link`).
    */
   readonly link_strengths?: readonly {
+    readonly input_claim?: import('../../cee/provenance/approved-link-input.js').LinkInputClaim;
+    readonly previous_input?: unknown;
     readonly from: string;
     readonly to: string;
     /** |mean| the link lands on. */
@@ -3524,7 +3528,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
         ...(l.likely_range !== undefined ? { likely_range: l.likely_range } : {}) } } : {}) }));
   // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
   const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
-    scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value }));
+    scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value, ...(l.basis !== undefined ? { basis: l.basis } : {}) }));
   // Digested in `computeRequestHash`'s format over every link, level and the base revision (informational;
   // the idempotency key is (scenario_id, turn_id)).
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
@@ -3547,10 +3551,11 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(gapInput.declarations.length > 0 ? { optionGaps: gapInput.declarations } : {}),
     fenceRefusalReachesCaller: true,
     ...(input.values !== undefined && input.values.length > 0 ? { values: input.values.map(v => ({ factorId: v.factor_id, value: v.value,
-      ...(v.unit !== undefined ? { unit: v.unit } : {}), ...(v.author === 'model_proposed' ? { adopted: true } : {}) })) } : {}),
+      ...(v.unit !== undefined ? { unit: v.unit } : {}), ...(v.author === 'model_proposed' ? { adopted: true, ...(v.basis !== undefined ? { basis: v.basis } : {}) } : {}) })) } : {}),
     ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames.map(f => ({ factorId: f.factor_id, cap: f.cap })) } : {}),
     ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { linkStrengths: input.link_strengths.map(l => ({
       from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band,
+      ...(l.input_claim ? { inputClaim: l.input_claim, previousInput: l.previous_input } : {}),
       // L4 (c): a `confirm_current` is a REVIEW, never an adoption — the adoption authority is for a `set` only
       // (`adopted_estimate_not_a_set`). D1 (DL 12 Oct, Batch D): Olumi's band on a placeholder now arrives as a `set` at the
       // band's midpoint (a placeholder has no current band), so it is adopted here as Olumi's estimate, never its default.

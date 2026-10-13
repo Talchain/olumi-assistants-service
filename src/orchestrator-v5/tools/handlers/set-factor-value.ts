@@ -33,7 +33,7 @@ import type { HandlerFact, SetFactorValueHandlerFact } from '@talchain/schemas/o
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
-import { APPROVED_ADOPTION_SOURCE, approvedAdoptionSourceFor } from '../../agent-lane/approved-adoption-context.js';
+import { APPROVED_ADOPTION_SOURCE, approvedAdoptionSourceFor, approvedAdoptionBasisFor } from '../../agent-lane/approved-adoption-context.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -576,6 +576,9 @@ export function createSetFactorValueHandler(): HandlerFn {
       ? approvedAdoptionSourceFor(invocation.context.session_id, targetId, normalised.raw_value)
       : undefined;
 
+    const adoptedBasis = adoptedSource === undefined ? undefined
+      : approvedAdoptionBasisFor(invocation.context.session_id, targetId, normalised.raw_value);
+
     const after: ObservedSnapshot = {
       value: normalised.value,
       raw_value: normalised.raw_value,
@@ -790,6 +793,7 @@ export function createSetFactorValueHandler(): HandlerFn {
         // An approved adoption of Olumi's figure (defined only when there is no panel
         // provenance — see `adoptedSource`) is stored as an assumption, not as typed.
         ...(adoptedSource !== undefined ? { source: adoptedSource } : {}),
+        ...(adoptedBasis !== undefined ? { basis: adoptedBasis } : {}),
         // ⭐ ORIGIN AND ACCEPTANCE ARE TWO FACTS (DL #75 5921002291; AIQ 5921018606). `user_assumption` says
         // whose NUMBER it is (Olumi's, adopted); the approval itself is recorded as REVIEW, the same carrier the
         // same-value confirm (below) and an adopted link band (`adjust-edge-strength.ts`) already write. Not a hash
@@ -811,6 +815,7 @@ export function createSetFactorValueHandler(): HandlerFn {
       // ⭐ AND EVERY AUTHORING WRITE CLEARS IT — the same rule as `elicited_from` and `extractionType` below. A review
       // is of the figure that was there; once someone writes a different figure (the user's own, a colleague's) that
       // review describes nothing, and left in place it would tell a reader Olumi's accepted estimate is still here.
+      if (adoptedBasis === undefined) delete (merged as { basis?: unknown }).basis;
       if (adoptedSource === undefined) {
         delete (merged as { reviewed_by_user?: unknown }).reviewed_by_user;
       }

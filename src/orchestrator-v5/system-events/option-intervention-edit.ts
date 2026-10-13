@@ -1,3 +1,5 @@
+import { approvedLevelBasisFor } from '../agent-lane/approved-adoption-context.js';
+import { withApprovedLinkInput, type LinkInputClaim } from '../../cee/provenance/approved-link-input.js';
 import { proposedFrameForLevels, levelOnFinalFrame, preserveSiblingQuantities, type ReencodedSibling } from '../agent-lane/level-batch-frame.js';
 import { applyTeamShareEdit, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../goal-target/team-share-write.js';
 import { withApprovedShareByDateWrite } from '../goal-target/share-by-date-carrier.js';
@@ -119,6 +121,7 @@ export interface OptionInterventionEditInput {
    * stamp. Never from a wire field: `executeOptionInterventionEdit` derives it server-side.
    */
   readonly source?: typeof APPROVED_LEVEL_ADOPTION_SOURCE;
+  readonly basis?: string;
   /** Canvas edits may derive display coordinates; explicit approval batches may not. */
   readonly inferFactorFigure?: boolean;
   /**
@@ -146,7 +149,7 @@ export interface OptionInterventionTransactionInput extends OptionInterventionEd
 type OptionInterventionStore = NonNullable<Parameters<typeof commitDirectAnswer>[2]>;
 
 /** One (option, factor) level this commit writes, with the cell's stamp when it is not the user's own. */
-export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source' | 'figure'>;
+export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source' | 'figure' | 'basis'>;
 
 /**
  * Compare to the original persisted bytes, not two independently normalised
@@ -192,7 +195,8 @@ export function optionInterventionBatchPostimageIsScoped(
     const newNode = newNodes[0]!;
     const entry = InterventionV3.safeParse(newNode.interventions?.[target.factorId]);
     if (!entry.success || entry.data.value !== target.modelValue
-      || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId) return false;
+      || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId
+      || (target.basis !== undefined && entry.data.reasoning !== target.basis)) return false;
     const approved = target.figure?.likely_range;
     if (approved !== undefined && !isDeepStrictEqual(entry.data.range,
       { low: approved.low, high: approved.high, meaning: 'likely_range', source: 'user_specified' })) return false;
@@ -269,9 +273,9 @@ export function applyOptionInterventionEdit(input: OptionInterventionTransaction
   | OptionInterventionCandidate
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string } {
-  const { optionId, factorId, modelValue, source, figure, ...rest } = input;
+  const { optionId, factorId, modelValue, source, figure, basis, ...rest } = input;
   const result = applyOptionInterventionBatch({ ...rest,
-    targets: [{ optionId, factorId, modelValue, ...(source !== undefined ? { source } : {}), ...(figure !== undefined ? { figure } : {}) }] });
+    targets: [{ optionId, factorId, modelValue, ...(basis !== undefined ? { basis } : {}), ...(source !== undefined ? { source } : {}), ...(figure !== undefined ? { figure } : {}) }] });
   return result.kind === 'refused' ? { kind: 'refused', reason: result.reason } : result;
 }
 
@@ -295,7 +299,7 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
     const target = input.targets[i]!;
     const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph, inferFactorFigure: input.inferFactorFigure,
       optionId: target.optionId, factorId: target.factorId, modelValue: target.modelValue,
-      expectedGraphHash: input.expectedGraphHash, ...(target.source !== undefined ? { source: target.source } : {}),
+      expectedGraphHash: input.expectedGraphHash, ...(target.basis !== undefined ? { basis: target.basis } : {}), ...(target.source !== undefined ? { source: target.source } : {}),
       ...(target.figure !== undefined ? { figure: target.figure } : {}) });
     if (prepared.kind === 'refused') return refuse(prepared.reason, i);
     if (prepared.kind === 'unchanged') continue;
@@ -379,6 +383,7 @@ export interface ApprovedFactorValue {
    * adoption authority (`runWithApprovedAdoption`), never as the user's own figure. It can only narrow the stamp.
    */
   readonly adopted?: boolean;
+  readonly basis?: string;
 }
 /**
  * A range for a factor that holds a bare amount and declares none — the one its figure (or the level read on it) was
@@ -495,7 +500,7 @@ async function applyApprovedFactorValues(
       event: event as never, requestId: ctx.requestId, persistedGraph: working, priorFacts: [],
     });
     const res = v.adopted === true
-      ? await runWithApprovedAdoption({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, targetId: v.factorId, rawValue: v.value }, write)
+      ? await runWithApprovedAdoption({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, targetId: v.factorId, rawValue: v.value, ...(v.basis !== undefined ? { basis: v.basis } : {}) }, write)
       : await write();
     if (res.kind !== 'mutated') return refuse(`value_${res.reason}`, i);
     working = res.mutatedGraph;
@@ -538,6 +543,8 @@ async function applyApprovedFactorValues(
  * refusal) once per link, IN MEMORY, and committed as ONE append — all of them or none.
  */
 export interface ApprovedLinkStrength {
+  readonly inputClaim?: LinkInputClaim;
+  readonly previousInput?: unknown;
   readonly from: string;
   readonly to: string;
   /** |mean| the link lands on: the band's midpoint (`set`), or the current |mean| kept (`confirm_current`). */
@@ -749,11 +756,15 @@ async function applyApprovedLinkStrengths(
     // A review of Olumi's band holds the link's figure: no band context, so no spread (DEFECT 1). The writer still sizes a
     // placeholder on review (`sizedByApproval`, L4 c).
     try {
-      res = l.adopted
+      const writeWithOrigin = async () => l.adopted
         ? await runWithApprovedLinkAdoptions([{ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, magnitude: l.magnitude, band: l.band }], write)
         : l.review === true
           ? await write()
           : await runWithStatedLinkBand({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, band: l.band }, write);
+      res = l.inputClaim && l.intent === 'set'
+        ? await withApprovedLinkInput({ scenario: ctx.scenarioId, turn: ctx.turnId, from: l.from, to: l.to,
+          claim: l.inputClaim, previous: l.previousInput }, writeWithOrigin)
+        : await writeWithOrigin();
     } catch {
       return refuse('canonical_graph_unavailable', i);
     }
@@ -933,7 +944,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // Set LAST and unconditionally: a `source` a caller slipped onto the input is overwritten, never kept.
   let targets: OptionLevelTarget[] = input.targets.map(t => {
     const source = approvedLevelSourceFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
-    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
+    const basis = approvedLevelBasisFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
+    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(basis !== undefined ? { basis } : {}), ...(source !== undefined ? { source } : {}),
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   // Decide value-only no-ops on the original graph, before attaching any range.
@@ -1616,7 +1628,7 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     kind: 'prepared',
     operation: {
       ...operation,
-      value: { ...(operation.value as Record<string, unknown>), source: input.source },
+      value: { ...(operation.value as Record<string, unknown>), source: input.source, ...(input.basis !== undefined ? { reasoning: input.basis } : {}) },
       rationale: `Records the level Olumi proposed, and the user approved, for ${option.label} on ${factor.label}.`,
     },
     ...withLink,

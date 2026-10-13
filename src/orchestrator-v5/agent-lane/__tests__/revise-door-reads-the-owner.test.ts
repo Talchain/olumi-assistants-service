@@ -1,3 +1,4 @@
+import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 /**
  * ⛔ THE USER'S SALARIES WERE STORED AS OLUMI'S AT THE REVISE DOOR (served CEE 5d73351, journey E, 2/2 drafts; #72 5882023751).
  *
@@ -42,6 +43,12 @@ async function authorship(graph: unknown, text: string, values: Record<string, n
     { scenario_id: '550e8400-e29b-41d4-a716-4466554400f2', authenticated_user_id: null, request_id: 'r', user_text: text },
     { assumptions: Object.entries(values).map(([factor_label, value]) => ({ user_stated: true, factor_label, value, unit: unitOf(graph, factor_label), basis: 'as the user said', revise: true })) },
   ) as R;
+  if (r.refusal === 'origin_unknown') {
+    // Unknown is refused, not stored as a new AI estimate. The dispatch above permits reads only.
+    expect(r).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
+    expect(store.outstanding('550e8400-e29b-41d4-a716-4466554400f2', null)).toEqual([]);
+    return Object.fromEntries(Object.keys(values).map(label => [label, 'unknown']));
+  }
   expect(r.ok, JSON.stringify(r)).toBe(true);
   const p = store.get(r.proposal_id)!;
   const labelOf = new Map((graph as { nodes: { id: string; label: string }[] }).nodes.map((n) => [n.id, n.label] as const));
@@ -54,7 +61,7 @@ describe('the revise door reads a figure\'s owner the add-factor door\'s way (jo
   });
 
   it.each([['D1', E1], ['D2', E2]])('CONTROL (served %s): the SWAP is never the user\'s', async (_d, g) => {
-    expect(await authorship(g, SERVED, { [SENIOR]: 65000, [JUNIOR]: 120000 })).toEqual({ [SENIOR]: 'model_proposed', [JUNIOR]: 'model_proposed' });
+    expect(await authorship(g, SERVED, { [SENIOR]: 65000, [JUNIOR]: 120000 })).toEqual({ [SENIOR]: 'unknown', [JUNIOR]: 'unknown' });
   });
 
   it('RED (DL\'s typed clarification): each figure binds to its owner', async () => {
@@ -62,16 +69,16 @@ describe('the revise door reads a figure\'s owner the add-factor door\'s way (jo
   });
 
   it('RED (the swap AIQ named): under the DL\'s typed clarification, senior £65k is NOT the user\'s — the plain reading stored it as theirs', async () => {
-    expect(await authorship(E1, DL_TYPED, { [SENIOR]: 65000 })).toEqual({ [SENIOR]: 'model_proposed' });
+    expect(await authorship(E1, DL_TYPED, { [SENIOR]: 65000 })).toEqual({ [SENIOR]: 'unknown' });
   });
 
   it('CONTROL: the salary-spend limit\'s £400k is never a senior salary', async () => {
-    expect(await authorship(E1, 'Keep annual salary spend under £400k.', { [SENIOR]: 400000 })).toEqual({ [SENIOR]: 'model_proposed' });
+    expect(await authorship(E1, 'Keep annual salary spend under £400k.', { [SENIOR]: 400000 })).toEqual({ [SENIOR]: 'unknown' });
   });
 
   it('CONTROLS (journey A, served 13acc577): the user\'s churn stays theirs; an MRR figure is never the price', async () => {
     expect(await authorship(A, 'For the record, our current monthly churn is 3.7%.', { 'Monthly churn': 3.7 })).toEqual({ 'Monthly churn': 'user_stated' });
-    expect(await authorship(A, 'Our MRR is £12,000.', { 'Pro plan price': 12000 })).toEqual({ 'Pro plan price': 'model_proposed' });
+    expect(await authorship(A, 'Our MRR is £12,000.', { 'Pro plan price': 12000 })).toEqual({ 'Pro plan price': 'unknown' });
   });
 });
 
@@ -86,6 +93,6 @@ describe('one reading at both doors that write a factor\'s value', () => {
   it.each(cases)('%s: revise door == add-factor matcher', async (_n, g, text, label, value) => {
     const unit = unitOf(g, label);
     const addFactor = figureTheUserWroteFor(value, unit, text, newFactorScopeIn(g as never, label, unit, []));
-    expect(await authorship(g, text, { [label]: value })).toEqual({ [label]: addFactor ? 'user_stated' : 'model_proposed' });
+    expect(await authorship(g, text, { [label]: value })).toEqual({ [label]: addFactor ? 'user_stated' : 'unknown' });
   });
 });

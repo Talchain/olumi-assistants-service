@@ -396,8 +396,7 @@ describe('R3 F5 I1.1 (#85 5933250962): the TOOL the model sees takes a level wit
   });
   it('RED: its words say leave it out and record the level on its own — and never tell the model to ask first', () => {
     const words = String(tool().parameters.properties.goal_is?.description);
-    expect(words).toMatch(/Otherwise leave it out/);
-    expect(words).toMatch(/recorded on its own, with or without a target/);
+    expect(words).toBe("Only a supported verified statement of the target comparator; otherwise omit it. This current-level proposal does not require a target and does not invent one.");
     expect(words).not.toMatch(/If they have not said, ask them/);
   });
   it('CONTROL: the four comparators are still the only values it takes', () => {

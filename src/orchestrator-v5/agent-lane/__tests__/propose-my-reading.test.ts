@@ -111,13 +111,16 @@ describe('⭐ propose_link_strength: the user\'s own words are proposed as a typ
     }
   });
 
-  it('CONTRAST (2b): "very high" written only in an EARLIER turn, and this turn is "Yes." → refused (this turn\'s words only)', async () => {
+  it('retained verified words support the same link even when this turn is Yes.', async () => {
     const w = world(true);
     const store = new ProposalStore();
     const ctx = { ...said('Yes.'), user_text: `${PAUL}\nYes.` };
     const p = await createAgentCapabilities(w.d, store).proposeLinkStrength!(ctx, READING as never);
-    expect(p.refusal).toBe('strength_not_stated');
-    expect(store.outstanding(SCENARIO, null)).toEqual([]);
+    expect(p.ok).toBe(true);
+    expect(p.input_claim).toEqual({ origin: 'human', basis: '', source_quote: PAUL,
+      subject: { from: 'Price sensitivity', to: 'Monthly churn' } });
+    expect(store.outstanding(SCENARIO, null).map(p => p.proposal_id)).toEqual([p.proposal_id]);
+    expect(w.sent).toEqual([]);
   });
 
   it('CONTRAST (3): a band the user wrote literally ("it\'s very strong") → the unchanged path: a proposal WITHOUT an interpretation', async () => {
@@ -262,7 +265,8 @@ describe('the Agent is told how to propose its reading, and when to ask', () => 
       const tool = AGENT_TOOLS.find((t) => t.name === name)!;
       const props = (tool.parameters as { properties: Record<string, { type?: string; description?: string }>; required?: string[] }).properties;
       expect(props['from_words']?.type, name).toBe('string');
-      expect(String(props['from_words']?.description), name).toMatch(/exact phrase/);
+      if (name === 'propose_link_strength') expect(props['from_words']?.description).toBe("The actual source words for this statement, retaining its subject, uncertainty, negation, bounds and conditions. Use a verified retained human statement as well as this turn when applicable; assistant, chip and uncertain-origin text is not new human authority. Keep the complete relevant source separate from your interpretation and new estimate basis.");
+      else expect(String(props['from_words']?.description), name).toMatch(/exact phrase/);
       expect((tool.parameters as { required?: string[] }).required ?? [], name).not.toContain('from_words');
     }
   });
