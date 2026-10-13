@@ -70,7 +70,9 @@ function graphWith(riskValued: boolean, riskLabel = 'Demand shortfall'): Rec {
 
 let historicalZero = false;
 let historicalWarning = false;
+// The served Run's own warnings are kept (they carry its withheld finding); the historical zero warning is added beside them.
 const savedResult = () => historicalWarning ? { ...SERVED.block, enrichment: { ...(SERVED.block.enrichment as Rec), inference_warnings: [
+  ...((SERVED.block.enrichment as Rec).inference_warnings as unknown[] ?? []),
   { code: 'GOAL_ANCESTOR_DATA_GAP', message: "Root ancestor(s) 'demand_shortfall' carry no observed value and defaulted to 0.0." },
 ] } } : SERVED.block;
 const ready = () => ({ ...READY, ...(historicalZero ? { unvalued_roots: [{ node_id: 'demand_shortfall', label: riskLabel, kind: 'risk', treated_as: 'zero' }] } : {}) });
