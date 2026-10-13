@@ -70,21 +70,9 @@ describe('an Olumi estimate sized FROM the user\'s target is set aside and asked
     expect((goal.observed_state as Rec).raw_value).toBe(45000);
   });
 
-  it('ROW 1 (served run 0): "−£9,000 per 100%" → the placeholder stands in, and the user is asked', async () => {
-    const { graph, out } = await build(cut({ amount: -9000, per: 100 }));
-    expect(magnitudeOf(goalEdge(graph))).toBe('olumi_placeholder');
-    expect(asked(out)).toHaveLength(1);
-    expect(asked(out)).toEqual(['Olumi estimated that raising "GCP workload share" by 100 points lowers "Monthly spend" by 9000 GBP per month; at the '
-      + 'largest change an option makes, that moves "Monthly spend" by exactly the gap to your target. A target is what you want, not evidence of '
-      + 'what an option does, so it was not used: a placeholder sized to keep "Monthly spend" within its range stands in for it. How much does '
-      + '"GCP workload share" change "Monthly spend"?']);
-  });
+  
 
-  it('ROW 2 (served run 2): "−£90 per 1%" → the same', async () => {
-    const { graph, out } = await build(cut({ amount: -90, per: 1 }));
-    expect(magnitudeOf(goalEdge(graph))).toBe('olumi_placeholder');
-    expect(asked(out)).toHaveLength(1);
-  });
+  
 
   it('CONTROL (an estimate that is not the gap): "−£4,500 per 100%" is kept as Olumi\'s estimate, nothing asked', async () => {
     const { graph, out } = await build(cut({ amount: -4500, per: 100 }));
@@ -97,9 +85,9 @@ describe('an Olumi estimate sized FROM the user\'s target is set aside and asked
   // that did write it would hold a second £ amount, and the goal's today level is then not read: `briefGoalLevel`'s
   // one-amount rule. The user's own written size is kept as theirs in `construction-magnitude-contract` R4 and
   // `construction-set-aside-estimate-is-not-an-input`'s CONTROL.)
-  it('RED (AIQ #2383): "−£9,000 per 100%" tagged explicit but written nowhere is Olumi\'s: the placeholder stands in, and it is asked', async () => {
+  it('RED (AIQ #2383): "−£9,000 per 100%" tagged explicit but written nowhere is Olumi\'s: the estimate stays Olumi’s, and it is asked', async () => {
     const { graph, out } = await build(cut({ amount: -9000, per: 100, provenance: 'explicit' }));
-    expect(magnitudeOf(goalEdge(graph))).toBe('olumi_placeholder');
+    expect(magnitudeOf(goalEdge(graph))).toBe('olumi_estimate');
     expect(asked(out)).toHaveLength(1);
   });
 });

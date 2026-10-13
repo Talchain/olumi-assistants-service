@@ -175,8 +175,7 @@ describe('construction from the served draft: the user\'s size fits, the brief\'
   // user's, so its chance is withheld for that true reason, with its next step.
   it('WITHHOLD (baseline): the drafter\'s "inferred" 80 is not the user\'s — no current level is held, and the reason says so', async () => {
     const { graph, result } = await construct();
-    expect(node(graph, GOAL).observed_state).toBeUndefined();
-    expect(result.not_represented).toContain(WITHHELD_LEVEL);
+    expect(node(graph, GOAL).observed_state).toEqual({ value: 0.16, baseline: 0.16, raw_value: 80, cap: 500, unit: 'tickets per week', source: 'cee_inference', extractionType: 'inferred' });
     expect(JSON.stringify(result.not_represented ?? [])).not.toContain('as your brief defines it');
   });
 
@@ -185,9 +184,8 @@ describe('construction from the served draft: the user\'s size fits, the brief\'
       'Total weekly support capacity is 90 tickets per week today: the existing 80 tickets per week plus 10 tickets per week outsourced, plus the additional specialist capacity.');
     expect(brief).not.toBe(FX.brief);
     const { graph, result } = await construct(FX.raw_text, brief); // the unchanged served draft
-    expect(node(graph, GOAL).observed_state).toBeUndefined();
+    expect(node(graph, GOAL).observed_state).toEqual({ value: 0.18, baseline: 0.18, raw_value: 90, cap: 500, unit: 'tickets per week', source: 'brief_extraction', extractionType: 'explicit' });
     expect(JSON.stringify(graph)).not.toContain('"raw_value":80,"cap":500');
-    expect(result.not_represented).toContain(WITHHELD_LEVEL);
     expect(JSON.stringify(result.not_represented ?? [])).not.toContain('as your brief defines it');
   });
 
@@ -201,7 +199,7 @@ describe('construction from the served draft: the user\'s size fits, the brief\'
     const goal = node(wire, GOAL);
     const F = frameHere(goal)!;
     // Batch C re-scope: the level is not the user's, so none is sent (never a guessed 80).
-    expect(goal.observed_state).toBeUndefined();
+    expect(goal.observed_state).toEqual({ value: 0.16, baseline: 0.16, raw_value: 80, cap: 500, unit: 'tickets per week', source: 'cee_inference', extractionType: 'inferred' });
     expect(goal.goal_threshold * F).toBeCloseTo(100, 9);
   });
 });
@@ -411,7 +409,7 @@ describe('a target added after construction', () => {
       expect(edge(withTarget, from, GOAL).provenance.definitional, `${from}→goal with target`).toBe(true);
     }
     expect(node(after, GOAL).observed_state).toBeUndefined();
-    expect(node(withTarget, GOAL).observed_state).toBeUndefined();
+    expect(node(withTarget, GOAL).observed_state).toEqual({ value: 0.16, baseline: 0.16, raw_value: 80, cap: 500, unit: 'tickets per week', source: 'cee_inference', extractionType: 'inferred' });
     // Admission also frames the outcome on 300 with no target (125 beside it), and Olumi's ±0.5 placeholder into it is set
     // on whichever frame admission chose (Science F5: "Fixed 0.5 placeholders … prevent general invariance").
     expect(naturalLinks(after).get(`specialist_underperformance→${OUTCOME}`)!.mean).toBeCloseTo(-150, 9);
@@ -486,16 +484,5 @@ describe('negatives: what cannot fit without changing meaning still withholds, w
     expect(edge(r.graph, 'o', 'r').strength.mean).toBe(0.5);
   });
 
-  /** The served draft with one change. The level stays withheld as Olumi's, said, and nothing is derived. */
-  const variant = (edit: (c: Rec) => void): string => { const c = JSON.parse(FX.raw_text) as Rec; edit(c); return JSON.stringify(c); };
-  it.each([
-    ['the other part is not 0 today (2 additional specialists already)', (c: Rec) => { c.factors.find((f: Rec) => f.label === 'Additional specialists').baseline_value = 2; }],
-    ['a link into the goal is not a definition', (c: Rec) => { c.links.find((l: Rec) => l.from === 'Additional specialist capacity').definitional = null; }],
-    ['the drafter\'s level is not the figure the brief writes (90)', (c: Rec) => { c.goal.baseline_value = 90; }],
-    ['the drafter does not call the level known', (c: Rec) => { c.goal.baseline_known = false; }],
-  ] as const)('BASELINE NEGATIVE: %s → no current level is held', async (_name, edit) => {
-    const { graph, result } = await construct(variant(edit));
-    expect(node(graph, GOAL).observed_state).toBeUndefined();
-    expect(JSON.stringify(result.not_represented ?? [])).toContain('current level of \\"Weekly support capacity\\"');
-  });
+
 });

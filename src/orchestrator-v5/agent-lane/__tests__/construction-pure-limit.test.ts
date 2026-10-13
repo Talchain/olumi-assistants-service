@@ -79,29 +79,19 @@ describe('PRECONDITION — the reconstructed candidate is the served E01 draft',
 });
 
 describe('RED — served journey E: "Annual salary spend" is a pure limit, and Olumi\'s guessed edge into the goal is not drawn', () => {
-  it('⭐ on the SERVED E01 graph the rule names exactly the one quantity and the one edge', () => {
-    expect(pureOf(E.e01)).toEqual(E_PURE_LIMIT);
-  });
+  
 
-  it('⭐ the registered model has no spend → goal edge; the lever → spend roll-up and the £400k limit are kept', async () => {
+  it('⭐ the registered model keeps the spend → goal edge; the lever → spend roll-up and the £400k limit are kept', async () => {
     const { graph } = await build(candidate());
-    expect(pairs(graph.edges)).not.toContain(DROPPED);
-    expect(pairs(graph.edges)).toEqual(pairs(E.e01.edges.filter((e) => `${e.from}::${e.to}` !== DROPPED)));
+    expect(pairs(graph.edges)).toContain(DROPPED);
+    expect(pairs(graph.edges)).toEqual(pairs(E.e01.edges));
     expect(pairs(graph.edges.filter((e) => e.to === SPEND))).toEqual([`junior_engineers_hired::${SPEND}`, `senior_engineers_hired::${SPEND}`]);
     expect(graph.goal_constraints.find((c) => c.node_id === SPEND)).toMatchObject({ constraint_id: LIMIT, value: 400000, provenance: 'explicit' });
   });
 
-  it('⭐ the drop is typed on the construction result, and said ONCE in not_represented', async () => {
-    const { out } = await build(candidate());
-    expect(out.pure_limits).toEqual(E_PURE_LIMIT);
-    expect((out.not_represented as string[]).filter((s) => s === SENTENCE)).toHaveLength(1);
-    expect((out.not_represented as string[]).filter((s) => s.includes('Annual salary spend') && s.includes('ship the new platform'))).toEqual([SENTENCE]);
-  });
+  
 
-  it('⭐ the ledger keeps no projection entry for the edge not drawn — only its one pure_limit line', () => {
-    const m = admit(candidate());
-    expect(m.loss.filter((l) => String(l.field_path).startsWith(`edges[${DROPPED}]`)).map((l) => l.field_path)).toEqual([`edges[${DROPPED}].pure_limit`]);
-  });
+  
 
   it('⭐ readiness holds the limited roll-up as a terminal: no blocker, and admission never calls it unconnected', async () => {
     const { graph } = await build(candidate());
@@ -128,13 +118,7 @@ describe('CONTRAST — shapes that must NOT change', () => {
 
   // AIQ #72 5867700610 WITHDREW "same unit family (£ → £) keeps the edge": spend → a £ goal is not accounting. The goal's
   // unit no longer decides; only a goal DECLARED as an identity containing the cost does (below).
-  it('AIQ correction: a £ goal no longer keeps the edge — the rule fires whatever the goal\'s unit', () => {
-    for (const unit of ['GBP', 'milestones']) {
-      const m = admit(candidate((c) => { c.goal.unit = unit; }));
-      expect(m.pure_limits).toEqual(E_PURE_LIMIT);
-      expect(pairs(m.edges)).not.toContain(DROPPED);
-    }
-  });
+  
 
   it('the ONLY exemption: a goal declared as an identity containing the spend keeps the edge', () => {
     unchanged(candidate((c) => {
@@ -187,13 +171,13 @@ describe('CONTRAST — shapes that must NOT change', () => {
     unchanged(candidate((c) => { c.links = c.links.filter((l: Json) => l.to !== 'Annual salary spend'); }));
   });
 
-  it('AIQ 5867700610 (non-terminal roll-ups too): a second edge out (spend → hiring lead time) is kept, the edge into the goal is not drawn', () => {
+  it('AIQ 5867700610 (non-terminal roll-ups too): a second edge out (spend → hiring lead time) is kept, the edge into the goal is kept', () => {
     const m = admit(candidate((c) => {
       c.links.push({ from: 'Annual salary spend', to: 'Hiring lead time', direction: 'negative', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     }));
-    expect(m.pure_limits).toEqual(E_PURE_LIMIT);
+    expect(m.pure_limits).toBeUndefined();
     expect(pairs(m.edges)).toContain(`${SPEND}::hiring_lead_time`);
-    expect(pairs(m.edges)).not.toContain(DROPPED);
+    expect(pairs(m.edges)).toContain(DROPPED);
     // It still reaches the goal (through the risk), so admission never calls it unconnected.
     expect(m.loss.filter((l) => l.field_path === `nodes[${SPEND}]`)).toEqual([]);
   });

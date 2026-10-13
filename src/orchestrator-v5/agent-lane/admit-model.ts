@@ -81,7 +81,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedGoalLevelValue, verifiedOptionSetting } from './verified-option-setting.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
 const MAX_ID = 100;
@@ -1110,27 +1110,14 @@ function costRollupGoalEdges(
     if (goalIdentityParts.has(q.id)) continue;
     shapes.push({ q, levers: [...new Set(into.map((e) => e.from))], edge });
   }
-  // The precondition, to a fixed point: a roll-up whose edge is kept (asked) restores that edge for the others.
-  let drop = new Set(shapes.map((s) => s.q.id));
-  const onlyThrough = new Map<string, string[]>();
-  for (let changed = true; changed;) {
-    changed = false;
-    const kept = edges.filter((e) => !(e.to === goal.id && drop.has(e.from)));
-    for (const s of shapes) {
-      if (!drop.has(s.q.id)) continue;
-      const around = kept.filter((e) => e.from !== s.q.id && e.to !== s.q.id);
-      const stuck = s.levers.filter((l) => findMechanismPath(around, l, goal.id) === null);
-      if (stuck.length > 0) {
-        onlyThrough.set(s.q.id, stuck);
-        drop = new Set([...drop].filter((id) => id !== s.q.id));
-        changed = true;
-      }
-    }
-  }
+  // T4 A6: a cost limit does not establish that its causal edge is wrong.
+  // Preserve every such edge and surface Olumi's assumption for review.
+  const onlyThrough = new Map(shapes.map((s) => [s.q.id, s.levers.filter((l) =>
+    findMechanismPath(edges.filter((e) => e.from !== s.q.id && e.to !== s.q.id), l, goal.id) === null)]));
   const goalLabel = goal.label ?? goal.id;
   return {
-    pure_limits: shapes.filter((s) => drop.has(s.q.id)).map((s) => ({ node_id: s.q.id, label: s.q.label ?? s.q.id, dropped_edge_to: goal.id })),
-    asks: shapes.filter((s) => !drop.has(s.q.id)).map((s) => {
+    pure_limits: [],
+    asks: shapes.map((s) => {
       const direction = s.edge.effect_direction === 'negative' ? 'negative' : 'positive';
       return {
         node_id: s.q.id,
@@ -2969,17 +2956,10 @@ export function admitStatedGoalChange(
     }
     return null;
   })();
-  /**
-   * ⭐ RECOVERY BATCH C (ruling 9; amendments 7 and 10): a RELATIVE change on Olumi's own starting value is no longer refused
-   * outright. With a valid basis it is admitted as `estimate_only`: the base is written as OLUMI'S (`cee_inference`, never
-   * the user's), and the licence labels the chance "Provisional estimate using Olumi's assumed starting value: B", adding that
-   * B's own uncertainty is not included. A missing base, a base stated for another quantity, or a missing denominator stays
-   * refused. A LEVEL target on Olumi's base stays withheld (amendment 7: `admitModel`'s level guard).
-   * ⛔ S3 T5 D3 (L2): a base the drafter typed `explicit` that the brief does not write for this goal is OLUMI's too (C's rule:
-   * human only by positive attestation), never dropped. "400 paying customers at £20" drafted as £8,000 today was refused
-   * because only an `ai_proposed` base reached this branch, so the saved goal held no base at all.
-   */
-  const estimateOnly = notTheUsers !== null && fromBrief?.kind !== 'adopt' && frame === 'change_rel' && basis !== null
+  // T4 A2: both relative and absolute changes can retain an Olumi starting
+  // estimate on a valid basis. Missing levels, another quantity's figure and
+  // invalid units/reference/period still cannot supply that baseline.
+  const estimateOnly = notTheUsers !== null && fromBrief?.kind !== 'adopt' && basis !== null
     && typeof today === 'number' && Number.isFinite(today) && notTheUsers !== 'stated for another quantity';
   if (notTheUsers !== null && fromBrief?.kind !== 'adopt' && !estimateOnly) {
     // ⛔ AIQ 5894808343 (1), no-regret: the brief DID give a figure, so "was not stated" would be false.
@@ -3019,8 +2999,8 @@ export function admitStatedGoalChange(
     // OLUMI'S starting value, said as such by the licence (`estimate_only`); never `brief_extraction` / `user_stated`.
     return { node: withBasis({
       ...withBase,
-      observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goal.unit ? { unit: goal.unit } : {}), source: 'cee_inference', raw_value: level, cap: resolved.cap },
-    }) };
+      observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goal.unit ? { unit: goal.unit } : {}), source: 'cee_inference', extractionType: 'inferred', raw_value: level, cap: resolved.cap },
+    }), reading: `Olumi's provisional estimate of today's level of "${goal.metric}" is ${level}${goal.unit ? ` ${goal.unit}` : ''}; the change is measured from that assumption.` };
   }
   // ⭐ AIQ (b): OLUMI'S READING of the brief's figure. Never `user_stated` (`cee_inference`); the reading carries the
   // brief's clause and the words, keyed to the level it read (`goalLevelReadingWords`: a level the user states or edits
@@ -3508,7 +3488,9 @@ function admitOnce(
   const { model: foldedModel, found: rateOperandFolds } = foldPassThroughRateOntoUsersPrice(restatedModel);
   // ⛔ A goal read as a two-part product gets no third direct parent: a non-money factor's Olumi-sized link is re-pointed
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
-  const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  const { model: draftedModel, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  // Authenticate before framing or writing levels: an estimate never competes with the user's current figure.
+  const model = { ...draftedModel, factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) };
   const levelReading = { value: null as BriefGoalLevel | null };
 
   /**
@@ -3531,10 +3513,12 @@ function admitOnce(
     if (typeof f.plausible_max === 'number' && Number.isFinite(f.plausible_max) && f.plausible_max > 1) {
       capByLabel.set(f.label, f.plausible_max);
     }
-    // ⛔ ONLY A KNOWN BASELINE. An AI estimate (`baseline_known: false`) must never
-    // derive its own frame: a guess that sets the scale it is then read against
-    // is a guess dressed as a measurement.
-    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value, f.provenance);
+    // T4 A3: a coordinate frame is not evidence for the estimate. Derive it only
+    // for an already named unit, keep the inferred source and disclose the frame.
+    if (f.baseline_known || (typeof f.unit === 'string' && f.unit.trim() !== ''
+      && typeof f.baseline_value === 'number' && f.baseline_value >= 0)) {
+      noteMagnitude(f.label, f.baseline_value, f.baseline_known ? f.provenance : 'ai_proposed');
+    }
   }
   for (const o of model.options) {
     for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
@@ -3637,7 +3621,11 @@ function admitOnce(
   }
   const defaultedFrames: { label: string; frame: number }[] = [];
   for (const [label, largest] of largestByLabel) {
-    if (capByLabel.has(label) || largest <= 1) continue;
+    const unframedEstimate = model.factors.some((f) => f.label === label && !f.baseline_known
+      && (f.plausible_max === null || f.plausible_max === undefined)
+      && typeof f.unit === 'string' && f.unit.trim() !== ''
+      && typeof f.baseline_value === 'number' && Number.isFinite(f.baseline_value) && f.baseline_value >= 0);
+    if (capByLabel.has(label) || (largest <= 1 && !unframedEstimate)) continue;
     const frame = defaultFrameFor(largest);
     capByLabel.set(label, frame);
     defaultedFrames.push({ label, frame });
@@ -3775,7 +3763,8 @@ function admitOnce(
          * (`cee_inference`). No current level → nothing, and nothing is derived
          * from the target.
          */
-        const baselineRaw = model.goal.baseline_value;
+        const authenticatedLevel = verifiedGoalLevelValue(model, brief);
+        const baselineRaw = authenticatedLevel ?? model.goal.baseline_value;
         let observed_state: AdmittedNode['observed_state'];
         const withheld = (reason: string): void => {
           loss.push({
@@ -3786,24 +3775,12 @@ function admitOnce(
             severity: 'warn',
           } as RepairEntry);
         };
-        /**
-         * ⛔ AND ONLY A LEVEL THE BRIEF STATES (review 5824085993; RC ruling 5824518762,
-         * fix (a)). An estimate of the goal's current level would set the chance of
-         * reaching the user's target on Olumi's own guess, and nothing downstream says
-         * so for a goal (the inferred-value disclosure covers factors only). So an
-         * estimate is withheld from Goal fit and said, with the one step that makes it
-         * count. A target-only brief stays admissible: only the Goal-fit figure waits.
-         */
-        // ⛔ "Known" alone is not enough (verdict 5824647383): the strict schema cannot tie
-        // `baseline_known` to its provenance, so a level the model marks known but
-        // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
-        const estimated = goalLevelIsEstimated(model.goal);
-        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
-          withheld(
-            `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
-            `so no chance of reaching ${raw} is shown: that figure would rest on a guess, not on anything you ` +
-            `said. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
-          );
+        // T4 A1: a convertible Olumi starting value is retained with its source.
+        // Target-as-baseline and the shared unit/frame verdict remain independent guards.
+        const estimated = authenticatedLevel === null && goalLevelIsEstimated(model.goal);
+        if (estimated && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)
+          && (typeof model.goal.unit !== 'string' || model.goal.unit.trim() === '')) {
+          withheld(`Olumi's estimate of the current level of "${model.goal.metric}" (${baselineRaw}) cannot be put on the goal's scale until its unit is known.`);
         } else if (
           resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)
           && sameLevel(baselineRaw, raw) && !targetFigureWrittenAgain(baselineRaw, model.goal.unit)
@@ -3822,8 +3799,26 @@ function admitOnce(
             targetUnit: model.goal.unit,
           });
           if (verdict.admitted) {
-            // Only the user's stated level reaches here (see `estimated` above).
-            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap, verifiedGoalLevel(model, brief));
+            observed_state = estimated
+              ? { value: verdict.normalised, baseline: verdict.normalised, raw_value: baselineRaw,
+                  cap: resolved.cap, ...(model.goal.unit ? { unit: model.goal.unit } : {}),
+                  source: 'cee_inference', extractionType: 'inferred' }
+              : briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap, authenticatedLevel !== null || verifiedGoalLevel(model, brief));
+            if (!estimated && authenticatedLevel === null && !verifiedGoalLevel(model, brief)
+              && !goalLevelStated(baselineRaw, model.goal.unit)) {
+              // A draft's human-origin claim without a receipt stays unknown, never user-stated or Olumi-authored.
+              delete observed_state.source;
+              loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
+                before: baselineRaw, after: baselineRaw,
+                reason: `The origin of the current level of "${model.goal.metric}" (${baselineRaw}) is unverified.`,
+                severity: 'info' } as RepairEntry);
+            }
+            if (estimated) loss.push({
+              field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
+              before: baselineRaw, after: baselineRaw,
+              reason: `Olumi's provisional estimate of the current level of "${model.goal.metric}" is ${baselineRaw}${model.goal.unit ? ` ${model.goal.unit}` : ''}.`,
+              severity: 'info',
+            } as RepairEntry);
           } else {
             withheld(verdict.reason);
           }

@@ -18,8 +18,6 @@ import {
   labelMatchesBaseline,
 } from "../../cee/transforms/analysis-ready.js";
 import { nameMappingNeed } from "../../cee/transforms/option-status.js";
-import { isSwitch, resolveMagnitudeFrame } from "../../cee/magnitude/link-effect.js";
-import type { MagnitudeNode } from "../../cee/magnitude/link-effect.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 // The PUBLISHED blocker contract, used to decide which rows the refusal carrier
 // may keep. Imported rather than restated: a hand-copied field list here would
@@ -836,7 +834,7 @@ const BLOCKER_ISSUE_BY_TYPE = {
   constraint_dropped: {
     code: 'CONSTRAINT_REVIEW_REQUIRED',
     category: 'option_values',
-    message: ({ suffix }) => `Review the unresolved constraint${suffix}.`,
+    message: ({ suffix }) => `This limit was not checked${suffix}; analysis describes the current model without that check.`,
   },
 } as const satisfies Record<AnalysisBlockerTypeT, BlockerIssueShape>;
 
@@ -915,12 +913,12 @@ export function blockerIssue(
     ...(factorId ? { factor_id: factorId } : {}),
     ...(factorLabel ? { factor_label: factorLabel } : {}),
   };
-  if (status === 'needs_user_mapping' && !optionId && factorId) {
+  if (status === 'needs_user_mapping' && !optionId && factorId && blockerType !== 'constraint_dropped') {
     return {
       ...common,
       code: 'UNREACHABLE_CONTROLLABLE_FACTOR',
       category: 'option_mapping',
-      message: `Choose which option changes${suffix} and by how much.`,
+      message: `No option changes "${factorLabel ?? factorId}"; it remains part of the current model.`,
     };
   }
   // A carrier with no usable `blocker_type` at all is malformed, not
@@ -1208,7 +1206,7 @@ function relationshipAsk(option: unknown): string | undefined {
  *     (`hasSampledPrior`) — PLoT's only two ParameterUncertainty sources.
  *   · REACHES THE GOAL = any directed causal path.
  *
- * TWO DELIBERATE DEPARTURES FROM ISL:
+ * DELIBERATE DEPARTURE FROM ISL:
  *   · ISL does not flag a root that EVERY option intervenes on. It is flagged
  *     here: the status quo is the un-intervened world, which still reads the
  *     root at 0.0, and B1a reports every level as `o + (option − status quo)`.
@@ -1216,8 +1214,9 @@ function relationshipAsk(option: unknown): string | undefined {
  *     5860802299): such a root unvalued gave carry-on £80,358.51, and the same
  *     root valued at £49 gave the correct £75,000.00. The walk to the goal does
  *     not stop at an everywhere-pinned node for the same reason.
- *   · A switch (`isSwitch`, levels only 0/1) is exempt, because 0 is a real
- *     status-quo level for it ("not done"), not a placeholder.
+ * Binary option levels describe possible interventions, not today's state.
+ * Stated absence, explicit Olumi estimates and structural starting levels
+ * remain supported through their held level; binary shape supplies none.
  * Every sampled root kind is covered; risks carry a likelihood/magnitude ask.
  * Goal, option, decision and constraint (limit) nodes are not sampled roots.
  */
@@ -1245,10 +1244,6 @@ function goalRootsWithoutStatusQuoLevel(
     parents.set(edge.to, (parents.get(edge.to) ?? 0) + 1);
     children.set(edge.from, [...(children.get(edge.from) ?? []), edge.to]);
   }
-  const levelsOf = (id: string): number[] =>
-    payload.options
-      .map((option) => (option.interventions ?? {})[id])
-      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   const reachesGoal = (rootId: string): boolean => {
     const stack = [rootId];
     const seen = new Set([rootId]);
@@ -1271,6 +1266,10 @@ function goalRootsWithoutStatusQuoLevel(
     ((payload.blockers ?? []) as unknown[])
       .filter(isPlainObject)
       .filter((blocker) => readNonEmptyString(blocker.option_id) === null)
+      .filter((blocker) => {
+        const issue = blockerIssue(blocker, 0, payload.status);
+        return issue?.code !== 'CONSTRAINT_REVIEW_REQUIRED' && issue?.code !== 'UNREACHABLE_CONTROLLABLE_FACTOR';
+      })
       .map((blocker) => readNonEmptyString(blocker.factor_id)),
   );
   const gaps: Array<{ id: string; label: string; kind: GraphV3T['nodes'][number]['kind'] }> = [];
@@ -1291,14 +1290,6 @@ function goalRootsWithoutStatusQuoLevel(
     // event_risk.v1: an event risk's level is its OCCURRENCE, which ISL draws (0/1 per draw);
     // it is never held at zero, so it needs no level today. Only a block the write doors accept counts.
     if (EventRiskV1.safeParse(node.event_risk).success) continue;
-    const magnitudeNode: MagnitudeNode = {
-      label: node.label ?? node.id,
-      kind: 'factor',
-      scale_frame: (node as { scale_frame?: unknown }).scale_frame,
-      observed_state: observed as MagnitudeNode['observed_state'],
-      option_levels: levelsOf(node.id),
-    };
-    if (isSwitch(magnitudeNode, resolveMagnitudeFrame(magnitudeNode))) continue;
     if (!reachesGoal(node.id)) continue;
     gaps.push({ id: node.id, label: node.label ?? node.id, kind: node.kind });
   }
@@ -1578,13 +1569,21 @@ export function assessCanonicalAnalysisReadiness(
       blockingIssues,
       repairWiredFactorCountByOption(parsed.data),
     );
+    // T4 R4/R5: preserve these limitations as context, without blocking a Run.
+    // Missing root levels and structural/numeric defects below remain independent.
+    const policyIssues = blockingIssues.filter((issue) =>
+      issue.code === 'CONSTRAINT_REVIEW_REQUIRED' || issue.code === 'UNREACHABLE_CONTROLLABLE_FACTOR');
+    for (let i = blockingIssues.length - 1; i >= 0; i--) {
+      if (policyIssues.includes(blockingIssues[i]!)) blockingIssues.splice(i, 1);
+    }
     // PLACEHOLDER-ZERO: node-scoped, so neither admission waiver (both need an
     // option id) can answer it — excluding options does not give the remaining
     // arms a status-quo level.
     const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic, graph) : [];
-    const factorLevelGaps = levelGaps.filter((gap) => gap.kind === 'factor');
-    const nonFactorLevelGaps = levelGaps.filter((gap) => gap.kind !== 'factor');
-    factorLevelGaps.forEach((gap, index) => {
+    // K1 covers every sampled root, including risks and outcomes: a label
+    // cannot make the engine's unknown-to-zero default a valid input.
+    const rootLevelGaps = levelGaps;
+    rootLevelGaps.forEach((gap, index) => {
       blockingIssues.push({
         issue_id: `level_${index + 1}`,
         code: 'MISSING_FACTOR_LEVEL',
@@ -1624,7 +1623,9 @@ export function assessCanonicalAnalysisReadiness(
     stampObligationsInPlace(carrierIssues, graph);
     stampObligationsInPlace(blockingIssues, graph);
 
-    const allIssues = [...carrierIssues, ...blockingIssues];
+    stampObligationsInPlace(policyIssues, graph);
+    const limitations = policyIssues.map((issue) => ({ ...issue, obligation: 'offered' as const }));
+    const allIssues = [...carrierIssues, ...blockingIssues, ...limitations];
     const proposal: CanonicalReadinessRepairProposal | null =
       blockingIssues.length >= 2
         ? {
@@ -1660,20 +1661,24 @@ export function assessCanonicalAnalysisReadiness(
         || issue.category === 'numeric_integrity'
         || issue.category === 'internal',
     );
+    const activeSemanticBlockers = (semantic?.blockers ?? []).filter((blocker) => {
+      const issue = blockerIssue(blocker, 0, semantic?.status ?? 'ready');
+      return issue?.code !== 'CONSTRAINT_REVIEW_REQUIRED' && issue?.code !== 'UNREACHABLE_CONTROLLABLE_FACTOR';
+    });
     const analysisReady = semantic
       ? {
           ...semantic,
-          ...(nonFactorLevelGaps.length > 0
-            ? { unvalued_roots: nonFactorLevelGaps.map((gap) => ({
-                node_id: gap.id, label: gap.label, kind: gap.kind, treated_as: 'zero' as const,
-              })) }
-            : {}),
-          ...(factorLevelGaps.length > 0
+          ...(policyIssues.length > 0 ? {
+            blockers: activeSemanticBlockers,
+            ...(blockingIssues.length === 0 && semantic.options.every((option) => option.status === 'ready')
+              ? { status: 'ready', blocked_reason: undefined } : {}),
+          } : {}),
+          ...(rootLevelGaps.length > 0
             ? {
                 status: 'needs_user_input',
                 blockers: [
-                  ...(semantic.blockers ?? []),
-                  ...factorLevelGaps.map((gap) => ({
+                  ...activeSemanticBlockers,
+                  ...rootLevelGaps.map((gap) => ({
                     factor_id: gap.id,
                     factor_label: gap.label,
                     blocker_type: 'missing_value' as const,

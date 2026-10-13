@@ -14,8 +14,8 @@
  * ⭐ THE CORPUS IS NOT THE AUTHOR'S. Every graph below is a served
  * `draft_graph` copied byte-for-byte from a real capture, and the expected
  * factor set is ISL's OWN warning from the same turn
- * (`served.isl_goal_ancestor_data_gap`), never a list typed here. The one
- * deliberate difference is the switch exemption, pinned by its own case.
+ * (`served.isl_goal_ancestor_data_gap`), never a list typed here. Binary shape
+ * alone does not establish a current state (AIE T4 R5, 13 October 2026).
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -161,7 +161,7 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
     });
   });
 
-  describe('EXEMPTION journey A brief (pj-20260927T222214Z/A01): a 0/1 switch the status quo leaves off', () => {
+  describe('K1 journey A brief (pj-20260927T222214Z/A01): binary shape without a held current state', () => {
     const fx = load('journey-a-brief-switch-222214Z');
 
     it('precondition: ISL named the switch; served ready', () => {
@@ -169,10 +169,10 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
       expect(fx.served.isl_goal_ancestor_data_gap).toEqual(['feature_release_delivered']);
     });
 
-    it('0 is a real status-quo level for a switch ("not released"), so no level blocker and the Run proceeds', () => {
-      expect(levelIssueFactorIds(fx.graph)).toEqual([]);
-      expect(buildCanonicalAnalysisReadyFromGraph(fx.graph)?.status).toBe('ready');
-      expect(resolveRunAdmission(fx.graph).willProceed).toBe(true);
+    it('the missing current state blocks; an option switching on does not attest absence today', () => {
+      expect(levelIssueFactorIds(fx.graph)).toEqual(['feature_release_delivered']);
+      expect(buildCanonicalAnalysisReadyFromGraph(fx.graph)?.status).toBe('needs_user_input');
+      expect(resolveRunAdmission(fx.graph).willProceed).toBe(false);
     });
   });
 
