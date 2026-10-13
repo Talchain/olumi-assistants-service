@@ -2419,6 +2419,13 @@ export async function buildModelFromBrief(
     const noLongerCut = new Set(admitted.loss.filter((l) => fitted.has(l.field_path) && l.reason.includes(NOT_REPRESENTABLE)).map((l) => l.reason));
     for (let i = openQuestions.length - 1; i >= 0; i--) if (noLongerCut.has(openQuestions[i]!)) openQuestions.splice(i, 1);
 
+    // DL L3b: show the bound definition and its verbatim quote through the existing visible build-reply channel.
+    const quotedSumPaths = new Set(graph.edges.filter((e) => e.provenance?.definitional === true
+      && typeof e.provenance.source_quote === 'string'
+      && graph.nodes.some((n) => n.id === e.to && n.nonlinear_identity?.operation === 'sum'
+        && n.nonlinear_identity.stated_in_brief === true)).map((e) => `nodes[${e.to}].sum_identity`));
+    openQuestions.unshift(...admitted.loss.filter((l) => quotedSumPaths.has(l.field_path)).map((l) => l.reason));
+
     return { admitted, prePersistGraph, graph, goalNodes, openQuestions, levelAsks, setAside,
       withheldOptions, scopeAsked, untypedScopeWords };
   };

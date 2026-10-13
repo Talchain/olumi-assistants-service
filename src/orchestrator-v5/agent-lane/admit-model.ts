@@ -1385,12 +1385,12 @@ const quotedList = (items: readonly string[]): string => {
   return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
 };
 
-/** A declared `sum` that held whole (`checkDeclaredSums`): Olumi's reading, with any located evidence. */
+/** A declared `sum` that held whole (`checkDeclaredSums`), with its bound source and authorship. */
 export interface AcceptedDeclaredSum {
   readonly outcome_id: string;
   readonly factor_ids: readonly string[];
-  readonly stated_in_brief: false;
-  /** Located brief sentence retained as evidence only, never authorship authority. */
+  readonly stated_in_brief: boolean;
+  /** Located brief sentence bound to the declared quantities. */
   readonly quote?: string;
 }
 
@@ -1413,11 +1413,10 @@ const ISL_IDENTITY_RECONCILIATION_TOLERANCE = 0.05;
  *  · the total and every part have a scale and a level today, and today's levels add up within ISL's own reconciliation
  *    (|total − Σ parts| ≤ 5% × max(|total|, Σ |parts|)), so a stated sum is never one ISL would refuse the Run over. A
  *    constant is only ever a part with its own level: the candidate has no other place for one.
- * The arithmetic is necessary, never authorship authority. Every admitted declaration is Olumi's reading until the
- * user approves it through the existing declaration authority. A quote CEE locates and binds to the quantities is
- * retained as evidence only: word or number overlap does not prove that the sentence asserts addition. A quote CEE
- * cannot locate or bind is rejected as before. Any failure writes nothing: the links stay as drafted, and the refusal
- * is said once (`nonlinear_identity_rejected`). Pure.
+ * DL L3b ruling: an explicit declaration with located, bound brief evidence retains original user authorship.
+ * This trusts the drafter's relation reading: a falsely declared denial can pass (accepted AI-misreading residual).
+ * No declaration means no declared sum. A quote CEE cannot locate or bind is rejected as before. Any failure writes
+ * nothing: the links stay as drafted, and the refusal is said once (`nonlinear_identity_rejected`). Pure.
  */
 function checkDeclaredSums(
   allDeclared: readonly CandidateIdentity[],
@@ -1495,7 +1494,7 @@ function checkDeclaredSums(
       reject(`today "${totalLabel}" is ${sayFigure(total, '')} while those parts add up to ${sayFigure(sum, '')}`);
       continue;
     }
-    // Evidence validation only. A located sentence cannot confer human authorship on the drafter's reading.
+    // Bind the drafter's declaration to its source; relation polarity remains the drafter's responsibility (DL L3b).
     const quoted = d.evidence?.quote;
     if (quoted === undefined || quoted === null) {
       accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: false });
@@ -1509,7 +1508,7 @@ function checkDeclaredSums(
       reject('the sentence it was read from is not one Olumi can find in your brief naming each of them');
       continue;
     }
-    accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: false, quote: sentence });
+    accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: d.provenance === 'explicit', quote: sentence });
   }
   return { accepted, loss };
 }
@@ -5566,7 +5565,7 @@ function admitOnce(
     }
   }
   // ⭐ L2: a SUM the drafter declared, checked whole against the FINAL structure (`checkDeclaredSums`) and carried on its
-  // total as Olumi's reading until approved by the user. A declared product wins its node; a declared sum
+  // total with the bound declaration's authorship. A declared product wins its node; a declared sum
   // wins over R3-2's minted tally. Said once among what was done with the brief (`declaredSumSentence`).
   const declaredSums = checkDeclaredSums(Array.isArray(model.identities) ? model.identities : [], resolveEntity, levers.nodes,
     finalEdges, (id) => { const m = magnitudeNodeById.get(id); return m === undefined ? undefined : resolveMagnitudeFrame(m); }, brief);
@@ -5580,7 +5579,8 @@ function admitOnce(
       field_path: `nodes[${s.outcome_id}].sum_identity`,
       before: null,
       after: { operation: 'sum', factor_ids: [...s.factor_ids], stated_in_brief: s.stated_in_brief },
-      reason: declaredSumSentence(labelById.get(s.outcome_id) ?? s.outcome_id, s.factor_ids.map((id) => labelById.get(id) ?? id), s.stated_in_brief),
+      reason: declaredSumSentence(labelById.get(s.outcome_id) ?? s.outcome_id, s.factor_ids.map((id) => labelById.get(id) ?? id), s.stated_in_brief)
+        + (s.quote !== undefined ? ` Brief quote: “${s.quote}”` : ''),
       severity: 'info',
     } as RepairEntry);
   }
@@ -5630,8 +5630,8 @@ function admitOnce(
   }
   // ⭐ L2: a carried DECLARED sum's parts are its definition too, at existence 1 and the spread floor, as R3-2's. The size is
   // the one admission already checked (`holdsByDefinition`: ±1 per 1 in one unit, β on the two frames), kept as it is so
-  // the frame fits after admission move it like any other link. The link remains Olumi's reading (as R3-2); a located
-  // `source_quote` is evidence only. Olumi's pending fit and basis are dropped: a definition has no estimate to refit.
+  // the frame fits after admission move it like any other link. Bound explicit declarations retain user authorship
+  // and their `source_quote`. Olumi's pending fit and basis are dropped: a definition has no estimate to refit.
   if (declaredCarried.length > 0) {
     const declaredOf = new Map(declaredCarried.map((s) => [s.outcome_id, s] as const));
     finalEdges = finalEdges.map((e) => {
@@ -5641,7 +5641,8 @@ function admitOnce(
       const { reasoning: _guess, basis: _guessBasis, source: _drafted, source_quote: _drafterQuote, olumi_fit_candidate: _fit,
         mean_projected: _projected, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
       return { ...edge, strength: { mean: e.strength.mean, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,
-        provenance: { ...provenance, source: 'cee_hypothesis', magnitude: 'olumi_estimate' as const, definitional: true as const,
+        provenance: { ...provenance, source: declared.stated_in_brief ? 'brief_extraction' : 'cee_hypothesis',
+          magnitude: declared.stated_in_brief ? 'user_stated' as const : 'olumi_estimate' as const, definitional: true as const,
           ...(declared.quote !== undefined ? { source_quote: declared.quote } : {}) } };
     });
     for (const s of declaredCarried) definedParts.set(s.outcome_id, new Set(s.factor_ids));
