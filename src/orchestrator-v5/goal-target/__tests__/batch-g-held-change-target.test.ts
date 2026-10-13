@@ -74,12 +74,23 @@ describe('G14: restating the saved change target is "already saved", never a ref
     expect(goalOf(SAVED).goal_target_basis.open_question).toBeUndefined();
   });
 
-  it('precondition (RED as served): the caller today refuses the turn-14 restatement as goal_is_a_change', async () => {
+  it('the real caller (proposeGoalTarget, with its hook): the turn-14 restatement is already saved, never goal_is_a_change', async () => {
     const d: InternalDispatch = async (p) => (p.endsWith('/graph') ? { status: 200, json: structuredClone(SAVED) } : { status: 500, json: {} });
     const out = await createAgentCapabilities(d, new ProposalStore()).proposeGoalTarget!({ scenario_id: String(SAVED.scenario_id),
       authenticated_user_id: null, request_id: 'r', user_text: userWordsOf([String(SAVED.brief_text)], CLARIFIED), user_turn_text: CLARIFIED } as never,
     { constraint_type: 'at_least', value: 10, unit: '%' } as never);
-    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'goal_is_a_change' });
+    expect(out).toMatchObject({ ok: true, mutated: false, already_saved: true });
+    expect((out as Rec).refusal).toBeUndefined();
+  });
+
+  it('the real caller: a genuinely different target keeps the change-frame refusal, now with the saved meaning to compare', async () => {
+    const said = "I mean 15% relative to today's productivity.";
+    const d: InternalDispatch = async (p) => (p.endsWith('/graph') ? { status: 200, json: structuredClone(SAVED) } : { status: 500, json: {} });
+    const out = await createAgentCapabilities(d, new ProposalStore()).proposeGoalTarget!({ scenario_id: String(SAVED.scenario_id),
+      authenticated_user_id: null, request_id: 'r', user_text: userWordsOf([String(SAVED.brief_text)], said), user_turn_text: said } as never,
+    { constraint_type: 'at_least', value: 15, unit: '%' } as never) as Rec;
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'goal_is_a_change',
+      saved_goal: { target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=', reference: 'today', denominator: 'today’s productivity' } });
   });
 
   it('RED→GREEN: the turn-14 restatement → ok, already_saved, nothing prepared, with the FULL saved meaning', () => {

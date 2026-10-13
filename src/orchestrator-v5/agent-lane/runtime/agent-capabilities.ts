@@ -7,7 +7,7 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalMeaningOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
-import { CONFIRM_GOAL_READING_OP } from '../../goal-target/held-change-target.js';
+import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
@@ -5254,7 +5254,9 @@ export function createAgentCapabilities(
       // a fraction). This path writes a LEVEL target, so it would silently turn the user's change into a level. Refused by
       // name until a change can be edited as a change; the goal doors refuse it too (`add-constraint.ts`, `goal-target-edit.ts`).
       if (isChangeFrame((goal as { goal_threshold_frame?: unknown }).goal_threshold_frame)) {
-        return { ok: false, mutated: false, refusal: 'goal_is_a_change',
+        const held = heldChangeTargetAnswer({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, user_text: ctx.user_text, user_turn_text: ctx.user_turn_text, graph: g, goal_id: goal.id, requested: { operator: TARGET_OPERATOR[type], value, unit }, rationale: args.rationale, proposals });
+        if (held !== undefined) return held;
+        return { ok: false, mutated: false, refusal: 'goal_is_a_change', saved_goal: savedGoalMeaningOf(g.raw, goal.id),
           detail: `The goal "${goal.label}" is stated as a change from today, and this path cannot yet change a target stated that way, so nothing was prepared. `
             + 'Tell the user plainly, and never offer a level target in its place.' };
       }
