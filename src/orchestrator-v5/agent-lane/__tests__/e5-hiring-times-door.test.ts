@@ -228,6 +228,42 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
       ctx(later) as never, w.caps)).toMatchObject({ ok: true, public_label: expect.stringContaining('starts after 6 months') });
   });
 
+  it.each([['at least 6 months', 'lower', 6], ['within 1 month', 'upper', 1]])(
+    'A2i incompatible %s keeps the complete source, never prepares a point', async (phrase, bound, value) => {
+      const w = world(), before = w.graph();
+      const quote = `For the tech lead, ${phrase}, though I am uncertain`;
+      const out = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote }] }] }),
+        ctx(quote) as never, w.caps) as Rec;
+      expect(out).toEqual({ ok: false, mutated: false, refusal: 'hiring_bound_conflict', calculation_supported: false,
+        statement: { quote, source: 'user_stated', bound, value },
+        detail: `You gave ‘${quote}’. That gives a ${bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` });
+      expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);
+      expect(w.registers).toEqual([]);
+      expect(w.graph()).toEqual(before);
+    });
+
+  it('A2i incomplete-source miss stays unknown; an explicit new unquoted estimate is its own act', async () => {
+    const w = world();
+    const context = { ...ctx('Consider a timing estimate.'), user_text_complete: false };
+    const unknown = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
+      starts: [{ quote: 'in 6 months', months: 6 }] }] }), context as never, w.caps);
+    expect(unknown).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);
+    const own = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
+      starts: [{ quote: '', months: 6 }] }] }), context as never, w.caps) as Rec;
+    expect(own).toMatchObject({ ok: true, mutated: false });
+    expect(w.proposals.get(own.proposal_id)?.provenance.authored_by).toBe('model_proposed');
+    expect(own.public_label).toBe('Use these hiring assumptions? ‘Hire a Tech lead’: Olumi proposed “in 6 months”. Modelled timing: starts after 6 months, with an assumption that this start is exactly 6 months from the reference date, Olumi’s estimate of the soonest start (6 months), Olumi’s estimate of the latest start (6 months), and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month).');
+    expect(await press(w, own.proposal_id)).toMatchObject({ ok: true, applied: true });
+    const carrier = w.graph().nodes.find((n: Rec) => n.id === 'event_capacity_1').observed_state.extra_share_by_date;
+    expect(carrier.statement).toEqual({ quote: 'in 6 months', form: 'about', source: 'model_proposed' });
+    expect(carrier.figures.lead_low).toEqual({ value: 6, role: 'olumi_estimate', source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } });
+    expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
+      starts: [{ quote: 'in 6 months' }] }] }), context as never, w.caps))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'already_held' });
+
+  });
+
   it('W13 typed months travel through dispatch, approval, storage and provenance readback', async () => {
     const w = world();
     const out = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,

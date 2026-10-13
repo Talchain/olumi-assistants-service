@@ -154,7 +154,8 @@ const olumiFigure = (value: number, role: Exclude<FigureRole, 'stated'>, quote?:
   ({ value, role, source: 'user_assumption', reviewed_by_user: { intent: 'confirm' }, ...(quote === undefined ? {} : { quote }) });
 
 /** DL CUT: one refusal for every form Olumi cannot model as quoted; R16 stays its own (the deferred coupled law). */
-export type PlanRefusal = { readonly refusal: 'hiring_timings_unusable' | 'relative_to_range' | 'too_many_starts' | 'fewer_starts_than_held'; readonly quote?: string };
+export type PlanRefusal = { readonly refusal: 'hiring_timings_unusable' | 'relative_to_range' | 'too_many_starts' | 'fewer_starts_than_held'; readonly quote?: string }
+  | { readonly refusal: 'hiring_bound_conflict'; readonly quote: string; readonly bound: 'lower' | 'upper'; readonly value: number; readonly source: 'user_stated' | 'model_proposed' };
 
 /** The option's planned parts from the user's starts and Olumi's estimate; the pace split equally. */
 export function planStarts(quotes: readonly string[], estimate: PlannedOption['olumi_estimate'], heldParts: number, readings?: readonly { months?: unknown; stated: boolean; held?: Pick<PlannedPart, 'statement' | 'lead_low' | 'lead_high'> }[]):
@@ -177,7 +178,9 @@ export function planStarts(quotes: readonly string[], estimate: PlannedOption['o
     }
     if (typed !== undefined && (typeof typed !== 'number' || !Number.isFinite(typed) || typed < 0 || typed > 60)) return { refusal: 'hiring_timings_unusable', quote };
     const parsed = readHiringStart(quote);
-    const matches = typed === undefined || (parsed !== null && 'months' in parsed && parsed.months === typed);
+    // A proposed interpretation cannot erase a stated inequality, even with different typed months.
+    const matches = parsed?.kind === 'at_least' || parsed?.kind === 'within' || typed === undefined
+      || (parsed !== null && 'months' in parsed && parsed.months === typed);
     const form: HiringForm | null = typed === undefined || matches ? parsed : { kind: 'about', months: typed as number };
     const own = reading?.stated !== false && matches;
 
@@ -192,9 +195,11 @@ export function planStarts(quotes: readonly string[], estimate: PlannedOption['o
       low = olumiFigure(prev.lead_low.value + form.months, 'derived', quote);
       high = olumiFigure(prev.lead_high.value + form.months, 'derived', quote);
     } else if (form.kind === 'at_least') {
-      low = stated(form.months, quote); high = olumiFigure(Math.max(estimate.lead_high, form.months), 'olumi_estimate');
+      if (form.months > estimate.lead_high) return { refusal: 'hiring_bound_conflict', quote, bound: 'lower', value: form.months, source: own ? 'user_stated' : 'model_proposed' };
+      low = stated(form.months, quote); high = olumiFigure(estimate.lead_high, 'olumi_estimate');
     } else if (form.kind === 'within') {
-      low = olumiFigure(Math.min(estimate.lead_low, form.months), 'olumi_estimate'); high = stated(form.months, quote);
+      if (form.months < estimate.lead_low) return { refusal: 'hiring_bound_conflict', quote, bound: 'upper', value: form.months, source: own ? 'user_stated' : 'model_proposed' };
+      low = olumiFigure(estimate.lead_low, 'olumi_estimate'); high = stated(form.months, quote);
     } else if (form.kind === 'about' && APPROXIMATE.test(plainWords(quote))) {
       // AIE 6122738619: the exact figure modelled from "about N" is Olumi's disclosed choice, never a human-stated endpoint.
       low = olumiFigure(form.months, 'derived', quote); high = olumiFigure(form.months, 'derived', quote);
@@ -360,6 +365,9 @@ type StartView = { readonly statement?: Statement; readonly low: HeldFigure; rea
 function assumptionsOf(starts: readonly StartView[], deliverable: string): string[] {
   const items: string[] = [];
   for (const s of starts) {
+    if (s.statement?.source === 'model_proposed' && s.low.value === s.high.value) {
+      items.push(`an assumption that this start is exactly ${figure(s.low.value)} months from the reference date`);
+    }
     const derived = s.low.role === 'derived' && s.high.role === 'derived';
     if (derived && s.statement?.form === 'after_previous') {
       const offset = readHiringStart(s.statement.quote);

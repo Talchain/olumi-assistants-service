@@ -227,7 +227,7 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     expect(route).toContain("capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' })");
     expect(route).toContain('const typedNow = typedByUser(body) ? message : null;');
     expect(route).toContain('user_text: userWordsOf(authorshipWords.verified, typedNow)');
-    expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow);');
+    expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow, toolCtx.user_text_complete);');
     expect(route).not.toContain('userWordsOf(history');
     expect(route).not.toContain('{ scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }');
     // Declared once; used at the eight dispatch sites (incl. the route-issued confirm card, #2310, the M1 Strengthen card,

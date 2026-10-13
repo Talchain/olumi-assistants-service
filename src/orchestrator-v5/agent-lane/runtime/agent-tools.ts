@@ -113,6 +113,8 @@ export interface AgentToolContext {
   readonly verified_user_messages?: readonly string[];
   /** Restored history whose source is unknown; reference only, never human or Olumi authority. */
   readonly unverified_user_text?: string;
+  /** Host source coverage, not a model claim: false on fresh, restored or capped history. */
+  readonly user_text_complete?: boolean;
   /**
    * THIS turn's message when the user typed it (never a chip's text), bound by the route. A link's strength band is
    * the user's only when named here (`bandTheUserWrote`): a band word elsewhere in the conversation is about something else.

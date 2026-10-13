@@ -460,6 +460,65 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     }
   });
 
+  it.each(['fresh', 'restored', 'capped'])('A2i incomplete %s source miss refuses the quoted figure; explicit own estimate is a new act', async source => {
+    const { admitCandidateModel } = await import('../admit-model.js');
+    const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
+    const admitted = admitCandidateModel({ goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+      unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+    graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
+
+    if (source === 'restored') await turn({ message: 'We discussed the recruitment process.' });
+    if (source === 'capped') for (let i = 0; i < 40; i++) await turn({ message: `Recruitment discussion ${i}.` });
+    const before = bytes();
+    let output: Record<string, any> = {};
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote: 'in 6 months', months: 6 }] }] }),
+      body => { output = toolOutputIn(body); return say(String(output.detail)); }];
+    const session = source === 'restored' ? { agent_session_id: randomUUID() } : {};
+    const result = await turn({ message: 'Use the previously quoted hiring time.', ...session });
+    expect(result._agent.tool_calls.find(c => c.name === 'propose_hiring_times')).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(output).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(result)).toBeUndefined();
+    expect(bytes()).toBe(before);
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote: '', months: 6 }] }] }),
+      body => { output = toolOutputIn(body); return say(String(output.public_label)); }];
+    const own = await turn({ message: 'Show a new Olumi timing estimate for review.', ...session });
+    expect(own._agent.tool_calls.find(c => c.name === 'propose_hiring_times')).toMatchObject({ ok: true });
+    const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
+    const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
+    expect(proposal.provenance.authored_by).toBe('model_proposed');
+    expect(proposal.operations[0].value.options[0].parts[0].statement).toEqual({ quote: 'in 6 months', form: 'about', source: 'model_proposed' });
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  it.each([['at least 6 months', 'lower', 6], ['within 1 month', 'upper', 1]])('A2i real route bound conflict: %s', async (phrase, bound, value) => {
+    const { admitCandidateModel } = await import('../admit-model.js');
+    const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
+    const admitted = admitCandidateModel({ goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+      unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+    graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
+
+    const quote = `A Tech lead would take ${phrase}, but that is uncertain`;
+    const before = bytes();
+    let output: Record<string, any> = {};
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote }] }] }),
+      body => { output = toolOutputIn(body); return say('The timing can be treated as exact.'); }];
+    const result = await turn({ message: quote });
+    const detail = `You gave ‘${quote}’. That gives a ${bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.`;
+    expect(output).toEqual({ ok: false, mutated: false, refusal: 'hiring_bound_conflict', calculation_supported: false,
+      statement: { quote, source: 'user_stated', bound, value }, detail });
+    expect(result.assistant_text).toBe(detail);
+    expect(approveChipOf(result)).toBeUndefined();
+    expect(bytes()).toBe(before);
+  });
+
   // ⛔ DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it ABOUT it. The
   // unscoped matcher asked only whether the figure is somewhere in the message, so a swap and the £400k limit passed.
   const CONJOINED = 'Seniors are £120k a year and juniors £65k a year, with a £400k salary budget.';
