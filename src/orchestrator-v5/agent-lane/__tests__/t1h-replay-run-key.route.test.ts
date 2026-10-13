@@ -337,4 +337,21 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     expect(row.run_narration).toEqual(body.narration);
     expect(rpcCalls.filter(n => n.startsWith('append_agent_answer')).at(-1)).toBe('append_agent_answer_narrated');
   });
+  it('default result-first Run press: the row stores its narration, and a cold replay of a still-current Run returns the same narration, words and shape', async () => {
+    originalLoop = false;
+    const turnId = randomUUID();
+    const first = await press(turnId);
+    expect(first.statusCode, first.body).toBe(200);
+    const live = first.json();
+    expect(live.narration?.status).toBe('pending');
+    expect(table.find(r => r.turn_id === turnId)?.run_narration).toEqual(live.narration);
+    await restart();
+    const body = (await resend(turnId)).json();
+    expect(body._agent.replayed).toBe(true);
+    expect(body.narration).toEqual(live.narration);
+    expect(body.assistant_text).toBe(live.assistant_text);
+    expect(body._answer_shape).toEqual(live._answer_shape);
+    expect(runs).toHaveLength(1);
+  });
+
 });

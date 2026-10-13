@@ -10,17 +10,17 @@ ALTER TABLE public.v5_conversation_turns ADD COLUMN IF NOT EXISTS run_narration 
 COMMENT ON COLUMN public.v5_conversation_turns.run_narration IS
   'The final Agent answer''s own narration, {status, run_key}: the Run it was sent with (16-hex key). NULL = unknown.';
 -- NULL, or exactly {status, run_key}: every status the live route sends (`stale` included: an Explain press on a
--- moved Run, agent-v1-turn.ts narrationStatus) and a 16-hex key. NOT VALID: the column is new, so every existing row
--- is NULL; this skips a validation scan under the ADD COLUMN lock on a shared table, and still checks every write.
+-- moved Run, agent-v1-turn.ts narrationStatus) and a 16-hex key. `IS TRUE`: a missing field makes the predicate NULL,
+-- which a bare CHECK would accept ({} or {"status":"ready"}). NOT VALID: the column is new, so every existing row is
+-- NULL; this skips a validation scan under the ADD COLUMN lock on a shared table, and still checks every write.
 ALTER TABLE public.v5_conversation_turns ADD CONSTRAINT v5_conversation_turns_run_narration_shape CHECK (
-  run_narration IS NULL OR (
-    jsonb_typeof(run_narration) = 'object'
-    AND (run_narration - 'status' - 'run_key') = '{}'::jsonb
+  run_narration IS NULL OR (CASE WHEN jsonb_typeof(run_narration) = 'object' THEN
+    (run_narration - 'status' - 'run_key') = '{}'::jsonb
     AND jsonb_typeof(run_narration->'status') = 'string'
     AND (run_narration->>'status') IN ('pending', 'ready', 'unavailable', 'stale')
     AND jsonb_typeof(run_narration->'run_key') = 'string'
     AND (run_narration->>'run_key') ~ '^[0-9a-f]{16}$'
-  )
+  ELSE FALSE END) IS TRUE
 ) NOT VALID;
 
 CREATE FUNCTION public.append_agent_answer_narrated(

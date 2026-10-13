@@ -15,10 +15,12 @@ describe('T1h additive answer-narration migration (static, no DB)', () => {
     expect(code.match(/CREATE\s+(?:OR REPLACE\s+)?FUNCTION\s+[^\s(]+/gi)).toEqual([
       'CREATE FUNCTION public.append_agent_answer_narrated', 'CREATE FUNCTION public.append_agent_answer_if_latest_narrated']);
     expect(code.match(/\bALTER\b[^;]*;/gi)).toEqual(['ALTER TABLE public.v5_conversation_turns ADD COLUMN IF NOT EXISTS run_narration JSONB;',
-      'ALTER TABLE public.v5_conversation_turns ADD CONSTRAINT v5_conversation_turns_run_narration_shape CHECK ( run_narration IS NULL OR ( '
-      + "jsonb_typeof(run_narration) = 'object' AND (run_narration - 'status' - 'run_key') = '{}'::jsonb "
+      'ALTER TABLE public.v5_conversation_turns ADD CONSTRAINT v5_conversation_turns_run_narration_shape CHECK ( run_narration IS NULL OR '
+      + "(CASE WHEN jsonb_typeof(run_narration) = 'object' THEN (run_narration - 'status' - 'run_key') = '{}'::jsonb "
       + "AND jsonb_typeof(run_narration->'status') = 'string' AND (run_narration->>'status') IN ('pending', 'ready', 'unavailable', 'stale') "
-      + "AND jsonb_typeof(run_narration->'run_key') = 'string' AND (run_narration->>'run_key') ~ '^[0-9a-f]{16}$' ) ) NOT VALID;"]);
+      + "AND jsonb_typeof(run_narration->'run_key') = 'string' AND (run_narration->>'run_key') ~ '^[0-9a-f]{16}$' ELSE FALSE END) IS TRUE ) NOT VALID;"]);
+    // A missing field must REFUSE: a bare CHECK passes a NULL predicate ({} or {"status":"ready"}).
+    expect(code).toMatch(/ELSE FALSE END\) IS TRUE \) NOT VALID;/);
     expect(code).not.toMatch(/\bDROP\b|CREATE\s+(?:TABLE|INDEX|TRIGGER)\b|\bDEFAULT\b/i);
     // The only data write: this column, on the new row the delegate just appended.
     expect(code.match(/(?<!FOR )\b(?:INSERT|UPDATE|DELETE)\b[^;]*;/gi)).toEqual([
