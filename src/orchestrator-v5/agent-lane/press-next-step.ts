@@ -24,8 +24,7 @@
 export type PressBlocker =
   | { readonly kind: 'missing_input'; readonly ask: string; readonly also_unbuilt?: string }
   | { readonly kind: 'missing_implementation'; readonly what: string }
-  /** `goal_target`: the goal's own target control (the approved target write holds the stated comparator on the goal). */
-  | { readonly kind: 'confirm'; readonly by: 'identity_card' | 'confirm_reading' | 'goal_target' }
+  | { readonly kind: 'confirm'; readonly by: 'identity_card' | 'confirm_reading' }
   | { readonly kind: 'run_again'; readonly why: 'precision_missing' | 'not_returned' }
   | { readonly kind: 'stale'; readonly say: string };
 

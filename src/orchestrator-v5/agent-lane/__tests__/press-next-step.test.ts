@@ -58,31 +58,22 @@ describe('target: the failing cases type the ONE step', () => {
     expect(targetBlockerOf(parts)).toEqual({ kind: 'missing_input', ask: parts.question });
   });
 
-  it('a strict LEVEL target the target write alone unlocks (today\'s level held): the target control is the step, never "can\'t"', () => {
+  it('a strict LEVEL target is never "can\'t": the approved target write can hold it (the real pair writer\'s post-state)', () => {
     const g = strictLevel('Monthly cancellations', 'cancellations / month', 400, 520);
     const parts = partsOf(g);
-    expect([parts.untestableComparator, parts.untestableComparatorUnlock]).toEqual(["'< 400 cancellations / month'", 'target_control']);
-    expect(targetBlockerOf(parts)).toEqual({ kind: 'confirm', by: 'goal_target' });
-    // The real writer's post-state: (b) is gone.
+    expect([parts.untestableComparator, parts.untestableComparatorUnlock]).toEqual(["'< 400 cancellations / month'", 'target_write']);
     expect(failingCases(g)).toContain('b');
     expect(failingCases(afterTargetWrite(g))).not.toContain('b');
+    // No step is typed from it (whether the write ALONE unlocks it is the writer's to answer: Codex r3, two own rows).
+    expect(targetBlockerOf(parts)).toBeNull();
   });
 
-  it('the unit\'s own scale pairs it too: the control first, then today\'s level is still asked', () => {
-    const g = strictLevel('Churn', '%', 5);
-    expect(partsOf(g).untestableComparatorUnlock).toBe('target_control');
-    expect(targetBlockerOf(partsOf(g))).toEqual({ kind: 'confirm', by: 'goal_target' });
-    const after = afterTargetWrite(g);
-    expect(failingCases(after)).not.toContain('b');
-    expect(targetBlockerOf(partsOf(after))).toEqual({ kind: 'missing_input', ask: "What's today's level of Churn?" });
-  });
-
-  it('a strict LEVEL target the write cannot pair yet (no level, no scale): today\'s level is the step; no gap is claimed', () => {
-    const g = strictLevel('Monthly cancellations', 'cancellations / month', 400);
-    const parts = partsOf(g);
-    expect(parts.untestableComparatorUnlock).toBe('not_by_control_alone');
-    expect(failingCases(afterTargetWrite(g))).toContain('b');
-    expect(targetBlockerOf(parts)).toEqual({ kind: 'missing_input', ask: "What's today's level of Monthly cancellations?" });
+  it('a strict LEVEL target with a question: the question alone is the step, with no gap beside it', () => {
+    for (const g of [strictLevel('Monthly cancellations', 'cancellations / month', 400), strictLevel('Churn', '%', 5)]) {
+      const parts = partsOf(g);
+      expect(parts.untestableComparatorUnlock).toBe('target_write');
+      expect(targetBlockerOf(parts)).toEqual({ kind: 'missing_input', ask: `What's today's level of ${parts.name}?` });
+    }
   });
 
   it('a strict CHANGE target: no writer holds it, so it is a capability gap, said and never asked', () => {
@@ -221,7 +212,7 @@ describe('one step, one owner: only an owner of THAT step keeps it', () => {
   const none: NextStepOwners = { guidedRunFinding: null, said: [], pressed: [] };
   const ask: PressBlocker = { kind: 'missing_input', ask: 'What\'s today\'s level of MRR?' };
   const unbuilt: PressBlocker = { kind: 'missing_implementation', what: 'x' };
-  const card: PressBlocker = { kind: 'confirm', by: 'goal_target' };
+  const card: PressBlocker = { kind: 'confirm', by: 'confirm_reading' };
   const again: PressBlocker = { kind: 'run_again', why: 'not_returned' };
   const stale: PressBlocker = { kind: 'stale', say: 'The analysis on screen was computed before this change; run it again to see the comparison with this change.' };
   const sizing = 'The link from Price to MRR is Olumi\'s placeholder; size it to see a goal chance.';
@@ -237,7 +228,7 @@ describe('one step, one owner: only an owner of THAT step keeps it', () => {
     expect(unownedNextStep(ask, { ...none, said: [ask.ask] })).toBeNull();
     expect(unownedNextStep(ask, { ...none, guidedRunFinding: `${sizing} ${ask.ask}` })).toBeNull();
     expect(unownedNextStep(stale, { ...none, said: [stale.say] })).toBeNull();
-    expect(unownedNextStep(card, { ...none, pressed: ['goal_target'] })).toBeNull();
+    expect(unownedNextStep(card, { ...none, pressed: ['confirm_reading'] })).toBeNull();
     expect(unownedNextStep(again, { ...none, pressed: ['run'] })).toBeNull();
     expect(unownedNextStep(unbuilt, { ...none, said: [AIE_TEXT_PENDING_CANNOT_CALCULATE_YET('x')] })).toBeNull();
     // An input step never owns a missing implementation, a stale result, a repeat Run or a card.

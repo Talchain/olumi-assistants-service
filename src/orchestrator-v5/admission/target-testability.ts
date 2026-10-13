@@ -33,7 +33,6 @@ import { NodeV3 } from '../../schemas/cee-v3.js';
 import { levelOf as accumulationInputLevelOf } from '../agent-lane/accumulation-identity.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
 import type { PressBlocker } from '../agent-lane/press-next-step.js';
-import { pairGoalCeiling } from '../goal-target/goal-ceiling-pair.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -454,16 +453,16 @@ export interface UntestableTargetParts {
    */
   readonly untestableComparator: string | null;
   /**
-   * ⭐ COACH (Codex buddy r1/r2): what can unlock (b), or null without (b).
-   *   - `target_control`: the goal's own target control alone. Its approved write holds the stated `<` on the goal
-   *     (`add-constraint.ts` `cardIsAGoalCeiling` → `goal_direction`) and pairs the threshold (`pairGoalCeiling`); a dry run
-   *     of exactly that leaves `resolveGoalThresholdStrict` true.
-   *   - `not_by_control_alone`: a LEVEL target that write cannot yet pair (no level frame and no scale of its unit,
-   *     `ceilingFrameCap`); what it lacks is the target's own question, if any.
+   * ⭐ COACH (Codex buddy r1–r3): what can unlock (b), or null without (b).
+   *   - `target_write`: a LEVEL target. The approved target write can hold the stated `<` on the goal (`add-constraint.ts`
+   *     `cardIsAGoalCeiling` → `goal_direction`, paired by `pairGoalCeiling`), which `resolveGoalThresholdStrict` scores, so
+   *     it is never a capability gap. Whether that write ALONE unlocks it here depends on the writer's own row preparation
+   *     (`add-constraint.ts` retires other own target rows) and pairing (`ceilingFrameCap`), which only the writer itself
+   *     can answer: no step is typed from it (split after r3; the target-control step waits on a pure dry run of that writer).
    *   - `unbuilt`: a CHANGE target. That write is a level (`goal-target-edit.ts`, the contract's `raw_value`) and a change
    *     row stays independent of it (`add-constraint.ts` `ownTarget`), so no writer holds its comparator.
    */
-  readonly untestableComparatorUnlock: 'target_control' | 'not_by_control_alone' | 'unbuilt' | null;
+  readonly untestableComparatorUnlock: 'target_write' | 'unbuilt' | null;
   readonly question: string | null;
   /**
    * ⭐ Near tie (red team 19; DL #87, 6 Oct): the link `question` asks, when it IS the (c) link question (the failing case's
@@ -552,8 +551,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     clauses: cases.map((c) => said(c)[0]),
     needs: cases.map((c) => said(c)[1]).filter((n): n is string => n !== null),
     untestableComparator: cases.includes('b') ? `'${comparatorTarget}'` : null,
-    untestableComparatorUnlock: !cases.includes('b') ? null : (stated.frame ?? 'level') !== 'level' ? 'unbuilt'
-      : targetWriteScoresStrictly(graph, verdict.goal_id, comparator) ? 'target_control' : 'not_by_control_alone',
+    untestableComparatorUnlock: !cases.includes('b') ? null : (stated.frame ?? 'level') === 'level' ? 'target_write' : 'unbuilt',
     question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
     asked: askingCase === 'c' && failingLink?.link !== undefined ? { from: failingLink.link.from, to: failingLink.link.to } : null,
     askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
@@ -563,29 +561,14 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
 }
 
 /**
- * A dry run, on a copy, of the approved target write's own effect on the goal: the stated comparator held as
- * `goal_direction` (`add-constraint.ts` `cardIsAGoalCeiling`) and the pair written by `pairGoalCeiling`. True only where
- * the Run would then score the comparator strictly. Never writes the caller's graph.
- */
-function targetWriteScoresStrictly(graph: unknown, goalId: string, comparator: unknown): boolean {
-  if (comparator !== '<' || !isRec(graph) || !Array.isArray(graph.nodes)) return false;
-  const copy = structuredClone(graph) as Record<string, unknown> & { nodes: unknown[] };
-  const goal = copy.nodes.filter(isRec).find((n) => n.id === goalId);
-  if (goal === undefined) return false;
-  goal.goal_direction = comparator;
-  return pairGoalCeiling(copy, goalId) === 'paired' && resolveGoalThresholdStrict(copy, goalId);
-}
-
-/**
  * ⭐ COACH (DL coaching-on-press; PL #94 6135017311): the ONE next step these parts support, typed by the failing cases.
- * A strict comparator the goal's target control alone unlocks is that control: it outranks a question, as a card does
- * (`oneNextStep`). A question the user can answer is the step (case a/c/d), including what a level target's write still
- * lacks. A strict comparator on a CHANGE target is a CAPABILITY gap (no writer holds it): said as such, never asked, and
- * beside a question it travels with the ask so an answer is never promised to unlock it. A case (c) whose link is a
- * pending identity has no question: its card owns the step. Otherwise: no step.
+ * A question the user can answer is the step (case a/c/d). A strict comparator on a CHANGE target is a CAPABILITY gap (no
+ * writer holds it): said as such, never asked, and beside a question it travels with the ask so an answer is never
+ * promised to unlock it. A strict comparator on a LEVEL target is never called a gap (a writer can hold it) and types no
+ * step of its own (`untestableComparatorUnlock`). A case (c) whose link is a pending identity has no question: its card
+ * owns the step. Otherwise: no step.
  */
 export function targetBlockerOf(parts: UntestableTargetParts, identityCardOffered = false): PressBlocker | null {
-  if (parts.untestableComparatorUnlock === 'target_control') return { kind: 'confirm', by: 'goal_target' };
   const unbuilt = parts.untestableComparatorUnlock !== 'unbuilt' ? undefined : `a chance for a ${parts.untestableComparator} target on ‘${parts.name}’`;
   if (parts.question !== null) return { kind: 'missing_input', ask: parts.question, ...(unbuilt === undefined ? {} : { also_unbuilt: unbuilt }) };
   if (unbuilt !== undefined) return { kind: 'missing_implementation', what: unbuilt };
