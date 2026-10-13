@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { POLICY } from '../../guidance/policy.js';
-import { checkMethodTurn, methodPlanOf, type GuidanceSignals as SelectorSignals } from '../../guidance/index.js';
+import { checkMethodTurn as _checkMethodTurn, methodPlanOf, type GuidanceSignals as SelectorSignals } from '../../guidance/index.js';
 import * as plans from '../../guidance/plan.js';
 import type { SuppliedItem } from '../../science/method-science-context.js';
 import type { GuidanceSignalInputs, GuidanceSignals as TurnSignals } from '../../turn-context/guidance-signals.js';

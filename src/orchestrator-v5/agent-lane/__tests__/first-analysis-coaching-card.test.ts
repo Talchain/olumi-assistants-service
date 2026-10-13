@@ -169,8 +169,8 @@ const buildTurn = (app: FastifyInstance) => {
   return turn(app, { message: BRIEF });
 };
 const coachingOf = (r: Reply) => (r.blocks ?? []).filter((b) => b.type === 'coaching');
-const FIRST_PASS = 'Before relying on this first pass on Olumi\'s estimates';
-const LEADER = /option in front|winner|recommend|best option|leading option/i;
+const _FIRST_PASS = 'Before relying on this first pass on Olumi\'s estimates';
+const _LEADER = /option in front|winner|recommend|best option|leading option/i;
 
 describe('N14: Run coaching stays off while current science facts survive', () => {
   let app: FastifyInstance;

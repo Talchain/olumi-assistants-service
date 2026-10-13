@@ -16,7 +16,7 @@ type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
 /** The b3-2 Run 1 provisional view's reasoning, verbatim as served (CEE 7addf05, `agent.interpret`). */
 const SERVED_REASONING = 'That relationship remains unsized, so the stated £1,500/month salesperson cost alone cannot establish the effect on your profit goal. The run has not measured which assumption most affects the comparison, so investigation priority is not established.';
-const CLEAN_REASONING = 'That relationship remains unsized, so the stated £1,500/month salesperson cost alone cannot establish the effect on your profit goal.';
+const _CLEAN_REASONING = 'That relationship remains unsized, so the stated £1,500/month salesperson cost alone cannot establish the effect on your profit goal.';
 const VIEW = {
   view: 'Before comparing, size how strongly running a fourth shop changes its monthly operating profit.',
   reasoning: SERVED_REASONING,

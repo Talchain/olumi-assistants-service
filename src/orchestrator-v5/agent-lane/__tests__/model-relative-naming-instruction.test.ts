@@ -5,11 +5,11 @@
  * It grants nothing: on a withheld turn the rule's own sentence form is still a ranking the wire gate drops.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import type { OlumiResponse } from '@talchain/schemas/boundary';
+import { readFileSync as _readFileSync } from 'node:fs';
+import type { OlumiResponse as _OlumiResponse } from '@talchain/schemas/boundary';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
-import { MODEL_RELATIVE_NAMING_INSTRUCTION, REPLY_LENGTH_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
-import { enforceAgentLaneLeaderClaimsAtWire, rankingLabelContext, sentenceRanksOptions } from '../withheld-leader-fail-closed.js';
+import { MODEL_RELATIVE_NAMING_INSTRUCTION, REPLY_LENGTH_INSTRUCTION as _REPLY_LENGTH_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
+import { enforceAgentLaneLeaderClaimsAtWire as _enforceAgentLaneLeaderClaimsAtWire, rankingLabelContext, sentenceRanksOptions } from '../withheld-leader-fail-closed.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../leader-final-egress.js';
 
 describe('AIE 363 Run result instruction', () => {

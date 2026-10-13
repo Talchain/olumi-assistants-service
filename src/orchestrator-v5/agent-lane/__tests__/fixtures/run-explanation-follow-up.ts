@@ -22,4 +22,4 @@ export function explanationContext(input: unknown): Record<string, unknown> | un
   }
   return undefined;
 }
-import { randomUUID } from 'node:crypto';
+import { randomUUID as _randomUUID } from 'node:crypto';

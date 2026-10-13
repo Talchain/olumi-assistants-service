@@ -8,16 +8,16 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFlipClaimPosture } from '../../context/flip-threshold-rows.js';
-import { reconciliationPending } from '../goal-scope.js';
+import { readFlipClaimPosture as _readFlipClaimPosture } from '../../context/flip-threshold-rows.js';
+import { reconciliationPending as _reconciliationPending } from '../goal-scope.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
-import { NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../../coaching/analysis-result-headline.js';
-import { collectFactorIdsSetByEveryOption } from '../../context/intervention-controlled-drivers.js';
-import { analysedOptionIds } from '../conditional-input-basis.js';
-import { decisionInputAsk, textAtRest } from '../decision-input-ask.js';
-import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
-import { sentencesOf } from '../reply/compose-reply.js';
+import { NOT_ROBUST_SENTENCE as _NOT_ROBUST_SENTENCE, robustnessHonestySentence as _robustnessHonestySentence } from '../../coaching/analysis-result-headline.js';
+import { collectFactorIdsSetByEveryOption as _collectFactorIdsSetByEveryOption } from '../../context/intervention-controlled-drivers.js';
+import { analysedOptionIds as _analysedOptionIds } from '../conditional-input-basis.js';
+import { decisionInputAsk as _decisionInputAsk, textAtRest as _textAtRest } from '../decision-input-ask.js';
+import { RUN_EXPLANATION_MESSAGE as _RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { sentencesOf as _sentencesOf } from '../reply/compose-reply.js';
 
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
   state: { draft_graph: unknown; analysis_state: Record<string, unknown>; analysis_ready: {
@@ -40,8 +40,8 @@ const bulletedNarrator = (n: number) => [NARRATOR, ...NARRATOR_BULLETS.slice(0, 
  */
 const LONG_TAIL = 'They describe what this model implies on current information, not what the market will do, and they change when its assumptions change. '
   + 'The figures behind them are planning assumptions rather than measured evidence, so the next useful step is to check the inputs this result leans on most.';
-const shapedNarrator = (n: number) => `${bulletedNarrator(n)} ${LONG_TAIL}`;
-const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
+const _shapedNarrator = (n: number) => `${bulletedNarrator(n)} ${LONG_TAIL}`;
+const _BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
 /** Exact public sentences, pinned independently of the selector so base/mutants cannot redefine the oracle. */
 const SENTENCE = 'The result is not yet robust — small changes could flip it.';
 const ROBUSTNESS_MARKER = 'Small changes could change the comparison';
@@ -93,7 +93,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', () => {
   let app: FastifyInstance;
   let narrator = NARRATOR;
-  let providerCalls = 0;
+  let _providerCalls = 0;
   let emptyNarration = false;
   let readbackState: Record<string, unknown>;
   let readbackReady: typeof FX.state.analysis_ready;
@@ -102,7 +102,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   let duringNarration: (() => void) | undefined;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
-      providerCalls += 1;
+      _providerCalls += 1;
       duringNarration?.();
       return new Response(JSON.stringify({ output: emptyNarration ? [] : [
         { type: 'message', content: [{ type: 'output_text', text: narrator }] },
@@ -129,7 +129,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
   beforeEach(() => {
-    rows.clear(); narrator = NARRATOR; providerCalls = 0; emptyNarration = false;
+    rows.clear(); narrator = NARRATOR; _providerCalls = 0; emptyNarration = false;
     readbackGraph = structuredClone(FX.state.draft_graph); retainedScope = []; canonicalScopeRead = undefined; duringNarration = undefined;
     readbackState = { ...FX.state.analysis_state,
       run_state: { ...(FX.state.analysis_state.run_state as Record<string, unknown>), computed_at: '2026-10-01T12:00:00.000Z' },
@@ -161,7 +161,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
     expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
   };
-  const assertCaveat = (b: Body, sentence = SENTENCE) => {
+  const _assertCaveat = (b: Body, sentence = SENTENCE) => {
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.headline).toBe(NARRATOR);
     assertShapedCaveat(b, sentence);
@@ -181,7 +181,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
 
   // W11: removing scope rereads canonical authority; the same Run's restored licence must add the caveat.
 
-  const graphWithControlledFlipFactors = () => {
+  const _graphWithControlledFlipFactors = () => {
     const graph = structuredClone(FX.state.draft_graph) as { nodes: Record<string, unknown>[] };
     const interventions = Object.fromEntries(FLIP_ROWS.map(row => [(row as { factor_id: string }).factor_id, { value: 1 }]));
     for (const node of graph.nodes) if (node.kind === 'option') node.interventions = interventions;

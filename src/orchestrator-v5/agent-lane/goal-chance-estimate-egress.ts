@@ -159,7 +159,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
           const heldMonths = heldGoalHorizonMonths(claimGoal) ?? goalTargetBasisOf(claimGoal)?.period_months;
           const verdict = goalHorizonVerdict(context.graph, enrichment ?? run);
           const named = optionLabels.filter(o => names(subject, o.label) || names(subject, o.id));
-          const target = readGoalRecord(context.graph, claimGoal.id)?.target;
+          const target = typeof claimGoal.id === 'string' ? readGoalRecord(context.graph, claimGoal.id)?.target : undefined;
           const licensedTarget = rec(licence.target);
           const comparator = target?.comparator === '>=' ? 'at_least' : target?.comparator === '<=' ? 'at_most'
             : target?.comparator === '>' ? 'above' : target?.comparator === '<' ? 'below' : undefined;

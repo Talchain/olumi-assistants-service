@@ -4555,7 +4555,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       !runBound.some(existing => (existing as { block_id?: unknown }).block_id === block.block_id))];
     // What changed since the last run: the run turn's own block and refusal reason, only beside that same run.
     const runDelta = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
-    const coachingBlocks: unknown[] = coachingBound.length === 0
+    const _coachingBlocks: unknown[] = coachingBound.length === 0
       ? []
       : sanitiseOlumiResponseForEgress(
         // A carrier for the blocks only — not an answer, so not a compose site: nothing here speaks.

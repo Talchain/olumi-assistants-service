@@ -4,18 +4,18 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../../../utils/telemetry.js';
-import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
-import { markerForDisclosure, sentenceMultiset, type ReplyComposeInput } from '../reply/compose-reply.js';
-import { CHANCE_FREE_HORIZON_PREFIX } from '../decision-input-ask.js';
-import { targetTestabilityOf } from '../../admission/target-testability.js';
+import { deriveAnswerTextFromShape as _deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { markerForDisclosure as _markerForDisclosure, sentenceMultiset as _sentenceMultiset, type ReplyComposeInput as _ReplyComposeInput } from '../reply/compose-reply.js';
+import { CHANCE_FREE_HORIZON_PREFIX as _CHANCE_FREE_HORIZON_PREFIX } from '../decision-input-ask.js';
+import { targetTestabilityOf as _targetTestabilityOf } from '../../admission/target-testability.js';
 import { actionFactsOf } from '../actions/state.js';
-import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
+import { deriveOlumiAuthoredValues as _deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
+import { whatChangesFaceLine as _whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
 import { identityCardOfferable, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 import { projectCanonicalAnalysisView, type CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
-import { thresholdReasonLine } from '../break-even.js';
-import { widenedLine, widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../runtime/widen-draft.js';
+import { thresholdReasonLine as _thresholdReasonLine } from '../break-even.js';
+import { widenedLine as _widenedLine, widenedRiskNote as _widenedRiskNote, widenedRiskMarker as _widenedRiskMarker, type WidenCounts } from '../runtime/widen-draft.js';
 
 type Rec = Record<string, unknown>;
 type Graph = { nodes: Rec[]; edges: Rec[] };
@@ -25,11 +25,11 @@ type Body = { assistant_text: string; _answer_shape?: AnswerShape; suggested_act
 const FX = JSON.parse(readFileSync(new URL('./fixtures/one-reply-paul-pricing.json', import.meta.url), 'utf8')) as {
   brief: string; narrator: string; read: Rec & { graph: Graph; graph_hash: string; analysis_result: Rec; analysis_state: Rec };
 };
-const B1 = JSON.parse(readFileSync(new URL('./fixtures/r11b-head-b1.json', import.meta.url), 'utf8')) as {
+const _B1 = JSON.parse(readFileSync(new URL('./fixtures/r11b-head-b1.json', import.meta.url), 'utf8')) as {
   brief: string; graph: Graph; graph_hash: string; analysis_result: Rec; analysis_state: Rec;
   analysis_ready: Rec; before_shape: AnswerShape; before_text: string;
 };
-const B1_WIDENED = JSON.parse(readFileSync(new URL('./fixtures/served-b1-widened-20261008.json', import.meta.url), 'utf8')) as Graph;
+const _B1_WIDENED = JSON.parse(readFileSync(new URL('./fixtures/served-b1-widened-20261008.json', import.meta.url), 'utf8')) as Graph;
 // Reuse the captured Run that already licenses numeric goal chances; no chance is invented for this route row.
 const T1B = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as {
   j: typeof FX.read & { brief_text: string };
@@ -38,8 +38,8 @@ let currentRead = FX.read;
 let buildBrief = FX.brief;
 let buildWidened: WidenCounts | undefined;
 let withoutRun = false;
-let lastComposeInput: unknown;
-let withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['withholdDisclosureFor'];
+let _lastComposeInput: unknown;
+let _withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['_withholdDisclosureFor'];
 let lastBuildPayload: Rec;
 let saved: Graph = { nodes: [], edges: [] };
 let askedToBuild = false;
@@ -67,7 +67,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 vi.mock('../reply/compose-reply.js', async (original) => {
   const actual = await original<typeof import('../reply/compose-reply.js')>();
   return { ...actual, composeReplyShape: (input: Parameters<typeof actual.composeReplyShape>[0]) => {
-    lastComposeInput = structuredClone(input);
+    _lastComposeInput = structuredClone(input);
     return actual.composeReplyShape(input);
   } };
 });
@@ -94,10 +94,10 @@ vi.mock('../../handlers/chip-click-dispatch.js', async (original) => ({
       suggested_actions: [], insights: [], blocks: [currentRead.analysis_result], analysis_state: currentRead.analysis_state } }),
 }));
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
-const face = (shape: AnswerShape) => [shape.headline, ...shape.bullets].join('\n');
-const count = (text: string, phrase: string) => text.split(phrase).length - 1;
+const _face = (shape: AnswerShape) => [shape.headline, ...shape.bullets].join('\n');
+const _count = (text: string, phrase: string) => text.split(phrase).length - 1;
 const words = (text: string) => text.trim().split(/\s+/u).filter(Boolean).length;
-const withheldCells = (code: string, message: string | null = null): readonly CanonicalAnalysisCell[] => [
+const _withheldCells = (code: string, message: string | null = null): readonly CanonicalAnalysisCell[] => [
   { kind: 'withheld', why: 'Chance not shown yet', face: message ?? 'Why this figure is withheld is not recorded.', reasons: [{ code, message }] },
 ];
 
@@ -117,7 +117,7 @@ describe('ONE reply contract through the build route', () => {
       return new Response(JSON.stringify(say(narrator)), { status: 200 });
     }));
     const route = await import('../../../routes/agent-v1-turn.js');
-    withholdDisclosureFor = route.withholdDisclosureFor;
+    _withholdDisclosureFor = route.withholdDisclosureFor;
     const { agentV1TurnRoute } = route;
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async req => {
@@ -156,7 +156,7 @@ describe('ONE reply contract through the build route', () => {
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
   beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); askedToBuild = false;
     narrator = process.env.ONE_REPLY_CAPTURE_BASE === '1' ? FX.narrator : `${FX.narrator}\n\n${GOAL_CHANCE_CAPTURE}`;
-    currentRead = FX.read; buildBrief = FX.brief; buildWidened = undefined; withoutRun = false; lastComposeInput = undefined; info.mockClear(); });
+    currentRead = FX.read; buildBrief = FX.brief; buildWidened = undefined; withoutRun = false; _lastComposeInput = undefined; info.mockClear(); });
   // #2851 supersedes the captured draft's automatic-card premise: Olumi's basis-less 250 is not a user level.
   // Keep the exact positive identity assertions on the same count explicitly ratified by the user; the original
   // capture remains untouched and has its own no-card route control below.
@@ -195,7 +195,7 @@ describe('ONE reply contract through the build route', () => {
     expect(replay._answer_shape, 'PL replay: exact live face/detail shape').toEqual(body._answer_shape);
   };
 
-  const withOlumiAddedRisks = () => {
+  const _withOlumiAddedRisks = () => {
     const option = currentRead.graph.nodes.find(node => node.kind === 'option')!;
     const factor = currentRead.graph.nodes.find(node => node.kind === 'factor')!;
     const goal = currentRead.graph.nodes.find(node => node.kind === 'goal')!;
@@ -214,7 +214,7 @@ describe('ONE reply contract through the build route', () => {
     (currentRead.current_read as Rec).current_analysis_hash = currentRead.graph_hash;
     return risks;
   };
-  const useNumericChanceRead = (): void => {
+  const _useNumericChanceRead = (): void => {
     currentRead = structuredClone(T1B);
     buildBrief = T1B.brief_text;
     narrator = 'Your results are ready. You can view them now or ask me to explain them.';

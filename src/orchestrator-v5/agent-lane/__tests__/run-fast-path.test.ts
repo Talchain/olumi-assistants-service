@@ -81,7 +81,7 @@ describe('fast path 3: a typed Run dispatches once and returns its AI interpreta
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { modelBodies = []; runs = 0; interp = 'ok'; blocked = false; failed = false; });
-  const explain = async (first: { json(): { suggested_actions: { id: string; message: string }[]; _agent: { session_id: string } } }) => {
+  const _explain = async (first: { json(): { suggested_actions: { id: string; message: string }[]; _agent: { session_id: string } } }) => {
     const b = first.json();
     const chip = b.suggested_actions.find((a) => a.id.startsWith('agent-explain-run:'));
     expect(chip).toBeDefined();
@@ -175,7 +175,7 @@ describe('fast path 3: a typed Run dispatches once and returns its AI interpreta
     // words below); every other byte is the banked text (base hash 3d979e8406693be4 with that clause back).
     expect(INTERPRETER_V02_BANKED).toContain("Use the supplied current driver and sensitivity data to explain what the result rests on, with its source and uncertainty.");
     expect(INTERPRETER_V02_BANKED).not.toContain('say investigation priority is not established.');
-    const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    const _first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
     expect(modelBodies, 'Run includes its one interpretation').toHaveLength(1);

@@ -11,26 +11,26 @@ import { readFileSync } from 'node:fs';
 import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent, withScreenLinesOwed as _withScreenLinesOwed } from '../goal-chance-screen-lines.js';
 import { SPREAD_NOTE_WITHOUT_DOWNSIDE } from '../../goal-target/goal-chance-licence.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
-import { untestedHorizonLine } from '../decision-input-ask.js';
-import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
-import { HORIZON_MARKER, WITHHOLD_FALLBACK_MARKER, type ReplyComposeInput, type ReplyComposition } from '../reply/compose-reply.js';
-import { runExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
-import { goalKindOf } from '../../goal-target/goal-kind.js';
-import { teamShareMoments, extraShareMoments } from '../../goal-target/event-by-date-share.js';
-import { preconditionRiskIds } from '../../../graph/inert-risk.js';
-import { WIDENED_RISK_MARKER_DOWN } from '../widened-risk-markers.js';
+import { untestedHorizonLine as _untestedHorizonLine } from '../decision-input-ask.js';
+import { whatChangesFaceLine as _whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
+import { HORIZON_MARKER, WITHHOLD_FALLBACK_MARKER as _WITHHOLD_FALLBACK_MARKER, type ReplyComposeInput, type ReplyComposition } from '../reply/compose-reply.js';
+import { runExplanationChip as _runExplanationChip, RUN_EXPLANATION_MESSAGE as _RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { goalKindOf as _goalKindOf } from '../../goal-target/goal-kind.js';
+import { teamShareMoments as _teamShareMoments, extraShareMoments as _extraShareMoments } from '../../goal-target/event-by-date-share.js';
+import { preconditionRiskIds as _preconditionRiskIds } from '../../../graph/inert-risk.js';
+import { WIDENED_RISK_MARKER_DOWN as _WIDENED_RISK_MARKER_DOWN } from '../widened-risk-markers.js';
 
 type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
 /** B5 T1b on 3fce64f: three point lines on the `each` licence, leader withheld (near tie); the gate deleted the chat's copy. */
 const READ_T1B = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
 /** Historical static B1 pilot before the accumulation carrier, with its original face/detail. */
-const READ_B1 = JSON.parse(readFileSync(new URL('./fixtures/r11b-head-b1.json', import.meta.url), 'utf8')) as Json;
+const _READ_B1 = JSON.parse(readFileSync(new URL('./fixtures/r11b-head-b1.json', import.meta.url), 'utf8')) as Json;
 // Exact B2 was not captured in this tree; the constructed fixture records its source and alterations.
-const RANGE_WINS_B2 = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-range-wins.json', import.meta.url), 'utf8')) as Json;
+const _RANGE_WINS_B2 = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-range-wins.json', import.meta.url), 'utf8')) as Json;
 let READ: Json = READ_B3;
 const VIEW = {
   view: 'Before comparing, size how strongly running a fourth shop changes its monthly operating profit.',
@@ -48,7 +48,7 @@ const withClause = (line: string, words: string): string => {
   if (at < 0) throw new Error(`no "in this model" in: ${line}`);
   return `${line.slice(0, at)}, in this model, using Olumi's estimates for ${words} (see Check estimates).${line.slice(at + ', in this model.'.length)}`;
 };
-const SCREEN_NOW = SCREEN.map((l) => withClause(l, '6 starting values, 2 option settings and 5 relationships'));
+const _SCREEN_NOW = SCREEN.map((l) => withClause(l, '6 starting values, 2 option settings and 5 relationships'));
 const SCREEN_T1B = ALL_SCREEN.filter((s) => s.source.includes('/t1b-b5-1/')).map((s) => s.line);
 const SIZE_QUESTION = 'How sure are you of that size?';
 // RC6 keeps the first screen unit intact and drops only the later copy of its question.
@@ -58,7 +58,7 @@ let forwardedText = 'ok';
 let composeInput: ReplyComposeInput | undefined;
 let composition: ReplyComposition | undefined;
 let lastTurnPayload: Json;
-let runCompleted = false;
+let _runCompleted = false;
 let canonicalReadOverride: ((view: ReturnType<typeof projectCanonicalAnalysisView>) => unknown) | undefined;
 let warn: ReturnType<typeof vi.spyOn>;
 vi.mock('../reply/compose-reply.js', async original => {
@@ -115,7 +115,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     warn = vi.spyOn(log, 'warn');
     hashTurn = message => agentTurnRequestHash(SCENARIO, null, message);
     app = Fastify({ logger: false });
-    app.post('/orchestrate/v2/turn', async () => { runCompleted = true; return ({
+    app.post('/orchestrate/v2/turn', async () => { _runCompleted = true; return ({
       response_version: 2, assistant_text: forwardedText, suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [analysisResult], analysis_ready: READ.analysis_ready, analysis_state: READ.analysis_state,
     }); });
@@ -137,8 +137,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     await app.ready();
   }, 60_000);
   afterAll(async () => { warn.mockRestore(); await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { runCompleted = false; canonicalReadOverride = undefined; warn.mockClear(); rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
-  const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
+  beforeEach(() => { _runCompleted = false; canonicalReadOverride = undefined; warn.mockClear(); rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
+  const _useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
   // A string third argument is the Agent session id (GP rows); an object is extra payload (A rows).
@@ -155,11 +155,11 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     return b;
   };
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
-  const run = (reply: string) => [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }], say(reply)];
+  const _run = (reply: string) => [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }], say(reply)];
   const count = (text: string, s: string): number => text.split(s).length - 1;
   const faceUnits = (body: Body): string[] => [body._answer_shape!.headline, ...body._answer_shape!.bullets];
-  const withholdMarkers = (body: Body): string[] => faceUnits(body).filter(unit => /^Not shown(?::| yet;)/.test(unit));
-  const expectStoredAndReplayed = async (body: Body): Promise<void> => {
+  const _withholdMarkers = (body: Body): string[] => faceUnits(body).filter(unit => /^Not shown(?::| yet;)/.test(unit));
+  const _expectStoredAndReplayed = async (body: Body): Promise<void> => {
     const payload = structuredClone(lastTurnPayload);
     expect(body._answer_shape, 'PL live: displayed contract carries its face/detail shape').toBeDefined();
     const durable = rows.get(payload.turn_id);
@@ -176,7 +176,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(replay._answer_shape, 'PL replay: exact live face/detail shape').toEqual(body._answer_shape);
     expect(replay.assistant_text, 'PL replay: display is the exact shape derivation').toBe(deriveAnswerTextFromShape(replay._answer_shape!));
   };
-  const expectHorizonMarker = (body: Body, chance: string, fullSentence: string): void => {
+  const _expectHorizonMarker = (body: Body, chance: string, fullSentence: string): void => {
     const shape = body._answer_shape!;
     const units = [shape.headline, ...shape.bullets];
     expect(units[units.indexOf(chance) + 1], 'must-face horizon marker immediately follows its chance').toBe(HORIZON_MARKER);
@@ -206,7 +206,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     }];
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
   };
-  const expectMandatoryFindings = (body: Body) => {
+  const _expectMandatoryFindings = (body: Body) => {
     expect(body._answer_shape, 'R2 T1b coaching reply carries one shape').toBeDefined();
     const units = [body._answer_shape!.headline, ...body._answer_shape!.bullets];
     // This route harness forwards a historical licence, bypassing the Run producer.
@@ -218,7 +218,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(units.join('\n')).not.toContain("Olumi's estimates:");
     expect(composition?.measure?.face_over_word_budget).toBe(true);
   };
-  const shortfallScreenLine = () => {
+  const _shortfallScreenLine = () => {
     READ = structuredClone(READ_T1B);
     READ.analysis_state.leader_claim = { permitted: true };
     analysisResult = structuredClone(READ.analysis_result);
@@ -240,7 +240,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     return lines[0]!;
   };
 
-  const oneChance = (goalFields: Json = {}, driver = false) => {
+  const _oneChance = (goalFields: Json = {}, driver = false) => {
     READ = structuredClone(READ_T1B);
     const goal = READ.graph.nodes.find((n: Json) => n.kind === 'goal');
     Object.assign(goal, { label: 'MRR', goal_threshold_raw: 20000, goal_threshold_cap: 25000,
@@ -261,7 +261,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   };
 
   it('r11: a forwarded assistant reply crosses the same current-Run boundary', async () => {
-    const line = estimateScreenLine();
+    const _line = estimateScreenLine();
     const unrelated = 'The chance of supplier failure is 10%.';
     forwardedText = `Raise to £59: 67%. ${unrelated}`;
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
