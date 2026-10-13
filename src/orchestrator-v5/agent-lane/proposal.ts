@@ -119,6 +119,13 @@ export interface ProposalOperation {
     | 'set_goal_deadline'
     /** The user's card-only temporal judgement for the held month; `value` is `{months}`. */
     | 'attest_goal_steady'
+    /**
+     * G — THE USER'S ANSWER TO THEIR GOAL'S OPEN QUESTION about how its target is read (`goal-target/held-change-target.ts`).
+     * `path` is the goal's id; `value` is `{expected_basis, open_question}`: the stored reading the card showed, byte for byte.
+     * Written only through the atomic level door's `goal_reading` member (`goal-reading-write.ts`), alone: it removes ONLY the
+     * question. The reading stays Olumi's.
+     */
+    | 'confirm_goal_reading'
     | 'set_team_time'
     /** E5 (SYS1): each capacity option's hiring times; field-scoped like `set_team_time` (`scoped_precondition_holds`). */
     | 'set_hiring_times'
