@@ -80,12 +80,13 @@ describe('G14: restating the saved change target is "already saved", never a ref
       label: 'Productivity', target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=',
       reference: 'today', denominator: 'today’s productivity', effect_unit: '% of today’s productivity', period_months: 3, period_kind: 'at_end',
       also_required: ['maintaining code quality'],
-    } });
+    }, compared: ['target_frame', 'target_raw', 'unit', 'comparator'], not_compared: ['denominator', 'reference', 'period'] });
     expect(proposals.outstanding(String(SAVED.scenario_id), null)).toEqual([]);
   });
 
   it('the held effect unit itself is the same target too ("% of today\'s productivity", either apostrophe)', () => {
-    expect(answer(SAVED, { ...AT_LEAST_10, unit: "% of today's productivity" }).p).toMatchObject({ already_saved: true });
+    expect(answer(SAVED, { ...AT_LEAST_10, unit: "% of today's productivity" }).p).toMatchObject({ already_saved: true,
+      compared: ['target_frame', 'target_raw', 'unit', 'comparator', 'denominator'], not_compared: ['reference', 'period'] });
   });
 
   it.each([
@@ -99,6 +100,13 @@ describe('G14: restating the saved change target is "already saved", never a ref
     expect(proposals.outstanding(String(SAVED.scenario_id), null)).toEqual([]);
     expect(savedGoalMeaningOf(SAVED.graph, GOAL)).toMatchObject({ target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=',
       reference: 'today', denominator: 'today’s productivity', period_months: 3 });
+  });
+
+  it('BOUND (Codex buddy): the user says percentage points but the Agent passes "%" — the tool cannot tell, and says which members it did not compare', () => {
+    const { p } = answer(SAVED, AT_LEAST_10, 'I mean 10 percentage points on the productivity score.');
+    // "already saved" is a claim about the SAVED target only; the reading it holds rides beside it for the Agent to compare.
+    expect(p).toMatchObject({ already_saved: true, not_compared: ['denominator', 'reference', 'period'],
+      saved_goal: { denominator: 'today’s productivity', effect_unit: '% of today’s productivity', reference: 'today', period_months: 3 } });
   });
 
   it('CONTRAST: the same figure on a goal with no validated reading is never "already saved" (value alone never matches)', () => {
@@ -142,11 +150,19 @@ describe('G: the user\'s answer to the goal\'s open question reaches the saved r
     expect(savedGoalMeaningOf(ASKED.graph, GOAL)).toMatchObject({ open_question: QUESTION });
   });
 
+  it('BOUND (Codex buddy): a points answer typed with "%" over the asked draft gets the card, whose words state the relative reading; nothing is written unpressed', () => {
+    const { p, proposals } = answer(ASKED, AT_LEAST_10, 'I mean 10 percentage points on a productivity score.');
+    expect(p!.public_label).toBe(CARD);
+    expect(CARD).toContain('% from today at three months, measured against today\'s development productivity');
+    expect(proposals.isApplied(String(p!.proposal_id))).toBe(false);
+  });
+
   it('CONTRAST: admission\'s conditions refusal is not a question the user can answer — already saved, no card', () => {
     const body = structuredClone(ASKED);
     goalOf(body).goal_target_basis.open_question = CONDITIONS_NOT_KEPT;
     const { p, proposals } = answer(body);
-    expect(p).toMatchObject({ ok: true, mutated: false, already_saved: true });
+    // The conditions refusal stays explicit: its sentence rides verbatim in the saved meaning, never cleared or hidden.
+    expect(p).toMatchObject({ ok: true, mutated: false, already_saved: true, saved_goal: { open_question: CONDITIONS_NOT_KEPT } });
     expect(proposals.outstanding(String(ASKED.scenario_id), null)).toEqual([]);
   });
 });
@@ -170,8 +186,10 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
         write.handler_facts.map((fact) => ({ turn_id: id, fact_created_at: '2026-10-13T23:00:00.000Z', fact }))),
     });
     const commits: CommitOptionLevelsInput[] = [];
+    let unconfirm = false;
     const commit = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
       commits.push(input);
+      if (unconfirm) return { status: 'unconfirmed' };
       const out = await executeOptionInterventionBatch({ scenarioId: String(body.scenario_id), turnId: input.turn_id, requestId: 'g-door',
         requestHash: `g:${input.turn_id}`, stage: 'frame', freshness: 'fresh', hasExistingAnalysis: true,
         expectedGraphHash: input.base_graph_hash, targets: [], goalReading: input.goal_reading }, store);
@@ -194,7 +212,7 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
       { proposal_id: pid } as never) as Promise<Rec>;
       return { proposals, caps, card, press };
     };
-    return { graph, rows, commits, store, open, setGraph: (g: Rec) => { bytes = JSON.stringify(g); } };
+    return { graph, rows, commits, store, open, setGraph: (g: Rec) => { bytes = JSON.stringify(g); }, unconfirmNext: () => { unconfirm = true; } };
   }
   /** The 13:18 graph with ONLY the question removed from the goal's reading: the one write's whole postimage. */
   const answered = (): Rec => { const g = structuredClone(ASKED.graph) as Rec; delete goalOf({ graph: g }).goal_target_basis.open_question; return g; };
@@ -227,6 +245,18 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     expect(await press(pid)).toMatchObject({ ok: true, applied: true });
     expect(await press(pid)).toMatchObject({ ok: true, mutated: false, already_applied: true });
     expect(w.rows).toHaveLength(1);
+  });
+
+  it('failed write: a commit that cannot be confirmed gives no receipt and never says the answer was recorded', async () => {
+    const w = persisted(ASKED);
+    const { card, press, proposals } = w.open();
+    const pid = String(card().proposal_id);
+    w.unconfirmNext();
+    const r = await press(pid);
+    expect(r).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' });
+    expect(r.follow_up).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('Recorded your answer');
+    expect(proposals.isApplied(pid)).toBe(false);
   });
 
   it('denied: another user\'s press is refused and nothing is written', async () => {

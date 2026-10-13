@@ -99,6 +99,18 @@ export function restatesHeldChangeTarget(
   return label !== '' && figureTheUserWroteFor(requested.value, requested.unit, userText, { target: [label], others });
 }
 
+/**
+ * Which members of the saved meaning the request itself could be compared on (structured, no prose): the request carries a
+ * figure, a unit and a comparator only, so the reference and the period are never compared here, and the denominator only
+ * when the unit names it. The Agent compares the rest with the user's own words, against `saved_goal`.
+ */
+export function comparedMembersOf(raw: unknown, goalId: string, requested: { readonly unit: string }): { readonly compared: readonly string[]; readonly not_compared: readonly string[] } {
+  const basis = goalTargetBasisOf(goalNodeOf(raw, goalId));
+  const denominator = basis !== undefined && unitPhrase(requested.unit) === unitPhrase(basis.effect_unit);
+  return { compared: ['target_frame', 'target_raw', 'unit', 'comparator', ...(denominator ? ['denominator'] : [])],
+    not_compared: [...(denominator ? [] : ['denominator']), 'reference', 'period'] };
+}
+
 /** AIE_TEXT_PENDING: the card's words, built from the stored question and the reading it answers with. */
 export const CONFIRM_GOAL_READING_LABEL_TEMPLATE = 'Read your target as {reading}. This answers: {question}';
 /** AIE_TEXT_PENDING: the Agent's note on the card. */
@@ -130,7 +142,7 @@ export function heldChangeTargetAnswer(args: {
   const stored = goal?.goal_target_basis;
   const reading = basis === undefined ? undefined : goalReadingWords(graph.raw, goalId, basis);
   if (basis?.open_question === undefined || basis.open_question === CONDITIONS_NOT_KEPT || !isRec(stored) || reading === undefined) {
-    return { ok: true, mutated: false, already_saved: true, saved_goal: saved };
+    return { ok: true, mutated: false, already_saved: true, saved_goal: saved, ...comparedMembersOf(graph.raw, goalId, args.requested) };
   }
   const proposal = createProposal({
     scenario_id: args.scenario_id,
