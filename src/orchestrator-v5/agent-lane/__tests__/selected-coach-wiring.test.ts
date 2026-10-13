@@ -25,7 +25,9 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // G (12 Oct, AIE #94 6133027121): the range rule in #34 and #35 says goal_chance_words when given (else “chance of meeting
 // your goal”), and #35's headline is “its chance, in this model”, so a part-goal Run is never called the whole goal's chance:
 // 23,075 → 23,185 bytes (+110). Reversing exactly those three edits on the module's string reproduces a9c847ef… and 23,075.
-const HOST_SHA = 'ba7dee9095a0317e96c1dd5cab8c720bca010677d4e87c0e1c17b0b09cbff05b';
+// PROMPT 28 (13 Oct, AIE one-pass packet 94ad9c8f…): #9, #14, #19, #34 (the AIE's whole replaced entry), #35, #36 and #41
+// carry the packet's words; 20,248 bytes. Derived with the route's SENT body (below), never by hand.
+const HOST_SHA = '249a074624e00b874c897d354082d9f8b5ee57ffb5ebb8528b31e9feead56d78';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -56,14 +58,39 @@ const HOST_SHA = 'ba7dee9095a0317e96c1dd5cab8c720bca010677d4e87c0e1c17b0b09cbff0
 //   phrases (“their chance of meeting the goal”, “highest chance of meeting the goal”, “similar chances of meeting the
 //   goal”) become goal chances / chance / similar chances; plus the +110-byte host edits above: 35,418 → 35,782 bytes (+364).
 //   Derived from the SENT body; reversing exactly those edits on the SENT body reproduces a8a9845b… and 35,418 bytes.
-const RENDERED_SHA = '96cd8417fa4c8d5c1874f553f9addb164106d8872c2fa3da40211bf225063add';
-const RENDERED_BYTES = 35_782;
-/** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
-const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
+// + PROMPT 28 (13 Oct, AIE one-pass packet 94ad9c8f…): the host contract above, MUTATION_INSTRUCTION's propose_new_limit
+//   clause (P9), REPLY_LENGTH_INSTRUCTION (P10/P11), REPLY_SHAPE_INSTRUCTION (P12), and MODEL_RELATIVE_NAMING_INSTRUCTION
+//   leaving the join (its P13 words sit once inside #34): 35,782 → 31,245 bytes. Derived from the SENT body; replacing
+//   exactly those five pieces with staging's on the SENT body reproduces 96cd8417… and 35,782 bytes.
+const RENDERED_SHA = 'a56075bbf1ea1e55f313e36db524c8ec182689e2c6c5fac9d8cf7522029cba10';
+const RENDERED_BYTES = 31_245;
+/** ⛔ CHANGED EXPECTATION (prompt P13): the result-reply rule that replaced "N% of runs supported X", matched as SENT bytes. */
+const NAMING_RULE_FORM = 'Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present.';
 /** G (AIE #94 6133027121): the approved selected-Run scope line, verbatim; SENT once on every coaching path. */
 const AIE_SCOPE_LINE = 'Describe the selected Run using its licensed target wording and scope. If it scores only part of the user\'s goal, '
   + 'name that target and retain the unscored conditions; never call its chance the chance of meeting the whole goal. Keep its provisional '
   + 'or timing-assumption qualification in your own explanation.';
+/**
+ * PROMPT 28 (AIE one-pass packet SHA 94ad9c8f…): the approved texts the converse role's SYSTEM instructions carry, copied
+ * from the packet's own rows (never read from the source modules), plus the AIE's withheld-better rule. Each is SENT once.
+ */
+const PACKET_SYSTEM_TEXTS: Readonly<Record<string, string>> = {
+  'P1/P8': 'Use the tool result to explain what changed and the value and unit saved. Distinguish a prepared proposal from a committed change. If the result or current read does not confirm the save, say that its outcome is uncertain; never claim it was saved.',
+  'P2/P21': 'If analysis did not run, explain its actual recorded reason and a useful next action from the supplied facts. Keep reasoning useful before a Run; do not invent a missing value or promise that one answer will make analysis possible.',
+  'P3': 'Explain what the tool committed and use readiness_after to describe what can happen next. Do not report readiness or a result from an earlier model revision as current.',
+  'P4/P15/P20/P26': 'Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions.',
+  'P5/P6': 'Explain the selected Run’s currently licensed figures in your own words, retaining the exact licensed number or range, named option and target, unit, reference and period, in-this-model meaning, and supplied provisional or timing qualifications. A narrower target is not the chance of meeting the whole goal. Do not derive, invent, re-round or substitute a goal chance, or replace a missing chance with a share of model runs.',
+  'P7/P22/P23': 'Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer.',
+  'P9/P27/P28': 'Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved.',
+  'P10/P11': 'Answer the user directly and visibly with the relevant reasoning, uncertainty and next action. The host does not supply a separate explanatory answer. Ask for a necessary missing target or input yourself only when it has not already been supplied; do not re-ask a known figure. Keep concise ordinary replies, with enough detail for the actual question and proposed change.',
+  'P12': 'Keep the existing reply structure where required by this role’s schema, but put the useful answer and necessary explanation in the visible answer. Do not rely on a host-authored headline, hidden More detail section or later appendix to communicate it.',
+  'P13': 'Run result replies: lead with the selected Run\'s licensed goal-chance or withholding lines. Retain their target scope, unscored conditions and provisional, timing and source qualifications. Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. Never substitute a relative ranking for an unavailable goal chance. The separate goal-chance licence governs any comparison of goal chances. In dedicated comparative reasoning only, you may report a permitted share recorded for the selected Run, using the approved credit label and qualifier; never turn it into a recommendation or the chance of the whole goal. Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available. Never write recommend or recommendation, including negated forms. Never call a result, option or link fragile.',
+  'withheld-better': 'When leader permission is withheld, do not describe an option as the better, preferred or superior option, or the one to choose. You may explain a specifically scoped difference supported by current supplied facts, preserving its uncertainty and unresolved conditions; that difference does not establish an overall option to favour.',
+};
+/** The host-deferral premises the packet retires: none may reach the model in its instructions or tool descriptions. */
+const RETIRED_DEFERRALS = ['beneath your reply', 'Olumi adds its own status', 'Olumi asks for it after your words', 'show its card exactly',
+  'Olumi shows it under More detail', 'use its exact say', 'Never write that view', 'Never write the view in', 'N% of runs supported',
+  'use goal_chance_words verbatim', 'beyond the screen\'s own driver lines'] as const;
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';
@@ -241,6 +268,16 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     // G: the coaching conversation carries the AIE's scope line exactly once, and no whole-goal headline or superlative.
     expect(sent[0]!.instructions.split(AIE_SCOPE_LINE)).toHaveLength(2);
     expect(sent[0]!.instructions).not.toMatch(/headline is its chance of meeting|highest chance of meeting|similar chances of meeting/);
+  });
+
+  it('PROMPT 28: the SENT converse call carries each approved packet text once and no retired deferral', async () => {
+    await sendTurn('What does the analysis say?', [say('The comparison is provisional.')]);
+    const body = sent[0]!;
+    for (const [site, text] of Object.entries(PACKET_SYSTEM_TEXTS)) expect(body.instructions.split(text).length - 1, site).toBe(1);
+    for (const retired of RETIRED_DEFERRALS) expect(body.instructions, retired).not.toContain(retired);
+    const tools = (body.tools ?? []) as { name?: string; description?: string }[];
+    expect(tools.find((t) => t.name === 'give_provisional_view')?.description).toContain(PACKET_SYSTEM_TEXTS['P4/P15/P20/P26']);
+    for (const tool of tools) for (const retired of RETIRED_DEFERRALS) expect(tool.description ?? '', `${tool.name}: ${retired}`).not.toContain(retired);
   });
 
   it('keeps the same selected prompt on a tool-followup conversation; the narrating hop is low effort (P44 S1)', async () => {
