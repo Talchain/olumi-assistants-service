@@ -184,7 +184,7 @@ describe('Q6 limit checks use the Run’s recorded sent option set', () => {
           analysis_ready: { status: 'ready', may_run: true }, blocks: [body.analysis_result] } };
         throw new Error(`unexpected dispatch ${path}`);
       };
-      const reply = await createAgentCapabilities(dispatch, new ProposalStore()).runAnalysis(CTX, { reason: 'Run it.' });
+      const reply = await createAgentCapabilities(dispatch, new ProposalStore()).runAnalysis(CTX, { reason: 'Run it.', effects_timing: null });
       expect((reply.limit_checks as { limits: LimitCheck[] }).limits[0]!.say).toBe(sent ? BOTH : SENT_ONLY);
     }
   });
@@ -193,7 +193,7 @@ describe('Q6 limit checks use the Run’s recorded sent option set', () => {
     const body = await storedRunRead(undefined);
     const dispatch: InternalDispatch = async path => path.endsWith('/graph') ? { status: 200, json: body }
       : { status: 200, json: { assistant_text: '', analysis_state: body.analysis_state, blocks: [body.analysis_result] } };
-    const reply = await createAgentCapabilities(dispatch, new ProposalStore()).runAnalysis(CTX, { reason: 'Run it.' });
+    const reply = await createAgentCapabilities(dispatch, new ProposalStore()).runAnalysis(CTX, { reason: 'Run it.', effects_timing: null });
     expect((reply.limit_checks as { limits: LimitCheck[] }).limits[0]!.say).toBe(BOTH);
   });
 });

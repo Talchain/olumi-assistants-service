@@ -64,7 +64,7 @@ import { identityConfirmBaseIsWritable, isEditableGraph, type EditableGraph } fr
 import { commitDirectAnswer } from '../commit.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { useAppendV6 } from '../append-v6-flag.js';
-import { isRevisionConflict } from '../graph-revision-conflict.js';
+import { isRevisionConflict, rethrowRevisionConflict } from '../graph-revision-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { buildOptionEffectRawOperation, linkedFactorsOf, formatOptionEffectWriteAck, readCommittedOptionEffect } from '../routing/option-effect-write.js';
@@ -814,7 +814,8 @@ export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactio
   readonly requestHash: string;
   /**
    * B8 (DL CR 5934735711): let a turn-fence refusal escape (the Agent's in-process door only), so its
-   * `runFencedInProcessWrite` maps the verdict. The wire event keeps `commit_not_confirmed`.
+   * `runFencedInProcessWrite` maps the verdict. On the wire event a `superseded` refusal is the revision guard's 409
+   * (see the writer's catch); every other verdict keeps `commit_not_confirmed`.
    */
   readonly fenceRefusalReachesCaller?: boolean;
 };
@@ -1332,6 +1333,10 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     // The fence refuses BEFORE the write (nothing saved): the in-process door's wrapper names the verdict.
     if (isRevisionConflict(err)) throw err;
     if (input.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
+    // J (sys3 CAPACITY-CONCURRENT-409-vs-500): on the wire, the fence's own `superseded` refusal is a CONFIRMED non-write
+    // (a later turn claimed this scenario; the append rolled back). It is the revision guard's refusal: 409
+    // revision_conflict, refresh_and_reconfirm. Any other verdict or error keeps the unverified path below.
+    if (err instanceof TurnFenceRejectedError && err.verdict === 'superseded') rethrowRevisionConflict({ conflict_category: 'revision_conflict' });
     // A transport error need not prove rollback. No Applied response or claim
     // of "nothing changed" escapes; retry/readback must settle that question.
     return { kind: 'unverified', reason: 'commit_not_confirmed', commitAttempted: true };

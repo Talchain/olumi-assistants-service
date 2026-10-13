@@ -63,7 +63,7 @@ async function saved(read: Json): Promise<Json> {
   return (await capabilities(read).getCanonicalState(ctx) as Json).analysis;
 }
 async function run(read: Json): Promise<Json> {
-  return (await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis' }) as Json).result;
+  return (await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis', effects_timing: null }) as Json).result;
 }
 function noCompanions(row: Json) {
   for (const key of GOAL_CHANCE_COMPANION_KEYS) expect(row).not.toHaveProperty(key);
@@ -216,7 +216,8 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(await run(fixture())).not.toHaveProperty('goal_horizon_line');
   });
   it('(10) both reporting rules add the exact range/deadline words and retain the existing bans', () => {
-    const rangeRule = 'For other options in goal_chance_range_display, say its range text exactly as given, then “ chance of meeting your goal, in this model” (for example “between less than 1% and 40% chance of meeting your goal, in this model”). Then state what it depends on: for link_strength, “It depends most on how strongly ‘{from}’ affects ‘{to}’, which isn\'t sized in the model yet.”; for link_existence, “It depends most on whether ‘{from}’ affects ‘{to}’ at all, which Olumi assumed.” Use depends_on.from_label and depends_on.to_label for {from} and {to}. Prefix “Of the links not sized yet, ” when depends_on.among is unsized_links. Never state a single figure for that option, and never compare or order ranges.';
+    // ⛔ CHANGED EXPECTATION (G, AIE #94 6133027121): a range takes the licence's own target words when given (as the screen does).
+    const rangeRule = 'For other options in goal_chance_range_display, say its range text exactly as given, then goal_chance_words when it is given, otherwise “chance of meeting your goal”, followed by “, in this model” (for example “between less than 1% and 40% chance of meeting your goal, in this model”). Then state what it depends on: for link_strength, “It depends most on how strongly ‘{from}’ affects ‘{to}’, which isn\'t sized in the model yet.”; for link_existence, “It depends most on whether ‘{from}’ affects ‘{to}’ at all, which Olumi assumed.” Use depends_on.from_label and depends_on.to_label for {from} and {to}. Prefix “Of the links not sized yet, ” when depends_on.among is unsized_links. Never state a single figure for that option, and never compare or order ranges.';
     const horizonRule = 'When goal_horizon_line is present and you state any goal chance or range, add that sentence verbatim once, right after the chance or range.';
     const runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
     const savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
@@ -309,7 +310,7 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     const read = driven(strengthDriver as Json);
     read.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
     read.analysis_ready = { ...read.analysis_ready, analysis_admission: { ...(read.analysis_ready?.analysis_admission ?? {}), admitted: true, permitted_analysis_mode: 'comparative_leader' } };
-    const out = await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis' }) as Json;
+    const out = await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis', effects_timing: null }) as Json;
     expect(out.claim_permissions?.leader_may_be_named, 'precondition: a leader may be named on this Run').toBe(true);
     expect(out.result.goal_chance_driver_display).toEqual({ [A]: 'It rests most on Olumi’s own estimate of how strongly ‘Pro plan price’ affects ‘Monthly recurring revenue’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?' });
   });

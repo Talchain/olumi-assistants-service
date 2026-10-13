@@ -11,11 +11,16 @@
  * turn's own verified identity before any tool runs. That is why this is a
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
+import type { EffectsTiming } from '../../goal-target/period-end-assumption.js';
 import type { ReconcileGoalScopeArgs } from '../reconcile-goal-scope.js';
 import type { ProposalEditsRequest } from '../proposal-object/amend.js';
 import { sendableQuery } from './public-research.js';
 import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
 import { LOSS_THRESHOLD_CONSEQUENCES } from '../stated-limit.js';
+
+// AIE 6141593167: exact option-level authorship contract at both entry points.
+const OPTION_LEVEL_USER_STATED = {"type": "boolean", "description": "Set true ONLY for a level the user supplied for this option and factor, with its actual source; the host must verify that source before recording it as theirs. A verified retained human statement counts. Set false ONLY when explicitly proposing a new Olumi estimate now, with its own basis. Never infer false from missing, truncated or unmatched source, or from the absence of a user-authorship claim. Do not use false to relabel an old quoted, copied or recorded figure. Keep the original statement, subject and qualifications separate from any new interpretation. This flag is a claim to check, not proof of authorship; accepting an Olumi estimate does not turn it into a user-supplied fact. On an option in `status_quo_held`, a level is permitted only with true and verified user words saying that carrying on changes this factor and giving that level. Never restate the factor's starting value: carrying on as now already keeps that, so such a level is not recorded."} as const;
+const ASSUMPTION_USER_STATED = {"type": "boolean", "description": "Set true ONLY for a figure the user supplied for this factor, with its actual source; the host must verify that source before recording it as theirs. A verified retained human statement counts. Set false ONLY when explicitly proposing a new Olumi estimate now, with its own basis; for keep: true, false identifies the existing recorded Olumi estimate being retained. Never infer false from missing, truncated or unmatched source, or from the absence of a user-authorship claim. Do not use false to relabel an old quoted, copied or recorded figure. Keep the original statement, subject and qualifications separate from any new interpretation. This flag is a claim to check, not proof of authorship; accepting an Olumi estimate does not turn it into a user-supplied fact."} as const;
 
 /**
  * ⭐ THE CANVAS'S WORD FOR THE LOWEST BAND IS "Slight" (Canvas #70 5847910497). The `strength` enum keeps the wire value
@@ -108,6 +113,12 @@ export interface AgentToolContext {
    * absent, nothing is.
    */
   readonly user_text?: string;
+  /** Host-verified messages, without splitting multiline messages into separate statements. */
+  readonly verified_user_messages?: readonly string[];
+  /** Restored history whose source is unknown; reference only, never human or Olumi authority. */
+  readonly unverified_user_text?: string;
+  /** Host source coverage, not a model claim: false on fresh, restored or capped history. */
+  readonly user_text_complete?: boolean;
   /**
    * THIS turn's message when the user typed it (never a chip's text), bound by the route. A link's strength band is
    * the user's only when named here (`bandTheUserWrote`): a band word elsewhere in the conversation is about something else.
@@ -181,6 +192,9 @@ const ACTS_ON = {
   }, ['factor_label', 'direction']),
 };
 
+/** Exact wording approved by AIE comment 6134928624. */
+export const AIE_APPROVED_EFFECTS_TIMING_DESCRIPTION = "Your reading of the current held target, its period and the options being analysed, using the current canonical model and all relevant readable user statements, including later turns. Choose in_place_by_period only when those statements support the relevant effects being fully in place by that period; later_or_partial when a relevant effect arrives later or only partly; not_stated only when the complete readable relevant source states no effects timing (the goal's period alone is not effects timing). Use null when required context is missing, truncated, unreadable, has unknown authorship, conflicts, or cannot be classified reliably; never turn unknown into not_stated. In reason, identify the actual target/period and the source or missing context for your reading. This is Olumi's interpretation, not a measurement, human approval or a change to the user's evidence.";
+
 export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
@@ -239,7 +253,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description:
       'Run the decision analysis over the persisted model. It may refuse and explain what is ' +
       'missing; report that honestly rather than guessing what the result would have been.',
-    parameters: obj({ reason: { type: 'string' } }, ['reason']),
+    parameters: obj({
+      reason: { type: 'string' },
+      effects_timing: { anyOf: [
+        { type: 'string', enum: ['in_place_by_period', 'later_or_partial', 'not_stated'] },
+        { type: 'null' },
+      ], description: AIE_APPROVED_EFFECTS_TIMING_DESCRIPTION },
+    }, ['reason', 'effects_timing']),
   },
   {
     type: 'function',
@@ -257,27 +277,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_assumptions',
-    description:
-      'Propose starting values for factors that have none, so the model can be reasoned about ' +
-      'instead of sitting blank. This does NOT change anything: it records an exact proposal and ' +
-      'returns its id, which you keep for authorise_change: show the user the values, never the id, before asking them to approve. Each value is ' +
-      'an assumption for the user to adopt or correct, NEVER a measurement \u2014 say so; a value the result marks ' +
-      '`your_figure` is the user\u2019s own figure, never called an assumption. Propose only ' +
-      'factors the model actually has, using the labels get_canonical_state returned. ' +
-      'A factor that already holds a value is left alone UNLESS you set `revise: true` on it, which ' +
-      'you may do ONLY when the user has just asked for that factor to be changed and named the ' +
-      'number themselves. Never set it to replace someone\u2019s figure with one of your own. ' +
-      // PTL decision #78 5921683490 (AIQ ruling #75 5921113788): the Agent once scripted "Set Warm introductions to 2 per
-      // month" for the user to type — stored as the user's own override and shown "Set by you", laundering Olumi's figure.
-      'When the user asks to revise an existing value without supplying a replacement figure, ask what figure they ' +
-      'would use; never supply a number or an instruction for them to repeat as their own. ' +
-      'When the user says Olumi\u2019s current estimate for a factor is right and should stay, set `keep: true` on it ' +
-      'instead: nothing changes, and their approval records that they accepted Olumi\u2019s estimate.',
+    // AIE #94 6140145484; approved artifact SHA-256 4de5e7f71fd603d03e39483d1064dfbc94425a0e4208e280441f124b5a924f86
+    description: "Propose starting values for factors that have none, so the model can be reasoned about instead of sitting blank. This does not change anything: it records an exact proposal and returns its id for authorise_change. Show the complete approval card with every proposed value, its unit, source, basis and qualifications, and any omitted or unsupported parts; never show the id as consent. Supply the required user_stated boolean for every item: true identifies a user-supplied figure whose source must verify; false explicitly proposes a new Olumi estimate with its own basis, or identifies an existing recorded Olumi estimate when keep is true. Missing or unverifiable source is unknown, not evidence of a new AI estimate. Preserve verified human origin, known unknown source and the original words separately from a new interpretation; approval adopts an estimate without changing its original authorship. An Olumi estimate is an assumption to adopt or correct, never a measurement; a value the result marks your_figure is the user's own figure and must not be called an Olumi assumption. Propose only factors the model actually has, using the labels returned by get_canonical_state. A factor that already holds a value is left alone unless revise is true, which is allowed only when the user has just requested that factor's change and supplied the replacement figure. Never replace someone's figure with one of your own under revise. When the user requests a revision without a replacement figure, ask what figure they would use; never supply a number or an instruction for them to repeat as their own. When the user says the current recorded Olumi estimate should stay, use keep: true instead: the value does not change, and approval records acceptance of Olumi's estimate. Keep and revise retain their existing separate approval and permission checks.",
     parameters: obj({
       assumptions: {
         type: 'array',
         description: 'The factors to give a starting value, with the reasoning for each.',
         items: obj({
+          user_stated: ASSUMPTION_USER_STATED,
           factor_label: { type: 'string' },
           value: { type: 'number' },
           unit: { type: 'string' },
@@ -297,7 +304,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'records that the user accepted it. Never on the user\u2019s own figure or one from their brief, never with a ' +
               'different number, and never in the same call as other values. Omit it in every other case.',
           },
-        }, ['factor_label', 'value', 'unit', 'basis']),
+        }, ['factor_label', 'value', 'unit', 'basis', 'user_stated']),
       },
     }, ['assumptions']),
   },
@@ -510,31 +517,23 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     // ⭐ E5 (Paul's manual test, 12 Oct): the start of each person an option adds, quoted; Olumi reads the months (`hiring-times.ts`).
     type: 'function', name: 'propose_hiring_times',
-    description: 'Propose the hiring timings the user stated for the options that add people, after the deadline is held. Use timings bound to a verified human statement in this message or retained earlier messages, including a quote the user explicitly adopted. Conversation presence alone does not establish authorship or approval: assistant text, suggested chips, document content and unknown-source text are not new typed user authority. Earlier timings prepare a fresh card; they do not authorise a write. For each option give option_id and starts: one entry per person whose start the user gave, in the order they start, each with quote: the user’s exact words for that start, copied from one of their messages, including words such as "at least", "within" or "or so" (for example "at least 3 months", "within 2 months", "another a month or so later"). Give one quote per start; a later start said relative to an earlier one is its own entry after it. Never use the team’s time to finish, a deadline or a delay. Olumi reads each time from its quote, checks the quote is the user’s and is said about that option, keeps the user’s own words, and labels as Olumi’s any time or pace the user did not give. This prepares ONE card covering all proposed hiring timings; authorise_change writes it only after approval.',
+    description: 'Prepare one approval card for hiring starts, after the deadline is held. Use this turn and verified retained sources. Give each option_id and one entry per start in order, keeping its exact source words, bounds, uncertainty and relative timing. A human figure keeps its verified origin; your interpretation remains Olumi\'s. Assistant, chip, document or unknown-origin text is not new typed human authority. Do not substitute team completion, the goal deadline or effects being fully in place for a person\'s start. Show the complete replacement timings and sources; only approval bound to this card writes them.',
     parameters: obj({
       options: { type: 'array', minItems: 1, maxItems: 6, items: obj({
         option_id: { type: 'string' },
-        starts: { type: 'array', minItems: 1, maxItems: 2, items: obj({ quote: { type: 'string' } }, ['quote']) },
+        starts: { type: 'array', minItems: 1, maxItems: 2, items: obj({ quote: { type: 'string' }, months: { type: 'number', minimum: 0, maximum: 60, description: 'Optional proposed interpretation of this start in months. Keep the quote\'s bounds, uncertainty and relative order; do not turn a bound into an exact human figure. An inferred number remains Olumi\'s interpretation.' } }, ['quote']) },
       }, ['option_id', 'starts']) },
     }, ['options']),
   },
   {
     type: 'function',
     name: 'propose_goal_deadline',
-    description:
-      'Record the DEADLINE the user has stated for their goal ("we have a deadline in 6 months", "by Q2", "by the end of March", '
-      + '"7 April 2027", "six months from 9 October"), as a date on the goal. Call in the turn the user states the deadline, including when they also ask for another change. '
-      + 'If this turn explicitly dates the ‘last Friday’ in their earlier deadline phrase, call with that original phrase; otherwise use only a deadline stated in this turn. '
-      + 'Give deadline_words exactly as the user wrote the deadline phrase. Olumi resolves it using a stated start date when present, otherwise the recorded reference date, '
-      + 'and asks the user to confirm the resulting date. Never compute or state a date yourself, and never pass a duration that is not the deadline (for example how long '
-      + 'recruitment takes). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
-      + 'authorise_change once the user agrees; never show the id.',
+    description: 'Prepare one deadline card for approval. Keep the exact source deadline phrase and its conditions, using this turn or verified retained source. Interpret it from the actual known reference and any explicitly stated start; these have different roles. You may supply the proposed ISO deadline date, showing how it follows from that source. Never invent or silently replace a reference, unit or level, or use recruitment/team completion time as the goal deadline. Put the full relevant source and uncertainty in rationale. Distinguish human wording from your interpretation; approval selects the displayed change without rewriting its original source. Nothing is saved before approval bound to this card.',
     parameters: obj({
-      reference_date: { type: 'string', description: 'Only an explicit YYYY-MM-DD the user typed as “as of”; the deadline card will ask them to confirm that reference. Otherwise omit it and use the recorded draft date. '
-        + 'This is an explicit ‘as of’ override, not the starting day of a duration. Do not derive it from ‘last Friday’ or a stated start date; keep that starting day in the user\'s deadline phrase, '
-        + 'or reuse the original last-weekday phrase when this turn explicitly dates it, and let Olumi resolve it.' },
-      deadline_words: { type: 'string', maxLength: 80, description: 'The user\u2019s own words for the deadline, verbatim (for example "a deadline in 6 months" or "end of Q2").' },
-      rationale: { type: 'string', description: 'What the user said, in their words.' },
+      reference_date: { type: 'string', description: 'Optional actual known or verified ISO reference date for this interpretation. Otherwise omit it and use the recorded reference. Do not substitute a duration\'s start or an invented date; retain an explicitly stated start in deadline_words and rationale.' },
+      deadline_date: { type: 'string', description: 'Optional proposed ISO calendar deadline date derived from the actual source and known reference, shown with that basis for approval. An interpretation is not a newly stated human date.' },
+      deadline_words: { type: 'string', maxLength: 80, description: 'Exact source deadline phrase being interpreted, including its timing qualifiers, within this field\'s limit. Retain the full surrounding source, conditions and authorship in rationale. A new Olumi proposal must be identified as such, not quoted as the user\'s words.' },
+      rationale: { type: 'string', description: 'Full relevant source wording and conditions, its verified or unknown origin, the known reference and any stated start, and your reasoning for the proposed date. Distinguish source statements from your interpretation; do not drop negation, uncertainty or limits.' },
     }, ['deadline_words', 'rationale']),
   },
   {
@@ -596,15 +595,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'propose_new_factor',
     description:
-      'Add 1\u20133 NEW factors whose figures the user just stated (e.g. \u201cseniors cost \u00a3120k a year each\u201d), each figure '
-      + 'recorded as theirs, as ONE change. Prepares only: show the factors and figures, never the id, then authorise_change once '
-      + 'they agree. A factor the model has already: propose_assumptions.',
+      'Propose 1–3 NEW factors with finite current figures in known units, using this turn and verified retained quantity/source records. Preserve the original central figure, any bounds and qualifications, and their separate origins; do not invent a midpoint or turn a range into a probability law. A verified human figure remains human when reused later; your estimates remain Olumi\'s, and unknown origin stays unknown. Never invent a unit or use a coordinate cap or goal target as evidence for the figure. Show every value and source on one complete card; authorise_change only after approval bound to it. For an existing factor use propose_assumptions.',
     parameters: obj({
       factors: {
         type: 'array', minItems: 1, maxItems: 3,
         items: obj({
           label: { type: 'string' },
-          unit: { type: 'string', description: 'The user\u2019s unit, e.g. "GBP/year per engineer".' },
+          unit: { type: 'string', description: 'The actual known quantity\'s unit, from the model or verified source, for example GBP/year per engineer. Preserve its physical meaning; never invent a unit or silently change it.' },
           today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' },
             range_low: { type: 'number', description: 'Only when the user also gave a range for this figure, both ends in one sentence of theirs ("between 20% and 30%"): its low end, in the same unit as value. value stays the one figure they chose; never a midpoint.' },
             range_high: { type: 'number', description: 'The high end of that same range. Send it with range_low.' } }, ['value']),
@@ -676,15 +673,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           unit: { type: 'string', description: 'The unit the user wrote this figure in, if any (\u00a3 per month for \u201c\u00a310 per month\u201d).' },
           basis: { type: 'string' },
           unmodelled_mechanisms: UNMODELLED_MECHANISMS,
-          user_stated: {
-            type: 'boolean',
-            description:
-              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
-              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
-              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
-              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
-              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
-          },
+          user_stated: OPTION_LEVEL_USER_STATED,
           likely_low: {
             type: 'number',
             description:
@@ -705,7 +694,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             type: 'boolean',
             description: 'Set true ONLY when the USER gave this range (both ends) for this option and factor.',
           },
-        }, ['option_label', 'factor_label', 'value', 'basis']),
+        }, ['option_label', 'factor_label', 'value', 'basis', 'user_stated']),
       },
       whole_request: WHOLE_REQUEST,
     }, ['interventions']),
@@ -726,11 +715,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         type: 'array',
         description: 'Starting values for factors that have none. May be empty.',
         items: obj({
+          user_stated: ASSUMPTION_USER_STATED,
           factor_label: { type: 'string' },
           value: { type: 'number' },
           unit: { type: 'string' },
           basis: { type: 'string' },
-        }, ['factor_label', 'value', 'unit', 'basis']),
+        }, ['factor_label', 'value', 'unit', 'basis', 'user_stated']),
       },
       option_levels: {
         type: 'array',
@@ -741,16 +731,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           value: { type: 'number' },
           basis: { type: 'string' },
           unmodelled_mechanisms: UNMODELLED_MECHANISMS,
-          user_stated: {
-            type: 'boolean',
-            description:
-              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
-              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
-              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
-              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
-              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
-          },
-        }, ['option_label', 'factor_label', 'value', 'basis']),
+          user_stated: OPTION_LEVEL_USER_STATED,
+        }, ['option_label', 'factor_label', 'value', 'basis', 'user_stated']),
       },
     }, ['assumptions', 'option_levels']),
   },
@@ -955,9 +937,9 @@ export interface AgentCapabilities {
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months: number; high_months: number }): Promise<ToolResult>;
   /** E5: the user's hiring times per option, quoted, proposed on ONE card for approval. */
-  proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string }[] }[] }): Promise<ToolResult>;
+  proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string; months?: number }[] }[] }): Promise<ToolResult>;
   /** S-E GOALS: the user's stated deadline as a date on the goal, proposed for approval. */
-  proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string; reference_date?: string }): Promise<ToolResult>;
+  proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string; reference_date?: string; deadline_date?: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
   proposeOptionStatus?(ctx: AgentToolContext, args: {
     option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
@@ -985,11 +967,11 @@ export interface AgentCapabilities {
     /** A2 follow-up: the comparator the user stated in this message, typed; absent for a new figure alone. */
     stated_operator?: '<' | '<=' | '>' | '>=';
   }): Promise<ToolResult>;
-  runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
+  runAnalysis(ctx: AgentToolContext, args: { reason: string; effects_timing: EffectsTiming | null }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
-    assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; revise?: boolean; keep?: boolean }[];
+    assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; user_stated: boolean; revise?: boolean; keep?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label?: string; acts_on?: NewOptionActsOn[]; rationale: string;
@@ -1005,7 +987,7 @@ export interface AgentCapabilities {
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean; unmodelled_mechanisms?: readonly string[] }[];
   }, internal?: ProposeLevelsInternal): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
+    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; user_stated: boolean }[];
     option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean; unmodelled_mechanisms?: readonly string[] }[];
   }): Promise<ToolResult>;
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */

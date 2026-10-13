@@ -1,5 +1,5 @@
 {
-  "source_sha": "7872f085332057c0d4e7463b88e0f05f1cd12528",
+  "source_sha": "1fec9097fea2ed5bb0650acc1b4cd22037ff8189",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -201,7 +201,7 @@
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 1,
       "src/orchestrator-v5/agent-lane/proposal-object/record.ts": 1,
       "src/orchestrator-v5/agent-lane/proposal.ts": 2,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 4,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 3,
       "src/orchestrator-v5/agent-lane/science/method-science-context.ts": 3,
       "src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts": 3,
       "src/orchestrator-v5/agent-lane/turn-context/selector-signals.ts": 3,
@@ -394,7 +394,7 @@
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 7,
       "src/orchestrator-v5/goal-target/goal-direction.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-own-constraint-chance.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-own-constraint-chance.ts": 3,
       "src/orchestrator-v5/goal-target/share-by-date-run.ts": 1,
       "src/orchestrator-v5/graph-management/field-safety.ts": 2,
       "src/orchestrator-v5/handlers/describe-changeset.ts": 2,
@@ -700,7 +700,8 @@
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 5,
       "src/orchestrator-v5/agent-lane/stated-limit.ts": 4,
       "src/orchestrator-v5/context/graph-hash.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 2,
+      "src/orchestrator-v5/goal-target/goal-own-constraint-chance.ts": 1,
       "src/orchestrator-v5/goal-target/goal-target-basis.ts": 7,
       "src/orchestrator-v5/system-events/limit-add.ts": 1,
       "src/schemas/cee-v3.ts": 5,
@@ -820,7 +821,7 @@
     "goal_constraints": 450,
     "goal_deadline_as_stated": 11,
     "goal_direction": 99,
-    "goal_horizon": 52,
+    "goal_horizon": 51,
     "goal_horizon_months": 43,
     "goal_level_reading": 19,
     "goal_node_id": 287,
@@ -828,14 +829,14 @@
     "goal_scope": 48,
     "goal_sense_reading": 15,
     "goal_stated_as": 3,
-    "goal_threshold": 251,
+    "goal_threshold": 253,
     "goal_threshold_cap": 166,
     "goal_threshold_cap_provenance": 37,
     "goal_threshold_frame": 142,
     "goal_threshold_raw": 247,
     "goal_threshold_unit": 224,
     "pickGoalThresholdTrio": 18,
-    "quantity_frame": 41,
+    "quantity_frame": 43,
     "readHeldGoalComparator": 20,
     "resolveGoalDirection": 31,
     "resolveGoalThresholdStrict": 13,
@@ -846,7 +847,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2465,
+  "total_references": 2468,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

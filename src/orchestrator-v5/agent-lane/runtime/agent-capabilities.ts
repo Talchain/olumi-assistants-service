@@ -1,8 +1,11 @@
+import { verbatimSourceLine } from '../quote-confirmation.js';
+import { plainWords } from '../../goal-target/hiring-times.js';
+import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
-import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
@@ -260,7 +263,7 @@ import { levelLimitNodeDecision, thresholdOnNodeLevel } from '../../tools/handle
 import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participation-guard.js';
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
 import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
-import { lastWeekdayNamedIn, readStatedDeadline, readStatedWeekdayDate, sayDate, sayDeadlineFromToday, todayInLondon, weekdayDatedIn, type Weekday } from '../../goal-target/deadline-date.js';
+import { lastWeekdayNamedIn, readStatedDeadline, readStatedWeekdayDate, sayDate, sayDeadlineFromToday, todayInLondon, weekdayDatedIn, type Weekday, type StatedDeadline } from '../../goal-target/deadline-date.js';
 import { draftReferenceDate } from '../../goal-target/draft-reference.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
@@ -292,7 +295,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
-import { heldFigureOwnerOf, provenanceOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { heldFigureOwnerOf, isHumanStatementSource, provenanceOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
@@ -2674,11 +2677,11 @@ export function createAgentCapabilities(
       const statedRaw = (os as { raw_value?: unknown } | undefined)?.raw_value ?? os?.value;
       // ⭐ PJ-E-FIG: a factor the add-factor door committed WITH the user's figure — said as theirs, never asked again; its
       // range (Olumi's) is disclosed once below, never re-framed later (`levelFrameOf` reads the stored cap).
-      if (userTodayIds.has(fid) && os?.source === USER_TODAY_SOURCE && typeof statedRaw === 'number') {
+      if (userTodayIds.has(fid) && (os?.source === USER_TODAY_SOURCE || provenanceOf({ value: os }).origin === 'ai') && typeof statedRaw === 'number') {
         const u = (os as { unit?: unknown }).unit;
         const cap = (os as { cap?: unknown }).cap;
         sentences.push(`Added "${String(f.label ?? fid)}" as a factor, affecting ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
-          + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, ${confirmedIds.has(fid) ? 'as you confirmed' : 'as you said'}.`);
+          + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, ${provenanceOf({ value: os }).origin === 'ai' ? 'Olumi’s estimate' : confirmedIds.has(fid) ? 'as you confirmed' : 'as you said'}.`);
         // ⭐ Recovery Batch E (run 4 hiring step 13, B5/U5): a factor that holds the range the user stated is never said to
         // have a range "not yours" (`isUserStatedRange`).
         if (typeof cap === 'number' && Number.isFinite(cap) && cap > 1 && !isUserStatedRange((os as { range?: unknown }).range)) {
@@ -4039,16 +4042,22 @@ export function createAgentCapabilities(
     }
   };
 
-  const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown }, g: GraphRead, words: string, reference: string | undefined,
-    dating?: { readonly turnText: string; readonly required?: Weekday }): Promise<ToolResult> => {
+  const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown; deadline_date?: unknown }, g: GraphRead, words: string, reference: string | undefined,
+    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReference = true): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
       // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
       // accepted only when that date IS that weekday. With no recorded reference day, "last <weekday>" is never counted back.
       const datedWeekday = dating === undefined ? null : readStatedWeekdayDate(dating.turnText, today);
       const named = lastWeekdayNamedIn(words);
-      const stated = dating?.required !== undefined && datedWeekday?.weekday !== dating.required ? null
+      const parsed = dating?.required !== undefined && datedWeekday?.weekday !== dating.required ? null
         : readStatedDeadline(words, today, { ...(datedWeekday !== null ? { lastWeekday: datedWeekday } : {}), relativeWeekdays: reference !== undefined });
+      if (args.deadline_date !== undefined && (!isCalendarDate(args.deadline_date) || args.deadline_date <= today)) {
+        return { ok: false, mutated: false, refusal: 'unreadable_deadline', detail: 'The proposed deadline must be a valid future ISO calendar date.' };
+      }
+      const stated: StatedDeadline | null = args.deadline_date === undefined ? parsed
+        : { words, form: 'date' as const, date: args.deadline_date as string, reference: today };
+      const authoredBy = userWords && userReference && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
       if (stated === null) {
         const deadlineAsk = chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
           ?? (g.nodes.filter((n) => n.kind === 'goal').length === 1 ? g.nodes.find((n) => n.kind === 'goal')!.label : 'your goal'));
@@ -4086,6 +4095,8 @@ export function createAgentCapabilities(
       const fromToday = reference === undefined ? sayDeadlineFromToday(stated)
         : sayDeadlineFromToday(stated).replace('from today', `from ${sayDate(reference)}`);
       const question = `Is your deadline ${date} (${fromToday})?`;
+      const rationale = typeof args.rationale === 'string' ? args.rationale : '';
+      const sourceDetail = rationale.trim() === '' ? '' : ` Basis supplied for this interpretation: ${rationale}`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -4095,9 +4106,9 @@ export function createAgentCapabilities(
           value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words,
             ...(reference !== undefined ? { reference } : {}),
             ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
-        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        provenance: { authored_by: authoredBy, basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${question}${replaces}`,
+        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
       });
       proposals.put(proposal);
       return {
@@ -4106,8 +4117,8 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         deadline: { goal: goal.label, date, words: stated.words, from_today: fromToday },
-        note: `Nothing has changed yet. Ask the user exactly: "${question}"${replaces === '' ? '' : ` and say it replaces ${sayDate(held!)}`} — never the id, `
-          + 'never a date of your own — and call authorise_change with this proposal_id once they say yes. If they give another date, '
+        note: `Nothing has changed yet. Show the complete approval card: "${proposal.public_label}" — never the id. `
+          + 'Keep its date, reference and source visible, and call authorise_change with this proposal_id once they agree. If they give another date, '
           + 'call propose_goal_deadline again with their new words.',
       };
   };
@@ -5290,24 +5301,35 @@ export function createAgentCapabilities(
       };
     },
 
-    /** Parse and propose this turn's current-team duration; a singleton is only the most likely time. */
+    /** Propose the current-team duration from the Agent's reading of the user's words; a single time carries Olumi's assumed range. */
     async proposeTeamTime(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const stated = readTeamTime(ctx.user_turn_text);
-      if (stated === null || !teamTimeArgumentsMatch(ctx.user_turn_text, args, stated)) {
-        return { ok: false, mutated: false, refusal: 'team_time_not_stated',
-          detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
-      }
+      const typed = readTeamTime(ctx.user_turn_text);
+      // A single typed time carries Olumi's assumed range (`withAssumedTeamRange`), so its approval opens the Run.
+      const typedNow = typed !== null && teamTimeArgumentsMatch(ctx.user_turn_text, args, typed)
+        ? withAssumedTeamRange(typed, String(ctx.user_turn_text).trim(), String(ctx.user_turn_text)) : null;
+      /**
+       * ⭐ B2-c CONFIRMATION (DL re-scope, 12 Oct; PL #94 6131809231; AIE #94 6132054663), AI-first Lane 1 (DL 12 Oct, PL
+       * 6134071898): a duration the user did not type as this whole answer is the Agent's reading, offered ONLY as a confirmation
+       * card and never refused by a reader of their words. The card quotes their complete source line where the quote stands
+       * verbatim in their typed words (`quotedTeamTime`, never whose it is), and only its press records the figure as their
+       * selected forecast (`hasCardOnlyOperations`).
+       */
+      const quoted = typedNow === null ? quotedTeamTime({ now: ctx.user_turn_text, conversation: ctx.user_text }, args as never) : undefined;
+      if (quoted?.kind === 'refused') return { ok: false, mutated: false, refusal: 'team_time_not_stated', detail: quoted.detail };
+      const stated = typedNow ?? (quoted as Extract<NonNullable<typeof quoted>, { kind: 'found' }>).time;
+      const confirmation = quoted?.kind === 'found' ? quoted.confirmation : undefined;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
-        detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
+        detail: 'First type and confirm the deadline, for example "7 April 2027".' };
       const read = teamTimeReadDigest(g.raw);
       const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
-        reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}) };
+        reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}),
+        ...(confirmation !== undefined ? { confirmation } : {}) };
       if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
-        detail: 'That deadline has passed. Type a future deadline and confirm it, then give the soonest and latest times with your current team.' };
+        detail: 'That deadline has passed. Type a future deadline and confirm it.' };
       if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), g.raw)) {
         return { ok: false, mutated: false, refusal: 'already_held',
           detail: a.low_months === a.high_months ? 'Your most likely time is already held. Type the soonest and latest times with your current team, for example "6–10 months".'
@@ -5315,9 +5337,12 @@ export function createAgentCapabilities(
       }
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
-        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
+        // B2-c: Olumi's interpretation of the user's words until their press; the source line is its basis.
+        provenance: confirmation !== undefined ? { authored_by: 'model_proposed', basis: confirmation.source !== '' ? confirmation.source : confirmation.quote }
+          : { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
+        public_label: confirmation !== undefined ? teamTimeConfirmationCard(a, part.deliverable)
+          : teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
         if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === 'set_team_time')) proposals.discard(pending.proposal_id);
       }
@@ -5326,48 +5351,44 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash, team_time: a };
     },
 
-    /**
-     * ⭐ S-E GOALS — THE USER'S DEADLINE, AS A DATE, PROPOSED IN THE TURN THEY STATE IT (Science ruling 7 Oct §3; Paul's prod
-     * test item 6: "the six-month deadline isn't encoded in the goal yet", and nothing was proposed). The Agent quotes the
-     * user's own phrase; CEE places it on the calendar (`readStatedDeadline`, Europe/London's today) — the model never
-     * computes a date. The card asks "Is your deadline 7 April 2027 (6 months from today)?"; the Yes writes ONLY the goal's
-     * `goal_horizon.deadline`, through the atomic level door, stale-gated on the date the goal held when the card was made.
-     */
+    /** THE USER approves the interpreted deadline and its actual source.
+     * A chance goal holds a date, never a target percentage; approval binds the date and recorded reference. */
     async proposeGoalDeadline(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const words = typeof args?.deadline_words === 'string' ? args.deadline_words.trim() : '';
       if (words === '' || words.length > 80) {
         return { ok: false, mutated: false, refusal: 'unreadable_deadline',
-          detail: 'A deadline needs the user\u2019s own words for it (at most 80 characters). Nothing was prepared; ask the user for the date.' };
+          detail: 'A deadline needs a non-empty phrase of at most 80 characters to interpret. Nothing was prepared.' };
       }
-      // ⛔ The words must be the USER'S, typed in THIS turn, as whole words (Codex buddy r1 on #2742: "6 months" matched inside
-      // "16 months", and an earlier message's duration could stand in for today's). Case, spacing and dash/apostrophe forms aside.
+      // Whole-word matching establishes authorship, not admission: "6 months" inside "16 months" is Olumi's
+      // interpretation, never the user's stated duration. The approval card keeps that distinction visible.
       const plainOf = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
       const phrase = plainOf(words).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const typed = typeof ctx.user_turn_text === 'string' ? plainOf(ctx.user_turn_text) : '';
       const writes = (text: string): boolean => text !== '' && new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').test(text);
-      // ⭐ Recovery Batch B (Paul's marketing test, 11 Oct): "We have 6 months to launch our new features from last Friday" in one
-      // message, "Last Friday was the 9th of October." in the next. An EARLIER message's phrase is the user's deadline only when
-      // THIS message dates its "last <weekday>" — never otherwise (an earlier duration never stands in for today's: Codex r1).
       const named = lastWeekdayNamedIn(words);
       const datedNow = named !== null && weekdayDatedIn(typed) === named;
-      const fromEarlier = !writes(typed) && datedNow && writes(typeof ctx.user_text === 'string' ? plainOf(ctx.user_text) : '');
-      if (!writes(typed) && !fromEarlier) {
-        return { ok: false, mutated: false, refusal: 'deadline_not_stated',
-          detail: `"${words}" is not something the user wrote in this message, so nothing was prepared: it would be recorded as their deadline. Ask them for the date, in their own words.` };
-      }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const heldHumanWords = proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id).some(held => {
+        const proposal = proposals.get(held.proposal_id);
+        return proposal?.provenance.authored_by === 'user_stated' && proposal.operations.some(op =>
+          op.op === 'set_goal_deadline' && writes(plainOf(String((op.value as { words?: unknown })?.words ?? ''))));
+      });
+      const origin = statementOrigin(writes(typed) || writes(plainOf(ctx.user_text ?? '')) || heldHumanWords,
+        writes(plainOf(ctx.unverified_user_text ?? '')) || writes(plainOf(g.brief_text ?? '')), ctx.user_text_complete);
+      if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
       const typedAsOfDates = [...typed.matchAll(/(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu)].map(match => match[1]);
-      const asOf = typedAsOfDates.length === 0 ? undefined : args.reference_date;
-      if (asOf !== undefined && (typeof asOf !== 'string' || !typedAsOfDates.includes(asOf))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
-          detail: deadlineRefusalDetail.reference_not_stated };
+      const asOf = args.reference_date;
+      if (asOf !== undefined && !isCalendarDate(asOf)) return { ok: false, mutated: false, refusal: 'reference_invalid',
+        detail: 'The reference must be a valid ISO calendar date. Nothing was prepared.' };
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
-      const reference = draftReferenceDate({ ...(typeof asOf === 'string' ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
+      const reference = draftReferenceDate({ ...(typeof asOf === 'string' && typedAsOfDates.includes(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
-        datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined);
+        datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
+        origin === 'human', true);
     },
 
     /**
@@ -5403,14 +5424,49 @@ export function createAgentCapabilities(
         if (held.length === 0 || estimate === null) return refuse('adds_no_people', `‘${label}’ adds no people in this model, so it has no start time. Nothing was prepared.`);
         const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
         const heldQuotes = heldStatementsOf(held);
-        for (const quote of quotes) {
-          if (heldQuotes.includes(quote)) continue;
-          const stated = quoteStatedFor(texts, quote, label);
-          if (stated === 'not_stated') return refuse('hiring_time_not_stated', `"${quote}" is not in the user's messages, so nothing was prepared. Copy the hiring time exactly from the user's own message and call again; do not ask the user to retype it.`);
-          if (stated === 'not_for_option') return refuse('hiring_time_not_for_option', `"${quote}" is not said about ‘${label}’ in the user's message, so nothing was prepared. Ask which option that time is for.`);
-        }
-        const plan = planStarts(quotes, estimate, held.length);
+        const starts = o.starts as readonly { months?: unknown }[];
+        const pairings = quotes.map(quote => {
+          const source = verbatimSourceLine(texts, quote);
+          if (source !== undefined && quoteStatedFor(texts, quote, label) === 'not_for_option') {
+            return { original_source: { text: source, authored_by: 'user_stated' as const },
+              pairing: { option_id: id, authored_by: 'model_proposed' as const } };
+          }
+          const retained = heldQuotes.includes(quote)
+            ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date.statement
+            : undefined;
+          return retained?.original_source?.authored_by === 'user_stated' && retained?.pairing?.option_id === id
+            && retained.pairing.authored_by === 'model_proposed'
+            ? { original_source: retained.original_source, pairing: retained.pairing } : undefined;
+        });
+        const origins = quotes.map((quote, i) => {
+          const retained = heldQuotes.includes(quote)
+            ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date.statement
+            : undefined;
+          const heldOlumi = retained?.source === 'model_proposed' || retained?.pairing?.authored_by === 'model_proposed';
+          return statementOrigin(pairings[i] !== undefined || quoteStatedFor(texts, quote, label) === 'ok' || (retained !== undefined && !heldOlumi),
+            !heldOlumi && (quoteSpansIn(plainWords(ctx.unverified_user_text ?? ''), plainWords(quote)).length > 0
+              || quoteSpansIn(plainWords(g.brief_text ?? ''), plainWords(quote)).length > 0), ctx.user_text_complete,
+            heldOlumi || (quote === '' && typeof starts[i]?.months === 'number'));
+        });
+        if (origins.includes('unknown')) return refuse('origin_unknown', UNKNOWN_ORIGIN_DETAIL);
+        // An empty source plus explicit months is a NEW Olumi estimate, never an old quote relabelled.
+        quotes.forEach((quote, i) => { if (quote === '' && origins[i] === 'ai' && typeof starts[i]?.months === 'number') quotes[i] = `in ${starts[i]!.months} months`; });
+        const plan = planStarts(quotes, estimate, held.length, quotes.map((quote, i) => {
+          const prior = starts[i]?.months === undefined && heldQuotes.includes(quote)
+            ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date
+            : undefined;
+          return { months: starts[i]?.months, stated: origins[i] === 'human' && pairings[i] === undefined,
+            ...pairings[i],
+            ...(prior?.figures ? { held: { statement: prior.statement,
+              lead_low: prior.figures.lead_low, lead_high: prior.figures.lead_high } } : {}) };
+        }));
         if (!('parts' in plan)) {
+          if (plan.refusal === 'hiring_bound_conflict') {
+            const completeSource = verbatimSourceLine(texts, plan.quote) ?? plan.quote;
+            return { ok: false, mutated: false, refusal: plan.refusal, calculation_supported: false,
+              statement: { quote: completeSource, source: plan.source, bound: plan.bound, value: plan.value },
+              detail: `${isHumanStatementSource(plan) ? 'You gave' : 'Olumi proposed'} ‘${completeSource}’. That gives a ${plan.bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` };
+          }
           if (plan.refusal === 'too_many_starts') return refuse('too_many_starts', `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly, and ask once which two starts to use; until then Olumi’s own hiring estimate for ‘${label}’ stays in the model, labelled as Olumi’s.`);
           if (plan.refusal === 'fewer_starts_than_held') {
             return refuse('fewer_starts_than_held', heldQuotes.length === held.length
@@ -5429,7 +5485,7 @@ export function createAgentCapabilities(
       if (!hiringTimesHeld(withHiringTimes(g.raw, a), a)) return unusable();
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_HIRING_TIMES, path: goalId, value: a }],
-        provenance: { authored_by: 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
+        provenance: { authored_by: planned.some(o => o.parts.some(p => p.statement.source === 'model_proposed' || p.statement.pairing?.authored_by === 'model_proposed')) ? 'model_proposed' : 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: hiringTimesCard(a, part.deliverable) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
@@ -5599,6 +5655,12 @@ export function createAgentCapabilities(
 
       for (const given of input) {
         let a = given;
+        // AIE #94 6140145484: incomplete source never supplies a missing authorship declaration.
+        // Keep retains the recorded Olumi estimate; it cannot claim a new human origin.
+        if (ctx.user_text_complete === false && (typeof a?.user_stated !== 'boolean'
+          || (a.keep === true && a.user_stated !== false))) {
+          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        }
         const requested = String(a?.factor_label ?? '');
         const identified = a?.factor_id !== undefined ? g.nodes.find(n => n.id === a.factor_id) : undefined;
         const res = a?.factor_id === undefined ? resolveNamed(g, requested, writable)
@@ -5733,6 +5795,11 @@ export function createAgentCapabilities(
         const quote = readable && !writtenAbout && soleFigure && typeof existing === 'number'
           && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, turnWords, { ...ownerScope, nearOnly: true })
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
+        if (statementOrigin(writtenAbout || quote !== null,
+          figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
+          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, a.user_stated === false && a.revise !== true) === 'unknown') {
+          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        }
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
@@ -5843,7 +5910,13 @@ export function createAgentCapabilities(
         // offered to them; `leftOutClause` is staging’s disclosure of the labels that
         // were not factors. Both are required — the heading alone drops the disclosure,
         // and staging’s label alone calls a revision an adoption.
-        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
+        public_label: heading + ordered.map(a => {
+          const figure = describe(a);
+          // AIE 6141593167: the complete basis belongs on the bound card, beside its figure.
+          // Keeping a canonical estimate is retention, not a newly authored estimate.
+          return usersOwn(a) || a.kept ? figure
+            : `${figure}\nOlumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “${a.basis}”`;
+        }).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
       return {
@@ -6217,6 +6290,10 @@ export function createAgentCapabilities(
         // A rejected range has no bearing on the ordinary level or its authorship.
         const userWrote = claimedByUser && (likelyRange !== undefined
           || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
+        if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
+          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false) === 'unknown') {
+          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        }
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
@@ -8947,6 +9024,11 @@ export function createAgentCapabilities(
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
           const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          if (statementOrigin(wrote, figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
+            || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text), ctx.user_text_complete, lvl.estimate !== undefined) === 'unknown') {
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: UNKNOWN_ORIGIN_DETAIL });
+            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
+          }
           const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
           // A part of the user's split in another period is refused with its own reason, even as Olumi's estimate.
           if (!wrote && split.kind === 'period_mismatch' && split.factor_ids.includes(f.id)) {
@@ -9061,6 +9143,8 @@ export function createAgentCapabilities(
           }
           const levelUnit = unit ?? today.unit;
           const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
+          if (statementOrigin(wrote, figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text)
+            || figureTheUserWrote(asked, levelUnit, g.brief_text), ctx.user_text_complete, lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '') === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
           const basis = lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' ? lv.basis.trim() : undefined;
           if (!wrote && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
           if (!wrote && contradictsItsName(asked, levelUnit, plan.label)) {
@@ -9598,6 +9682,7 @@ export function createAgentCapabilities(
       const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string;
         range?: { low: number; high: number; quote: string } }[] = [];
       const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
+      let originUnknown = false;
       const ambiguous: AmbiguousTarget[] = [];
       const recordOf = (x: unknown): Record<string, unknown> => (x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {});
       // Every new factor named in THIS call, with its declared unit: each one's figure is never another's (`newFactorScopeIn`).
@@ -9605,14 +9690,23 @@ export function createAgentCapabilities(
         label: typeof x.label === 'string' ? x.label.trim() : '',
         unit: typeof x.unit === 'string' ? x.unit.trim() : '',
       }));
-      // ⛔ HUMAN CONTROL IS THE PROVENANCE GATE (DL ruling on #2235, 14:05Z 28 Sep). When this message writes two figures or
-      // more, or the change adds two factors or more, WHOSE each figure is cannot be read from word proximity: three review
-      // rounds moved the failure from one common phrasing to the next. So nothing is credited by the words alone: each
-      // figure must be WRITTEN in this message (in its kind of unit), and Olumi's pairing is shown on the approval card with
-      // the user's own sentence (`quoteOfFigure`) — their approval makes it theirs (`confirmed_by_approval`, on the hold).
-      // One figure for one new factor: the strict match decides, as before (`written_about`).
+      // The route's retained typed-word records exclude chips, assistant text and source-unknown restored rows.
+      // Reusing a verified earlier figure does not change its author. Multiple figures still need pairing approval.
       const turnText = ctx.user_turn_text ?? '';
+      const sourceMessages = ctx.verified_user_messages ?? [ctx.user_text ?? turnText];
       const confirmPairing = inCall.length >= 2 || figuresWrittenIn(turnText) >= 2;
+      // Existing held quantity records retain their independently verified figure/range source across turns.
+      const retained = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).flatMap(hold => {
+        const patch = (hold.action as { inline_patch?: Record<string, unknown> }).inline_patch;
+        const raw = patch?.[GM_HELD_USER_TODAY_KEY];
+        const verified = readUserTodayMember(raw);
+        return (Array.isArray(raw) ? raw : []).flatMap(entry => {
+          const row = recordOf(entry), os = recordOf(row.observed_state);
+          const op = heldOpsOf(hold).find(o => o.op === 'add_node' && o.path === row.factor_id);
+          const name = recordOf(op?.value).label;
+          return typeof name === 'string' ? [{ label: name, os, member: verified?.find(m => m.factor_id === row.factor_id) }] : [];
+        });
+      });
       for (const raw of requested) {
         const f = recordOf(raw);
         const label = typeof f.label === 'string' ? f.label.trim() : '';
@@ -9654,7 +9748,7 @@ export function createAgentCapabilities(
         const t = recordOf(f.today);
         const todayUnit = typeof t.unit === 'string' && t.unit.trim() !== '' ? t.unit.trim() : unit;
         const shown = `${typeof t.value === 'number' ? t.value : JSON.stringify(t.value ?? null)} ${todayUnit}`;
-        if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < 0) {
+        if (typeof t.value !== 'number' || !Number.isFinite(t.value)) {
           todayNotSet.push({ factor: label, value: t.value ?? null,
             reason: `${shown} is not a level "${label}" can hold, so it was not taken. Ask the user what it is.` });
           continue;
@@ -9672,34 +9766,45 @@ export function createAgentCapabilities(
             reason: `${shown} is in a scaled unit; give the figure in whole units (120000 for £120k) in the user's own unit.` });
           continue;
         }
-        // The lane's SCOPED matcher, over THIS message's words (Canonical, on the door's review F4; DL CHANGES_REQUIRED on
-        // #2235): the figure must be written ABOUT this factor. Over the whole conversation, or anywhere in the message, a
-        // figure typed about anything else — the £400k LIMIT, the other factor's figure (a swap) — could be committed as
-        // this new factor's value, as the user's. A factor the user is adding now is one they state now, beside its name.
-        const quote = quoteOfFigure(t.value, todayUnit, turnText);
-        const ownsIt = quote !== null
-          && (confirmPairing || figureTheUserWroteFor(t.value, todayUnit, turnText, newFactorScopeIn(g, label, todayUnit, inCall)));
-        if (!ownsIt || quote === null) {
+        // Read each verified message separately: a figure in a different message cannot lend its subject to this one.
+        const source = [turnText, ...sourceMessages.slice().reverse()].find(text =>
+          quoteOfFigure(t.value as number, todayUnit, text) !== null
+          && (confirmPairing || figureTheUserWroteFor(t.value as number, todayUnit, text, newFactorScopeIn(g, label, todayUnit, inCall))));
+        const prior = retained.find(r => norm(r.label) === norm(label)
+          && (r.os.raw_value ?? r.os.value) === t.value && unitComparisonKey(String(r.os.unit ?? '')) === unitComparisonKey(todayUnit));
+        const priorHuman = prior?.member !== undefined && prior.member.basis !== 'olumi_estimate'
+          && provenanceOf({ value: prior.os }).origin === 'human';
+        const quote = source === undefined ? (priorHuman ? prior!.member!.quote ?? null : null) : quoteOfFigure(t.value, todayUnit, source);
+        const origin = statementOrigin(source !== undefined || priorHuman,
+          (prior !== undefined && prior.member === undefined)
+          || quoteOfFigure(t.value, todayUnit, ctx.unverified_user_text ?? '') !== null
+          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null, ctx.user_text_complete);
+        const ownsIt = origin === 'human';
+        if (origin === 'unknown') {
+          originUnknown = true;
           todayNotSet.push({ factor: label, value: t.value,
-            reason: `The user's own words in this message do not state ${shown} for "${label}", so it was not prepared: a new factor's value is never taken from Olumi's words, a guess, or a figure said about something else (another factor, a limit, an earlier message). Ask the user what it is.` });
+            reason: `The retained source of ${shown} for "${label}" is not verified. Its origin stays unknown; nothing was prepared. Ask for its source rather than relabelling it as Olumi’s estimate.` });
           continue;
         }
         // THE ONE FRAMING RULE (ruling point 3; `proposeNewOption` statedToday): Olumi's default range over the largest
-        // figure this change carries for the factor — its own — then stamped as the user's.
+        // figure this change carries. The frame stays Olumi's; the figure keeps its actual source.
         const v = t.value;
-        const framed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
-          plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }), source: USER_TODAY_SOURCE };
+        const framed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: ownsIt ? 'explicit' : 'inferred',
+          plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }), source: ownsIt ? USER_TODAY_SOURCE : 'cee_inference',
+          extractionType: ownsIt ? 'explicit' : 'inferred' };
         // ⭐ RECOVERY BATCH B (SYS3 TRACE L6): the RANGE the user gave for this figure ("between 20% and 30%") is stored AS A
         // RANGE beside the figure they chose (`isStatedLevelRange`, add-factor-transaction.ts), only when BOTH ends are in ONE
         // sentence the user wrote in this conversation and the chosen figure lies inside. Never a midpoint: the figure is still
-        // the one they wrote in THIS message (checked above), or nothing is prepared.
-        let range: { low: number; high: number; quote: string } | undefined;
+        // attributed independently of the range; an Olumi point is never a user-stated figure.
+        const heldRange = prior?.member?.observed_state.range;
+        let range: { low: number; high: number; quote: string } | undefined = isStatedLevelRange(heldRange, framed)
+          ? { low: (heldRange as { low: number }).low, high: (heldRange as { high: number }).high, quote: (heldRange as { source_quote: string }).source_quote } : undefined;
         if (t.range_low !== undefined || t.range_high !== undefined) {
           const lo = t.range_low, hi = t.range_high;
           const sentence = typeof lo === 'number' && typeof hi === 'number' ? sentenceStatingBoth(lo, hi, todayUnit, ctx.user_text ?? turnText) : null;
           const stored = sentence === null ? undefined
             : { low: lo as number, high: hi as number, meaning: 'min_max' as const, source: USER_TODAY_SOURCE, source_quote: sentence };
-          if (stored === undefined || !isStatedLevelRange(stored, framed)) {
+          if (!ownsIt || stored === undefined || !isStatedLevelRange(stored, framed)) {
             todayNotSet.push({ factor: label, value: t.value,
               reason: `The range ${String(lo ?? '?')} to ${String(hi ?? '?')} ${todayUnit} for "${label}" is not one the user wrote, both ends in one sentence of theirs, `
                 + `with ${shown} inside it, so nothing was prepared. Ask the user; never supply a range, an end or a midpoint of your own.` });
@@ -9710,15 +9815,15 @@ export function createAgentCapabilities(
         const observed = range === undefined ? framed
           : { ...framed, range: { low: range.low, high: range.high, meaning: 'min_max', source: USER_TODAY_SOURCE, source_quote: range.quote } };
         planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed,
-          basis: confirmPairing ? 'confirmed_by_approval' : 'written_about', quote, ...(range !== undefined ? { range } : {}) });
+          basis: ownsIt ? (source === undefined ? prior!.member!.basis ?? 'written_about' : confirmPairing ? 'confirmed_by_approval' : 'written_about') : 'olumi_estimate', quote: ownsIt ? quote ?? '' : '', ...(range !== undefined ? { range } : {}) });
       }
       if (ambiguous.length > 0) {
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
       }
       if (todayNotSet.length > 0) {
-        return { ok: false, mutated: false, refusal: 'today_not_set', today_not_set: todayNotSet,
-          detail: 'Nothing was prepared or held: every new factor in one change carries the value the user stated, or none is '
-            + 'added. Tell the user plainly which figure is missing and ask for it; never supply one.' };
+        return { ok: false, mutated: false, refusal: originUnknown ? 'origin_unknown' : 'today_not_set', today_not_set: todayNotSet,
+          detail: originUnknown ? UNKNOWN_ORIGIN_DETAIL : 'Nothing was prepared or held: each new factor needs a finite figure in its known unit. '
+            + 'Explain the invalid figure or unit from today_not_set; do not substitute zero or invent a unit.' };
       }
       // The door's own builder, run here purely: a spec it would refuse is never sent.
       const factors = planned.map((p) => ({ label: p.label, link: { to_id: p.to_id, effect_direction: p.direction } }));
@@ -9735,7 +9840,7 @@ export function createAgentCapabilities(
         turn_id: randomUUID(),
         base_graph_hash: g.graph_hash,
         factors: planned.map((p, i) => ({ id: ids[i]!, label: p.label, link: { to_id: p.to_id, effect_direction: p.direction }, observed_state: p.observed_state,
-          basis: p.basis, quote: p.quote })),
+          basis: p.basis, ...(p.quote !== '' ? { quote: p.quote } : {}) })),
       });
       if (res.status === 'stale') {
         return { ok: false, mutated: false, refusal: 'model_changed',
@@ -9756,7 +9861,7 @@ export function createAgentCapabilities(
             && member !== undefined && member.length === planned.length
             && planned.every((p, i) => JSON.stringify(sorted(member.find((m) => m.factor_id === ids[i])?.observed_state)) === JSON.stringify(sorted(p.observed_state)))
             // The record of WHY each figure is theirs is on the hold, exactly as prepared.
-            && planned.every((p, i) => { const m = member.find((x) => x.factor_id === ids[i]); return m?.basis === p.basis && m?.quote === p.quote; });
+            && planned.every((p, i) => { const m = member.find((x) => x.factor_id === ids[i]); return m?.basis === p.basis && (m?.quote ?? '') === p.quote; });
         } catch {
           heldOk = false;
         }
@@ -9779,12 +9884,14 @@ export function createAgentCapabilities(
           label: p.label,
           // `user_to_confirm`: the figure is in their words, and the PAIRING is Olumi's until they approve it (the card
           // shows `quote`). `user`: one figure for one factor, written about it.
-          current_value: { value: p.value, unit: p.unit, stated_by: p.basis === 'confirmed_by_approval' ? 'user_to_confirm' : 'user', quote: p.quote,
+          current_value: { value: p.value, unit: p.unit, stated_by: p.basis === 'olumi_estimate' ? 'olumi_estimate' : p.basis === 'confirmed_by_approval' ? 'user_to_confirm' : 'user', quote: p.quote,
             ...(p.range !== undefined ? { range: { low: p.range.low, high: p.range.high, quote: p.range.quote } } : {}) },
           affects: `${labelOfId(p.to_id)} (${p.direction === 'positive' ? 'raises it' : 'lowers it'})`,
           how_strongly: FACTOR_PLACEHOLDER_STRENGTH,
         })),
-        note: confirmPairing
+        note: planned.some(p => p.basis === 'olumi_estimate')
+          ? 'Nothing has changed yet. Show each figure and unit with its actual source. A figure marked olumi_estimate is Olumi’s estimate, never the user’s words. Only approval of this card records these figures.'
+          : confirmPairing
           ? 'Nothing has changed yet. Show the user each factor with its figure and their own words quoted, say that Olumi paired '
             + 'each figure with its factor and they approve only if every pairing is right, say what each affects and that how '
             + 'strongly is a placeholder — never the id — and call authorise_change with this proposal_id once they agree.'
@@ -10105,7 +10212,8 @@ export function createAgentCapabilities(
         turn_class: 'decide',
         source: 'chip_click',
         message: args.reason,
-        chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
+        chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis',
+          parameters: { effects_timing: args.effects_timing } },
       });
       /**
        * ⛔ A RUN THAT FAILED IS NOT A RUN THAT WAS REFUSED (served 319dde1, 01:42Z). The run turn answered 500

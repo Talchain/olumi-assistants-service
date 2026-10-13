@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ EVERY REPLY ON THE AGENT ROUTE ARRIVES IN ONE SHAPE (S-A REPLY SHAPE v1, lane COPY-SHAPE, 7 Oct 2026; Paul: "It was a
  * better length before with the three bullets as a construct"): a headline and the typed face lines, the rest under "More
@@ -146,7 +147,9 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   let app: FastifyInstance;
   let noLeaderSentence: string;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const forced = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (forced) return forced;
       const output = callModelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));
@@ -185,7 +188,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
   /** The UI's Run control (fast path 3): the analysis runs, then ONE interpreting call answers — scripted here. */
   const typedRun = async (text: string, scenario = SCENARIO) => {
-    callModelOutputs = [say(text)];
+    callModelOutputs = [say('The calculation is available for discussion.'), say(text)];
     const turnId = nextTurnId();
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: scenario, message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId,
@@ -294,17 +297,17 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     ] } };
   };
 
-  it('B15 / 2b-0: uninterpreted Run leads with the first screen finding; ready and disclosure in More detail', async () => {
+  it('B15 / R1: the loop Run keeps licensed findings and disclosure beside its interpretation', async () => {
     hostRunFixture();
     const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
     expect(screen, 'positive control: two typed screen findings').toHaveLength(2);
     const { b, turnId } = await runOnly();
-    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(b._diagnostic_trace.fast_path).toBeUndefined();
     expect(carriesResult(b)).toBe(true);
-    expect(fetch, 'the Run has no interpreter output').not.toHaveBeenCalled();
+    expect(fetch, 'Run makes the model tool call and interpretation').toHaveBeenCalledTimes(2);
     expect(b._answer_shape, 'base keeps host_composed whole').toBeDefined();
     expect(b._answer_shape!.headline).toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
-    expect(b._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
+    expect(b._answer_shape!.detail).toContain('Done.');
     const horizon = untestedHorizonLine(readbackGraph, { besideChance: true, plural: true });
     expect(horizon, 'a horizon always accompanies these two non-event goal chances').not.toBeNull();
     expect([b._answer_shape!.headline, ...b._answer_shape!.bullets].slice(0, 3), 'chance findings and their own notes precede the mandatory horizon marker').toEqual([
@@ -319,7 +322,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
       expect(faceOf(b._answer_shape!)).toContain(line.chance);
       expect(b.assistant_text.split(line.chance)).toHaveLength(2);
     }
-    for (const part of [RUN_RESULT_READY_TEXT, RUN_DISCLOSURE]) for (const sentence of sentencesOf(part)) {
+    for (const part of ['Done.', RUN_DISCLOSURE]) for (const sentence of sentencesOf(part)) {
       expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence), 'each host sentence exactly once').toHaveLength(1);
     }
     const deliveredSentences = sentenceMultiset(b.assistant_text);
@@ -443,26 +446,26 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(first._answer_shape!.headline, 'B15: the live Run leads with its first chance finding').toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
     expect(rows.get(turnId)?.assistant_message).toBe(deriveAnswerTextFromShape(first._answer_shape!));
     expect(rows.get(turnId)?.assistant_message!.startsWith(first._answer_shape!.headline)).toBe(true);
-    expect(first._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
+    expect(first._answer_shape!.detail).toContain('Done.');
     const { b: replay } = await runOnly(turnId);
     expect(replay._agent.replayed).toBe(true);
     expect(runRequests, 'the replay did not run again').toBe(1);
     expect(replay.narration).toEqual(first.narration);
-    expect(replay.narration!.status).toBe('pending');
+    expect(first.narration!.status).toBe('ready');
     expect(carriesResult(replay)).toBe(true);
     // DL (reload = same): the replay re-applies the same composer to the same typed parts — same bytes, same shape.
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(replay._answer_shape).toEqual(first._answer_shape);
-    expect(fetch).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('2b-0 REPLAY PARITY GUARD: stored words the rebuild does not reproduce → the rebuilt text ships whole, no shape', async () => {
+  it('2b-0 REPLAY PARITY GUARD: stored words the rebuild does not reproduce → legacy host words the rebuild does not reproduce ship whole, no shape', async () => {
     hostRunFixture();
     const { b: first, turnId } = await runOnly();
     expect(first._answer_shape, 'control: the live Run was shaped').toBeDefined();
     // A live branch the rebuild does not mirror changed the words the user saw (e.g. the leader gate's closing).
     const row = rows.get(turnId)!;
-    rows.set(turnId, { ...row, assistant_message: `${row.assistant_message}\n\nA live-only closing sentence.` });
+    rows.set(turnId, { ...row, assistant_message: `${RUN_RESULT_READY_TEXT}\n\n${row.assistant_message}\n\nA live-only closing sentence.` });
     const { b: replay } = await runOnly(turnId);
     expect(replay._agent.replayed).toBe(true);
     expect(replay._answer_shape, 'no shape the stored words do not prove').toBeUndefined();
@@ -569,25 +572,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     for (const para of text.split('\n\n')) for (const s of para.split(/(?<=[.!?])\s+(?=[A-Z])/)) expect(b.assistant_text).toContain(s.trim());
   });
 
-  it('4. ordinary converse: with or without an analysis_result, the narrator points still fill the staging face pool', async () => {
-    readbackCarriesResult = false;
-    const without = await askedTurn(CLEAN_BULLETS.text);
-    expect(carriesResult(without), 'the control: no result block on this response').toBe(false);
-    expect(without._answer_shape, 'base shipped this whole (Run replies only)').toBeDefined();
-    expect(deriveAnswerTextFromShape(without._answer_shape!)).toBe(without.assistant_text);
-    expect(without._answer_shape!.headline).toBe('The comparison cannot yet answer whether to raise Pro to £59, because neither of your decision constraints was successfully checked.');
-    // No build mutation, Run/Explain fast path, screen chances or withheld chance: ordinary coaching keeps its pool.
-    // The narrator's points, in order, until the 80-word face budget (AIE §5); the rest sits in detail, verbatim.
-    const points = without._answer_shape!.bullets;
-    expect(points.length).toBeGreaterThan(0);
-    expect(CLEAN_BULLETS.text).toContain(`- ${points[0]!}`);
-    expect(without._answer_shape!.detail).toContain('The next reasoning step is to define the churn limit on a measurable model quantity and supply the current MRR baseline.');
-
-    readbackCarriesResult = true;
-    const withBlock = await askedTurn(CLEAN_BULLETS.text);
-    expect(carriesResult(withBlock)).toBe(true);
-    expect(withBlock._answer_shape, 'the control: with the block, the same shape').toEqual(without._answer_shape);
-  });
+  // AI-first Lane 2 N1: row 4 pinned the removed ordinary-turn face pool; it went with the fold (one-reply-build-contract's N1 row).
 
   it('5. RUN: a reply LONGER than the old collapse floor with no bullets → shaped; its supporting sentences remain in detail', async () => {
     const synth = synthesiseAnswerShapeFromText(LONG_NO_BULLETS);
@@ -748,8 +733,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(carriesResult(b), 'the control: over a current result').toBe(true);
     expect(b.assistant_text.split('Nothing was saved this turn.'), 'the host removed the claim and said so, once').toHaveLength(2);
     expect(b.assistant_text).not.toContain('Saved the change.');
-    expect(b._answer_shape, 'shaped').toBeDefined();
-    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
+    // AI-first N1: an ordinary turn ships whole (this row pinned the removed fold); the write-truth negatives above stay.
+    expect(b._answer_shape, 'no fold on an ordinary turn').toBeUndefined();
   });
 
   it('11. CONTROL: the SAME Agent Run on the graph WITH its target → no host ask is owed → the reply is still shaped', async () => {

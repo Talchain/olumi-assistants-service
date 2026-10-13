@@ -45,7 +45,8 @@ import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
-import { goalOwnConstraintChanceRecords, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
+import { goalOwnConstraintChanceRecords, sentRunPairsChange, sentRunScoresHeldChange, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
+import { effectsTimingOf, periodEndAssumptionNote, type EffectsTiming } from './period-end-assumption.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
@@ -215,6 +216,15 @@ export interface GoalChanceLicence {
   readonly provisional?: true;
   /** Batch C, several targets: each target's own chance and the same-draw joint (the headline) or why it is withheld. */
   readonly targets?: GoalTargetsBlock;
+  /**
+   * ⭐ G (AIE #94 6128697025; amendments 6131950992): present iff these chances are the CONDITIONAL reading of a change target on
+   * a static model ({@link periodEndConditionalOf}): OLUMI'S assumption, never the person's, that the estimated effects are in
+   * place by the period. The stored basis keeps `effects_at_period_end: false`; the note says the assumption once.
+   */
+  readonly period_end_assumption?: { readonly origin: 'olumi'; readonly period_months: number; readonly reference: 'today' | 'launch' };
+  /** G2: the AI reading belongs to CEE's conditional licence, never the provider envelope. */
+  readonly effects_timing?: EffectsTiming;
+  readonly effects_timing_origin?: 'olumi';
 }
 
 /** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
@@ -223,6 +233,13 @@ export interface GoalChanceConstraintInputs {
   readonly sentConstraints?: unknown;
   /** What CEE sent PLoT for this Run: binds a deadline goal's engine-read chance (`goal-own-constraint-chance.ts`). */
   readonly sentRun?: SentRunInputs;
+  /**
+   * G (AIE 6131950992 (d)): the retained source a conditional reading is checked against — the persisted brief as this Run read
+   * it. `null` (it could not be read) and absent (not given) both read no conditional chance: never "no contradiction".
+   */
+  readonly brief?: string | null;
+  /** Olumi's AI reading for THIS Run. Missing or invalid readings withhold the conditional chance. */
+  readonly effects_timing?: unknown;
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -291,12 +308,22 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
  * deciles apart; or any recorded centre or decile not exactly the reference in the Run's frame (D2, exact equality).
  * A row that records none of these (no outcome, or its spread already withheld) agrees.
  */
-function statusQuoReadingOf(a: { readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined }): StatusQuoReading {
+function statusQuoReadingOf(a: {
+  readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined;
+  /** A goal measured AS a change: the chance a ZERO change has against the held target (1 meets it, 0 does not). */
+  readonly zeroChange?: 0 | 1;
+}): StatusQuoReading {
   if (!a.paired) return a.forecast ? 'projection' : 'unknown';
   const row = a.row;
   if (row === undefined) return 'assumed';
   const p = row.probability_of_goal;
   if (typeof p === 'number' && p !== 0 && p !== 1) return 'moved';
+  // ⭐ G (DL ruling 12 Oct: the AIE's D2 exact equality, applied IN THE RUN'S OWN RECORDED FRAME): a goal measured AS a change is
+  // scored as the PAIRED change (each option minus carrying on, on the same draw), so carrying on's change is 0 = the
+  // reference by construction, and its recorded chance must be exactly what a zero change gives against the held target. The
+  // row's `outcome` holds the goal's raw level samples — another frame — and is never compared with the change's reference.
+  // A recorded chance at the other extreme is a change that moved: withheld, never relabelled.
+  if (a.zeroChange !== undefined) return typeof p === 'number' && p !== a.zeroChange ? 'moved' : 'assumed';
   const o = isRec(row.outcome) ? row.outcome : undefined;
   if (o === undefined) return 'assumed';
   // ⭐ D2 EXACT SAME-FRAME EQUALITY (AIE 6129749753 AMEND, PL 6130375396, 12 Oct; the 16ε tolerance is REJECTED): ANY positive
@@ -376,10 +403,15 @@ export function goalChanceLicenceOf(
   const basis: GoalTargetBasis | undefined = goal === undefined ? undefined : goalTargetBasisOf(goal);
   // ⛔ Ruling 12 / amendment 2: a change's "at three months" needs its effects stated at that month; never steady state.
   // D3: where the basis holds they are NOT stated, the Run says why (`withholdForPeriodEndEffects`), never a silent gap.
-  if ((changeFrame !== undefined && (basis === undefined || !basis.effects_at_period_end)) || basis?.open_question !== undefined) return null;
+  // ⭐ G (AIE #94 6128697025; amendments 6131950992): except the CONDITIONAL reading on a static model — this very Run scored the
+  // held target and the brief was read; the AI reads timing as not stated or in place by the period (G2).
+  // The result says Olumi's assumption, never a human attestation.
+  const conditional = changeFrame !== undefined && basis !== undefined && !basis.effects_at_period_end
+    ? periodEndConditionalOf(envelope, graph, goalId, constraints) : undefined;
+  if ((changeFrame !== undefined && (basis === undefined || (!basis.effects_at_period_end && conditional === undefined)))
+    || basis?.open_question !== undefined) return null;
   // A change carries its direction in its sign; with no comparator held, the run's own sense is the bound ISL scored.
-  const held = target.held ?? (changeFrame === undefined ? undefined
-    : resolveGoalDirection(graph, goalId)?.direction === 'minimise' ? '<=' : '>=');
+  const held = statedComparatorOf(target.held, changeFrame !== undefined, graph, goalId);
   const comparator = held === undefined ? undefined : COMPARATOR[held];
   if (held === undefined || comparator === undefined || typeof target.unit !== 'string' || target.unit.trim() === '') return null;
   // ⭐ Ruling 21 / amendments 7, 10: a relative change needs today's level; on OLUMI's own starting value it is estimate_only.
@@ -436,14 +468,20 @@ export function goalChanceLicenceOf(
   const readingFrame = basis?.quantity_frame;
   const changeQuantity = changeFrame !== undefined && readingFrame === 'change';
   const timing = ordinaryTimingOf(horizonGraph, envelope);
+  // ⭐ G / D2 (AIE #94 6133027121): a change goal is read as paired only where the PRODUCER scored this Run's sent goal as the
+  // paired change, and that sent goal is the held one — never because the goal's target says change.
+  const pairedChange = changeQuantity && sentRunPairsChange(constraints.sentRun, goalId)
+    && sentRunScoresHeldChange(constraints.sentRun, graph, goalId, held);
   const sqReading: StatusQuoReading = share !== null || statusQuoId === undefined || goal === undefined ? 'unknown'
     : statusQuoReadingOf({
-      paired: timing.ordinary && (changeQuantity || pairedLevelFacts(graph, goal, basis)),
+      paired: timing.ordinary && (changeQuantity ? pairedChange : pairedLevelFacts(graph, goal, basis)),
       forecast: timing.forecast,
       row: sqRow,
       // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in
       // the Run's own frame).
       reference: changeQuantity ? 0 : levelToday,
+      // G: D2 in the change frame — what a zero change scores against the held target (a level goal: unchanged, undefined).
+      ...(changeQuantity ? { zeroChange: zeroChangeMeets(held, target.value) ? 1 as const : 0 as const } : {}),
     });
   const sqByAssumption = sqReading === 'assumed';
   const sqP = sqRow?.probability_of_goal;
@@ -585,9 +623,12 @@ export function goalChanceLicenceOf(
     ...(Object.keys(rounding).length > 0 ? { display_rounding_by_option: rounding } : {}),
     ...(Object.keys(drivers).length > 0 ? { driver_by_option: drivers } : {}),
     ...(Object.keys(noDrivers).length > 0 ? { no_driver_by_option: noDrivers } : {}),
+    ...(conditional !== undefined ? { period_end_assumption: { origin: 'olumi' as const, period_months: conditional.basis.period_months,
+      reference: conditional.basis.reference }, effects_timing: conditional.effects_timing, effects_timing_origin: 'olumi' as const } : {}),
   };
   const worded = withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
+    periodEndNote: conditional?.note,
     sqByAssumption, sqReading, timingOrdinary: timing.ordinary,
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
     // Acceptance is not authorship (DL 12 Oct, BLOCKING 3): an accepted Olumi value or link is still Olumi's — provisional.
@@ -622,6 +663,8 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean; readonly statusQuoLabel: string | undefined;
   readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
   readonly estimates: GoalChanceEstimates; readonly jointEstimates: GoalChanceEstimates | undefined;
+  /** G: the AIE's note, present only on the conditional reading ({@link periodEndConditionalOf}). */
+  readonly periodEndNote?: string;
 }): GoalChanceLicence {
   const { goalLabel, changeFrame } = c;
   // ⭐ R5 MEANING AT THE PRODUCER (DL 12 Oct): the target says its frame whenever Olumi's VALIDATED reading holds one — a
@@ -631,12 +674,13 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   const single: GoalChanceLicence = validatedFrame === undefined ? unframed
     : { ...unframed, target: { ...unframed.target, frame: validatedFrame } };
   // A level target's period is said only on an at-period-end basis (ruling 12); otherwise today's words, unchanged.
-  const basis = c.basis !== undefined && c.basis.effects_at_period_end ? c.basis : undefined;
+  // G: the conditional reading says the same own-target words, at the period it assumes (its note says so).
+  const basis = c.basis !== undefined && (c.basis.effects_at_period_end || c.periodEndNote !== undefined) ? c.basis : undefined;
   const alsoRequired = c.basis?.also_required ?? [];
   // Amendment 7: any Olumi input (a starting value, an option setting or an effect size) on the path makes it provisional.
   // ⭐ LABEL, DON'T WITHHOLD (DL 12 Oct): an input whose origin is not established (R5-2) is shown too, never unlabelled —
   // provisional, with its own note saying what it rests on. It is never counted as Olumi's (that is `olumiInputs`).
-  const provisional = c.estimateOnly || c.olumiInputs || c.unverifiedInputs;
+  const provisional = c.estimateOnly || c.olumiInputs || c.unverifiedInputs || c.periodEndNote !== undefined;
   const unverified = c.unverifiedInputs ? [UNVERIFIED_SOURCES_NOTE] : [];
   // Amendment 1, every frame: the status quo's own line, by assumption — never a figure or an interval.
   const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
@@ -691,14 +735,17 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   // facts do not establish it); a forecast's status quo is said as carrying on's own projection.
   if ('status_quo' in statusQuo) notes.push(statusQuoAssumptionWords(goalLabel, basis));
   notes.push(...projection);
-  // Amendment 2 / DL hiring decision: the effects' timing basis and the additive reading.
-  const effects = basis === undefined ? undefined : effectsBasisWords(basis);
+  // Amendment 2 / DL hiring decision: the effects' timing basis and the additive reading — or, G, the conditional reading's
+  // own note in the same place (never both: the stored basis says the effects are NOT stated at the period's end).
+  const effects = basis === undefined ? undefined : effectsBasisWords(basis) ?? c.periodEndNote;
   if (effects !== undefined) notes.push(effects);
   // Amendment 4 (see `covers`): every limit the Run did not include and every retained condition.
   notes.push(...covers(goalLabel));
   notes.push(...unverified);
   const out: GoalChanceLicence = {
     ...single,
+    // G (AIE #94 6133027121): the record the Agent reads says the chance in its own target's words, never "of meeting your goal".
+    ...(single.message === '' ? {} : { message: `Each option’s chance of ${words} is licensed on this Run.` }),
     target: { ...single.target, ...(changeFrame !== undefined ? { frame: changeFrame } : {}) },
     chance_words: `chance of ${words}`,
     notes,
@@ -1313,6 +1360,9 @@ export function goalChanceLicenceForAgent(result: unknown): {
   /** Recovery Batch C: the stored sentence parts, read only when well formed (a record at odds with itself speaks for nothing). */
   chance_words?: string; notes?: readonly string[]; status_quo?: { option_id: string; line: string };
   estimate_only?: { base: number; unit: string }; provisional?: true; targets?: GoalTargetsBlock;
+  period_end_assumption?: GoalChanceLicence['period_end_assumption'];
+  /** G (AIE #94 6133027121): the licensed target itself, read only when well formed. */
+  target?: GoalChanceLicence['target'];
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
@@ -1398,7 +1448,18 @@ export function goalChanceLicenceForAgent(result: unknown): {
     ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),
     ...(Object.keys(zeroSpreadReasons).length > 0 ? { withheld_reason_by_option: zeroSpreadReasons } : {}),
     ...batchCPartsOf(r, optionIds, withheld ?? []),
+    ...(licensedTargetOf(r.target) !== undefined ? { target: licensedTargetOf(r.target)! } : {}),
   };
+}
+
+/** The stored target, only when every member is well formed (G: the Agent is handed the actual target it describes). */
+function licensedTargetOf(t: unknown): GoalChanceLicence['target'] | undefined {
+  if (!isRec(t) || !['at_least', 'above', 'at_most', 'below'].includes(String(t.comparator)) || !finite(t.value)
+    || typeof t.unit !== 'string' || (t.frame !== undefined && !['level', 'change_abs', 'change_rel'].includes(String(t.frame)))
+    || (t.by_date !== undefined && typeof t.by_date !== 'string')) return undefined;
+  return { comparator: t.comparator as GoalChanceComparator, value: t.value, unit: t.unit,
+    ...(typeof t.by_date === 'string' ? { by_date: t.by_date } : {}),
+    ...(t.frame !== undefined ? { frame: t.frame as 'level' | 'change_abs' | 'change_rel' } : {}) };
 }
 
 /** The longest stored note read back: every retained condition at its full kept length, plus the limits beside them. */
@@ -1408,6 +1469,7 @@ const NOTE_MAX = BASIS_ALSO_REQUIRED_MAX * (BASIS_CONDITION_MAX + 2) + 2000;
 function batchCPartsOf(r: Rec, optionIds: readonly string[], withheld: readonly string[]): {
   chance_words?: string; notes?: readonly string[]; status_quo?: { option_id: string; line: string };
   estimate_only?: { base: number; unit: string }; provisional?: true; targets?: GoalTargetsBlock;
+  period_end_assumption?: GoalChanceLicence['period_end_assumption'];
 } {
   const sayable = (v: unknown, max = 600): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= max && !/[\r\n]/.test(v);
   // A note may name every retained condition (up to 20 × 300 characters; re-scope r2 BLOCKING 2): its own, larger bound.
@@ -1417,6 +1479,11 @@ function batchCPartsOf(r: Rec, optionIds: readonly string[], withheld: readonly 
   const est = isRec(r.estimate_only) && finite(r.estimate_only.base) && typeof r.estimate_only.unit === 'string'
     ? { base: r.estimate_only.base, unit: r.estimate_only.unit } : undefined;
   const targets = r.targets === undefined ? undefined : readGoalTargetsBlock(r.targets, optionIds);
+  // G: Olumi's period-end assumption, read only when well formed (its origin is Olumi's, never a person's).
+  const pea = isRec(r.period_end_assumption) ? r.period_end_assumption : undefined;
+  const assumption = pea !== undefined && pea.origin === 'olumi' && Number.isInteger(pea.period_months) && (pea.period_months as number) > 0
+    && (pea.reference === 'today' || pea.reference === 'launch')
+    ? { origin: 'olumi' as const, period_months: pea.period_months as number, reference: pea.reference as 'today' | 'launch' } : undefined;
   return {
     ...(sayable(r.chance_words, 600) && r.chance_words.startsWith('chance of ') ? { chance_words: r.chance_words } : {}),
     ...(notes !== undefined ? { notes } : {}),
@@ -1424,6 +1491,7 @@ function batchCPartsOf(r: Rec, optionIds: readonly string[], withheld: readonly 
     ...(est !== undefined ? { estimate_only: est } : {}),
     ...(r.provisional === true ? { provisional: true as const } : {}),
     ...(targets !== undefined ? { targets } : {}),
+    ...(assumption !== undefined ? { period_end_assumption: assumption } : {}),
   };
 }
 
@@ -1470,6 +1538,56 @@ export function periodEndEffectsUnstatedOf(graph: unknown, goalId: unknown): { r
 }
 
 /**
+ * ⭐ G (AIE #94 6128697025, "S4/S8 — D timing decision"; amendments 6131950992 (a)–(e), 12 Oct): the CONDITIONAL reading of a
+ * change target whose basis holds that the effects are NOT stated at the period's end ({@link periodEndEffectsUnstatedOf}).
+ * A static model may support the chance under OLUMI'S disclosed assumption that its estimated effects are in place by the
+ * period — never by flipping `effects_at_period_end`, never a steady state substituted silently. Every one of these holds,
+ * else undefined (and {@link withholdForPeriodEndEffects} says E's sentence):
+ *   · (b) the STATIC reading: no held month or deadline, no accumulation carrier, not a deadline-share forecast — a producer
+ *     that models when the effects arrive, or sizes them at the period, says its own timing instead (never this note);
+ *   · (a) THE Run: what CEE sent for this Run scored the held quantity, target, frame, unit, reference, comparator and period
+ *     (`sentRunScoresHeldChange`); a `probability_of_goal` on the wire alone licenses nothing;
+ *   · (d) the retained source was read: a brief that is absent or unreadable is never "no contradiction";
+ *   · (c) the AI reads effects as in place by the period, or not stated. Later/partial, missing and invalid readings withhold;
+ *   · (e) the target's own words can be said ("‘productivity’ being at least 10% higher than today at three months"), so a
+ *     chance of this target alone is never worded as the chance of the whole goal (its other conditions stay in the notes).
+ * The other guards (target, permission, currentness, condition) are the licence's own and run unchanged around this.
+ */
+export function periodEndConditionalOf(
+  envelope: unknown, graph: unknown, goalId: unknown, inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief' | 'effects_timing'> = {},
+): { readonly record: GoalRecord; readonly basis: GoalTargetBasis; readonly note: string; readonly effects_timing: 'not_stated' | 'in_place_by_period' } | undefined {
+  const held = periodEndEffectsUnstatedOf(graph, goalId);
+  if (held === undefined) return undefined;
+  // Ordinary timing (`ordinaryTimingOf`): no held month (a held month without an at-period basis is the horizon gate's
+  // 'withhold'), no deadline, no accumulation carrier — so no forecast either; and not a deadline-share event.
+  if (!ordinaryTimingOf(graph, envelope).ordinary || shareByDateGoalForChanceOf(graph) !== null || isEventShareForecast(graph)) return undefined;
+  // The comparator the chance is stated with, exactly as the licence reads it (`statedComparatorOf`).
+  const target = held.record.target;
+  const comparator = statedComparatorOf(target?.comparator, true, graph, goalId);
+  if (comparator === undefined || !sentRunScoresHeldChange(inputs.sentRun, graph, goalId, comparator)) return undefined;
+  const brief = inputs.brief;
+  if (typeof brief !== 'string' || brief.trim() === '') return undefined;
+  if (inputs.effects_timing !== 'not_stated' && inputs.effects_timing !== 'in_place_by_period') return undefined;
+  // Through the ONE goal record (S5): the label and the stated target the licence's words are formed from.
+  const label = held.record.label.trim() !== '' && !/[\r\n]/.test(held.record.label) ? held.record.label.trim() : undefined;
+  const frame = target?.frame === 'change_abs' || target?.frame === 'change_rel' ? target.frame : undefined;
+  if (target == null || label === undefined || frame === undefined || target.raw === undefined || typeof target.unit !== 'string'
+    || targetChanceWords({ label, frame, comparator, value: target.raw, unit: target.unit, quantityFrame: held.basis.quantity_frame,
+      basis: held.basis }) === undefined) return undefined;
+  return { ...held, note: periodEndAssumptionNote(held.basis), effects_timing: inputs.effects_timing };
+}
+
+/** Whether a change of exactly 0 meets the held comparison against the target (`held` is the stated comparator). */
+function zeroChangeMeets(held: string, value: number): boolean {
+  return held === '>=' ? 0 >= value : held === '>' ? 0 > value : held === '<=' ? 0 <= value : held === '<' ? 0 < value : false;
+}
+
+/** The comparator a chance is stated with: the held one, else — a change carries its direction in its sign — the Run's own sense. */
+function statedComparatorOf(held: string | undefined, change: boolean, graph: unknown, goalId: unknown): string | undefined {
+  return held ?? (change ? (resolveGoalDirection(graph, goalId)?.direction === 'minimise' ? '<=' : '>=') : undefined);
+}
+
+/**
  * The AIE's sentence, exactly (#94 6128697025). {target} is the stored target as the readiness words say a change
  * (`sayGoalChange`: "up at least 10% from today"); {period} is the basis' month. No next step: sizing a link does not clear it.
  */
@@ -1489,10 +1607,13 @@ export function periodEndEffectsWords(record: GoalRecord, basis: Pick<GoalTarget
 /** The withhold's CEE-local reason (`detail.reason`): its sentence says "isn’t shown" itself, so no reader prefixes it. */
 export const PERIOD_END_EFFECTS_UNSTATED = 'effects_at_period_end_unstated';
 
-export function withholdForPeriodEndEffects<E>(envelope: E, graph: unknown, goalId: unknown): E {
+export function withholdForPeriodEndEffects<E>(
+  envelope: E, graph: unknown, goalId: unknown, inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief' | 'effects_timing'> = {},
+): E {
   if (!isRec(envelope)) return envelope;
   const held = periodEndEffectsUnstatedOf(graph, goalId);
-  if (held === undefined) return envelope;
+  // G: the conditional reading is licensed instead (the licence reads the SAME predicate, so the two never disagree).
+  if (held === undefined || periodEndConditionalOf(envelope, graph, goalId, inputs) !== undefined) return envelope;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const baseline = new Set(nodes.filter((n) => n.kind === 'option' && n.is_baseline === true).map((n) => n.id));
   const scored = [...new Set(readOptionResultSources(envelope).flat().flatMap((r) => {
@@ -1500,10 +1621,13 @@ export function withholdForPeriodEndEffects<E>(envelope: E, graph: unknown, goal
     return id === undefined || baseline.has(id) ? [] : [id];
   }))];
   if (scored.length === 0) return envelope;
+  // The CEE-owned refusal retains the same AI reading the conditional licence records.
+  const effectsTiming = effectsTimingOf(inputs.effects_timing);
   // `detail.reason` is CEE-local (as `target_reading_open`); the UI renders `message` for this code.
   return withholdOptionGoalFigures(envelope, new Set(scored), {
     code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: periodEndEffectsWords(held.record, held.basis),
-    node_ids: [String(goalId)], option_ids: scored, detail: { reason: PERIOD_END_EFFECTS_UNSTATED },
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: PERIOD_END_EFFECTS_UNSTATED,
+      effects_timing: effectsTiming ?? null, effects_timing_origin: effectsTiming === undefined ? null : 'olumi' },
   }, { keepOutcome: true, keepOrdering: true });
 }
 

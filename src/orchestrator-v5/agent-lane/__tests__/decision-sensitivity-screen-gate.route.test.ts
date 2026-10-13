@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * S2i THROUGH THE ROUTE: what the model is actually sent when the user presses Explain on a current Run.
  *
@@ -62,6 +63,8 @@ describe('S2i: the model is not sent an absence status beside a screen that show
   const sent: string[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      const forced = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (forced) return forced;
       sent.push(typeof init?.body === 'string' ? init.body : '');
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }] }), { status: 200 });
     }));

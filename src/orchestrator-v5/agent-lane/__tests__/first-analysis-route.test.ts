@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ THE AUTOMATIC FIRST ANALYSIS ON THE REAL AGENT ROUTE (PR-B, tests 1a-7 and 9).
  *
@@ -122,6 +123,8 @@ function installFetch() {
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(candidate) }] }] }), { status: 200 });
     }
     modelBodies.push(body);
+    const runCall = runPressToolResponse(body);
+    if (runCall) return runCall;
     const next = body['tool_choice'] === 'none' ? undefined : script.shift();
     return new Response(JSON.stringify(next ?? say('Here is where the model stands.')), { status: 200 });
   }));
@@ -442,7 +445,7 @@ describe('the Agent route runs the first analysis itself, once', () => {
     await buildTurn(app);
     expect(st(SID).inProcessRuns).toHaveLength(1);
     const b = await turn(app, { message: 'Run analysis.', source: 'chip', chip: { id: RUN_CHIP_ID, action_type: 'run_analysis' } });
-    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(b._diagnostic_trace.fast_path).toBeUndefined();
     expect(st(SID).injectRuns, 'the explicit Run ran').toBe(1);
     expect(st(SID).inProcessRuns, 'and it was not the automatic path').toHaveLength(1);
     expect(b._diagnostic_trace.first_analysis).toBeUndefined();
@@ -617,10 +620,10 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const buildAndPropose = () => [
       callTool('build_model_from_brief', { brief: BRIEF }),
       callTool('propose_starting_point', {
-        assumptions: [{ factor_label: 'Delivery reliability', value: 70, unit: '%', basis: 'A typical figure for a team this size.' }],
+        assumptions: [{ user_stated: false, factor_label: 'Delivery reliability', value: 70, unit: '%', basis: 'A typical figure for a team this size.' }],
         option_levels: [
-          { option_label: 'Option A', factor_label: 'Delivery reliability', value: 85, basis: 'A lead raises delivery reliability.' },
-          { option_label: 'Option B', factor_label: 'Delivery reliability', value: 80, basis: 'Two developers raise it less at first.' },
+          { user_stated: false, option_label: 'Option A', factor_label: 'Delivery reliability', value: 85, basis: 'A lead raises delivery reliability.' },
+          { user_stated: false, option_label: 'Option B', factor_label: 'Delivery reliability', value: 80, basis: 'Two developers raise it less at first.' },
         ],
       }),
       say(prose),

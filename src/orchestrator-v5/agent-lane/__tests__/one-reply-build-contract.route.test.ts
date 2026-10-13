@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /** The real build route, with Paul's captured graph and narrator words; no provider is contacted. */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -43,6 +44,7 @@ let withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['wi
 let lastBuildPayload: Rec;
 let saved: Graph = { nodes: [], edges: [] };
 let askedToBuild = false;
+let awaitingRunReply = false;
 // COMPLETE retains final prose, not the provider's raw message. Include its captured goal-chance explanation
 // so the preservation row can prove it remains in detail. The paired producer row below leaves it to the host.
 const GOAL_CHANCE_CAPTURE = "This run doesn’t yet show each option’s chance of reaching £20,000. Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.";
@@ -107,8 +109,11 @@ describe('ONE reply contract through the build route', () => {
   beforeAll(async () => {
     vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
     info = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
       if (!String(url).includes('openai')) throw new Error('Unexpected external call');
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) { awaitingRunReply = true; return runCall; }
+      if (awaitingRunReply) { awaitingRunReply = false; return new Response(JSON.stringify(say('The model result is provisional.')), { status: 200 }); }
       if (!askedToBuild) {
         askedToBuild = true;
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'build_model_from_brief',
@@ -376,7 +381,9 @@ describe('ONE reply contract through the build route', () => {
     expect(count(body.assistant_text, note)).toBe(1);
     const riskOption = ((risks[0]!.draft_widening as Rec).hits as Rec).id;
     expect(input.chanceCells).toContainEqual(expect.objectContaining({ kind: 'figure', option_id: riskOption }));
-    expect(count(body.assistant_text, "and that option's chance doesn't include it yet")).toBe(risks.length);
+    // The interpreted loop uses the existing sentence dedupe: retain every named risk and state the shared exclusion once.
+    for (const risk of risks) expect(body.assistant_text).toContain(`‘${risk.label}’: ‘Raise prices 10%’ relies on this not happening.`);
+    expect(count(body.assistant_text, "and that option's chance doesn't include it yet")).toBe(1);
     await expectStoredAndReplayed(body, payload);
   });
 
@@ -695,5 +702,28 @@ describe('ONE reply contract through the build route', () => {
     expect(body.assistant_text).not.toContain("Olumi's estimates: ");
     expect(body.assistant_text).not.toMatch(/^Not shown/);
     expect(body._answer_shape?.headline ?? body.assistant_text.split('\n')[0]).toContain(narrator);
+  });
+
+  // AI-first Lane 2 N1 (PLAN-AI-FIRST-SUBTRACT): the AI's answer IS the reply on an ordinary turn. A long answer was cut to
+  // an 80-word face with the rest under "More detail". CONTRAST: `buildTurn` asserts the build keeps its Draft face.
+  it('AI-first N1: a long ordinary answer beside the withheld Run ships whole, in its own order, with no fold', async () => {
+    withUserRatifiedSubscribers();
+    await buildTurn();
+    const paragraphs = [
+      'Start with how many subscribers a price change would cost you, because that figure carries most of the uncertainty in this model.',
+      '- Ask your support team how many customers mentioned price when they cancelled last quarter.\n- Compare that with the cancellations that gave no reason.\n- Check whether annual-plan customers behave differently from monthly ones.',
+      'Once you have even a rough range, enter it on the link from price to subscribers and run the comparison again, so the model reflects your evidence rather than its placeholder.',
+      'If the range turns out to be wide, that is useful too: it tells you the decision depends on learning more before committing.',
+    ];
+    narrator = paragraphs.join('\n\n');
+    expect(words(narrator), 'the control: longer than the old 80-word face').toBeGreaterThan(80);
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'What should I look at first?' } });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    const body = response.json() as Body;
+    expect(body._agent.tool_calls.some(c => c.name === 'run_analysis' || c.name === 'build_model_from_brief')).toBe(false);
+    expect(body._answer_shape, 'no face/detail sidecar on an ordinary turn').toBeUndefined();
+    expect(body.assistant_text.startsWith(narrator), body.assistant_text.slice(0, 300)).toBe(true);
+    expect(body.assistant_text).not.toContain("Olumi's estimates: ");
   });
 });

@@ -53,7 +53,7 @@ export type GoalHorizonEditResult =
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: GoalHorizonRefusal };
 
-const isCalendarDate = (d: unknown): d is string => {
+export const isCalendarDate = (d: unknown): d is string => {
   if (typeof d !== 'string') return false;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
   if (m === null) return false;

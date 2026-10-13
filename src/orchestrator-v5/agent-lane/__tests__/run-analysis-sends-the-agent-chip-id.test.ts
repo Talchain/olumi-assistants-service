@@ -24,7 +24,7 @@ describe('the Agent’s run_analysis names itself to the dispatcher', () => {
       return { status: 200, json: { analysis_ready: { status: 'ready' }, blocks: [] } };
     };
     const caps = createAgentCapabilities(dispatch, new ProposalStore());
-    await caps.runAnalysis(ctx, { reason: 'compare the options' });
+    await caps.runAnalysis(ctx, { reason: 'compare the options', effects_timing: null });
     const runs = sent.filter((s) => s.path === '/orchestrate/v2/turn');
     expect(runs).toHaveLength(1);
     const body = runs[0].body as { source?: unknown; chip?: { id?: unknown; action_type?: unknown } };

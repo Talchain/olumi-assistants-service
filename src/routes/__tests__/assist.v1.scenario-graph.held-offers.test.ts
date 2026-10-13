@@ -1,3 +1,4 @@
+import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /** R2: the opt-in /graph read serves only CEE-authorised original held offers. */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -349,7 +350,7 @@ describe('R2 /graph server-validated held offers (only when conversation request
 // A real turn route, with the internal Run result and provider response fixed locally.
 // No network or model is contacted. The approval hydration/carrier path is production code.
 async function runTurn(sid = SCENARIO, approveId?: string) {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message',
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [{ type: 'message',
     content: [{ type: 'output_text', text: 'The run is provisional.' }] }] }), { status: 200 })))
   const app = Fastify()
   await installOwnershipHarness(app, () => resolveUserIdentity())

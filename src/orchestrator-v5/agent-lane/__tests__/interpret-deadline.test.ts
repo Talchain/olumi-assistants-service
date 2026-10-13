@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * AI HARNESS 2a — the Run's interpreting call has a deadline, and a deadline is never retried. The Run already stands
  * when the call is made: a slow explanation gets the honest fallback instead of holding the turn open (Paul 1 Oct:
@@ -28,6 +29,7 @@ const BLOCK = { type: 'analysis_result', computed_against_hash: '0123456789abcde
 describe('the Run interpreting call has a deadline', () => {
   let app: FastifyInstance;
   let interpretCalls = 0;
+  let runModelCalls = 0;
 
   beforeAll(async () => {
     vi.stubEnv('AGENT_LANE_ENABLED', 'true');
@@ -35,6 +37,13 @@ describe('the Run interpreting call has a deadline', () => {
     // The provider never answers: only the request's own signal can end the call.
     vi.stubGlobal('fetch', vi.fn((url: unknown, init?: { body?: string; signal?: AbortSignal }) => {
       if (String(url) !== 'https://api.openai.com/v1/responses') throw new Error(`Unexpected fetch ${String(url)}`);
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      if (body.tool_choice !== 'none') {
+        runModelCalls += 1;
+        return Promise.resolve(runPressToolResponse(body) ?? new Response(JSON.stringify({ output: [
+          { type: 'message', content: [{ type: 'output_text', text: 'The analysis result is available.' }] },
+        ] }), { status: 200 }));
+      }
       interpretCalls += 1;
       return new Promise((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
@@ -66,8 +75,9 @@ describe('the Run interpreting call has a deadline', () => {
       method: 'POST', url: '/agent/v1/turn',
       payload: { kind: 'message', scenario_id: scenarioId, message: 'Run the analysis please', source: 'chip_click', chip: { action_type: 'run_analysis' } },
     });
-    // Result first (#2455): the Run stands with no model call; the interpreting call is the follow-up's.
-    expect(interpretCalls, 'request 1 makes no model call').toBe(0);
+    // Run completes through its loop; the optional Explain remains independently deadline-bound.
+    expect(runModelCalls).toBe(2);
+    expect(interpretCalls, 'the Explain provider has not been called yet').toBe(0);
     expect((first.json() as { _agent?: { tool_calls?: { name: string }[] } })._agent?.tool_calls?.map((c) => c.name)).toEqual(['run_analysis']);
     const started = Date.now();
     const res = await explainRun(app, scenarioId, first);

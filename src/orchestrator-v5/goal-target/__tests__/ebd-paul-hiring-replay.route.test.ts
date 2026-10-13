@@ -278,7 +278,7 @@ async function runOn(w: ReturnType<typeof world>, mutate: (response: Rec) => Rec
 }
 
 describe("EBD: Paul's hiring conversation reaches a labelled chance per option by his 4th typed turn", () => {
-  it('brief → deadline → team time (his words refused, then a range he types): one question at a time, no "% today", then a chance per option', async () => {
+  it('brief → deadline → team time (his words a card, then a range he types): one question at a time, no "% today", then a chance per option', async () => {
     const w = world(), turn = await route(w);
     const seen: Rec[] = [];
 
@@ -298,7 +298,7 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
       [call('propose_goal_deadline', { deadline_words: DEADLINE_WORDS, rationale: PAUL.deadline }), say('Please confirm the date.')]);
     seen.push(t2);
     const deadline = proposed(t2, 'propose_goal_deadline');
-    expect(cardOf(t2, deadline.proposal_id)).toBe('Is your deadline 12 April 2027 (6 months from 12 October 2026)?');
+    expect(cardOf(t2, deadline.proposal_id)).toBe('Is your deadline 12 April 2027 (6 months from 12 October 2026)? Your words: “launch deadline in six months time”. Basis supplied for this interpretation: ' + PAUL.deadline);
     const t2yes = await turn(approve(t2, deadline.proposal_id));
     seen.push(t2yes);
     expect(t2yes._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
@@ -307,15 +307,15 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     expect(ask2).toBe('How long would next feature launch take with the team you have now?');
     expect(readinessAsks(t2yes.analysis_ready)).toContain(ask2);
 
-    // ── Typed turn 3: Paul's team-time sentence (served turn 13). E delta: the base door refuses it, writes nothing, and asks
-    // for the soonest and latest times; the model still asks the same one question.
-    const beforeRefusal = JSON.stringify(w.read());
+    // ── Typed turn 3: Paul's team-time sentence (served turn 13). AI-first Lane 1 (was refused `team_time_not_stated` at E): the
+    // Agent's reading is ONE card with his whole line and his low confidence; nothing is written until a press.
+    const beforeCard = JSON.stringify(w.read());
     const t3 = await turn({ message: PAUL.teamTime, agent_session_id: t2yes._agent.session_id },
-      [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('How long would it take at the soonest, and at the latest?')]);
+      [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('Please confirm.')]);
     seen.push(t3);
-    expect(t3._agent.tool_calls).toEqual([expect.objectContaining({ name: 'propose_team_time', ok: false, mutated: false, refusal: 'team_time_not_stated' })]);
-    expect(JSON.stringify(w.read()), 'the refusal wrote nothing').toBe(beforeRefusal);
-    expect(expectOneVoice(w.read(), 'after the refused team time')).toBe(ask2);
+    expect(cardOf(t3, proposed(t3, 'propose_team_time').proposal_id).startsWith(`From your message: ‘${PAUL.teamTime}’ Do you want to use 7 months as your forecast`)).toBe(true);
+    expect(JSON.stringify(w.read()), 'the card wrote nothing').toBe(beforeCard);
+    expect(expectOneVoice(w.read(), 'after the team-time card')).toBe(ask2);
 
     // ── Typed turn 4: the user gives a range (the base route). ONE card: the user's own range.
     const t4 = await turn({ message: TEAM_RANGE, agent_session_id: t3._agent.session_id },
@@ -396,6 +396,35 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     expect(providerCalls.filter(c => c !== 'agent' && c !== 'drafter' && c !== 'widening' && c !== 'brief_spans')).toEqual([]);
   }, 60_000);
 
+  /**
+   * ⭐ AI-first Lane 1, THE DEADLINE RUN, through the real route (DL 12 Oct; run 5, `recovery/sys2/evidence/run5-deadline-stall.md`):
+   * at 551258bb Paul's turn-13 sentence was refused `team_time_not_stated` and the Run stayed closed on the team part's level.
+   * Now the Agent's reading is the card, his press writes the level through the one write path, and the Run admits. Stops
+   * before PLoT: the recorded engine answer belongs to the typed-range request (row 1), and no new recording is made.
+   */
+  it('Lane 1 deadline Run: his turn-13 sentence → the card → his press → the team part has a level → ready to Run', async () => {
+    const w = world(), turn = await route(w);
+    const t1 = await turn({ message: PAUL.brief }, [call('build_model_from_brief', { brief: PAUL.brief }), say('I have set up the comparison.')]);
+    const t2 = await turn({ message: PAUL.deadline, agent_session_id: t1._agent.session_id },
+      [call('propose_goal_deadline', { deadline_words: DEADLINE_WORDS, rationale: PAUL.deadline }), say('Please confirm the date.')]);
+    const t2yes = await turn(approve(t2, proposed(t2, 'propose_goal_deadline').proposal_id));
+    expect(resolveRunAdmission(w.read()).willProceed, 'before his team time the Run is closed (the real gap)').toBe(false);
+    const t3 = await turn({ message: PAUL.teamTime, agent_session_id: t2yes._agent.session_id },
+      [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('Please confirm.')]);
+    const card = proposed(t3, 'propose_team_time');
+    expect(cardOf(t3, card.proposal_id)).toBe(`From your message: ‘${PAUL.teamTime}’ Do you want to use 7 months as your forecast for today's team to finish next feature launch? `
+      + 'Olumi’s assumed 3.5–10.5-month range informs this approximate calculation; modelled outcomes can fall outside those time bounds. You described low confidence in that forecast.');
+    const t3yes = await turn(approve(t3, card.proposal_id));
+    expect(t3yes._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    const held = w.read(), team = draftedTeamPartOf(held)!.team;
+    expect(team.observed_state.stated_time).toMatchObject({ low: 3.5, high: 10.5, forecast: 7, forecast_origin: 'user_confirmed', forecast_words: TEAM_QUOTE,
+      range_origin: 'olumi_estimate', range_rule: 'low_confidence', selection: { by: 'user_press', interpretation: 'olumi', source: PAUL.teamTime, quote: TEAM_QUOTE } });
+    expect(Number.isFinite(team.observed_state.value)).toBe(true);
+    expect(resolveRunAdmission(held).willProceed).toBe(true);
+    expect(assessRouteAdmission(held).can_run_analysis).toBe(true);
+    expect(t3yes.analysis_ready?.status).toBe('ready');
+    expect(decisionInputAsk(held, askContext)).toBeNull();
+  });
   it('E4: what the deadline model set aside from a brief is said ONCE, on the build turn, and never on a later turn', async () => {
     const brief = 'Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?';
     drafterOutput = () => ({ ...candidate(), goal: { ...candidate().goal, deliverable: 'the new platform', metric: 'Platform completion', unit: '%' },
@@ -478,9 +507,10 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     await send('typed', ORIGINAL.onboarding, [say('It is a risk Olumi suggested; it is not connected to the forecast yet.')]);
     await send('chip', ORIGINAL.risks, [say('Two more risks to consider: key-person dependency and scope growth.')], chip(t8, 'agent-next-suggest-risks'));
     await send('typed', ORIGINAL.blockerPaste2, [say(teamAsk)]);
-    const t13 = await send('typed', PAUL.teamTime, [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('How long would it take at the soonest, and at the latest?')]);
-    // E delta: the base door refuses his sentence (nothing written); he then gives a range, the base route.
-    expect(t13._agent.tool_calls).toEqual([expect.objectContaining({ name: 'propose_team_time', ok: false, refusal: 'team_time_not_stated' })]);
+    const t13 = await send('typed', PAUL.teamTime, [call('propose_team_time', { quote: TEAM_QUOTE, low_months: 7, high_months: 7 }), say('Please confirm.')]);
+    // AI-first Lane 1 (was refused `team_time_not_stated` at E): his sentence is a card; in this transcript he then types a range,
+    // whose card replaces it (one team-time card at a time).
+    expect(t13._agent.tool_calls).toEqual([expect.objectContaining({ name: 'propose_team_time', ok: true, mutated: false })]);
     const t14 = await send('typed', TEAM_RANGE, [call('propose_team_time', { low_months: 6, high_months: 10 }), say('Please confirm.')]);
     const team = proposed(t14, 'propose_team_time');
     const t15 = await turn(approve(t14, team.proposal_id));

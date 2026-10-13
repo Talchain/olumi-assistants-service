@@ -57,7 +57,7 @@ describe('⛔ run_analysis says how each of the user’s limits was checked', ()
   });
 
   it('⭐ B6 SUPERSEDES "CHECKED against Olumi’s estimates" (AIQ 5916187873): served C10 names each option resting on Olumi’s figure, never "cannot be checked"', async () => {
-    const r = await world().runAnalysis(ctx, { reason: 'Run it.' });
+    const r = await world().runAnalysis(ctx, { reason: 'Run it.', effects_timing: null });
     const checks = r.limit_checks as { limits: { limit: string; state: string; say: string }[]; note: string } | undefined;
     expect(checks, JSON.stringify(Object.keys(r))).toBeDefined();
     // Each row also carries MG's ask for that limit, verbatim (`limit-checks-carry-the-ask.test.ts` binds the join).
@@ -99,7 +99,7 @@ describe('⛔ run_analysis says how each of the user’s limits was checked', ()
   });
 
   it('CONTROL: no per-limit rows on the read → no limit_checks (nothing invented); a row whose limit has no label is left out', async () => {
-    const r = await world(null).runAnalysis(ctx, { reason: 'Run it.' });
+    const r = await world(null).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null });
     expect(r).not.toHaveProperty('limit_checks');
     expect(limitChecksForAgent(FX.graph, { per_limit: [{ constraint_id: 'unknown:limit', state: 'unscored' }], joint: { state: 'withheld' } })).toBeUndefined();
   });

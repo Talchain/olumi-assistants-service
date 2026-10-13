@@ -159,7 +159,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     const { caps, ctx } = agent();
     const before = currentHash();
     const p = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a typical SaaS churn' }],
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a typical SaaS churn' }],
       option_levels: [{ option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, basis: 'the option\'s own name' }],
     });
     expect(p.ok, JSON.stringify(p)).toBe(true);
@@ -176,7 +176,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     const { caps, ctx } = agent();
     const before = JSON.stringify(persisted);
     const p = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a typical SaaS churn' }],
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a typical SaaS churn' }],
       option_levels: [
         { option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, basis: 'the option\'s own name' },
         { option_label: RAISE, factor_label: 'Word of mouth', value: 0.4, basis: 'a guess' },
@@ -218,7 +218,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     const { caps, store, ctx } = agent(); const put = vi.spyOn(store, 'put');
     const level = { ...clearLevel(), unmodelled_mechanisms: value };
     const result = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
       option_levels: [clearLevel(), level as never],
     });
     expect(result.ok).toBe(false); expect(put).not.toHaveBeenCalled(); expect(rows.size).toBe(0);
@@ -228,7 +228,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
   it('conflicting repeated declarations refuse before either starting-point half is proposed', async () => {
     withGap(); const { caps, store, ctx } = agent(); const put = vi.spyOn(store, 'put');
     const result = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
       option_levels: [clearLevel(), { ...clearLevel(), unmodelled_mechanisms: ['another effect'] }],
     });
     expect(result).toMatchObject({ ok: false, refusal: 'conflicting_option_gap_declarations' });
@@ -297,7 +297,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
   it('malformed approved operation bytes refuse before any compound part is prepared or written', async () => {
     withGap(); const { caps, ctx, store } = agent();
     const offered = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
       option_levels: [clearLevel()],
     });
     expect(offered.ok, JSON.stringify(offered)).toBe(true);
@@ -345,7 +345,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
   it('a non-empty declaration and a numerical change use the same ONE compound door', async () => {
     withGap(); const { caps, ctx } = agent();
     const p = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
       option_levels: [{ ...clearLevel(), value: 59, unmodelled_mechanisms: ['  support   demand ', 'Support demand'] }],
     });
     expect(p.ok, JSON.stringify(p)).toBe(true); expect(String(p.public_label)).toContain('support demand');
@@ -409,7 +409,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
       const offered = caller === 'levels'
         ? await caps.proposeOptionInterventions(ctx, { interventions: levels })
         : await caps.proposeStartingPoint(ctx, {
-          assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+          assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
           option_levels: levels,
         });
       expect(offered, JSON.stringify({ caller, declaredValue, reverse })).toMatchObject({ ok: false, refusal: 'conflicting_option_gap_declarations' });
