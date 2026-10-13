@@ -480,12 +480,13 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   });
 
   // ⭐ T2A3 (DL): "<X> effects" credits links LEAVING the listed X, in THIS message, and nothing wider.
-  const pluralRun = async (words: string, keys: readonly Key[]) => {
+  const pluralRun = async (words: string, keys: readonly Key[], quote?: string) => {
     placeholderBase();
     const { censusConfidenceParameters } = await import('../../../src/orchestrator-v5/admission/analysis-admission.js');
     const confidence0 = censusConfidenceParameters(persisted).confidence_parameters_user_stated;
     const { caps, ctx, store } = agent(words);
-    const p = await caps.proposeLinkStrengths!(ctx, { links: keys.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong' })) as never, rationale: words });
+    const p = await caps.proposeLinkStrengths!(ctx, { links: keys.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong',
+      ...(quote === undefined ? {} : { from_words: quote }) })) as never, rationale: words });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const authors = Object.fromEntries(store.get(String(p.proposal_id))!.operations.map((op) => [op.path, (op.value as { author: string }).author]));
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
@@ -493,18 +494,22 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     return { authors, credited: censusConfidenceParameters(persisted).confidence_parameters_user_stated - confidence0 };
   };
   const pathOf = (k: Key): string => `${L[k][2]}::${L[k][3]}`;
-  it('T2A3 plural: the singular "X\u2019s effect on Y" credits only X → Y, never X\u2019s other link', async () => {
-    const { authors } = await pluralRun('set human capacity\u2019s effect on delegation quality to strong', ['capacityQuality', 'capacityOverhead']);
-    expect(authors).toEqual({ [pathOf('capacityQuality')]: 'user_stated', [pathOf('capacityOverhead')]: 'model_proposed' });
+  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message.
+  // EXPECTATION CHANGED: unquoted, old capacityQuality user_stated → new model_proposed; the quoted run keeps the old outcome.
+  it.each([[undefined, 'model_proposed'], ['set human capacity\u2019s effect on delegation quality to strong', 'user_stated']] as const)('T2A3 plural: the singular "X\u2019s effect on Y" credits only X → Y, never X\u2019s other link (from_words %s)', async (quote, want) => {
+    const { authors } = await pluralRun('set human capacity\u2019s effect on delegation quality to strong', ['capacityQuality', 'capacityOverhead'], quote);
+    expect(authors).toEqual({ [pathOf('capacityQuality')]: want, [pathOf('capacityOverhead')]: 'model_proposed' });
     expect(linkSizing(edge('capacityOverhead'))).not.toBe('user');
   });
   it('T2A3 plural: a second entity named beside the plural ("… effects on delegation quality") gives no blanket credit', async () => {
-    const { authors } = await pluralRun('set human capacity effects on delegation quality to strong', ['capacityQuality', 'capacityOverhead']);
+    // The AI quoting the whole message (the adverse case since the T2A3 ruling): the host's veto keeps it Olumi's.
+    const { authors } = await pluralRun('set human capacity effects on delegation quality to strong', ['capacityQuality', 'capacityOverhead'],
+      'set human capacity effects on delegation quality to strong');
     expect(authors[pathOf('capacityOverhead')]).toBe('model_proposed');
     expect(linkSizing(edge('capacityOverhead'))).not.toBe('user');
   });
   it('T2A3 plural: "Olumi says … effects are strong" credits none of the listed links', async () => {
-    const { authors, credited } = await pluralRun(`Olumi says ${PAUL_STRONG}`, STRONG);
+    const { authors, credited } = await pluralRun(`Olumi says ${PAUL_STRONG}`, STRONG, `Olumi says ${PAUL_STRONG}`);
     expect(Object.values(authors)).toEqual(STRONG.map(() => 'model_proposed'));
     expect(credited, 'nothing is the user\u2019s').toBe(0);
     for (const k of ['workloadHours', 'qualityHours', 'hoursFocus'] as const) expect(linkSizing(edge(k)), k).not.toBe('user');

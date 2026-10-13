@@ -4771,9 +4771,10 @@ export function createAgentCapabilities(
      * updates", then named the bands himself for eight links; four permissions recorded ONE link, because
      * `propose_link_strength` holds one link and refuses a band the user did not type.
      *
-     * Each link here is the user's estimate when their latest statement about it names that band (`latestLinkBands`):
-     * words binding both resolved ends, or THIS message's words naming an end of the ONE link the request selects, or
-     * this message's "<X> effects … to <band>" for a link leaving X.
+     * Each link here is the user's estimate only when the Agent quotes THIS message's words for it as `from_words` (the
+     * user's exact words, naming an end and the band) AND the host's reading of this message agrees (`latestLinkBands`):
+     * words binding both resolved ends, words naming an end of the ONE link the request selects, or "<X> effects … to
+     * <band>" for a link leaving X. Earlier messages credit nothing here until T2A5's quote (T2A3 DL ruling).
      * Otherwise it is OLUMI'S ESTIMATE: the approval adopts it and the writer stamps it as Olumi's size
      * (`olumi_estimate`), never as the user's. A strength that is already the user's own is never replaced by an
      * estimate. Directions are kept (a reversal is one link, in the user's words). One proposal, one chip, one commit.
@@ -4878,18 +4879,20 @@ export function createAgentCapabilities(
           heldFigures.push(userFigureHeldRefusalText(heldFigure, linkBandWord(band)));
           continue;
         }
-        // The user's LATEST statement for this exact link decides (`latestLinkBands`). THIS message first: words naming
-        // both ends, a selection binding exactly this ONE directed link with words naming an end of it, or "<X> effects"
-        // for links leaving X. Earlier verified words count only when they name both ends; history never supplies an end.
-        // The model's `user_stated` is not source authority (PL 22:07Z): attributed or questioned words fail at the source.
+        // The user's statement for this exact link in THIS message decides (`latestLinkBands`): words naming both ends, a
+        // selection binding exactly this ONE directed link with words naming an end of it, or "<X> effects" for links
+        // leaving X. The model's `user_stated` is not source authority (PL 22:07Z): attributed or questioned words fail.
         const selection = ctx.grounded_selection;
         const bound = selection?.unresolved === 'none' && selection.element_ids.length === 0 ? ctx.grounded_links ?? [] : [];
-        // Message by message (an "Olumi supplied these:" frame covers the rest of ITS message), only while they are
-        // exactly the words the route bound as `user_text`; a path that blanks or rewrites `user_text` keeps its text.
-        const messages = ctx.verified_user_messages !== undefined && ctx.verified_user_messages.join('\n') === ctx.user_text
-          ? ctx.verified_user_messages : ctx.user_text;
-        const stated = latestLinkBands(ctx.user_turn_text, g.nodes, from.id, to.id, { bound })
-          ?? latestLinkBands(messages, g.nodes, from.id, to.id);
+        // ⛔ T2A3 (DL ruling, Codex FAIL on c78b4ad4): it is the user's only with the Agent's own quote of it (`from_words`,
+        // the tool's contract and staging's rule). No quote is the Agent saying "not the user's" ("Alice says…", "strong
+        // evidence"), and the host reading never overrides it; the reading stays a veto on a quote. Earlier messages credit
+        // nothing here (staging never did): the tool asks for THIS message's words, so history waits for T2A5's quote.
+        const quoted = typeof l.from_words === 'string' && wordsTheUserWrote(l.from_words, ctx.user_turn_text)
+          && bandTheUserWrote(band, l.from_words) && [String(from.label ?? ''), String(to.label ?? '')].some((end) =>
+            factorTheUserNamed(end, l.from_words as string, { options: [], others: g.nodes.map((n) => String(n.label ?? '')).filter((x) => x !== end) }));
+        const thisMessage = latestLinkBands(ctx.user_turn_text, g.nodes, from.id, to.id, { bound });
+        const stated = quoted ? thisMessage : null;
         if (stated?.includes(band) === true) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)

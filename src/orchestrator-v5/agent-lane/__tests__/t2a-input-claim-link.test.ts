@@ -65,11 +65,13 @@ async function journey(from: string, overrides: Record<string, unknown> = {}, ve
 }
 
 describe('T2-A retained input_claim on the exact link through proposal, approval, canonical writer and JSON readback', () => {
-  // PL 22:07Z: the model's `user_stated` is not source authority; verified affirmative words credit whatever it says.
-  it.each([{}, { user_stated: false, basis: 'Model estimate' }])('(a) earlier verified words naming both ends credit the exact link: %j', async overrides => {
+  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message (`from_words`);
+  // no quote → Olumi's, and earlier messages credit nothing (staging never did) until T2A5's quote. EXPECTATION CHANGED:
+  // old user_stated / user_specified → new model_proposed / cee_hypothesis (earlier words, even quoted).
+  it.each([{}, { user_stated: false, basis: 'Model estimate' }, { from_words: history }])('(a) earlier verified words naming both ends credit nothing yet: %j', async overrides => {
     const result = await journey('Price', overrides);
-    expect((result.op.value as { author: string }).author).toBe('user_stated');
-    expect(result.edge.provenance.source).toBe('user_specified');
+    expect((result.op.value as { author: string }).author).toBe('model_proposed');
+    expect(result.edge.provenance.source).toBe('cee_hypothesis');
     expect(result.edge.strength.mean).toBe(0.1);
   });
   it.each([{}, { user_stated: false, basis: 'Model estimate' }, { from_words: history }])('(b) a different existing link stays Olumi’s: %j', async overrides => {
@@ -117,12 +119,16 @@ describe('T2A2 current interaction supplies the exact link, never an end from hi
     expect(result.edge.provenance.source).toBe('cee_hypothesis');
     expect(result.proposal.public_label).toBe('Record this link strength: "Price" → "MRR" as strong, Olumi’s estimate');
   });
-  it.each(['Price', 'Quality'])('review A with earlier history B credits only A: %s', async from => {
-    const result = await journey(from, { strength: 'strong', user_stated: false, basis: 'Model estimate' },
+  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message (`from_words`);
+  // no quote → Olumi's, and earlier messages credit nothing (staging never did) until T2A5's quote. EXPECTATION CHANGED:
+  // Price without a quote, old user_stated → new model_proposed; the AI's quote "Price is strong" keeps the old outcome.
+  it.each([['Price', undefined], ['Quality', undefined], ['Price', 'Price is strong'], ['Quality', 'Price is strong']] as const)('review A with earlier history B credits only A, and only with the AI\u2019s quote: %s, from_words %s', async (from, quote) => {
+    const result = await journey(from, { strength: 'strong', user_stated: false, basis: 'Model estimate', ...(quote === undefined ? {} : { from_words: quote }) },
       'Quality has a weak effect on MRR. Price is strong.',
       { ...priceReview, user_turn_text: 'Price is strong.' }, 0.3);
-    expect((result.op.value as { author: string }).author).toBe(from === 'Price' ? 'user_stated' : 'model_proposed');
-    expect(result.edge.provenance.source).toBe(from === 'Price' ? 'user_specified' : 'cee_hypothesis');
+    const theirs = from === 'Price' && quote !== undefined;
+    expect((result.op.value as { author: string }).author).toBe(theirs ? 'user_stated' : 'model_proposed');
+    expect(result.edge.provenance.source).toBe(theirs ? 'user_specified' : 'cee_hypothesis');
     expect(result.edge.strength.mean).toBe(0.55);
   });
   it('a current review card cannot borrow the shorthand band from earlier history', async () => {
@@ -195,15 +201,21 @@ describe('T2A3 (#2993 check): reporting or disputing Olumi’s claim is not the 
       expect(result.edge.provenance.magnitude).toBe('olumi_estimate');
     }
   });
-  it('control: the same words as the user’s own statement are credited', async () => {
+  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message (`from_words`);
+  // no quote → Olumi's, and earlier messages credit nothing (staging never did) until T2A5's quote. EXPECTATION CHANGED:
+  // old user_stated / user_specified → new model_proposed / cee_hypothesis (the user's own words, but an EARLIER message).
+  it('control: the same words as the user’s own earlier statement credit nothing yet (T2A5 brings the quote)', async () => {
     const result = await journey('Price', {}, `Price has a weak effect on MRR.\n${later}`, { user_turn_text: later });
-    expect(author(result)).toBe('user_stated');
-    expect(result.edge.provenance.source).toBe('user_specified');
+    expect(author(result)).toBe('model_proposed');
+    expect(result.edge.provenance.source).toBe('cee_hypothesis');
   });
 });
 
 describe('T2A3: a later statement supersedes an earlier one for the same link', () => {
-  it.each([['weak', 'model_proposed'], ['strong', 'user_stated']] as const)('"weak", then "Actually … strong": %s is %s', async (strength, want) => {
+  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message (`from_words`);
+  // no quote → Olumi's, and earlier messages credit nothing (staging never did) until T2A5's quote. EXPECTATION CHANGED:
+  // "strong", old user_stated → new model_proposed (both statements are earlier messages).
+  it.each([['weak', 'model_proposed'], ['strong', 'model_proposed']] as const)('"weak", then "Actually … strong": %s is %s', async (strength, want) => {
     const words = 'Price has a weak effect on MRR.\nActually, Price has a strong effect on MRR.';
     const result = await journey('Price', { strength }, words, { user_turn_text: 'Please prepare the link.' }, strength === 'weak' ? 0.55 : 0.3);
     expect(author(result)).toBe(want);
@@ -234,36 +246,54 @@ describe('T2A3 buddy review (Codex, read-only): same-sentence bands, direction, 
       expect(result.edge.provenance.source, from).toBe('cee_hypothesis');
     }
   });
-  it('the frame stops at its own message: the user\u2019s next message is theirs', async () => {
+  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message (`from_words`);
+  // no quote → Olumi's, and earlier messages credit nothing (staging never did) until T2A5's quote. EXPECTATION CHANGED:
+  // old user_stated / user_specified → new model_proposed / cee_hypothesis (the user's next message is an EARLIER one).
+  it('the frame stops at its own message, but that earlier message credits nothing yet', async () => {
     const verified_user_messages = ['Olumi supplied these estimates.', 'Price has a weak effect on MRR.', 'Please prepare the link.'];
     const result = await journey('Price', {}, verified_user_messages.join('\n'), { verified_user_messages });
-    expect(author(result)).toBe('user_stated');
-    expect(result.edge.provenance.source).toBe('user_specified');
+    expect(author(result)).toBe('model_proposed');
+    expect(result.edge.provenance.source).toBe('cee_hypothesis');
   });
   it.each([
     'Olumi says Quality is weak; my own estimate is that Price has a strong effect on MRR.',
     'Price has a strong effect on MRR. I disagree with Olumi about Quality.',
-  ])('an attribution or dispute about something else never demotes the user\u2019s own statement: %s', async words => {
-    const result = await journey('Price', { strength: 'strong' }, words, { user_turn_text: words }, 0.3);
-    expect(author(result)).toBe('user_stated');
-    expect(result.edge.provenance.source).toBe('user_specified');
+  ])('an attribution or dispute about something else never demotes the user\u2019s own quoted statement: %s', async words => {
+    // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message (`from_words`);
+    // no quote → Olumi's, and earlier messages credit nothing (staging never did) until T2A5's quote. EXPECTATION CHANGED:
+    // without a quote, old user_stated → new model_proposed; the AI's quote keeps the old outcome.
+    for (const [quote, want] of [[undefined, 'model_proposed'], ['Price has a strong effect on MRR', 'user_stated']] as const) {
+      const result = await journey('Price', { strength: 'strong', ...(quote === undefined ? {} : { from_words: quote }) }, words, { user_turn_text: words }, 0.3);
+      expect(author(result), String(quote)).toBe(want);
+      expect(result.edge.provenance.source, String(quote)).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
+    }
   });
 });
 
 describe('T2A3 (DL, PL 22:07Z): first-person claims after an attribution, and "<X> effects" in this message', () => {
-  it('"Olumi says Quality is weak, but I think Price has a strong effect on MRR." credits the user\u2019s own clause', async () => {
+  it('"Olumi says Quality is weak, but I think Price has a strong effect on MRR." credits the user\u2019s own quoted clause', async () => {
     const words = 'Olumi says Quality is weak, but I think Price has a strong effect on MRR.';
-    const result = await journey('Price', { strength: 'strong' }, words, { user_turn_text: words }, 0.3);
-    expect(author(result)).toBe('user_stated');
-    expect(result.edge.provenance.source).toBe('user_specified');
+    // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message (`from_words`);
+    // no quote → Olumi's, and earlier messages credit nothing (staging never did) until T2A5's quote. EXPECTATION CHANGED:
+    // without a quote, old user_stated → new model_proposed; the AI's quote keeps the old outcome.
+    for (const [quote, want] of [[undefined, 'model_proposed'], ['I think Price has a strong effect on MRR', 'user_stated']] as const) {
+      const result = await journey('Price', { strength: 'strong', ...(quote === undefined ? {} : { from_words: quote }) }, words, { user_turn_text: words }, 0.3);
+      expect(author(result), String(quote)).toBe(want);
+      expect(result.edge.provenance.source, String(quote)).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
+    }
   });
+  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message (`from_words`);
+  // no quote → Olumi's, and earlier messages credit nothing (staging never did) until T2A5's quote. EXPECTATION CHANGED:
+  // the first row, old user_stated → new model_proposed (no quote); its quoted twin keeps the old outcome. Every negative
+  // runs with the AI quoting the whole message, so the host's veto is what keeps it Olumi's.
   it.each([
-    ['this message: "Price effects are weak." credits the link leaving Price', 'Price effects are weak.', 'Price effects are weak.', 'user_stated'],
-    ['earlier history never supplies the target of a plural', 'Price effects are weak.', 'Please prepare the link.', 'model_proposed'],
-    ['"Olumi says Price effects are weak." is Olumi\u2019s', 'Olumi says Price effects are weak.', 'Olumi says Price effects are weak.', 'model_proposed'],
-    ['a second entity named beside the plural gives no blanket credit', 'Quality matters, and Price effects are weak.', 'Quality matters, and Price effects are weak.', 'model_proposed'],
-  ] as const)('%s', async (_case, verified, turn, want) => {
-    const result = await journey('Price', {}, verified, { user_turn_text: turn });
+    ['this message: "Price effects are weak." credits the link leaving Price', 'Price effects are weak.', 'Price effects are weak.', 'model_proposed', undefined],
+    ['this message, with the AI\u2019s quote: "Price effects are weak." credits the link leaving Price', 'Price effects are weak.', 'Price effects are weak.', 'user_stated', 'Price effects are weak'],
+    ['earlier history never supplies the target of a plural', 'Price effects are weak.', 'Please prepare the link.', 'model_proposed', 'Price effects are weak'],
+    ['"Olumi says Price effects are weak." is Olumi\u2019s', 'Olumi says Price effects are weak.', 'Olumi says Price effects are weak.', 'model_proposed', 'Olumi says Price effects are weak'],
+    ['a second entity named beside the plural gives no blanket credit', 'Quality matters, and Price effects are weak.', 'Quality matters, and Price effects are weak.', 'model_proposed', 'Quality matters, and Price effects are weak'],
+  ] as const)('%s', async (_case, verified, turn, want, quote) => {
+    const result = await journey('Price', quote === undefined ? {} : { from_words: quote }, verified, { user_turn_text: turn });
     expect(author(result)).toBe(want);
     expect(result.edge.provenance.source).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
   });
@@ -274,13 +304,19 @@ describe('T2A3 buddy review 3 (Codex, read-only, 35aae691): the band belongs to 
     ['Price is £49 and MRR growth is strong.', 'strong', 'model_proposed'],
     ['Price affects MRR, and our evidence is strong.', 'strong', 'model_proposed'],
     ['Price has a weak effect on MRR, and our evidence is strong.', 'strong', 'model_proposed'],
-    // The user's own band in the same sentence is still theirs (never demoted by an unrelated band).
-    ['Price has a weak effect on MRR, and our evidence is strong.', 'weak', 'user_stated'],
-    ['Price has a weak effect on MRR, while Olumi says Quality is strong.', 'weak', 'user_stated'],
-    ['Olumi supplied these estimates. But my own estimate is that Price has a weak effect on MRR.', 'weak', 'user_stated'],
-    ['Price \u2192 MRR is strong.', 'strong', 'user_stated'],
-  ] as const)('"%s" proposing %s → %s', async (words, strength, want) => {
-    const result = await journey('Price', { strength }, words, { user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
+    // The user's own band in the same sentence is still theirs (never demoted by an unrelated band), when the AI quotes it.
+    // T2A3 DL ruling: EXPECTATION CHANGED for the four unquoted rows, old user_stated → new model_proposed (no AI quote →
+    // no same-message credit); each quoted twin keeps the old outcome.
+    ['Price has a weak effect on MRR, and our evidence is strong.', 'weak', 'model_proposed'],
+    ['Price has a weak effect on MRR, while Olumi says Quality is strong.', 'weak', 'model_proposed'],
+    ['Olumi supplied these estimates. But my own estimate is that Price has a weak effect on MRR.', 'weak', 'model_proposed'],
+    ['Price \u2192 MRR is strong.', 'strong', 'model_proposed'],
+    ['Price has a weak effect on MRR, and our evidence is strong.', 'weak', 'user_stated', 'Price has a weak effect on MRR'],
+    ['Price has a weak effect on MRR, while Olumi says Quality is strong.', 'weak', 'user_stated', 'Price has a weak effect on MRR'],
+    ['Olumi supplied these estimates. But my own estimate is that Price has a weak effect on MRR.', 'weak', 'user_stated', 'my own estimate is that Price has a weak effect on MRR'],
+    ['Price \u2192 MRR is strong.', 'strong', 'user_stated', 'Price \u2192 MRR is strong'],
+  ] as const)('"%s" proposing %s → %s (from_words %s)', async (words, strength, want, quote?: string) => {
+    const result = await journey('Price', { strength, ...(quote === undefined ? {} : { from_words: quote }) }, words, { user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
     expect(author(result)).toBe(want);
     expect(result.edge.provenance.source).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
   });
@@ -312,11 +348,44 @@ describe('T2A3 buddy review 4 (Codex, read-only, 07323ca6)', () => {
     ['Price is £49 and strong MRR growth continues.', 'strong', 'model_proposed'],
     ['Olumi says "Quality is weak, but I think Price has a strong effect on MRR."', 'strong', 'model_proposed'],
     ['Price has a weak effect on MRR, according to Olumi.', 'weak', 'model_proposed'],
-    ['I do not withdraw my estimates. Price has a weak effect on MRR.', 'weak', 'user_stated'],
-    ['I estimate a weak effect of Price on MRR.', 'weak', 'user_stated'],
-  ] as const)('"%s" proposing %s → %s', async (words, strength, want) => {
-    const result = await journey('Price', { strength }, words, { user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
+    // T2A3 DL ruling: EXPECTATION CHANGED for the two unquoted rows, old user_stated → new model_proposed (no AI quote →
+    // no same-message credit); each quoted twin keeps the old outcome.
+    ['I do not withdraw my estimates. Price has a weak effect on MRR.', 'weak', 'model_proposed'],
+    ['I estimate a weak effect of Price on MRR.', 'weak', 'model_proposed'],
+    ['I do not withdraw my estimates. Price has a weak effect on MRR.', 'weak', 'user_stated', 'Price has a weak effect on MRR'],
+    ['I estimate a weak effect of Price on MRR.', 'weak', 'user_stated', 'I estimate a weak effect of Price on MRR'],
+  ] as const)('"%s" proposing %s → %s (from_words %s)', async (words, strength, want, quote?: string) => {
+    const result = await journey('Price', { strength, ...(quote === undefined ? {} : { from_words: quote }) }, words, { user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
     expect(author(result)).toBe(want);
     expect(result.edge.provenance.source).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
+  });
+});
+
+// ⛔ T2A3 DL ruling: credit now rests on the AI's quote, so every negative is re-run with the AI quoting the WHOLE message
+// (the adverse case: staging credits such a quote). The host's veto is what keeps each one Olumi's.
+describe('T2A3 ruling: the AI quoting the user\u2019s whole message credits none of the negatives', () => {
+  it.each([
+    ['Price is strong.', 'strong', {}],
+    ['Price is strong.', 'strong', { grounded_selection: { element_ids: ['price', 'mrr'], unresolved: 'none' as const } }],
+    ['Price has a weak effect on MRR, and our evidence is strong.', 'strong', {}],
+    ['MRR has a weak effect on Price.', 'weak', priceReview],
+    ['Price is weakly affected by MRR.', 'weak', priceReview],
+    ['Price is £49 and MRR growth is strong.', 'strong', {}],
+    ['Price affects MRR, and our evidence is strong.', 'strong', {}],
+    ['Price is £49 and strong MRR growth continues.', 'strong', {}],
+    ['Olumi says "Quality is weak, but I think Price has a strong effect on MRR."', 'strong', {}],
+    ['Price has a weak effect on MRR, according to Olumi.', 'weak', {}],
+    ['Olumi says Price has a weak effect on MRR. Is that right?', 'weak', {}],
+    ['You suggested Price has a weak effect on MRR; I disagree.', 'weak', {}],
+    ['According to Olumi, Price has a weak effect on MRR.', 'weak', {}],
+    ['Olumi supplied these estimates. Price has a weak effect on MRR.', 'weak', {}],
+    ['Price has a weak effect on MRR. Is that right?', 'weak', {}],
+    ['Price has a weak effect on MRR. Actually, Price has a strong effect on MRR.', 'weak', {}],
+    ['None of these are my estimates. Price has a weak effect on MRR. Quality has a weak effect on MRR.', 'weak', {}],
+    ['Price has a weak effect on MRR. Quality has a weak effect on MRR. I disagree with all these estimates.', 'weak', {}],
+  ] as const)('"%s" proposing %s, quoted whole → Olumi\u2019s', async (words, strength, interaction) => {
+    const result = await journey('Price', { strength, from_words: words }, words, { ...interaction, user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
+    expect(author(result)).toBe('model_proposed');
+    expect(result.edge.provenance.source).toBe('cee_hypothesis');
   });
 });
