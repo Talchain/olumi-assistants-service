@@ -1191,6 +1191,9 @@ export const RUN_FAILED_TEXT = 'I couldn\u2019t run the analysis: something went
 /** Request 1 ran, but the readback cannot confirm a current result: Olumi's own line, live and on replay (#2470). */
 export const RUN_RESULT_UNVERIFIED_TEXT = 'The analysis finished, but I can’t verify a current result. Check the current results before asking again.';
 
+/** K2 receipt: appended by the host to historical loop answers, never supplied by a prompt. */
+const LOOP_REPLAY_CURRENTNESS_TEXT = 'This answer was about an earlier analysis; the model has changed since. Run the analysis again to see the current result.';
+
 export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }, modelChangedThisTurn = false): string {
   if (ran.ran === true) {
     return 'The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.';
@@ -2461,14 +2464,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
       }
       const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
-      // A loop reply keeps its words. Attach result/guided carriers only while its own recorded Run is current.
+      // Legacy fixed receipts retain their existing reconstruction. A host receipt saying nothing ran
+      // is not an analysis answer. Every other Run-loop answer needs its ORIGINAL remembered identity.
+      const replayLoopRun = approvedProposal === undefined && typedRunOf(body)
+        && !(prior.assistant_message ?? '').includes(RUN_RESULT_READY_TEXT)
+        && replayText !== RUN_FAILED_TEXT
+        && replayText !== 'The analysis did not run. Press Run to try again.';
       const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length);
-      const replayLoopRunCurrent = approvedProposal === undefined && typedRunOf(body)
+      const replayLoopRunCurrent = replayLoopRun
         && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;
-      // A recovered explanation keeps the same bound retry control and status on resend.
-      if (replayLoopRunCurrent && replayText.includes(interpretationUnavailableText({ ran: true }))) {
-        replayNarration = { status: 'unavailable', run_key: replayLoopRunKey! };
+      const historicalLoopReplay = replayLoopRun && !replayLoopRunCurrent;
+      if (replayLoopRunCurrent) {
+        replayNarration = { status: replayText.includes(interpretationUnavailableText({ ran: true })) ? 'unavailable' : 'ready',
+          run_key: replayLoopRunKey! };
         boundControl.push(replayChip!);
+      }
+      if (historicalLoopReplay) {
+        replayText = `${prior.assistant_message ?? ''}\n\n${LOOP_REPLAY_CURRENTNESS_TEXT}`;
+        replayNarration = undefined;
+        boundControl.length = 0;
+        boundControl.push(RUN_OFFER_CHIP);
       }
       const resultFirstReplay = replayNarration !== undefined || replayLoopRunCurrent;
       // The durable carrier: this exact row's persisted Run offer, still within its lifetime.
@@ -2505,7 +2520,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           modelExists: state.draftGraph !== undefined,
         });
       const replayCard = replayRecords[0];
-      const replayActions = firstOfEachId([...stillValid, ...boundControl]);
+      const replayActions = firstOfEachId([...(historicalLoopReplay ? [] : stillValid), ...boundControl]);
       const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready' || replayLoopRunCurrent
         ? replayScopedDraftForRun : undefined;
       const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
@@ -2519,8 +2534,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || actionPressOf(body['chip']) !== null
         || (chiplessRetry && (prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)
           || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
-      if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
-      for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
+      if (!historicalLoopReplay && !decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
+      for (const r of historicalLoopReplay ? [] : replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
       // The ordinary replay shape still requires parity with the stored answer. A withheld Run's current typed finding
       // owns the new face-first contract even when a newer Run replaced that answer; its rebuilt sentences stay intact.
       // The live turn's A7 rule, read the same way (the answer before the replayed one), so the parity check can hold.
@@ -2603,13 +2618,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
       });
-      const optionGatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
+      const optionCorrectedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
         runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
       });
+      // K2: committed loop prose already crossed the live gates. Today's licence must not rewrite
+      // that historical evidence or append today's findings. Only the host currentness receipt is new.
+      const optionGatedReplay = replayLoopRun
+        ? { ...optionCorrectedReplay, assistant_text: historicalLoopReplay ? replayText : prior.assistant_message ?? replayText }
+        : optionCorrectedReplay;
       const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
-        current: (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
+        current: !replayLoopRun && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
         userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedByUser(body) ? [prior.user_message ?? message] : [])], recentRowsForEgress),
       });

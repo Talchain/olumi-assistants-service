@@ -13,6 +13,7 @@ const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-tu
 const SCENARIO = '3ad403fc-caf8-48e4-bd5b-578e20c1c48a';
 const HASH = '0123456789abcdef';
 const AT = '2026-10-13T01:00:00.000Z';
+const CURRENTNESS = 'This answer was about an earlier analysis; the model has changed since. Run the analysis again to see the current result.';
 const READY = { status: 'ready', options: [], blockers: [] };
 const STATE = { run_state: { kind: 'complete_current', computed_at: AT }, usable_for_chips: true,
   leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } };
@@ -29,6 +30,7 @@ let interpretationFailure: 'throw' | 'http500' | undefined;
 let turnToolResult: Rec | undefined;
 let licensedRecord: Rec | undefined;
 let modelWords = '';
+let claimCurrent = false;
 const rows: Rec[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -73,10 +75,13 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
           ...(licence.notes ?? []),
           ...Object.values(result.goal_chance_driver_display ?? {}),
         ].join(' ') : 'The analysis ran, but the model has not established how much of the hiring effects would be in place by month three.';
-        output = [answer(modelWords)];
+        output = [answer(`${claimCurrent ? 'The result is current. ' : ''}${modelWords}`)];
       }
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));
+    await freshApp();
+  }, 60_000);
+  async function freshApp() {
     process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
@@ -102,11 +107,11 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
       analysis_ready: READY, analysis_state: block ? STATE : { run_state: { kind: 'none' } },
       ...(block ? { analysis_result: block, goal_certainty: FX.goal_certainty } : {}) }, SCENARIO));
     await app.register(agentV1TurnRoute); await app.ready();
-  }, 60_000);
+  }
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; writes = []; rows.length = 0;
     STATE.run_state.computed_at = AT;
-    behavior = 'run'; interpretationFailure = undefined; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
+    claimCurrent = false; behavior = 'run'; interpretationFailure = undefined; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
   const press = (extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, ...extra,
@@ -198,6 +203,10 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(runs).toHaveLength(1); expect(bodies).toHaveLength(callCount);
     expect(replay.json().assistant_text).toBe(first.json().assistant_text);
     expect(replay.json().blocks).toEqual(first.json().blocks);
+    expect(first.json().narration.status).toBe('ready');
+    expect(first.json().suggested_actions).toContainEqual(expect.objectContaining({ id: expect.stringMatching(/^agent-explain-run:/) }));
+    expect(replay.json().suggested_actions).toEqual(first.json().suggested_actions);
+    expect(replay.json().narration).toEqual(first.json().narration);
   });
 
   it.each(['throw', 'http500'] as const)('completed Run survives interpretation %s and resends identically without calls', async (failure) => {
@@ -229,17 +238,49 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(bodies).toHaveLength(callCount);
   });
 
-  it('replay never attaches a newer Run result to the saved interpretation', async () => {
+  it.each([
+    ['ordinary', 'moved'], ['ordinary', 'cold'], ['ordinary', 'missing-current-key'],
+    ['recovered', 'moved'], ['recovered', 'cold'], ['recovered', 'missing-current-key'],
+  ] as const)('%s replay with %s identity keeps exact historical text plus ONE host receipt', async (path, identity) => {
+    claimCurrent = true;
+    if (path === 'recovered') interpretationFailure = 'http500';
     const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
     const first = await press(request);
-    expect(first.json().blocks.some((b: Rec) => b.type === 'analysis_result')).toBe(true);
+    expect(first.statusCode, first.body).toBe(200);
+    const live = first.json();
+    expect(live.blocks.some((b: Rec) => b.type === 'analysis_result')).toBe(true);
+    expect(live.narration.status).toBe(path === 'ordinary' ? 'ready' : 'unavailable');
+    if (path === 'ordinary') expect(live.assistant_text).toContain('The result is current.');
     const callCount = bodies.length;
-    STATE.run_state.computed_at = '2026-10-13T02:00:00.000Z';
-    const replay = await press(request);
-    expect(replay.json().assistant_text).toBe(first.json().assistant_text);
-    expect(replay.json().blocks ?? []).not.toContainEqual(expect.objectContaining({ type: 'analysis_result' }));
-    expect(replay.json().guided_sizing).toBeUndefined();
-    expect(runs).toHaveLength(1); expect(bodies).toHaveLength(callCount);
+    const savedRows = structuredClone(rows);
+    if (identity === 'moved') {
+      STATE.run_state.computed_at = '2026-10-13T02:00:00.000Z';
+      // Today's licence differs too: replay must retain the committed figures byte for byte.
+      const licence = block!.enrichment.inference_warnings.find((w: Rec) => w.code === 'GOAL_CHANCE_LICENSED');
+      licence.pct_by_option = { hire_a_tech_lead: 81, hire_two_developers: 93 };
+    } else if (identity === 'cold') {
+      await app.close(); vi.resetModules(); await freshApp();
+    } else {
+      STATE.run_state.computed_at = '';
+    }
+    store.append.mockClear();
+    for (let resend = 0; resend < 2; resend += 1) {
+      const replay = await press(request);
+      expect(replay.statusCode, replay.body).toBe(200);
+      const body = replay.json();
+      expect(body._agent.replayed).toBe(true);
+      expect(body.assistant_text).toBe(`${live.assistant_text}\n\n${CURRENTNESS}`);
+      expect(body.assistant_text.split(CURRENTNESS)).toHaveLength(2);
+      expect(body.blocks ?? []).toEqual([]);
+      expect(body.guided_sizing).toBeUndefined();
+      expect(body.narration).toBeUndefined();
+      expect(body.suggested_actions.map((a: Rec) => a.action_type)).toEqual(['run_analysis']);
+      expect(body.suggested_actions.some((a: Rec) => a.id.startsWith('agent-explain-run:'))).toBe(false);
+      expect(body._provider_calls ?? []).toEqual([]);
+      expect(runs).toHaveLength(1); expect(bodies).toHaveLength(callCount);
+    }
+    expect(store.append).not.toHaveBeenCalled();
+    expect(rows).toEqual(savedRows);
   });
 
   it('skipped Run says did not run, overrides fabricated success and leaves Run usable', async () => {
