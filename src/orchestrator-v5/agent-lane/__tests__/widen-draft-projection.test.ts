@@ -36,7 +36,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
     const build = async (risks: unknown[]) => {
       let registered: unknown;
       const call = vi.fn<CallStructuredModel>(async request => ({ text: JSON.stringify(
-        request.instructions.includes('suggest risks they have not considered') ? { risk_suggestions: risks }
+        Object.hasOwn((request.schema as { properties: object }).properties, 'risk_suggestions') ? { risk_suggestions: risks }
           : request.instructions.includes('\nMETHOD TURN:') ? { options: [] } : candidate) }));
       const dispatch: InternalDispatch = async (path, body) => {
         if (path.endsWith('/graph/register')) {
@@ -151,7 +151,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
       return graph;
     };
     const callStructured = vi.fn<CallStructuredModel>(async request => ({ text: JSON.stringify(
-      request.instructions.includes('suggest risks they have not considered')
+      Object.hasOwn((request.schema as { properties: object }).properties, 'risk_suggestions')
         ? { risk_suggestions: [{ label: 'Hiring stalls', category: 'timing', mechanism: 'relies_on',
           hits_id: 'hire_engineers', through_id: 'engineer_hires', through_direction: 'positive',
           affects_id: 'features_delivered', direction: 'negative', relies_on: 'both hires joining in time', watch_for: 'offers remain unaccepted' }] }
@@ -187,7 +187,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
     };
     const admitted = admitCandidateModel(candidate, {}, brief);
     const callStructured = vi.fn<CallStructuredModel>(async (request) => ({ text: JSON.stringify(
-      request.instructions.includes('suggest risks they have not considered')
+      Object.hasOwn((request.schema as { properties: object }).properties, 'risk_suggestions')
         ? { risk_suggestions: [{ label: 'Hiring stalls', category: 'timing', mechanism: 'relies_on',
           hits_id: 'hire_engineers', through_id: 'engineer_hires', through_direction: 'positive',
           affects_id: 'features_delivered', direction: 'negative', relies_on: 'both hires joining in time', watch_for: 'offers remain unaccepted' }] }

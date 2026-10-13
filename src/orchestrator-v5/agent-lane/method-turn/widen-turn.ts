@@ -1,3 +1,4 @@
+import { scienceReasonForMethod } from '../turn-context/guidance-wire.js';
 /**
  * ⭐ WIDEN THE OPTIONS: AN ASKED WIDEN RUNS THE REASONING COACH'S RC-WIDEN METHOD, AND ENDS IN ONE CONSENT CARD
  * (PTL 5947349533 GO; DL 5947426886: "≤3 genuinely distinct options as ONE add-option card → approve → re-analyse";
@@ -243,7 +244,8 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown, question?: 
   ].join('\n');
   const doorFactors = g.nodes.filter((n) => n.kind === 'factor').map((n) => ({
     id: String(n.id), label: typeof n.label === 'string' ? n.label : '', description: typeof n.description === 'string' ? n.description : '' }));
-  return { kind: 'run', target: 'options', variant: question !== undefined ? null : variant, goal_label: goalLabel, directive, current,
+  return { kind: 'run', target: 'options', variant: question !== undefined ? null : variant, goal_label: goalLabel,
+    directive: [directive, question === undefined ? scienceReasonForMethod('RC-WIDEN', variant ?? undefined)?.why : undefined].filter(Boolean).join('\n'), current,
     factors: doorFactors, graph: g, sq, raw: graph, ...(question !== undefined ? { question } : {}) };
 }
 
@@ -893,8 +895,9 @@ export function risksTurnFromSignals(s: TurnSignals, graph: unknown, userWords: 
   const risks = g.nodes.filter((n) => n.kind === 'risk' && labelOf(n) !== null).map((n) => labelOf(n)!);
   const favoured = favouredOptionOf(graph);
   const directive = [
-    'METHOD TURN: the user asked Olumi to suggest risks they have not considered. Do not write prose. Reply with ONLY '
-      + `<${RISK_TAG}>JSON array</${RISK_TAG}>, nothing before or after it. The server writes every word the user sees.`,
+    "Return ONLY "
+      + `<${RISK_TAG}>JSON array</${RISK_TAG}>`
+      + ", with no text before or after it. Put useful risk explanations in the existing declared text fields, preserving their specified meanings and this role’s schema. Do not add an answer field or rely on another layer to invent missing reasoning.",
     'METHOD: assumption-based planning. For each option below, find what it RELIES ON in the model (a factor it changes) and '
       + `how that could fail. Use the prompt list (${RISK_METHOD.categories.join(', ')}) for coverage, and keep up to ${RISK_MAX_ITEMS} `
       + 'risks, each from a DIFFERENT class. Risks on what the options DIFFER on come first; a risk on a factor no option changes '
@@ -920,7 +923,7 @@ export function risksTurnFromSignals(s: TurnSignals, graph: unknown, userWords: 
     ...(risks.length > 0 ? [`Risks already in the model (never suggest these again): ${JSON.stringify(risks)}.`] : []),
     'Use only these ids. Never write a probability, percentage, figure, likely, chance, best, recommend, winner, leads or ahead.',
   ].join('\n');
-  return { kind: 'run_risks', target: 'risks', goal_label: goalLabel, directive, graph: g, options, favoured, gap: modelGapOf(graph, userWords) };
+  return { kind: 'run_risks', target: 'risks', goal_label: goalLabel, directive: `${directive}\n${RISK_METHOD.line}`, graph: g, options, favoured, gap: modelGapOf(graph, userWords) };
 }
 
 const RISKS_UNAVAILABLE: Readonly<Record<'no_goal' | 'model_unread', string>> = {

@@ -174,18 +174,14 @@ describe('DL condition 1: what is left is well formed', () => {
   });
 });
 
-describe('wiring: both Agent exits apply the edit after the leader egress', () => {
-  it('live final and replay exits call it on the readback this turn ships', () => {
+describe('B4 scope: only K-a and K-b remain at Agent egress', () => {
+  it('live and replay exits do not call the retired driver phrase filter', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    const live = route.indexOf("exitPath: 'agent_lane_v1_final',\n        ...(turnId");
-    expect(live).toBeGreaterThan(route.indexOf("exitPath: 'agent_lane_v1_final',\n        scopeAuthorityUnavailable"));
-    expect(route.slice(live - 200, live)).toContain('withoutDriverAbsenceClaimsAtEgress(wireBody, {');
-    // #2783 r4: the replay exit keeps this order, then proves its shape after both gates (withShapeOnlyIfItDerives).
-    expect(route).toContain("const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {");
-    expect(route).toContain("const optionGatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {");
-    expect(route).toContain("const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {");
-    expect(route).toContain("return withShapeOnlyIfItDerives(gatedReplay);");
-    expect(route).toContain("analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',");
+    expect(route).not.toContain('withoutDriverAbsenceClaimsAtEgress');
+    expect(route).not.toContain('enforceAgentLaneLeaderClaimsAtWire');
+    expect(route).toContain('const finalEgress = enforceLeaderLicenceAtFinalEgress(wireBody, {');
+    expect(route).toContain('wireBody = withEstimateGoalPointsAtEgress(wholeAnswer, {');
+    expect(route).toContain('withEstimateGoalPointsAtEgress(leaderGatedReplay, {');
   });
 });
 

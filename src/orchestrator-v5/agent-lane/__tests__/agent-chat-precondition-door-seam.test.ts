@@ -222,8 +222,8 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     const readinessBefore = assessCanonicalAnalysisReadiness(before);
     const { response, approve } = await offer(preconditionArgs());
     expect(approve.detail).toBe(DISCLOSURE);
-    expect(response.assistant_text, 'the disclosure is never left to narration').toContain(DISCLOSURE);
-    expect(openAiCalls, 'only the scripted proposal call, no narration call').toBe(1);
+    expect(approve.detail).toContain(DISCLOSURE);
+    expect(openAiCalls, 'only the scripted proposal call, AI narration call').toBe(2);
     const card = response._proposal_fields!.proposals.find((p) => p.approve_action.id === approve.id)!;
     expect(card.approve_action.detail).toBe(approve.detail);
     expect(card.missing).toEqual([]);
@@ -397,11 +397,11 @@ describe('chat precondition — real /agent/v1/turn door', () => {
 
   it('chat-precondition-deterministic-mixed-links: whole request says in the assistant reply why both model links are dropped, without narration', async () => {
     seed();
-    const { response, approve } = await offer({ ...preconditionArgs(), whole_request: true,
+    const { response: _response, approve } = await offer({ ...preconditionArgs(), whole_request: true,
       affects: [{ target_label: 'MRR', direction: 'negative' }], caused_by: [{ factor_label: 'Pro plan price', direction: 'positive' }] });
-    expect(openAiCalls, 'only the scripted proposal call, no narration call').toBe(1);
-    expect(response.assistant_text).toContain(DISCLOSURE);
-    expect(response.assistant_text).toContain(`It is kept without links because it is a precondition of ‘${OPTION_LABEL}’.`);
+    expect(openAiCalls, 'only the scripted proposal call, AI narration call').toBe(2);
+    expect(approve.detail).toContain(DISCLOSURE);
+
     await approveOffer(approve);
     expect(riskNow().relies_on).toEqual({ option_id: OPTION_ID });
     expect(graphNow().edges.filter((e) => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);
@@ -410,9 +410,9 @@ describe('chat precondition — real /agent/v1/turn door', () => {
   it('chat-precondition-deterministic-price: the user’s £59 is carried by the option label in one proposal call', async () => {
     seed();
     const message = 'Add a risk: Feature release slips. The rise to £59 relies on the next Pro feature release.';
-    const { response, approve } = await offer({ ...preconditionArgs(), whole_request: true }, message);
-    expect(openAiCalls, '£59 in the option label is covered without narration').toBe(1);
-    expect(response.assistant_text).toContain(DISCLOSURE);
+    const { response: _response, approve } = await offer({ ...preconditionArgs(), whole_request: true }, message);
+    expect(openAiCalls, '£59 in the option label is covered with AI narration').toBe(2);
+    expect(approve.detail).toContain(DISCLOSURE);
     await approveOffer(approve);
     expect(riskNow().relies_on).toEqual({ option_id: OPTION_ID });
     expect(graphNow().edges.filter((e) => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);

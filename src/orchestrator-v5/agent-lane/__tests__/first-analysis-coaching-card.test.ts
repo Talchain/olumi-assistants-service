@@ -17,9 +17,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { CoachingBlockSchema } from '@talchain/schemas/boundary';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
-import { runTurnCoaching } from '../analysis-coaching-pass-through.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { rebindCapture } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 
@@ -174,10 +172,10 @@ const buildTurn = (app: FastifyInstance) => {
   return turn(app, { message: BRIEF });
 };
 const coachingOf = (r: Reply) => (r.blocks ?? []).filter((b) => b.type === 'coaching');
-const FIRST_PASS = 'Before relying on this first pass on Olumi\'s estimates';
-const LEADER = /option in front|winner|recommend|best option|leading option/i;
+const _FIRST_PASS = 'Before relying on this first pass on Olumi\'s estimates';
+const _LEADER = /option in front|winner|recommend|best option|leading option/i;
 
-describe('the automatic first analysis shows the fragile-link coaching card', () => {
+describe('N14: Run coaching stays off while current science facts survive', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
     installFetch();
@@ -193,40 +191,18 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     knobs = { graph: READY_GRAPH, readbackAfterRun: 'current' };
   });
 
-  it('RED: a brief that builds an admissible model → ONE automatic run, and exactly one card bound to it', async () => {
+  it('N14: an admissible brief runs once, retains its result and emits no coaching card', async () => {
     const r = await buildTurn(app);
     expect(r._diagnostic_trace.first_analysis, 'control: the automatic first analysis ran').toMatchObject({ ran: true });
     expect(st(SID).inProcessRuns).toBe(1);
     expect(st(SID).injectRuns).toBe(0);
-    const cards = coachingOf(r);
-    expect(cards).toHaveLength(1);
-    const card = cards[0]!;
-    expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
-    // IDENTITY: the card the contract builds for THIS run (a stateless automatic capture) on THIS readback.
-    const expected = runTurnCoaching(
-      { scenario_id: SID, status: 200, analysis_ready: T2.analysis_ready, blocks: [T2.analysis_result], trigger: 'auto_first_pass' },
-      { scenarioId: SID, graphHash: T2.graph_hash, analysisState: T2.analysis_state, analysisResult: T2.analysis_result },
-    ).blocks[0]!;
-    expect(card.block_id).toBe(expected.block_id);
-    expect(card.signal_id).toBe(expected.signal_id);
-    // The route's egress sanitiser (agent-v1-turn.ts, sanitiseOlumiResponseForEgress) leaves the card's words byte-identical.
-    const words = (b: Record<string, unknown>) => ({ title: b.title, body: b.body, action_label: b.action_label, action_prompt: b.action_prompt });
-    expect(words(card)).toEqual(words(expected as unknown as Record<string, unknown>));
-    expect(String(card.signal_id).endsWith(`:${T2.graph_hash}:${COMPUTED_AT}:auto_first_pass`)).toBe(true);
-    // Bound to the revision and the run the reply itself shows.
-    expect(card.graph_hash_at_generation).toBe(r.graph_hash);
-    expect(card.created_at).toBe(r.analysis_state?.run_state?.computed_at);
-    // First-pass copy, one conversational action, leader-free on this withheld run.
-    expect(String(card.body).startsWith(FIRST_PASS)).toBe(true);
-    // c19-B t2's leader is withheld FOR A LIMIT: C4 says the limit once as the caveat, and the one card is the link card.
-    expect(String(card.signal_id).startsWith('coach:fragile_link:')).toBe(true);
+    expect(coachingOf(r)).toEqual([]);
     expect(r._diagnostic_trace.coaching_next_move).toBe('link_view');
     expect(r._diagnostic_trace.coaching_caveats).toHaveLength(1);
     expect(String(r._diagnostic_trace.coaching_caveats?.[0]).startsWith('coach:limit_unchecked:')).toBe(true);
-    for (const field of ['title', 'body', 'action_label', 'action_prompt'] as const) expect(String(card[field])).not.toMatch(LEADER);
     expect((r.blocks ?? []).filter((b) => b.type === 'analysis_result')).toHaveLength(1);
     expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
-    expect(r._diagnostic_trace.first_analysis).toMatchObject({ coaching_blocks: 1 });
+    expect(r._diagnostic_trace.first_analysis).toMatchObject({ coaching_blocks: 0 });
   });
 
   it('SEAM: the route hands the readback\'s own graph to the card → one limit node on the run\'s graph is NAMED on the served card', async () => {
@@ -237,9 +213,7 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     const r = await buildTurn(app);
     expect(st(SID).inProcessRuns, 'control: the automatic first analysis ran').toBe(1);
     const cards = coachingOf(r);
-    expect(cards).toHaveLength(1);
-    const card = cards[0]!;
-    expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
+    expect(cards).toEqual([]);
     const computedAt = (PAUL_T1.analysis_state.run_state as { computed_at: string }).computed_at;
     // C4: the limit is the CAVEAT (its words are pinned in analysis-coaching-pass-through.test.ts); its signal id is in
     // the trace. Reverting agent-v1-turn.ts's `graph: readbackGraph` turns this RED: the caveat loses `:named`.
@@ -247,8 +221,6 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     // the PROVED cause (`:unanchored`): the route hands the run's own analysis_ready options to the proof.
     expect(r._diagnostic_trace.coaching_caveats).toEqual([`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named:unanchored`]);
     // The one card is the move: a link card bound to the same run.
-    expect(String(card.signal_id).startsWith('coach:fragile_link:')).toBe(true);
-    expect(card.graph_hash_at_generation).toBe(r.graph_hash);
     expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
   });
 
@@ -256,7 +228,7 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     knobs.bound = { turn: PAUL_T1, graph: PAUL_GRAPH, verdictState: 'identity_unresolved' };
     const r = await buildTurn(app);
     const cards = coachingOf(r);
-    expect(cards).toHaveLength(1);
+    expect(cards).toEqual([]);
     const computedAt = (PAUL_T1.analysis_state.run_state as { computed_at: string }).computed_at;
     // Reverting agent-v1-turn.ts's `constraintVerdictState` threading turns this RED: the caveat says the proved cause.
     expect(r._diagnostic_trace.coaching_caveats).toEqual([`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named:identity`]);
@@ -265,21 +237,17 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
   it('SEAM control: a graph read whose verdict state AGREES with the proof (unevaluated) keeps the proved cause', async () => {
     knobs.bound = { turn: PAUL_T1, graph: PAUL_GRAPH, verdictState: 'unevaluated' };
     const r = await buildTurn(app);
-    expect(coachingOf(r)).toHaveLength(1);
+    expect(coachingOf(r)).toEqual([]);
     expect(String(r._diagnostic_trace.coaching_caveats?.[0]).endsWith(':named:unanchored')).toBe(true);
   });
 
-  it('RED: an explicit Run on the same model → its OWN card (explicit copy, a different block_id)', async () => {
-    const auto = coachingOf(await buildTurn(app))[0];
+  it('N14: an explicit Run emits no coaching card', async () => {
+    expect(coachingOf(await buildTurn(app))).toEqual([]);
     const r = await turn(app, { message: 'Run analysis.', source: 'chip', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
     expect(r._diagnostic_trace.fast_path).toBeUndefined();
     expect(st(SID).injectRuns, 'control: the explicit Run ran').toBe(1);
     const cards = coachingOf(r);
-    expect(cards).toHaveLength(1);
-    expect(String(cards[0]!.signal_id).endsWith(':explicit_run')).toBe(true);
-    expect(String(cards[0]!.body).startsWith(FIRST_PASS)).toBe(false);
-    expect(auto, 'control: the automatic card existed').toBeDefined();
-    expect(cards[0]!.block_id).not.toBe(auto!.block_id);
+    expect(cards).toEqual([]);
     expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
   });
 

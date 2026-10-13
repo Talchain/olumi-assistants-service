@@ -628,7 +628,7 @@ export async function runAgentTurn(
       const toolStartedAt = now();
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
-      const result: ToolResult = repeatLimitations.has(String(call.name))
+      let result: ToolResult = repeatLimitations.has(String(call.name))
         ? { ...repeatedRefusals.get(String(call.name))!, detail: repeatLimitations.get(String(call.name)), repeat_withheld: true }
         : withheld.has(String(call.name))
         ? {
@@ -727,6 +727,14 @@ export async function runAgentTurn(
         ...rejectedLevelsOf(result),
         ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
       });
+      // PL condition 2: the narration after a write/Run sees the newly selected facts,
+      // not the packet captured before the tool. This is the existing canonical reader.
+      if (result.mutated === true || result.ran === true) {
+        let current: unknown;
+        try { current = await caps.getCanonicalState(input.ctx); }
+        catch { current = { ok: false, mutated: false, current_state_unknown: true }; }
+        result = { ...result, current_model_state: current };
+      }
       toolResults.push(result);
       items.push({
         type: 'function_call_output',

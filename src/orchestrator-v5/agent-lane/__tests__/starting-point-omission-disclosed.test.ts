@@ -39,6 +39,8 @@ const RISK = { user_stated: false, factor_label: 'Hiring ramp-up delay', value: 
 const FACTOR = { user_stated: false, factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' };
 const LEVEL = { user_stated: false, option_label: 'Hire two developers', factor_label: 'Onboarding load', value: 60, basis: 'more onboarding' };
 
+const OMISSION = 'Not included in this proposal: Hiring ramp-up delay (a risk). Only a factor can hold a starting value, so it was left out — approving adds nothing for it.';
+
 type Chip = { id: string; label: string };
 describe('a starting point that leaves a named input out says so in the response itself', () => {
   let app: FastifyInstance;
@@ -74,11 +76,14 @@ describe('a starting point that leaves a named input out says so in the response
     store.append.mockClear();
     const b = await turn('0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d');
     expect(b.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'the control: something approvable was offered').toBe(true);
-    expect(b.assistant_text).toContain('Not included in this proposal: Hiring ramp-up delay (a risk)');
-    expect(b.assistant_text).toMatch(/Only a factor can hold a starting value/);
+
+
     // The committed answer (what a replay returns) carries the same disclosure.
-    const persisted = JSON.stringify(store.append.mock.calls);
-    expect(persisted).toContain('Not included in this proposal: Hiring ramp-up delay (a risk)');
+    expect(b.assistant_text).toContain(OMISSION);
+    const saved = [...rows.values()].find(row => row.assistant_message === b.assistant_text);
+    expect(saved?.assistant_message).toBe(b.assistant_text);
+    expect((await turn('0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d')).assistant_text).toBe(b.assistant_text);
+
   });
 
   it('CONTRAST: an all-factor complete starting point — the ordinary approval, no omission line', async () => {
@@ -92,6 +97,7 @@ describe('a starting point that leaves a named input out says so in the response
     args = { assumptions: [RISK], option_levels: [] };
     const b = await turn();
     expect(b.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:'))).toBe(false);
-    expect(b.assistant_text).toContain('Not included in this proposal: Hiring ramp-up delay (a risk)');
+    expect(b.assistant_text).toContain(OMISSION);
+
   });
 });

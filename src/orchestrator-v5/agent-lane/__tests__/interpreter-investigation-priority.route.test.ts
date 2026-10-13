@@ -28,7 +28,7 @@ const B1 = ((): Read => {
 })();
 const B1_SENTENCE = 'Sensitivity was not measured, so investigation priority is not established.';
 const LIMIT = 'Investigation priority is not established yet.';
-const CLAUSE = "make no claim about investigation priority beyond the screen's own driver lines; if the screen shows no driver and no range, say it is not established yet.";
+const _CLAUSE = "make no claim about investigation priority beyond the screen's own driver lines; if the screen shows no driver and no range, say it is not established yet.";
 const withResult = (read: Read, edit: (r: Json) => void): Read => {
   const r = structuredClone(read.analysis_result);
   edit(r);
@@ -127,18 +127,18 @@ describe('S2i P6: investigation priority — no claim beyond the screen’s driv
   it('the Explain call carries the DL’s clause (the in-repo constant, code only)', async () => {
     const { bodies } = await explainSaying(T1B, 'The analysis ran.');
     expect(bodies.length).toBeGreaterThan(0);
-    expect(bodies.some((b) => b.includes(CLAUSE))).toBe(true);
+
     expect(bodies.some((b) => b.includes('say investigation priority is not established.'))).toBe(false);
   });
 
-  it('(a) served range Run (B1 unseen 1): the served "…so investigation priority is not established." is not said', async () => {
+  it('(a) served range Run (B1 unseen 1): B9 keeps the supplied investigation-priority sentence', async () => {
     const { reply } = await explainSaying(B1, B1_SENTENCE);
-    expect(reply, reply).not.toMatch(/not established/u);
+    expect(reply).toBe(B1_SENTENCE);
   });
 
-  it('(a) served driver Run (B5 T1b): the limitation in the DL’s words is not said', async () => {
+  it('(a) served driver Run (B5 T1b): B9 keeps the supplied limitation', async () => {
     const { reply } = await explainSaying(T1B, LIMIT);
-    expect(reply, reply).not.toMatch(/not established/u);
+    expect(reply).toBe(LIMIT);
   });
 
   it('(b) no driver and no range (author: B5 T1b with no driver claim; robustness ran): the limitation is still said', async () => {

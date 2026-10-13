@@ -22,8 +22,8 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
-/** The measured sentence (AI Quality, 25 Sep: qualified 4/4 vs 3/4 without it, 0/8 recommendations). */
-const PROVISIONAL_RULE = 'If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check.';
+/** AIE-REVIEW-6134666922, replace-once P13; retained by AIE-6138292449. */
+const PROVISIONAL_RULE = "Run result replies: lead with the selected Run's licensed goal-chance or withholding lines. Retain their target scope, unscored conditions and provisional, timing and source qualifications. Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. Never substitute a relative ranking for an unavailable goal chance. The separate goal-chance licence governs any comparison of goal chances. In dedicated comparative reasoning only, you may report a permitted share recorded for the selected Run, using the approved credit label and qualifier; never turn it into a recommendation or the chance of the whole goal. Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure's source when available. Never write recommend or recommendation, including negated forms. Never call a result, option or link fragile.";
 
 const ready = (mode: string) => ({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode } });
 
@@ -97,16 +97,12 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
     expect(run.canonical_state.run_explanation.claim_permissions).toMatchObject({ leader_may_be_named: true, provisional: true });
   });
 
-  it('ORDER: "Otherwise" still follows the permission sentence, and the provisional rule refines a nameable result AFTER the prohibition (review 5830350204)', async () => {
-    // Placed before "Otherwise", the provisional rule re-bound it: an ordinary permitted leader was told to withhold
-    // (measured 2/4 "no option can be put forward"). Writing "When … not true" instead let a WITHHELD run name the
-    // separated option (3/4, blind-labelled). This order measured 0/4 and 0/4 (provisional-clause/labels-1900.json).
+  it('AIE replace-once: the signed result rule retains qualifications and does not restore the superseded leader command', async () => {
     bodies = [];
     await explainRun(app, '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } }));
     const sent = String(bodies.find((b) => b.tool_choice === 'none')!['instructions']);
-    const anchor = 'never name a leader from it.';
-    expect(sent.slice(sent.indexOf(anchor) + anchor.length).trimStart().startsWith('Otherwise do not name, rank or hint at one'), 'Otherwise binds to the permission').toBe(true);
-    const tail = 'say in plain words why no option can be put forward yet.';
-    expect(sent.slice(sent.indexOf(tail) + tail.length).trimStart().startsWith(PROVISIONAL_RULE), 'the provisional rule comes after the prohibition').toBe(true);
+    expect(sent.split(PROVISIONAL_RULE)).toHaveLength(2);
+    expect(sent).not.toContain('Otherwise do not name, rank or hint at one');
+    expect(sent).not.toContain('If a result that may be named also carries');
   });
 });

@@ -140,7 +140,7 @@ export interface EligibleIntervention {
   readonly why: string;
   readonly trigger: string;
 }
-export const ELIGIBLE_INTERVENTION_INSTRUCTION = 'Only name the scientific method in CURRENT MODEL STATE.eligible_intervention. If absent, give a direct grounded answer without a named method. Write next moves as plain action bullets of at most eight words each. Keep useful questions and user figures. Olumi supplies the Why? disclosure; do not write it.';
+export const ELIGIBLE_INTERVENTION_INSTRUCTION = "When a supplied reasoning method materially helps this turn, give its reason briefly as part of your useful answer. Use the reason supplied with that method; do not invent a scientific justification or append the same explanation routinely. When the user asks about the method itself, explain it from that context.";
 /**
  * ⛔ A ROW'S SCIENCE SENTENCE IS NOT ALWAYS TRUE OF EVERY VARIANT (SYS2 G1, served 11 Oct). RC-WIDEN's sentence ("Decisions
  * framed with a single alternative ('whether or not') fail more often…") describes W2 only, the one-proposed-route case
@@ -156,6 +156,15 @@ function whyOf(row: (typeof POLICY.rows)[number], variant: string | undefined): 
   const own = typeof row.why_now === 'string' || variant === undefined ? undefined : (row.why_now as Readonly<Record<string, string>>)[variant];
   return typeof own === 'string' && own.trim() !== '' ? own : undefined;
 }
+/** A pressed method needs its own reason even when the display selector suppresses a row.
+ * This reads the same approved variant reason; it grants no eligibility or write authority. */
+export function scienceReasonForMethod(policyId: SelectedRow['policy_id'], variant?: string) {
+  const row = POLICY.rows.find(row => row.policy_id === policyId);
+  if (row === undefined) return undefined;
+  const why = whyOf(row, variant);
+  return why === undefined ? undefined : { policy_id: policyId, name: row.name, why };
+}
+
 export function eligibleInterventionFor(wire: GuidanceWire | undefined): EligibleIntervention | undefined {
   const selected = wire?.slot1;
   if (selected === undefined) return undefined;

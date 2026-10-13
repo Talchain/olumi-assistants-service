@@ -12,8 +12,10 @@ describe('Explain uses the canonical assembly (serialized provider bytes)', () =
     expect(Object.keys(ordinaryState).length, 'ordinary state decoded').toBeGreaterThan(0);
     for (const c of explain.calls) {
       const { run_explanation: section, ...base } = findState(c.payloads);
-      expect(base).toEqual(ordinaryState);
-      expect(Object.keys(object(section)).sort()).toEqual(['claim_permissions', 'leading_option_id', 'warning_codes']);
+      const { run_explanation: ordinarySection, ...ordinaryBase } = ordinaryState;
+      expect(base).toEqual(ordinaryBase);
+      expect(section).toEqual(ordinarySection);
+      expect(Object.keys(object(section)).sort()).toEqual(['claim_permissions', 'leading_option_id', 'robustness', 'warning_codes']);
       expect(object(section).leading_option_id).toBe(explain.seed.snapshot.analysis_result.leading_option_id);
       expect(object(section).claim_permissions).toEqual(object(ordinaryState.analysis).claim_permissions);
       expect(c.body.instructions).toBeDefined();
@@ -185,9 +187,7 @@ describe('Explain scoped assembly safety', () => {
   it('Explain instruction bytes retain the approved sha256', async () => {
     const w = await capture('Run-explanation','run2');
     expect(createHash('sha256').update(String(w.calls[0].body.instructions)).digest('hex'))
-      // G (12 Oct, AIE #94 6133027121): the selected-Run scope line and its range/headline/ranking edits: 39,550 → 39,914 bytes
-      // (+364, the selected-coach delta). Reversing exactly those edits on the SENT instructions reproduces fb8392d6….
-      .toBe('a792187f43143d7167124826b051330589ab397b5599812299c1176a7400a37f');
+      .toBe('ad569813594b8e1998216b92e29b1bb37b488d032a3d9354aa33a605fcf1bacd');
   },60000);
 });
 

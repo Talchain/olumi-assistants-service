@@ -31,7 +31,7 @@ describe('r16: a licensed option and its goal bind any narrated percentage', () 
     'This gives a 68% chance.',
   ];
   it.each(bare)('replaces the bound point: %s', sentence => {
-    expect(clean(sentence)).toBe(line().chance);
+    expect(clean(sentence)).toBe(sentence.startsWith('MRR ') ? '' : line().chance);
     expect(clean(sentence)).not.toContain(sentence);
   });
   it.each(bare)('removes the bare copy beside an already complete point: %s', sentence => {

@@ -330,6 +330,7 @@ export interface DriverAbsenceEgressOpts {
   readonly requestId: string;
   readonly exitPath: string;
   readonly turnId?: string;
+  readonly emptyReplacement?: string;
 }
 
 /**
@@ -414,7 +415,8 @@ export function withoutDriverAbsenceClaimsAtEgress<T extends { assistant_text?: 
         out = edit.text;
       }
       if (counts.length === 0) return undefined;
-      if (out === '') { for (const [c, n] of counts) add(keptUnsafe, c, n); return undefined; }
+      if (out === '' && opts.emptyReplacement === undefined) { for (const [c, n] of counts) add(keptUnsafe, c, n); return undefined; }
+      if (out === '') out = opts.emptyReplacement!;
       for (const [c, n] of counts) add(removed, c, n);
       return out;
     };

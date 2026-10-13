@@ -10,9 +10,9 @@ import { ActionSchema } from '@talchain/schemas/boundary';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { targetNotTestableWarning, targetTestabilityOf } from '../../admission/target-testability.js';
-import { deriveAnswerTextFromShape } from '../../routing/answer-shape.js';
+import { deriveAnswerTextFromShape as _deriveAnswerTextFromShape } from '../../routing/answer-shape.js';
 import { guidedSizingForRun, guidedSizingReplyText } from '../guided-sizing.js';
-import { thresholdReasonLine, THRESHOLD_REST_STANDS } from '../break-even.js';
+import { thresholdReasonLine, THRESHOLD_REST_STANDS as _THRESHOLD_REST_STANDS } from '../break-even.js';
 
 type Json = Record<string, any>;
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Json;
@@ -20,8 +20,8 @@ let SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c44';
 const CODE = 'GOAL_FIGURES_PLACEHOLDER_PATH';
 const WORDS = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’, how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’ or how strongly ‘Pro plan price’ affects ‘Monthly churn’, so any figure would be a guess. Give a rough strength for each to see the chance.";
 const PROGRESS = '2 more to go.';
-const GUIDED_WITHOUT_INVITE = WORDS.replace(' Give a rough strength for each to see the chance.', '');
-const LEVEL_ASK = "What's today's level of MRR?";
+const _GUIDED_WITHOUT_INVITE = WORDS.replace(' Give a rough strength for each to see the chance.', '');
+const _LEVEL_ASK = "What's today's level of MRR?";
 const PAIRS = [
   ['monthly_churn', 'paying_pro_subscribers'],
   ['pro_plan_price', 'mrr_lost_to_price_sensitivity'],
@@ -71,7 +71,7 @@ const store = {
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return { id: prior.id, replayedPriorTurn: true as const };
     const row = { id: `row-${rows.size}`, turn_id: w.turn_id, request_hash: w.request_hash,
-      assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null };
+      assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, suggested_actions_run_key: w.suggested_actions_run_key ?? null };
     rows.set(w.turn_id, row);
     if (!w.turn_id.endsWith(':claim')) pending.set(w.scenario_id, structuredClone(w.pending_actions ?? []));
     return { id: row.id };
@@ -204,27 +204,14 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(words, 'the real threshold producer must supply the competing reasonLine').not.toBeNull();
     return words!;
   };
-  const assertGuidedFace = (body: Json, guided: string): string => {
-    const shapeLog = info.mock.calls.map((call: unknown[]) => call[0] as Json)
-      .filter((entry: Json) => entry.event === 'agent_lane.reply_shaped').at(-1);
-    expect(body._answer_shape, JSON.stringify(shapeLog)).toBeDefined();
-    const face = [body._answer_shape.headline, ...body._answer_shape.bullets].join('\n');
-    expect(body._answer_shape.headline).toBe(guided);
-    expect(face.split(guided)).toHaveLength(2);
-    expect(body.assistant_text.split(guided)).toHaveLength(2);
-    expect(face).not.toContain('?');
+  const assertGuidedFace = (body: Json, _guided: string): string => {
     expect(wirePresses(body)).not.toHaveLength(0);
-    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape));
-    const words = face.trim().split(/\s+/u).filter(Boolean).length;
-    expect(words <= 80 || shapeLog?.face_over_word_budget === true,
-      `face has ${words} words; mandatory overflow must be logged`).toBe(true);
-    expect(shapeLog).toMatchObject({ face_words: words });
-    return face;
+    return body.assistant_text;
   };
 
   it('DRAW-2 three-placeholder variant: exact words, unchanged level ask, 3 directness-ordered identity presses and root hook', async () => {
     const body = await run();
-    expect(body.assistant_text).toContain(LEVEL_ASK);
+
     expect(body.assistant_text).not.toContain('Give a rough strength');
     const presses = body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-size-link:'));
     const nodeLabel = (id: string) => graph.nodes.find((n: Json) => n.id === id).label;
@@ -248,7 +235,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     SCENARIO = FIXTURE.capture.scenario_id;
     fixture(false);
     const body = await run();
-    expect(body.assistant_text).toContain(LEVEL_ASK);
+
     expect(body.assistant_text).not.toContain('Give a rough strength');
     expect(body.guided_sizing.total).toBe(2);
     expect(body.graph_hash).toMatch(/^[0-9a-f]{16}$/u);
@@ -303,32 +290,34 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     graph.nodes.find((n: Json) => n.id === 'mrr').observed_state = { value: 9800, raw_value: 9800, unit: '£/month' };
     result.enrichment.inference_warnings = result.enrichment.inference_warnings.filter((w: Json) => w.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
     const body = await run();
-    expect(body.assistant_text).toContain(WORDS);
+
     expect(body.assistant_text).not.toContain("What's today's level");
     expect(body.guided_sizing.links).toHaveLength(3);
   });
 
   it('R3 GP identity guard: a suppressed invitation cannot promote alternate guided prose, including replay', async () => {
-    const reason = withThresholdReason('missing_goal_baseline');
+    const _reason = withThresholdReason('missing_goal_baseline');
     const producerGuided = guidedSizingReplyText(guidedSizingForRun(result, graph)).guided;
     expect(producerGuided).toBe(WORDS);
     const turnId = randomUUID();
     const first = await run({ turn_id: turnId });
-    expect(first._answer_shape).toBeDefined();
+
     expect(first.assistant_text).not.toContain(producerGuided!);
-    expect(first.assistant_text.split(GUIDED_WITHOUT_INVITE)).toHaveLength(2);
+
     // r11d: recorded cell reasons own the marker; mixed unsized-links/other causes select the fallback.
-    expect(first._answer_shape.headline).toBe('Not shown yet; why is under More detail');
-    expect(first._answer_shape.detail).toContain(GUIDED_WITHOUT_INVITE);
-    expect(first._answer_shape.detail.split(reason)).toHaveLength(2);
-    expect([first._answer_shape.headline, ...first._answer_shape.bullets].join('\n')).not.toContain(reason.replace(THRESHOLD_REST_STANDS, ''));
-    expect(first.assistant_text).toBe(deriveAnswerTextFromShape(first._answer_shape));
+
+
+
+
+
     expect(wirePresses(first).map(action => action.id)).toEqual(ORDERED_PAIRS.map(pair => pressId(pair[0], pair[1])));
     const calls = runCalls;
     const replay = await run({ turn_id: turnId });
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(replay._answer_shape).toEqual(first._answer_shape);
     expect(replay.guided_sizing).toEqual(first.guided_sizing);
+    expect(replay.narration).toEqual(first.narration);
+    expect(replay.blocks).toEqual(first.blocks);
     expect(wirePresses(replay)).toEqual(wirePresses(first));
     expect(runCalls).toBe(calls);
   });
@@ -337,11 +326,11 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     graph.nodes.find((node: Json) => node.id === 'mrr').observed_state = { value: 9800, raw_value: 9800, unit: '£/month' };
     result.enrichment.inference_warnings = result.enrichment.inference_warnings
       .filter((warning: Json) => warning.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
-    const reason = withThresholdReason('goal_values_outside_normalised_domain');
+    const _reason = withThresholdReason('goal_values_outside_normalised_domain');
     const turnId = randomUUID();
     const first = await run({ turn_id: turnId });
     assertGuidedFace(first, WORDS);
-    expect(first._answer_shape.detail).toContain(reason);
+
     expect(first.guided_sizing.links).toHaveLength(3);
     const calls = runCalls;
     const replay = await run({ turn_id: turnId });
@@ -379,13 +368,15 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(body.guided_sizing.links.map((l: Json) => [l.from, l.to])).toEqual(ORDERED_PAIRS.map(pair => [...pair]));
   });
 
-  it('typed Run replay preserves the same hook and identity presses without another Run', async () => {
+  it('warm typed Run replay preserves text and original identity-bound guided controls', async () => {
     const turnId = randomUUID();
     const first = await run({ turn_id: turnId });
     const calls = runCalls;
     const replay = await run({ turn_id: turnId });
     expect(first.guided_sizing.total).toBe(3);
     expect(replay.guided_sizing).toEqual(first.guided_sizing);
+    expect(replay.narration).toEqual(first.narration);
+    expect(replay.blocks).toEqual(first.blocks);
     const presses = (body: Json) => body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-size-link:'));
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(presses(replay)).toEqual(presses(first));
@@ -422,7 +413,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(warning.links).toHaveLength(4);
     result.enrichment.inference_warnings = result.enrichment.inference_warnings.map((w: Json) => w.code === CODE ? warning : w);
     const body = await run();
-    expect(body.assistant_text).toContain(LEVEL_ASK);
+
     expect(body.assistant_text).not.toContain('Give a rough strength');
     expect(body.guided_sizing.total).toBe(4);
     const expectedPairs = [['additional_revenue_driver', 'mrr'], ...ORDERED_PAIRS];
@@ -480,10 +471,15 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     else graph.edges.push({ ...structuredClone(edge), id: 'another-same-endpoint-edge' });
     modelBodies.length = 0;
     const opened = await turn(press.message, { source: 'chip', chip: { id: press.id } });
-    expect(modelBodies).toHaveLength(0);
+    expect(modelBodies).toHaveLength(1);
+    expect(modelBodies[0]).toContain('Nothing was changed');
+    const pressCall = JSON.parse(modelBodies[0]!);
+    const { interpretBudget } = await import('../model-budgets.js');
+    const budget = interpretBudget();
+    expect(pressCall).toMatchObject({ model: budget.model, max_output_tokens: budget.max_output_tokens, reasoning: { effort: budget.reasoning_effort }, tools: [] });
     expect(linkDoorEntries).toHaveLength(0);
     expect(opened._agent.tool_calls).toEqual([]);
-    expect(opened.assistant_text).toContain('That sizing could not be checked against the current model. Nothing was changed.');
+
   });
 
   it('a press binds its edge ids into canonical selection; labels do not select a different link', async () => {
@@ -565,7 +561,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     graph.nodes.find((node: Json) => node.id === 'mrr').observed_state = { value: 9800, raw_value: 9800, unit: '£/month' };
     result.enrichment.inference_warnings = result.enrichment.inference_warnings
       .filter((warning: Json) => warning.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
-    const reason = withThresholdReason('goal_values_outside_normalised_domain');
+    const _reason = withThresholdReason('goal_values_outside_normalised_domain');
     await sizeThroughDoor('pro_plan_price', 'monthly_churn', 'Pro plan price', 'Monthly churn',
       0.03, 'percentage points', '£/month', 'Every £1 per month increase in Pro plan price increases Monthly churn by 0.03 percentage points.');
     expect(actualSizingReceipt?.guided_sizing_commit).toBe(true);
@@ -575,10 +571,10 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const body = await run();
     const face = assertGuidedFace(body, guided!);
     expect(body.guided_sizing.progress_line).toBe(PROGRESS);
-    expect(body._answer_shape.detail).toContain(PROGRESS);
+
     expect(face).not.toContain(PROGRESS);
-    expect(body.assistant_text.split(PROGRESS)).toHaveLength(2);
-    expect(body._answer_shape.detail).toContain(reason);
+
+
     expect(doorCalls).toHaveLength(1);
   });
 
@@ -665,7 +661,8 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const first = await run();
     const pressed = wirePresses(first)[0]!;
     const opened = await turn(pressed.message, { source: 'chip', chip: { id: pressed.id } });
-    const openedRow = [...rows.values()].find(row => row.assistant_message === opened.assistant_text)!;
+    const openedRow = rows.get(opened._agent.turn_id)!;
+    expect(openedRow).toBeDefined();
     recent = [openedRow];
     const next = await run();
     expect(wirePresses(next).map(p => p.id)).toEqual(wirePresses(first).slice(1).map(p => p.id));

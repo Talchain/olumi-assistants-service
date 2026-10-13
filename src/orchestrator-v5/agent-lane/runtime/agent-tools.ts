@@ -820,10 +820,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description:
       'Give a provisional view of what this model needs testing when the analysis cannot put an option forward yet (a leader may not be named). ' +
       PROVISIONAL_VIEW_RULE + ' ' +
-      'This changes nothing. Olumi shows it beneath your reply as ONE paragraph labelled as your provisional view \u2014 ' +
-      'never as the analysis result \u2014 with why the analysis cannot confirm it yet. Call it at most once per reply, and ' +
-      'never write the view in your reply text: a reply sentence that ranks or favours an option is removed. It is refused ' +
-      'when the analysis may name a leading option (then report what the analysis says) or when no analysis has completed.',
+      "Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions.",
     parameters: obj({
       view: { type: 'string', description: 'At most 2 sentences: what to test or find out about a factor, assumption or figure. ' + PROVISIONAL_VIEW_RULE },
       reasoning: {

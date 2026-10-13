@@ -211,6 +211,12 @@ export function goalChanceNotesForAgent(result: unknown, graph: unknown, current
   return out;
 }
 
+/** All licensed prose figures, including points which no longer need a host appendix. */
+export function licensedGoalChanceLinesForAgent(result: unknown, graph: unknown, current: boolean): GoalChanceScreenLine[] {
+  const { points, ranges } = composeGoalChanceLines(result, graph, current);
+  return [...points, ...ranges].filter((line): line is ComposedChanceLine & { label: string } => line.label !== undefined);
+}
+
 /** Every licensed cell's SAME sentence, including point forms not owed in narration. */
 export function goalChanceCellFacesForAgent(result: unknown, graph: unknown, current: boolean): ReadonlyMap<string, string> {
   const { points, ranges } = composeGoalChanceLines(result, graph, current);

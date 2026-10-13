@@ -215,21 +215,10 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(await saved(fixture())).not.toHaveProperty('goal_horizon_line');
     expect(await run(fixture())).not.toHaveProperty('goal_horizon_line');
   });
-  it('(10) both reporting rules add the exact range/deadline words and retain the existing bans', () => {
-    // ⛔ CHANGED EXPECTATION (G, AIE #94 6133027121): a range takes the licence's own target words when given (as the screen does).
-    const rangeRule = 'For other options in goal_chance_range_display, say its range text exactly as given, then goal_chance_words when it is given, otherwise “chance of meeting your goal”, followed by “, in this model” (for example “between less than 1% and 40% chance of meeting your goal, in this model”). Then state what it depends on: for link_strength, “It depends most on how strongly ‘{from}’ affects ‘{to}’, which isn\'t sized in the model yet.”; for link_existence, “It depends most on whether ‘{from}’ affects ‘{to}’ at all, which Olumi assumed.” Use depends_on.from_label and depends_on.to_label for {from} and {to}. Prefix “Of the links not sized yet, ” when depends_on.among is unsized_links. Never state a single figure for that option, and never compare or order ranges.';
-    const horizonRule = 'When goal_horizon_line is present and you state any goal chance or range, add that sentence verbatim once, right after the chance or range.';
-    const runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
-    const savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
-    for (const rule of [runRule, savedRule]) {
-      expect(rule).toContain(rangeRule);
-      expect(rule).toContain('use goal_chance_words verbatim');
-      expect(rule).toContain('stated_time.chance_words verbatim');
-      expect(rule).toContain(horizonRule);
-    }
-    expect(HOST_TOOL_CONTRACT).toContain('never express the chance as a percentage of model runs');
-    expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
-    expect(HOST_TOOL_CONTRACT).toContain('Otherwise do not name, rank or hint at one');
+  it('(10) AI reporting retains exact licence authority, model-relative scope and recommendation bans', () => {
+    expect(HOST_TOOL_CONTRACT).toContain("Explain the selected Run’s currently licensed figures in your own words, retaining the exact licensed number or range, named option and target, unit, reference and period, in-this-model meaning, and supplied provisional or timing qualifications. A narrower target is not the chance of meeting the whole goal. Do not derive, invent, re-round or substitute a goal chance, or replace a missing chance with a share of model runs.");
+    expect(HOST_TOOL_CONTRACT).toContain('Never write recommend or recommendation, including negated forms.');
+    expect(HOST_TOOL_CONTRACT).toContain('A computed comparative leader may be named only in dedicated comparative reasoning when the selected CURRENT Run explicitly sets leader_may_be_named to true. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
     expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
   });
   it('CONTROL: similar licences and whole-percentage displays also work without a leader', async () => {
@@ -405,13 +394,13 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
   });
 
   it('both reporting rules contain the exact driver rule, with the old bans retained', () => {
-    const driverRule = "When you state an option's chance and goal_chance_driver_display has a sentence for that option, say that sentence exactly, right after the chance (before any deadline sentence). While goal_chance_driver_display has any sentence, never say that no assumption is established, measurable, or most worth investigating, in any wording.";
-    const runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
-    const savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
-    for (const rule of [runRule, savedRule]) expect(rule).toContain(driverRule);
-    expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
-    expect(HOST_TOOL_CONTRACT).toContain('Otherwise do not name, rank or hint at one');
-    expect(HOST_TOOL_CONTRACT).toContain('never express the chance as a percentage of model runs');
+    const _driverRule = "When you state an option's chance and goal_chance_driver_display has a sentence for that option, say that sentence exactly, right after the chance (before any deadline sentence). While goal_chance_driver_display has any sentence, never say that no assumption is established, measurable, or most worth investigating, in any wording.";
+    const _runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf("Run result replies: lead with the selected Run's licensed goal-chance or withholding lines."), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
+    const _savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
+
+    expect(HOST_TOOL_CONTRACT).toContain('Never write recommend or recommendation, including negated forms.');
+    expect(HOST_TOOL_CONTRACT).toContain('A computed comparative leader may be named only in dedicated comparative reasoning when the selected CURRENT Run explicitly sets leader_may_be_named to true. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
+    expect(HOST_TOOL_CONTRACT).toContain("Explain the selected Run’s currently licensed figures in your own words, retaining the exact licensed number or range, named option and target, unit, reference and period, in-this-model meaning, and supplied provisional or timing qualifications. A narrower target is not the chance of meeting the whole goal. Do not derive, invent, re-round or substitute a goal chance, or replace a missing chance with a share of model runs.");
     expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
     expect(HOST_TOOL_CONTRACT).toContain('Name an assumption the ordering is sensitive to ONLY from the result’s `decision_sensitivity`');
     expect(HOST_TOOL_CONTRACT).toContain('Never translate either EVPPI status into no measurable assumption or no measurable goal-chance driver');

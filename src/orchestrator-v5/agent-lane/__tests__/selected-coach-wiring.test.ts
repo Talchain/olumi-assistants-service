@@ -2,7 +2,7 @@ import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /** Selected coaching reaches the real Agent route on every conversation path. No provider is called. */
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
@@ -22,10 +22,7 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // the share of runs; chat quotes the screen's goal-chance display: 09f7b6ac… → f6cec112….
 // S-E GOALS S2b (7 Oct): #34 and #35 gain the share-by-date sentences (goal_chance_words; a stated_time range says slow to
 // fast end, never causal doubt): 22,393 → 23,075 bytes (+682, exactly the two added sentences). 0732df33… → a9c847ef….
-// G (12 Oct, AIE #94 6133027121): the range rule in #34 and #35 says goal_chance_words when given (else “chance of meeting
-// your goal”), and #35's headline is “its chance, in this model”, so a part-goal Run is never called the whole goal's chance:
-// 23,075 → 23,185 bytes (+110). Reversing exactly those three edits on the module's string reproduces a9c847ef… and 23,075.
-const HOST_SHA = 'ba7dee9095a0317e96c1dd5cab8c720bca010677d4e87c0e1c17b0b09cbff05b';
+const HOST_SHA = 'f0918a13ab77f0c43318659d787ba2fd5c7a687c3ce9e0ff3fa1a73788529bbc';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -51,15 +48,11 @@ const HOST_SHA = 'ba7dee9095a0317e96c1dd5cab8c720bca010677d4e87c0e1c17b0b09cbff0
 // Combined (#2762 merge of staging): 34,302 + 682 + 193 = 35,177 bytes; sha re-derived from the SENT body.
 // + S-E GOALS S4 propose_new_limit clause in the proposing-tool instruction: staging 35,177 + 241 = 35,418 bytes.
 //   Removing exactly that clause from the SENT body reproduces staging's 915133ba… sha and 35,177 bytes.
-// + G (12 Oct, AIE #94 6133027121): the AIE's selected-Run scope line, verbatim and ONCE, appended to
-//   GOAL_CHANCE_RANKING_INSTRUCTION (where the Agent receives analysis.goal_chance_licence); that rule's three whole-goal
-//   phrases (“their chance of meeting the goal”, “highest chance of meeting the goal”, “similar chances of meeting the
-//   goal”) become goal chances / chance / similar chances; plus the +110-byte host edits above: 35,418 → 35,782 bytes (+364).
-//   Derived from the SENT body; reversing exactly those edits on the SENT body reproduces a8a9845b… and 35,418 bytes.
-const RENDERED_SHA = '96cd8417fa4c8d5c1874f553f9addb164106d8872c2fa3da40211bf225063add';
-const RENDERED_BYTES = 35_782;
+const RENDERED_SHA = '8e08fb3a53a04fbf4a3d955ad01857429ad29e7c6563342931c92e91f02f2ba4';
+const RENDERED_BYTES = 32129;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
-const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
+// AIE 6134666922 exact replacements; old/new pins are in recovery-notes/b2-assembled-pins.json.
+const NAMING_RULE_FORM = "Run result replies: lead with the selected Run's licensed goal-chance or withholding lines.";
 /** G (AIE #94 6133027121): the approved selected-Run scope line, verbatim; SENT once on every coaching path. */
 const AIE_SCOPE_LINE = 'Describe the selected Run using its licensed target wording and scope. If it scores only part of the user\'s goal, '
   + 'name that target and retain the unscored conditions; never call its chance the chance of meeting the whole goal. Keep its provisional '
@@ -128,6 +121,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body?: unknown }) => {
       const body = asSent(JSON.parse(String(init.body))) as Sent;
       sent.push(body);
+      if (process.env.B2R_SELECTED_CAPTURE) writeFileSync(process.env.B2R_SELECTED_CAPTURE, JSON.stringify(sent));
       const runCall = runPressToolResponse(body as unknown as Record<string, unknown>);
       if (runCall) return runCall;
       registeredAtCall.push(registered);
@@ -226,6 +220,9 @@ describe('selected Sol-high coach on the actual Agent route', () => {
   it('uses the exact selected template and host authority on an ordinary conversation', async () => {
     expect(sha256(SELECTED_COACH_V02_TEMPLATE)).toBe(TEMPLATE_SHA);
     expect(sha256(HOST_TOOL_CONTRACT)).toBe(HOST_SHA);
+    expect(HOST_TOOL_CONTRACT.split("Use the tool result to explain what changed and the value and unit saved. Distinguish a prepared proposal from a committed change. If the result or current read does not confirm the save, say that its outcome is uncertain; never claim it was saved.")).toHaveLength(2);
+    expect(HOST_TOOL_CONTRACT.split("Explain the selected Run’s currently licensed figures in your own words, retaining the exact licensed number or range, named option and target, unit, reference and period, in-this-model meaning, and supplied provisional or timing qualifications. A narrower target is not the chance of meeting the whole goal. Do not derive, invent, re-round or substitute a goal chance, or replace a missing chance with a share of model runs.")).toHaveLength(2);
+    expect(HOST_TOOL_CONTRACT).not.toContain('Name a leading option ONLY');
     expect(SELECTED_COACH_V02_TEMPLATE.split('{{MODE_AND_AUTHORITY}}')).toHaveLength(2);
     await sendTurn('What does the analysis say?', [say('The comparison is provisional.')]);
     expect(sent).toHaveLength(1);
@@ -241,6 +238,15 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     // G: the coaching conversation carries the AIE's scope line exactly once, and no whole-goal headline or superlative.
     expect(sent[0]!.instructions.split(AIE_SCOPE_LINE)).toHaveLength(2);
     expect(sent[0]!.instructions).not.toMatch(/headline is its chance of meeting|highest chance of meeting|similar chances of meeting/);
+  });
+
+  it('PL condition 2: the actual ordinary model input keeps source, withholding and saved-Run facts', async () => {
+    await sendTurn('What limits this result?', [say('The result is conditional on the current model.')]);
+    const input = JSON.stringify(sent[0]!.input);
+    expect(input).toContain('reasoning_source');
+    expect(input).toContain('run_explanation');
+    expect(input).toContain('withheld_reason');
+    expect(input).toContain('selected_run_reference');
   });
 
   it('keeps the same selected prompt on a tool-followup conversation; the narrating hop is low effort (P44 S1)', async () => {

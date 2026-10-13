@@ -401,7 +401,7 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
     expect(p.codeLine).toBe(LINE);
     expect(p.fallback).toBe(LINE);
     expect(p.instruction).toContain(LINE);
-    expect(p.instruction).toContain('never say whether the inputs changed or stayed the same');
+    expect(p.instruction).toContain("State only the particular input changes or unchanged inputs established by the verified current comparison. When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.");
   });
 
   it('INERT: no run_delta (a first Run) → no plan (the explanation path is exactly as before)', () => {

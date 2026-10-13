@@ -129,7 +129,9 @@ function scan({ rel, text }: Source): Sink[] {
       return value !== undefined && recur(value);
     }
     if (ts.isPropertyAccessExpression(expr)) return recur(expr.expression);
-    if (ts.isConditionalExpression(expr)) return recur(expr.whenTrue) && recur(expr.whenFalse);
+    if (ts.isConditionalExpression(expr)) {
+      return recur(expr.whenTrue) && recur(expr.whenFalse);
+    }
     if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
       const left = unwrap(expr.left);
       // The route's existing string carrier is pinned; new raw fallback prose
@@ -251,7 +253,7 @@ describe('estimate goal points: every discovered assistant writer uses the ONE c
 
   it('MUTANT: removing the call from the existing replay writer goes RED', () => {
     const source = checkedSources.find(s => s.rel === ROUTE)!;
-    const marker = `const gatedReplay = ${GATE}(optionGatedReplay, {`;
+    const marker = `= ${GATE}(leaderGatedReplay, {`;
     expect(source.text).toContain(marker);
     const ast = ts.createSourceFile(source.rel, source.text, ts.ScriptTarget.ES2022, true);
     let call: ts.CallExpression | undefined;
@@ -262,8 +264,19 @@ describe('estimate goal points: every discovered assistant writer uses the ONE c
     };
     find(ast);
     expect(call).toBeDefined();
-    const mutant = { ...source, text: `${source.text.slice(0, call!.getStart())}optionGatedReplay${source.text.slice(call!.end)}` };
+    const mutant = { ...source, text: `${source.text.slice(0, call!.getStart())}leaderGatedReplay${source.text.slice(call!.end)}` };
     expect(unqualified([mutant]).filter(s => s.kind === 'assistant send')).toHaveLength(3);
+  }, GUARD_WALK_TIMEOUT_MS);
+
+  it('MUTANT: no committed-text exception can bypass the chokepoint', () => {
+    const source = checkedSources.find(s => s.rel === ROUTE)!;
+    const before = 'const gatedReplay = withEstimateGoalPointsAtEgress(leaderGatedReplay, {';
+    expect(source.text).toContain(before);
+    for (const raw of ['replayText', "'Other prose.'"]) {
+      const mutant = source.text.replace(before,
+        `const gatedReplay = replayLoopRun ? { ...leaderGatedReplay, assistant_text: ${raw} } : withEstimateGoalPointsAtEgress(leaderGatedReplay, {`);
+      expect(unqualified([{ ...source, text: mutant }]).filter(sink => sink.kind === 'assistant send')).toHaveLength(3);
+    }
   }, GUARD_WALK_TIMEOUT_MS);
 
   it('later unknown spreads and raw nullish fallbacks cannot override a gated carrier', () => {

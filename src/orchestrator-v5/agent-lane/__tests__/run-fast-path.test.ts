@@ -69,7 +69,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     });
     // The goal carries a stated target, so D1's goal ask (`decision-input-ask.ts`, pinned there) stays out of these exact-text rows.
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity', goal_threshold_raw: 100 }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
+      graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity', goal_threshold_raw: 100 }, { id: 'f', kind: 'factor', label: 'Capacity' }, { id: 'hire', kind: 'option', label: 'Hire a tech lead' }], edges: [{ from: 'f', to: 'g' }] },
       graph_hash: 'h1',
       // The canonical verdict the interpreter must be GIVEN (Paul's case: a guardrail the engine could not score).
       analysis_state: failed
@@ -103,7 +103,8 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     expect(modelBodies[0]!['tool_choice'], 'it may interpret, never act').toBe('none');
     const input = JSON.stringify(modelBodies[0]!['input']);
     expect(input, 'the call sees the canonical selected Run').toContain('selected_run_reference');
-    expect(input, 'the call excludes raw analysis').not.toContain('analysis_result');
+    expect(input, 'raw unprojected tool payload is absent').not.toContain('the-run');
+    expect(input, 'interpreter input has no raw analysis_result').not.toContain('analysis_result');
     expect(b._diagnostic_trace.fast_path).toBe('explain');
     expect(b._agent.tool_calls.map((c) => c.name)).toEqual([]);
     expect(b.assistant_text).toBe('In the current model, the result turns on Capacity.');
@@ -160,8 +161,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
     expect(b._diagnostic_trace.fast_path).toBe('explain');
     expect(b.assistant_text).not.toMatch(/\bleads\b/);
-    expect(b.assistant_text).toContain('Your edit did not change the comparison.');
-    expect(b.assistant_text).toMatch(/No single option can be put forward yet/);
+    expect(b.assistant_text).toBe('Your edit did not change the comparison. No single option can be put forward yet.');
   });
 
   it('CONTRAST: "Run the analysis" typed as words still goes to the Agent', async () => {
@@ -172,10 +172,10 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
   it('the ONE call carries Interpreter v0.2 verbatim (appended) and the canonical claim permissions', async () => {
     const { INTERPRETER_V02_BANKED } = await import('../../../routes/agent-v1-turn.js');
     const { createHash } = await import('node:crypto');
-    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (programme-docs blob 344896ef + the S2i clause)').toBe('d13dd401219ddcb7');
+    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (programme-docs blob 344896ef + the S2i clause)').toBe('5152ec6404745d79');
     // S2i (DL P6, 7 Oct): one clause differs from blob 344896ef ("say investigation priority is not established" → the DL's
     // words below); every other byte is the banked text (base hash 3d979e8406693be4 with that clause back).
-    expect(INTERPRETER_V02_BANKED).toContain("are absent, make no claim about investigation priority beyond the screen's own driver lines; if the screen shows no driver and no range, say it is not established yet.");
+    expect(INTERPRETER_V02_BANKED).toContain("Use the supplied current driver and sensitivity data to explain what the result rests on, with its source and uncertainty.");
     expect(INTERPRETER_V02_BANKED).not.toContain('say investigation priority is not established.');
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
@@ -274,8 +274,8 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     const b = r.json() as { suggested_actions: { id: string; label: string; message: string; action_type?: string }[]; _diagnostic_trace: { fast_path?: string } };
     expect(b._diagnostic_trace.fast_path).toBeUndefined();
     expect(runs, 'one attempted run').toBe(1);
-    expect(b.suggested_actions).toEqual([expect.objectContaining({ id: 'agent-suggest-what-it-needs', label: 'Suggest what it still needs' })]);
-    expect(b.suggested_actions[0]!.action_type, 'a plain Agent turn, never another Run').toBeUndefined();
+    expect(b.suggested_actions.some(c => c.id === 'agent-suggest-what-it-needs')).toBe(true);
+    expect(JSON.stringify(modelBodies[1]?.input)).toContain(BLOCKED_WORDS);
   });
 
   it('CONTRAST: a COMPLETED Run offers no remedy chip', async () => {
@@ -314,6 +314,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
 
   it('RED (served 319dde1, 01:42Z): the run itself FAILS → the loop reads the failure and says it plainly — never an invented cause ("the saved graph has changed")', async () => {
     failed = true;
+    interp = 'empty';
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
@@ -340,4 +341,14 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     expect(res).toEqual(expect.objectContaining({ ok: false, ran: false, refusal: 'run_failed' }));
     expect(String(res.detail)).toMatch(/do not give any other reason/);
   });
+  it('approval authority never falls through into Run or a model-selected write', async () => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Approve this change',
+      chip: { id: 'agent-approve-proposal:prop_missing', action_type: 'run_analysis' },
+    } });
+    expect(r.statusCode).toBe(200);
+    expect(runs).toBe(0);
+    expect(modelBodies).toHaveLength(0);
+  });
+
 });

@@ -16,7 +16,8 @@ it('default ordinary-converse run2 canonical_state has no run_explanation key', 
   for (const call of w.calls) {
     const canonicalState = findState(call.payloads);
     expect(canonicalState.graph_revision).toBe(w.seed.revision);
-    expect(canonicalState).not.toHaveProperty('run_explanation');
+    expect(canonicalState).toHaveProperty('run_explanation');
+    expect(object(canonicalState.run_explanation).claim_permissions).toEqual(object(canonicalState.analysis).claim_permissions);
   }
   // #2900 positive control: run-explanation-turn-parity.test.ts checks the original
   // provider SHAs in fixtures/staging-turn-sha256.json; one-assembly checks opt-in presence.

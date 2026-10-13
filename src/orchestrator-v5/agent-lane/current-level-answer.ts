@@ -128,6 +128,8 @@ export function currentLevelAnswerFirstCall(state: unknown, ask: Ask | null, typ
 export function currentLevelAskOnAnswer(input: {
   graph: unknown; analysisResult: unknown; sentText: string; scenarioId: string; userId: string | null;
   emittedAtIso: string; prior: Ask | null; answered: boolean; message: string; awaitingApproval: boolean;
+  /** A successfully admitted set_current_level press requests this input independently of AI wording. */
+  explicitlyRequested?: boolean;
 }): Ask | null {
   if (input.awaitingApproval) return null;
   const nodes = records(rec(input.graph)?.nodes);
@@ -151,7 +153,7 @@ export function currentLevelAskOnAnswer(input: {
   }
   // GOAL-REACH 3b: the bar's set_current_level press delivered the threshold ask (the same words, one source).
   const asked = goalLevelAskOf(input.graph, input.analysisResult);
-  if (asked !== null && producerQuestionWasDelivered(input.sentText, asked.question)) {
+  if (asked !== null && (input.explicitlyRequested === true || producerQuestionWasDelivered(input.sentText, asked.question))) {
     const pa = parsePendingAction({
       id: randomUUID(), scenario_id: input.scenarioId, chip_id: 'agent-current-level-ask',
       action: { kind: 'elicit_goal_current_level', goal_id: asked.goal.id, goal_label: asked.goal.label, user_id: input.userId,

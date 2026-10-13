@@ -34,13 +34,8 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
  * provisional view (`give_provisional_view`), rendered after the leader gate, and it must be one the user can take or
  * a tool can propose — never one that cannot help (the futile-step failure the prohibition was measured against).
  */
-const CLAUSE =
-  'When the run says a limit cannot be checked in this model yet, say so plainly. When a leader cannot be named, you may give your own '
-  + 'provisional view by calling give_provisional_view once: what to test or find out about a factor, an assumption or a figure, never which option to do or explore first, your reasoning from the model\u2019s facts and the '
-  + 'user\u2019s own words, and the ONE step that would let the analysis confirm or overturn it \u2014 a step the user can take or a '
-  + 'change one of your tools can propose, never one that cannot help. Never write that view in your reply text: Olumi shows it '
-  + 'beneath your reply, labelled as your provisional view and never as the analysis result, and your reply text still never names, '
-  + 'ranks or favours an option.';
+// AIE-signed B2 HOST_TOOL_CONTRACT: its last sentences replace the retired 'Never write that view in your reply text' prohibition.
+const CLAUSE = "When the run says a limit cannot be checked in this model yet, say so plainly. When a leader cannot be named, you may give your own provisional view by calling give_provisional_view once: what to test or find out about a factor, an assumption or a figure, never which option to do or explore first, your reasoning from the model’s facts and the user’s own words, and the ONE step that would let the analysis confirm or overturn it — a step the user can take or a change one of your tools can propose, never one that cannot help. Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions.";
 /** The prohibition Paul's ruling replaced — it must not reach the model beside the clause that replaced it. */
 const REPLACED = 'do not suggest any step, input or model change to make it checkable';
 /** The rule it follows — its placement is part of what was measured. */

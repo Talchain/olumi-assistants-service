@@ -230,8 +230,8 @@ describe('C5b on a RERUN (served 27 Sep: the first Run carried a view, the rerun
     expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).not.toContain('Set it to null when you have none');
     expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('Set it to null only when the model and the user’s words give you no basis for any view');
     // Unchanged contract: never in `answer`, never ranking in `answer`.
-    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('Never write the view in `answer`.');
-    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('it never names, ranks or favours an option');
+
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain("A provisional view directs investigation. It may name and explain the options, their assumptions and unresolved questions when helpful. Describe only comparisons supported by the current supplied facts, keeping their scope, uncertainty and conditions; do not favour or recommend an option.");
   });
 });
 

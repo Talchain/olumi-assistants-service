@@ -79,12 +79,9 @@ describe('live Agent final egress respects the selected Run goal-chance drivers'
     return body;
   }
 
-  it('ships the production narration with only the driver-absence clause removed', async () => {
+  it('B4: ships the provider narration byte-identically with no driver phrase filter', async () => {
     const body = await liveTurn();
-    expect(body.assistant_text.endsWith('Six underlying values were supplied by Olumi, not you.')).toBe(true);
-    expect(body.assistant_text).not.toContain('has not established which assumption matters most');
-    // S-A (#2748): only that clause changes; the ONE composer may then move sentences, never change one.
-    expect(sentenceMultiset(body.assistant_text)).toEqual(sentenceMultiset(PROD.assistant_text.replace(ABSENCE_CLAUSE, '.')));
+    expect(body.assistant_text).toBe(PROD.assistant_text);
   });
 
   it('CONTRAST: the same live turn without licensed drivers ships the clause unchanged', async () => {

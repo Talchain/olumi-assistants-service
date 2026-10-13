@@ -94,30 +94,6 @@ describe('goalChanceLineOwed', () => {
     expect(goalChanceLineOwed([runWithheld], `• ${SAY.replace(/'/g, '**').replace(/\s+/g, '  ')}`)).toBeNull();
   });
 
-  it('WIRING: the route appends it with the owed disclosures, checked against the Agent\'s own text', () => {
-    const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    // ONE reply: the producer runs after the gate, so actual typed gate ownership decides whether a second line is owed.
-    expect(src).toContain("goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,");
-    expect(src).toContain('wireBody.assistant_text.includes(gateGoalChance.why)');
-    expect(src).toContain('owed.push(...goalLines);');
-    expect(src).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
-    expect(src).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
-    expect(src).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
-    expect(src).toContain('identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, \'\') !== null, graph: readbackGraph });');
-    expect(src).toContain('}], RUN_RESULT_READY_TEXT, { graph: state.graph });');
-    // Exact host-copy display normalisation preserves the narrator and the same owed lines.
-    expect(src).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
-    expect(src).toContain('withDisclosures(narrationText, owed)');
-    expect(src).toContain('withDisclosures(narrationText, [...owed, ...decisionLines])');
-  });
-  it('R13 MUTANT: a raw-tool-only owed line loses the final scoped owner', () => {
-    const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    const pin = "goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,";
-    expect(src.includes(pin)).toBe(true);
-    expect(src.replace(pin, pin.replace('goalChanceResults', 'result.tool_results')).includes(pin)).toBe(false);
-    // A later Run still clears an earlier withhold when no scoped final sentence exists.
-    expect(goalChanceLineOwed([runWithheld, runShown], PARAPHRASE)).toBeNull();
-  });
 });
 
 

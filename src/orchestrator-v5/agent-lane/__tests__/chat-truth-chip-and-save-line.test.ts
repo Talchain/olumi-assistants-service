@@ -479,7 +479,9 @@ describe('the real route: build + proposal in one turn', () => {
     expect(b.assistant_text).toContain('£60,000');
     const pid = proposalOf(b, 'propose_option_interventions');
     expect(pid).toMatch(/^prop_[0-9a-f]{32}$/);
-    expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Save £50,000 for Hire PA', message: 'Yes, use those.' });
+    const { agentProposals } = await import('../held-approval-offers.js');
+    expect(agentProposals.get(pid!)?.public_label).toBeTypeOf('string');
+    expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Save £50,000 for Hire PA', message: 'Yes, use those.', detail: agentProposals.get(pid!)!.public_label });
     expect(b.assistant_text).toContain(NEW_LINE);
     expect(b.assistant_text).not.toMatch(/model was saved|I saved the model/i);
     expect(b.assistant_text).not.toContain(OLD_LINE);
@@ -497,7 +499,9 @@ describe('the real route: build + proposal in one turn', () => {
     const b = await turn();
     const pid = proposalOf(b, 'propose_starting_point');
     expect(pid, JSON.stringify(b._agent.tool_calls)).toBeDefined();
-    expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Use these 2 starting figures', message: 'Yes, use those.' });
+    const { agentProposals } = await import('../held-approval-offers.js');
+    expect(agentProposals.get(pid!)?.public_label).toBeTypeOf('string');
+    expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Use these 2 starting figures', message: 'Yes, use those.', detail: agentProposals.get(pid!)!.public_label });
     expect(b.assistant_text).toContain(NEW_LINE);
     expect(b.assistant_text).not.toMatch(/model was saved|I saved the model/i);
   });
@@ -510,7 +514,9 @@ describe('the real route: build + proposal in one turn', () => {
     ];
     const b = await turn();
     const pid = proposalOf(b, 'propose_option_interventions');
-    expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Use as starting option levels', message: 'Yes, use those.' });
+    const { agentProposals } = await import('../held-approval-offers.js');
+    expect(agentProposals.get(pid!)?.public_label).toBeTypeOf('string');
+    expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Use as starting option levels', message: 'Yes, use those.', detail: agentProposals.get(pid!)!.public_label });
   });
 
   it('CONTRAST: a build with nothing proposed omits the saved sentence and offers no approve chip', async () => {

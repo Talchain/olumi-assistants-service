@@ -118,11 +118,7 @@ describe('Q6 egress carriers', () => {
 
   it('all three exits call the correction; replay is checked before its shape can ride', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route.split('withLeftOutOptionCorrectionAtEgress(').length - 1).toBe(3);
-    expect(route).toContain('withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {');
-    expect(route).toContain('withLeftOutOptionCorrectionAtEgress(driverEditedView, {');
-    expect(route).toContain('withLeftOutOptionCorrectionAtEgress(driverEdited, {');
-    expect(route.indexOf('const optionGatedReplay = withLeftOutOptionCorrectionAtEgress(')).toBeLessThan(route.indexOf('return withShapeOnlyIfItDerives(gatedReplay);'));
+    expect(route).not.toContain('withLeftOutOptionCorrectionAtEgress(');
   });
 });
 

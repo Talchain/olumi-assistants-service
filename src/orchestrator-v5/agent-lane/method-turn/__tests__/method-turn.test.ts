@@ -574,3 +574,25 @@ describe('round 2 (CODEX_CLI_OVERFLOW 5939415083; DL ruling): a recognised press
     expect(methodTurnItems(undefined, 'm', '')).toHaveLength(2);
   });
 });
+
+describe('PL condition 2: a pressed method keeps its approved science reason', () => {
+  it('carries prospective hindsight in the actual pre-mortem directive', () => {
+    const out = turnFor(served('A-Q-D1-BUILD'), planPickChipId('ai_reporting_module_sprint'));
+    if (out?.kind !== 'run') throw new Error('expected a run');
+    const why = POLICY.rows.find(row => row.policy_id === 'RC-PREMORTEM')!.science_basis.summary;
+    expect(out.directive).toContain(why);
+    expect(out.directive).not.toContain(`At most ${POLICY.method_turns.shared.max_words} words.`);
+  });
+  it('uses each approved variant reason and never borrows the single-option science for other widening variants', async () => {
+    const { scienceReasonForMethod } = await import('../../turn-context/guidance-wire.js');
+    for (const row of POLICY.rows) {
+      if (row.policy_id === 'RC-WIDEN') continue;
+      expect(scienceReasonForMethod(row.policy_id)?.why).toBe(row.science_basis.summary);
+    }
+    const widen = POLICY.rows.find(row => row.policy_id === 'RC-WIDEN')!;
+    expect(scienceReasonForMethod('RC-WIDEN', 'W2')?.why).toBe(widen.science_basis.summary);
+    expect(scienceReasonForMethod('RC-WIDEN', 'W7')?.why).toBe(widen.why_now.W7);
+    expect(scienceReasonForMethod('RC-WIDEN')).toBeUndefined();
+    expect(scienceReasonForMethod('RC-WIDEN', 'unrecorded')).toBeUndefined();
+  });
+});

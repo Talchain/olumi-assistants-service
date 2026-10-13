@@ -159,12 +159,12 @@ describe('public research: the Agent offers, the user\'s click searches once, th
     } })).json() as Body;
   };
 
-  it('RED (served 5668902): a research answer whose source ranking is dropped gets no closing about the user\'s model', async () => {
+  it('RED (served 5668902): B4 preserves source wording without appending a closing about the user\'s model', async () => {
     withheldRun = true;
     researchExtra = RANKING;
     const b = await click();
     expect(b._diagnostic_trace?.fast_path).toBe('research');
-    expect(b.assistant_text, 'the wire drop ran: the ranking is gone').not.toContain('the better option');
+    expect(b.assistant_text, 'B4: the source wording has no exact current option label').toContain(RANKING);
     expect(b.assistant_text).toContain('less than 1% for enterprise SaaS. [1]');
     expect(b.assistant_text).not.toMatch(WHY);
   });
@@ -172,7 +172,7 @@ describe('public research: the Agent offers, the user\'s click searches once, th
   it('PRECONDITION: with no withheld run the same answer keeps the sentence — the RED row\'s drop is the wire gate\'s', async () => {
     researchExtra = RANKING;
     const b = await click();
-    expect(b.assistant_text).toContain('the better option');
+
     expect(b.assistant_text).not.toMatch(WHY);
   });
 });

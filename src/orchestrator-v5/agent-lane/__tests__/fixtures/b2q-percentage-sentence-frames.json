@@ -1,0 +1,303 @@
+[
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/2026-10-11T222932Z/capacity/turns/02.json",
+    "sentence": "‘Add one specialist’: about 35% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "‘Add one specialist’: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).",
+    "id": "served-01"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/2026-10-12T172858Z/capacity/turns/01.json",
+    "sentence": "â€˜Add one specialistâ€™: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "â€˜Add one specialistâ€™: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates).",
+    "id": "served-02"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/2026-10-12T172858Z/capacity/turns/02.json",
+    "sentence": "‘Add one specialist’: about 36% chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "‘Add one specialist’: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 3 relationships (see Check estimates).",
+    "id": "served-03"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/2026-10-12T214005Z/capacity/turns/01.json",
+    "sentence": "â€˜Add one specialistâ€™: about 37% chance of meeting your goal, in this model, using Olumi's estimates for 1 starting value and 3 relationships (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "â€˜Add one specialistâ€™: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 1 starting value and 3 relationships (see Check estimates).",
+    "id": "served-04"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/2026-10-12T214005Z/capacity/turns/02.json",
+    "sentence": "‘Add one specialist’: about 37% chance of meeting your goal, in this model, using Olumi's estimates for 1 starting value and 3 relationships (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "‘Add one specialist’: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 1 starting value and 3 relationships (see Check estimates).",
+    "id": "served-05"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/2026-10-12T214005Z/capacity/turns/06.json",
+    "sentence": "‘Add one specialist’: about 63% chance of meeting your goal, in this model, using Olumi's estimates for 1 starting value and 3 relationships (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "‘Add one specialist’: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 1 starting value and 3 relationships (see Check estimates).",
+    "id": "served-06"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/2026-10-13T055848Z/capacity/turns/06.json",
+    "sentence": "‘Add one specialist’: about 64% chance of meeting your goal, in this model, using Olumi's estimates for 1 starting value and 3 relationships (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "‘Add one specialist’: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 1 starting value and 3 relationships (see Check estimates).",
+    "id": "served-07"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/2026-10-13T074403Z/hiring/turns/06.json",
+    "sentence": "‘Hire Tech lead’: about 13% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi's estimates for 4 starting values, 1 option setting and 4 relationships (see Check estimates).",
+    "label": "Hire Tech lead",
+    "frame": "‘Hire Tech lead’: {figure} chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi's estimates for 4 starting values, 1 option setting and 4 relationships (see Check estimates).",
+    "id": "served-08"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/2026-10-13T074403Z/hiring/turns/15.json",
+    "sentence": "• ‘Hire two developers’: less than 1% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi's estimates for 4 starting values and 4 relationships (see Check estimates).",
+    "label": "Hire two developers",
+    "frame": "• ‘Hire two developers’: {figure} chance of ‘Productivity’ being at least 10% higher than today at three months, in this model, using Olumi's estimates for 4 starting values and 4 relationships (see Check estimates).",
+    "id": "served-09"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/_smoke-capacity-1/capacity/turns/01.json",
+    "sentence": "â€˜Add one specialistâ€™: about 37% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "â€˜Add one specialistâ€™: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).",
+    "id": "served-10"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/_smoke-capacity-1/capacity/turns/02.json",
+    "sentence": "‘Add one specialist’: about 37% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "‘Add one specialist’: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).",
+    "id": "served-11"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/_smoke-capacity-2/capacity/turns/01.json",
+    "sentence": "â€˜Add one specialistâ€™: between about 21% and 36% chance of meeting your goal, in this model.",
+    "label": "Add one specialist",
+    "frame": "â€˜Add one specialistâ€™: {figure} chance of meeting your goal, in this model.",
+    "id": "served-12"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/_smoke-capacity-2/capacity/turns/02.json",
+    "sentence": "‘Add one specialist’: between about 21% and 36% chance of meeting your goal, in this model.",
+    "label": "Add one specialist",
+    "frame": "‘Add one specialist’: {figure} chance of meeting your goal, in this model.",
+    "id": "served-13"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/_smoke-w3-20261012T201114Z/capacity/turns/01.json",
+    "sentence": "â€˜Add one specialistâ€™: about 35% chance of meeting your goal, in this model, using Olumi's estimates for 2 relationships (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "â€˜Add one specialistâ€™: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 2 relationships (see Check estimates).",
+    "id": "served-14"
+  },
+  {
+    "source": "/Users/paulslee/olumi-work/recovery/live/runs/_smoke-w3-20261012T201114Z/capacity/turns/06.json",
+    "sentence": "‘Add one specialist’: about 58% chance of meeting your goal, in this model, using Olumi's estimates for 2 relationships (see Check estimates).",
+    "label": "Add one specialist",
+    "frame": "‘Add one specialist’: {figure} chance of meeting your goal, in this model, using Olumi's estimates for 2 relationships (see Check estimates).",
+    "id": "served-15"
+  },
+  {
+    "id": "review-01",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "Raise to £59 has a 68% chance of meeting your goal.",
+    "frame": "Raise to £59 has a {figure} chance of meeting your goal.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-02",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "The chance of meeting your goal with Raise to £59 is 68%.",
+    "frame": "The chance of meeting your goal with Raise to £59 is {figure}.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-03",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "There is a 68% chance that Raise to £59 meets your goal.",
+    "frame": "There is a {figure} chance that Raise to £59 meets your goal.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-04",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "Raise to £59 is 68% likely to meet your goal.",
+    "frame": "Raise to £59 is {figure} likely to meet your goal.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-05",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "Raise to £59 reaches the target 68% of the time.",
+    "frame": "Raise to £59 reaches the target {figure} of the time.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-06",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "With Raise to £59, the goal is met in 68% of cases.",
+    "frame": "With Raise to £59, the goal is met in {figure} of cases.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-07",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "Raise to £59 gives roughly a 68% chance of hitting £20k a month.",
+    "frame": "Raise to £59 gives roughly a {figure} chance of hitting £20k a month.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-08",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "There is a 68% chance that Hire a tech lead meets your goal.",
+    "frame": "There is a {figure} chance that Hire a tech lead meets your goal.",
+    "label": "Hire a tech lead"
+  },
+  {
+    "id": "review-09",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "Raise to £59: 68%.",
+    "frame": "Raise to £59: {figure}.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-10",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "the recorded chance for Raise to £59 is 68%.",
+    "frame": "the recorded chance for Raise to £59 is {figure}.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-11",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "**Raise to £59** has a 68% chance of meeting your goal.",
+    "frame": "**Raise to £59** has a {figure} chance of meeting your goal.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-12",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "- The chance of meeting your goal with Raise to £59 is 68%.",
+    "frame": "- The chance of meeting your goal with Raise to £59 is {figure}.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-13",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "- There is a 68% chance that Raise to £59 meets your goal.",
+    "frame": "- There is a {figure} chance that Raise to £59 meets your goal.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-14",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "**Raise to £59** is 68% likely to meet your goal.",
+    "frame": "**Raise to £59** is {figure} likely to meet your goal.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-15",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "**Raise to £59** reaches the target 68% of the time.",
+    "frame": "**Raise to £59** reaches the target {figure} of the time.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-16",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "- With Raise to £59, the goal is met in 68% of cases.",
+    "frame": "- With Raise to £59, the goal is met in {figure} of cases.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-17",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "**Raise to £59** gives roughly a 68% chance of hitting £20k a month.",
+    "frame": "**Raise to £59** gives roughly a {figure} chance of hitting £20k a month.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-18",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "- There is a 68% chance that Hire a tech lead meets your goal.",
+    "frame": "- There is a {figure} chance that Hire a tech lead meets your goal.",
+    "label": "Hire a tech lead"
+  },
+  {
+    "id": "review-19",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "- Raise to £59: 68%.",
+    "frame": "- Raise to £59: {figure}.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-20",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "- the recorded chance for Raise to £59 is 68%.",
+    "frame": "- the recorded chance for Raise to £59 is {figure}.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-21",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "Raise to £59 has a 68% chance of meeting your goal; the goal target is 10%.",
+    "frame": "Raise to £59 has a {figure} chance of meeting your goal; the goal target is 10%.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-22",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "The chance of meeting your goal with Raise to £59 is 68%; the goal target is 10%.",
+    "frame": "The chance of meeting your goal with Raise to £59 is {figure}; the goal target is 10%.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-23",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "There is a 68% chance that Raise to £59 meets your goal; the goal target is 10%.",
+    "frame": "There is a {figure} chance that Raise to £59 meets your goal; the goal target is 10%.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-24",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "Raise to £59 is 68% likely to meet your goal; the goal target is 10%.",
+    "frame": "Raise to £59 is {figure} likely to meet your goal; the goal target is 10%.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-25",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "Raise to £59 reaches the target 68% of the time; the goal target is 10%.",
+    "frame": "Raise to £59 reaches the target {figure} of the time; the goal target is 10%.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-26",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "In this model, raise to £59 has a 68% chance of meeting your goal.",
+    "frame": "In this model, raise to £59 has a {figure} chance of meeting your goal.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-27",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "In this model, the chance of meeting your goal with Raise to £59 is 68%.",
+    "frame": "In this model, the chance of meeting your goal with Raise to £59 is {figure}.",
+    "label": "Raise to £59"
+  },
+  {
+    "id": "review-28",
+    "source": "REVIEW-2983-claude.md F2 and route probes (format/compound-sentence variants)",
+    "sentence": "In this model, there is a 68% chance that Raise to £59 meets your goal.",
+    "frame": "In this model, there is a {figure} chance that Raise to £59 meets your goal.",
+    "label": "Raise to £59"
+  }
+]

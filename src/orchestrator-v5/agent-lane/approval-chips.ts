@@ -296,6 +296,13 @@ export function approvalChipsFor(
       tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' }
         : tool === 'propose_hiring_times' ? { id: 'agent-hiring-times-change', label: 'Change', message: 'I want to change the hiring times.' } : DEADLINE_CHANGE_CHIP];
   }
+  // Starting values remain reviewable beside consent even when the AI omits them from its reply.
+  if ((tool === 'propose_starting_point' || tool === 'propose_option_interventions')
+    && stored?.proposal_id === proposalId && held?.ok === true && held.proposal_id === proposalId
+    && held.public_label === stored.public_label && stored.public_label.trim() !== '') {
+    return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message,
+      detail: stored.public_label }, AMEND_CHIP];
+  }
   const detail = assumptionCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];

@@ -43,7 +43,7 @@ const store = {
   readCommittedTurn: vi.fn(async (_scenario: string, id: string) => {
     const r = rows.find((x) => x.turn_id === id);
     return r === undefined ? null : { id: String(r.turn_id), request_hash: r.request_hash, assistant_message: r.assistantMessage ?? null,
-      user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [] };
+      suggested_actions_run_key: r.suggested_actions_run_key ?? null, user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [] };
   }),
   append: vi.fn(async (row: Row) => { rows.push({ ...row }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => []),
@@ -267,4 +267,58 @@ describe('result-first on retry, lost response and failed explanation (live rout
       expect(explainIds(replay)).toEqual(explainIds(first));
     });
   }
+  it.each(['same', 'missing-key'] as const)('B2l: proposal IDs stay hidden on committed Run replay after restart: %s', async kind => {
+    const id = randomUUID();
+    const first = (await runTurn(id)).json() as Body;
+    const answer = rows.find(r => r.turn_id === id)!;
+    answer.assistantMessage = 'Discuss prop_abcdef123456 before acting.';
+    if (kind === 'same') answer.suggested_actions_run_key = first.narration!.run_key;
+    await app.close(); app = await freshApp();
+    const saved = structuredClone(rows);
+    const replay = (await runTurn(id)).json() as Body;
+    expect(replay.assistant_text).toBe('Discuss this proposal before acting.');
+    expect(replay.narration).toEqual({ status: 'stale', run_key: '' });
+    expect(rows).toEqual(saved);
+    expect(runs).toBe(1); expect(modelCalls).toBe(0);
+  });
+  it.each(['same', 'newer', 'stale', 'missing-key'] as const)('saved Run identity after cold restart: %s', async kind => {
+    const id = randomUUID();
+    const first = (await runTurn(id)).json() as Body;
+    const answer = rows.find(r => r.turn_id === id)!;
+    expect(answer).toBeDefined();
+    // Existing rows with durable offers can have this key; ordinary no-offer rows do not.
+    if (kind !== 'missing-key') answer.suggested_actions_run_key = first.narration!.run_key;
+    if (kind === 'newer') computedAt = RUN_B;
+    if (kind === 'stale') runKind = 'stale';
+    await app.close(); app = await freshApp();
+    const saved = structuredClone(rows); store.append.mockClear();
+    const replay = (await runTurn(id)).json() as Body;
+    expect(replay.assistant_text).toBe(first.assistant_text);
+    expect(replay.narration).toEqual({ status: 'stale', run_key: '' });
+    expect(replay.blocks ?? []).toEqual([]);
+    expect(replay.suggested_actions.filter(c => isRunExplanationChip(c.id))).toEqual([]);
+    expect(store.append).not.toHaveBeenCalled();
+    expect(rows).toEqual(saved);
+    expect(runs).toBe(1); expect(modelCalls).toBe(0);
+  });
+
+});
+
+// Exercise the real column projection too: a permissive row double cannot prove the SELECT.
+it('the real committed-turn reader uses one exact projection without the retired B2 Run key', async () => {
+  const { SupabaseSessionStore } = await import('../../session/supabase-store.js');
+  const key = '0123456789abcdef';
+  const selected: string[] = [];
+  const row: Record<string, unknown> = { id: 'answer', request_hash: 'h', assistant_message: PROSE, suggested_actions_run_key: key };
+  const client = { from: () => ({ select: (columns: string) => {
+    selected.push(columns);
+    return { eq: () => ({ eq: () => ({ limit: async () => ({ error: null,
+      data: [Object.fromEntries(columns.split(',').map(c => c.trim()).map(c => [c, row[c]]))] }) }) }) };
+  } }) };
+  const reader = new SupabaseSessionStore(client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20 } as never);
+  expect(await reader.readCommittedTurn(SCENARIO, 'turn')).toEqual({
+    id: 'answer', request_hash: 'h', assistant_message: PROSE, user_message: null,
+    llm_calls_used: 0, pending_actions: [],
+  });
+  expect(selected).toEqual(['id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance']);
 });

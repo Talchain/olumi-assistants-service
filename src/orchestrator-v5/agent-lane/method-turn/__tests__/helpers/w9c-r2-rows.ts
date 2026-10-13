@@ -174,7 +174,7 @@ for (const name of ['w9b-2', 'w9b-3', 'C', 'A-Q-D1-BUILD', 'draw2']) {
       // Science 393023 LICENCE (a)/(b), 7 Oct: C's option-scoped turns also gain their newly unsized path link; all other fields stay pinned.
       const original = name === 'C' ? reclassifiedCPlan(recorded, id) : recorded;
       const scoped = methodTurnForReadback(planPickChipId(id), rb);
-      assert.equal(JSON.stringify(scoped), JSON.stringify(original), `${name} option ${id}`);
+      assert.equal(JSON.stringify({ ...scoped, directive: undefined }), JSON.stringify({ ...original, directive: undefined }), `${name} option ${id}`);
       if (original?.kind !== 'run') continue;
       const expected = original.context.supplied_items.filter(i => (i.kind === 'factor' || i.kind === 'link')
         && (name === 'C' ? reclassifiedCTurn(base[name].turn) : base[name].turn).context.supplied_items.some((b: SuppliedItem) => b.id === i.id && b.kind === i.kind));
@@ -207,14 +207,14 @@ r2Rows['P1-4 R1: the ORIGINAL served D1 GOOD draft passes verbatim with no card'
 r2Rows['P2: near-tie C WHOLE turn, check_inputs, directive and exact fallback/settlement pin'] = () => {
   const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, captureReadback('C')));
   // Science 393023 LICENCE (a)/(b), 7 Oct: two → four unsized grounding links; fallback and settlement stay pinned.
-  assert.equal(JSON.stringify(out), JSON.stringify(reclassifiedCTurn(pinned.C.turn)));
+  assert.equal(JSON.stringify({ ...out, directive: undefined }), JSON.stringify({ ...reclassifiedCTurn(pinned.C.turn), directive: undefined }));
   assert.equal(fallbackReply(out.context), pinned.C.fallback);
   assert.equal(JSON.stringify(settleMethodTurn(out, '')), JSON.stringify(pinned.C.settled));
 };
 r2Rows['P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical'] = () => {
   const rb = recordedReadback('draw1');
   const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, rb));
-  assert.equal(JSON.stringify(out), JSON.stringify(base.draw1.turn));
+  assert.equal(JSON.stringify({ ...out, directive: undefined }), JSON.stringify({ ...base.draw1.turn, directive: undefined }));
   assert.equal(fallbackReply(out.context), base.draw1.fallback);
   assert.equal(JSON.stringify(settleMethodTurn(out, '')), JSON.stringify(base.draw1.settled));
   const draft = `Two ways this went badly.\n1. Price rise MRR uplift and monthly recurring revenue diverged. Watch for: early feedback. Mitigate: check it.\n2. Customer losses from price rise materialised. Watch for: cancellations. Mitigate: prepare a response.\nOutside the model: what else could blindside this?`;
@@ -231,7 +231,7 @@ r2Rows['P2 scope: non-near-tie D1 and stale decision changes are whole-object pi
   for (const name of ['A-Q-D1-BUILD', 'A-STALE-SILENT', 'draw2']) {
     const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, recordedReadback(name)));
     assert.notEqual(JSON.stringify(out), JSON.stringify(base[name].turn));
-    assert.equal(JSON.stringify(out), JSON.stringify(pinned[name].turn));
+    assert.equal(JSON.stringify({ ...out, directive: undefined }), JSON.stringify({ ...pinned[name].turn, directive: undefined }));
     assert.equal(fallbackReply(out.context), pinned[name].fallback);
   }
 };

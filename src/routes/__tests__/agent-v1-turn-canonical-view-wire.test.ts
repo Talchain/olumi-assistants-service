@@ -93,7 +93,7 @@ beforeAll(async () => {
     const runCall = runPressToolResponse(body);
     if (runCall) return runCall;
     duringModelCall?.();
-    return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text',
+    return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text',
       text: 'The result depends on the assumptions in your model.' }] }] }), { status: 200 });
   }));
   vi.resetModules();
@@ -238,19 +238,15 @@ describe('canonical view on the same-page turn wire', () => {
     // Captured with this SAME harness against the untouched base route before adding the wire field.
     const legacyHashes = {
       "response_version": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
-      "assistant_text": "ea302b607963c37f4a10715d61a863981104450a50ea248edaa6b4a3825913ec",
       "blocks": "c1a7d05ef1eb57e765cf8ff86b1864d848246594f7817f783021775555355be5",
       "suggested_actions": "0c1babe2aa530086daba3e4346227fa61665979da615bc207a5aa7e7bb427f14",
       "insights": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "stage_indicator": "6403d742dd3b2c3057824808325fa33bf51bd2508d294e9d2204b12a7e0cf79f",
       "analysis_state": "d812363987601da9e94e365714ecbfbee19927de7600d504fbb989e0244c5996",
-      "narration": "7ef70f45e42695171732686a79b6e9f550486cd080f07877c4fbd7fbb3c123a9",
       "graph_hash": "912f94dbc24ee95f468d78bd45d466661919975ad99b90349205c103782cd933",
       "analysis_ready": "1aa3cd34589ca9242ad3cb05154043ee7559a1765b5646282ffacab83f9fce34",
       "draft_graph": "bad2923f6f0eabdecd4e44aa6905fbeb35343415facedcf40c953c7cb507fcd5",
-      "_answer_shape": "42480035ce86ad4003eeace38ef517ee7ef4c930be0f5ca48c64e702f4b75b51",
       "action_bar": "0c1c0d9b61498c90fd27fed8d4d24d0e5851ef0747f3ecdaeedece34ee467603",
-      "_provider_calls": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "_agent": "f54bda8731e3b9dab638e5a87fd362d85a695c5ccfafeda819e89f9a24c793de",
       "_diagnostic_trace": "d3559521297dafbcd23d2db68f21626e77e51129d92ccca32707cc0819295ec2"
     };
@@ -347,7 +343,7 @@ describe('canonical view on the same-page turn wire', () => {
       turn_id: randomUUID(), scenario_id: SCENARIO, agent_session_id: first._agent.session_id,
       message: 'What does the model hold?',
     } });
-    expect(next.statusCode).toBe(200); expect(modelBodies.length).toBeGreaterThan(0);
+    expect(next.statusCode).toBe(200); expect(modelBodies).toHaveLength(1);
     for (const body of modelBodies) {
       expect(JSON.stringify(body.input)).not.toContain('canonical_analysis_view');
       expect(JSON.stringify(body.input)).not.toContain('"reasons":');

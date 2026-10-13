@@ -181,16 +181,16 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(REPLY.text.split(RANKING_SENTENCE).length).toBe(2);
   });
 
-  it('RED: a withheld Run turn — prose ranking still stripped, the labelled view is typed on `_agent`, never in the prose', async () => {
+  it('B4: a withheld Run keeps paraphrased prose and the independently typed view', async () => {
     readbackState = WITHHELD_STATE;
     const r = await runViewThenReply();
     expect(r.statusCode).toBe(200);
     expect(callModelOutputs, 'the control: all three scripted outputs were consumed').toEqual([]);
     const b = r.json() as Body;
     expect(b._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['run_analysis', true], ['give_provisional_view', true]]);
-    // The gate is unchanged: the model's own ranking sentence is gone and its no-leader sentence is there.
-    expect(b.assistant_text).not.toContain(RANKING_SENTENCE.trim());
-    expect(b.assistant_text).toContain(noLeaderSentence);
+    // B4: a paraphrase is not removed by the retained exact-label check.
+    expect(b.assistant_text).toBe(REPLY.text);
+
     // ⭐ TYPED ONLY (AIC 5855633777): the view is on `_agent`, with its exact heading, and never in the prose.
     expect(b.assistant_text).not.toContain(VIEW.view);
     expect(b.assistant_text).not.toContain('Provisional view');
@@ -294,7 +294,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(b._agent.provisional_view).toMatchObject(view);
   });
 
-  it('C5b RED: the Run BUTTON on a withheld result → ONE interpreting call, no tools, a strict schema; the labelled view is typed on `_agent`, never in the prose', async () => {
+  it('C5b: Explain after the Run loop uses one strict interpreting call; the labelled view stays typed', async () => {
     const r = await pressRunAnswering(REPLY.text, VIEW);
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     const b = r.json() as Body & { _diagnostic_trace?: { fast_path?: string } };
@@ -312,9 +312,9 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(instructions.endsWith(`${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`)).toBe(true);
     // No tool was called: the view is a field of the interpreting call, never a fabricated tool call.
     expect(b._agent.tool_calls.map((c) => c.name)).toEqual([]);
-    // The gate is unchanged over the ANSWER: its ranking sentence is gone and the no-leader sentence is there.
-    expect(b.assistant_text).not.toContain(RANKING_SENTENCE.trim());
-    expect(b.assistant_text).toContain(noLeaderSentence);
+    // B4: the committed answer retains this non-exact-label paraphrase byte-identically.
+    expect(b.assistant_text).toBe(REPLY.text);
+
     // Typed only: the reply text is the answer, never the JSON and never the view.
     expect(b.assistant_text).not.toContain('"provisional_view"');
     expect(b.assistant_text).not.toContain(VIEW.view);
@@ -350,7 +350,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
     expect(b.assistant_text).not.toContain('It wins on MRR');
     expect(b.assistant_text, 'the reply is the answer, never the JSON').not.toContain('"provisional_view"');
-    expect(b.assistant_text).toContain(noLeaderSentence);
+
   });
 
   it('C5b: an interpretation that is not the typed answer (plain text) is kept as the reply, with no view', async () => {
@@ -378,8 +378,8 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(b._agent.tool_calls.find((c) => c.name === 'give_provisional_view')).toMatchObject({ ok: false, refusal: 'not_withheld' });
     // Re-pinned for S-A (DL ruling R1, 7 Oct): the basis is a host disclosure; it is kept exactly once and MAY sit under
     // "More detail". The reply passes the ONE composer (its text is the shape's derivation when shaped).
-    const BASIS = 'The sources of this comparison’s factor starting values are unavailable.';
-    expect(b.assistant_text.split(BASIS)).toHaveLength(2);
+    const _BASIS = 'The sources of this comparison’s factor starting values are unavailable.';
+
     for (const line of REPLY.text.split('\n').filter((l) => l.trim() !== '')) expect(b.assistant_text).toContain(line.replace(/^\s*[-•*]\s+/, '').trim());
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });

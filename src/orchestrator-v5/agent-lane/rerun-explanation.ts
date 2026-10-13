@@ -372,9 +372,9 @@ export function rerunExplanationPlan(
         : `${RERUN_NO_CHANGE_LINES.unwithheld} ${caseLine}`}`
     : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;
   const instruction = [
-    'Olumi has already told the user, in its own words from the run record, what changed between the two Runs:',
+    "Use the supplied run_delta rows to explain what changed between those actual Runs. Name the metric and revision being compared; do not describe an unchanged ranking as proof that goal chances or model inputs did not change. State only the particular input changes or unchanged inputs established by the verified current comparison. When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.",
     `"${codeLine}"`,
-    'Do not repeat that line, and never say whether the inputs changed or stayed the same: that line is the record. Say what this Run shows.',
+    "",
     priorWithheld
       ? 'The earlier Run held its comparison figures back, so never say anything rose, fell, moved or changed in value.'
       : noMatched
@@ -526,6 +526,25 @@ export function composeRerunExplanation(reply: string, plan: RerunExplanationPla
     return false;
   }).join(' ')).filter((line) => line.trim() !== '').join('\n').trim();
   return { text: kept === '' ? plan.codeLine : `${plan.codeLine}\n\n${kept}`, dropped, failed: [...failed] };
+}
+
+/** B6 retired: retain only the fact-bound prohibition on movement without prior figures.
+ * Preserve every other AI byte; no record paragraph, repeat removal or prose shaping.
+ */
+export function withoutUnlicensedRerunMovement(reply: string, plan: RerunExplanationPlan): string {
+  const ends = [...reply.matchAll(/[.!?](?=\s|$)|\n/gu)].map(match => match.index! + match[0].length);
+  if (ends.at(-1) !== reply.length) ends.push(reply.length);
+  const spans: { start: number; end: number }[] = [];
+  let start = 0;
+  for (const end of ends) { spans.push({ start, end }); start = end; }
+  let text = reply;
+  for (const span of spans.reverse()) {
+    const sentence = reply.slice(span.start, span.end);
+    const failed = checkMethodTurn('RERUN-EXPLANATION', sentence, plan.inputs, true, sentence).failed;
+    if (!failed.includes('RX-NO-MOVEMENT-WITHOUT-PRIOR')) continue;
+    text = text.slice(0, span.start) + text.slice(span.end);
+  }
+  return text;
 }
 
 /**

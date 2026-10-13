@@ -60,7 +60,7 @@ export function findState(payloads: unknown[]): Obj {
   for (const p of payloads) {
     const value = object(p);
     if ('graph_revision' in value && 'entities' in value) return value;
-    const nested = object(value.canonical_state);
+    const nested = object(value.canonical_state ?? object(value.facts).canonical_state);
     if ('entities' in nested) return nested;
   }
   // A refused stale Explain has no request; a noncanonical packet cannot satisfy the contract.
@@ -246,13 +246,13 @@ export async function capture(turn: Turn, variant: Variant, options: {
     const response = JSON.parse(res.body) as Obj;
     if (turn === 'Run-explanation' && variant === 'stale') expect(calls).toHaveLength(0);
     else if (options.expectedCalls !== null) {
-      expect(calls).toHaveLength(options.expectedCalls ?? options.expectedProviderCalls ?? (turn === 'tool-continuation' ? 2 : 1));
+      expect(calls).toHaveLength(options.expectedCalls ?? options.expectedProviderCalls ?? (turn === 'tool-continuation' || turn === 'widen-risks' ? 2 : 1));
     }
     calls.forEach(c => {
       expect(JSON.parse(c.sentBody)).toEqual(c.body);
       expect(c.sha256).toMatch(/^[a-f0-9]{64}$/);
     });
-    if (dir !== undefined) writeFileSync(`${dir}/route-response.json`, res.body);
+    if (dir !== undefined) { mkdirSync(dir, { recursive: true }); writeFileSync(`${dir}/route-response.json`, res.body); }
     const state = findState(calls.flatMap(c => c.payloads));
     return { calls, state, response, seed, variant };
   } finally { await app.close(); vi.unstubAllGlobals(); }
