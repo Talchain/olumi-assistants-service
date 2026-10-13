@@ -40,6 +40,16 @@ vi.mock('../runtime/agent-loop.js', async (original) => {
   };
 });
 
+// Hook (a): a pass-through wrapper records what the ROUTE hands the treated-as-zero reader (its third argument).
+const { rootLineCalls } = vi.hoisted(() => ({ rootLineCalls: [] as { fromRoute: boolean; args: unknown[] }[] }));
+vi.mock('../root-line.js', async (original) => {
+  const actual = await original<typeof import('../root-line.js')>();
+  return { ...actual, treatedAsZeroReplyLine: (...args: Parameters<typeof actual.treatedAsZeroReplyLine>) => {
+    rootLineCalls.push({ fromRoute: (new Error().stack ?? '').includes('agent-v1-turn.ts'), args });
+    return actual.treatedAsZeroReplyLine(...args);
+  } };
+});
+
 /** `v5_conversation_turns`, newest first. */
 const table: Rec[] = [];
 const client = {
@@ -137,7 +147,7 @@ describe('T1h: a replay names its own answer’s Run (real route, real committed
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; rows.length = 0; table.length = 0;
-    STATE.run_state.computed_at = AT; originalLoop = true; });
+    STATE.run_state.computed_at = AT; originalLoop = true; rootLineCalls.length = 0; });
 
   const press = (extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click',
@@ -170,6 +180,26 @@ describe('T1h: a replay names its own answer’s Run (real route, real committed
     expect(latest?.run_key, 'precondition: the LATEST answer row carries Run B, written by the real route').toBe(keyB);
     return keyB;
   }
+
+  it('hook (a): the Run turn and its replay hand the treated-as-zero reader the readback’s bound saved result', async () => {
+    originalLoop = false; // the result-first Run: its replay is rebuilt from the readback (the replay call site)
+    const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
+    const first = await press(request);
+    expect(first.statusCode, first.body).toBe(200);
+    const saved = JSON.parse(JSON.stringify(block)) as Rec;
+    expect(saved.type).toBe('analysis_result');
+    const live = rootLineCalls.filter(c => c.fromRoute);
+    expect(live.length, 'the live Run call site was reached').toBeGreaterThan(0);
+    for (const c of live) expect(c.args[2]).toEqual(saved);
+    rootLineCalls.length = 0;
+    const replay = await press(request);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(replay.json().narration?.status, 'precondition: the rebuilt (result-first) replay').toBe('pending');
+    const replayed = rootLineCalls.filter(c => c.fromRoute);
+    expect(replayed.length, 'the replay call site was reached').toBeGreaterThan(0);
+    for (const c of replayed) expect(c.args[2]).toEqual(saved);
+    expect(runs).toHaveLength(1);
+  });
 
   it('store: readCommittedTurn returns THIS row’s Run key; another row’s never; a malformed key reads as unknown', async () => {
     const base = { scenario_id: SCENARIO, request_hash: 'agent_turn:h', assistant_message: 'a', user_message: 'u', llm_calls_used: 0, pending_actions: [] };
