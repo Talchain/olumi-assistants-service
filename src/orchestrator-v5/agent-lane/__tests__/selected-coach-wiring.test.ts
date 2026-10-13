@@ -273,10 +273,11 @@ describe('selected Sol-high coach on the actual Agent route', () => {
 
   it('PROMPT 28: the SENT converse call carries each approved packet text once and no retired deferral', async () => {
     // The UI's own typed-message shape (DGAI `buildV5Payload`, e218e3d2: kind, turn_id, scenario_id, stage, turn_class, message,
-    // source), never a self-authored wire body.
+    // source), never a self-authored wire body. `sendTurn` always passes `turn_class: 'frame'` (useConversation.ts:4746);
+    // `stage: 'analyse'` is `deriveV5Stage` after a completed Run; a typed message normalises to `source: 'composer'`.
     scripted = [say('The comparison is provisional.')];
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', turn_id: '5d4c3b2a-1f0e-4d9c-8b7a-0000000000f8', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'review',
+      kind: 'message', turn_id: '5d4c3b2a-1f0e-4d9c-8b7a-0000000000f8', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
       message: 'What does the analysis say?', source: 'composer',
     } });
     expect(response.statusCode, response.body.slice(0, 300)).toBe(200);
