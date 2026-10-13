@@ -153,7 +153,8 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
       input_snapshot: { snapshot_version: 1, sent_digest: 'a'.repeat(64), goal: null, options_not_sent: [], factors: [], constraints: [], links: [],
         options: (enrichment.option_comparison as Rec[]).map((r) => ({ option_id: r.option_id, settings: [] })) } } }, { scenarioId });
     expect(rows, JSON.stringify(rows).slice(0, 300)).toHaveProperty('ok');
-    const status = Object.fromEntries((rows as { ok: { options: Rec[] } }).ok.options.map((o) => [o.option_id, o.licence_status]));
+    if (!('ok' in rows)) throw new Error(JSON.stringify(rows));
+    const status = Object.fromEntries(rows.ok.options.map((o) => [o.option_id, o.licence_status]));
     expect(status).toEqual({ hire_a_tech_lead: 'permitted_with_caveat', hire_two_developers: 'permitted_with_caveat', continue_as_now: 'withheld' });
   });
 

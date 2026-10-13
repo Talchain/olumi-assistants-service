@@ -63,7 +63,7 @@ async function saved(read: Json): Promise<Json> {
   return (await capabilities(read).getCanonicalState(ctx) as Json).analysis;
 }
 async function run(read: Json): Promise<Json> {
-  return (await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis' }) as Json).result;
+  return (await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis', effects_timing: null }) as Json).result;
 }
 function noCompanions(row: Json) {
   for (const key of GOAL_CHANCE_COMPANION_KEYS) expect(row).not.toHaveProperty(key);
@@ -310,7 +310,7 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     const read = driven(strengthDriver as Json);
     read.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
     read.analysis_ready = { ...read.analysis_ready, analysis_admission: { ...(read.analysis_ready?.analysis_admission ?? {}), admitted: true, permitted_analysis_mode: 'comparative_leader' } };
-    const out = await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis' }) as Json;
+    const out = await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis', effects_timing: null }) as Json;
     expect(out.claim_permissions?.leader_may_be_named, 'precondition: a leader may be named on this Run').toBe(true);
     expect(out.result.goal_chance_driver_display).toEqual({ [A]: 'It rests most on Olumi’s own estimate of how strongly ‘Pro plan price’ affects ‘Monthly recurring revenue’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?' });
   });

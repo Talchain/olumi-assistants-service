@@ -46,7 +46,7 @@ import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { goalOwnConstraintChanceRecords, sentRunPairsChange, sentRunScoresHeldChange, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
-import { periodEndAssumptionNote } from './period-end-assumption.js';
+import { effectsTimingOf, periodEndAssumptionNote, type EffectsTiming } from './period-end-assumption.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
@@ -222,6 +222,9 @@ export interface GoalChanceLicence {
    * place by the period. The stored basis keeps `effects_at_period_end: false`; the note says the assumption once.
    */
   readonly period_end_assumption?: { readonly origin: 'olumi'; readonly period_months: number; readonly reference: 'today' | 'launch' };
+  /** G2: the AI reading belongs to CEE's conditional licence, never the provider envelope. */
+  readonly effects_timing?: EffectsTiming;
+  readonly effects_timing_origin?: 'olumi';
 }
 
 /** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
@@ -401,8 +404,8 @@ export function goalChanceLicenceOf(
   // ⛔ Ruling 12 / amendment 2: a change's "at three months" needs its effects stated at that month; never steady state.
   // D3: where the basis holds they are NOT stated, the Run says why (`withholdForPeriodEndEffects`), never a silent gap.
   // ⭐ G (AIE #94 6128697025; amendments 6131950992): except the CONDITIONAL reading on a static model — this very Run scored the
-  // held target, the brief was read and states no timing of the effects at all beyond the goal's own period (fail safe, G r2)
-  // — said with Olumi's assumption.
+  // held target and the brief was read; the AI reads timing as not stated or in place by the period (G2).
+  // The result says Olumi's assumption, never a human attestation.
   const conditional = changeFrame !== undefined && basis !== undefined && !basis.effects_at_period_end
     ? periodEndConditionalOf(envelope, graph, goalId, constraints) : undefined;
   if ((changeFrame !== undefined && (basis === undefined || (!basis.effects_at_period_end && conditional === undefined)))
@@ -621,7 +624,7 @@ export function goalChanceLicenceOf(
     ...(Object.keys(drivers).length > 0 ? { driver_by_option: drivers } : {}),
     ...(Object.keys(noDrivers).length > 0 ? { no_driver_by_option: noDrivers } : {}),
     ...(conditional !== undefined ? { period_end_assumption: { origin: 'olumi' as const, period_months: conditional.basis.period_months,
-      reference: conditional.basis.reference } } : {}),
+      reference: conditional.basis.reference }, effects_timing: conditional.effects_timing, effects_timing_origin: 'olumi' as const } : {}),
   };
   const worded = withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
@@ -1552,7 +1555,7 @@ export function periodEndEffectsUnstatedOf(graph: unknown, goalId: unknown): { r
  */
 export function periodEndConditionalOf(
   envelope: unknown, graph: unknown, goalId: unknown, inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief' | 'effects_timing'> = {},
-): { readonly record: GoalRecord; readonly basis: GoalTargetBasis; readonly note: string } | undefined {
+): { readonly record: GoalRecord; readonly basis: GoalTargetBasis; readonly note: string; readonly effects_timing: 'not_stated' | 'in_place_by_period' } | undefined {
   const held = periodEndEffectsUnstatedOf(graph, goalId);
   if (held === undefined) return undefined;
   // Ordinary timing (`ordinaryTimingOf`): no held month (a held month without an at-period basis is the horizon gate's
@@ -1571,7 +1574,7 @@ export function periodEndConditionalOf(
   if (target == null || label === undefined || frame === undefined || target.raw === undefined || typeof target.unit !== 'string'
     || targetChanceWords({ label, frame, comparator, value: target.raw, unit: target.unit, quantityFrame: held.basis.quantity_frame,
       basis: held.basis }) === undefined) return undefined;
-  return { ...held, note: periodEndAssumptionNote(held.basis) };
+  return { ...held, note: periodEndAssumptionNote(held.basis), effects_timing: inputs.effects_timing };
 }
 
 /** Whether a change of exactly 0 meets the held comparison against the target (`held` is the stated comparator). */
@@ -1618,10 +1621,13 @@ export function withholdForPeriodEndEffects<E>(
     return id === undefined || baseline.has(id) ? [] : [id];
   }))];
   if (scored.length === 0) return envelope;
+  // The CEE-owned refusal retains the same AI reading the conditional licence records.
+  const effectsTiming = effectsTimingOf(inputs.effects_timing);
   // `detail.reason` is CEE-local (as `target_reading_open`); the UI renders `message` for this code.
   return withholdOptionGoalFigures(envelope, new Set(scored), {
     code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: periodEndEffectsWords(held.record, held.basis),
-    node_ids: [String(goalId)], option_ids: scored, detail: { reason: PERIOD_END_EFFECTS_UNSTATED },
+    node_ids: [String(goalId)], option_ids: scored, detail: { reason: PERIOD_END_EFFECTS_UNSTATED,
+      effects_timing: effectsTiming ?? null, effects_timing_origin: effectsTiming === undefined ? null : 'olumi' },
   }, { keepOutcome: true, keepOrdering: true });
 }
 

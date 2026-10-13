@@ -2900,9 +2900,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
       { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
-    // Retained in the existing Run enrichment, including withheld Runs; never written into the goal's basis.
-    response = { ...response, effects_timing: effectsTiming ?? null,
-      effects_timing_origin: effectsTiming === undefined ? null : 'olumi' };
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);

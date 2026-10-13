@@ -1,4 +1,4 @@
-/** G2: AI timing argument → existing capability/chip → real Run handler → stored enrichment. No timing sweep. */
+/** G2: AI timing argument → existing capability/chip → real Run handler → stored CEE licence/refusal. No timing sweep. */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { AGENT_TOOLS, AIE_APPROVED_EFFECTS_TIMING_DESCRIPTION, dispatchTool } from '../../agent-lane/runtime/agent-tools.js';
@@ -68,8 +68,13 @@ describe('G2: AI reading is required and carried into this Run, with Olumi origi
     expect(plotRun).toHaveBeenCalledTimes(1);
     expect(stored).toBeDefined();
     const valid = effects_timing !== null && effects_timing !== undefined && effects_timing !== 'invalid';
-    expect(stored!.effects_timing).toBe(valid ? effects_timing : null);
-    expect(stored!.effects_timing_origin).toBe(valid ? 'olumi' : null);
+    expect(stored).not.toHaveProperty('effects_timing');
+    expect(stored).not.toHaveProperty('effects_timing_origin');
+    const record = (stored!.inference_warnings as Rec[]).find((w) => licensed
+      ? w.code === 'GOAL_CHANCE_LICENSED' : w.detail?.reason === 'effects_at_period_end_unstated');
+    const reading = licensed ? record : record?.detail;
+    expect(reading?.effects_timing).toBe(valid ? effects_timing : null);
+    expect(reading?.effects_timing_origin).toBe(valid ? 'olumi' : null);
     const licence = goalChanceLicenceForAgent({ type: 'analysis_result', enrichment: stored });
     const warning = (stored!.inference_warnings as Rec[]).find((w) => w.detail?.reason === 'effects_at_period_end_unstated');
     if (licensed) {
