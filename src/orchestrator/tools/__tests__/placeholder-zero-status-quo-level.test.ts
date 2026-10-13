@@ -27,6 +27,7 @@ import {
   buildCanonicalAnalysisReadyFromGraph,
 } from '../analysis-ready-helper.js';
 import { resolveRunAdmission } from '../../../orchestrator-v5/tools/handlers/analysis-ready-core.js';
+import { guardAnalysisParticipation } from '../../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js';
 
 interface Fixture {
   readonly _source: { readonly capture: string; readonly sha256: string };
@@ -233,6 +234,65 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
       const graph = withRootSetEverywhere({ value: 0.245 });
       expect(levelIssueFactorIds(graph)).toEqual([]);
       expect(resolveRunAdmission(graph).willProceed).toBe(true);
+    });
+  });
+
+  // T4i: the level a Run needs is judged on the graph the Run SENDS. The reference below is never a list typed here: it
+  // is the participation guard's own output (the one site that withholds a `retained_excluded` node and its links,
+  // `run-analysis.ts` §2.7), built from readiness's own options exactly as the Run builds it.
+  describe('JUDGED ON THE GRAPH THE RUN SENDS: an excluded node owes no level; a root it leaves behind does', () => {
+    const excluding = (graph: Record<string, unknown>, ids: readonly string[]): Record<string, unknown> => ({
+      ...graph,
+      nodes: (graph.nodes as Array<Record<string, unknown>>).map((node) =>
+        ids.includes(String(node.id)) ? { ...node, analysis_participation: 'retained_excluded' } : node),
+    });
+    const sent = (graph: unknown) => {
+      const ready = buildCanonicalAnalysisReadyFromGraph(graph)!;
+      const options = ready.options as Array<{ option_id: string; interventions?: Record<string, unknown> }>;
+      return guardAnalysisParticipation(graph, {
+        goalNodeId: ready.goal_node_id,
+        submittedOptionIds: options.map((option) => option.option_id),
+        optionInterventionTargetIds: options.flatMap((option) => Object.keys(option.interventions ?? {})),
+      });
+    };
+
+    it('E: its only unvalued root excluded → no level blocker and the Run proceeds, exactly as on the graph sent', () => {
+      const fx = load('journey-e-brief-213009Z');
+      const ROOT = 'current_annual_salary_spend';
+      expect(levelIssueFactorIds(fx.graph), 'contrast: included, it still blocks').toEqual([ROOT]);
+      const graph = excluding(fx.graph, [ROOT]);
+      const guard = sent(graph);
+      expect(guard.refusals).toEqual([]);
+      expect(guard.excludedNodeIds).toEqual([ROOT]);
+      expect(levelIssueFactorIds(guard.graph)).toEqual([]);
+      expect(levelIssueFactorIds(graph)).toEqual([]);
+      expect(resolveRunAdmission(graph).willProceed).toBe(true);
+    });
+
+    it('A: the excluded node is not asked for; the risk whose only cause it was becomes a root the engine samples, and is', () => {
+      const fx = load('journey-a-run2-final-214311Z');
+      const EXCLUDED = 'fac_new_pro_customer_price';
+      const ORPHANED = 'risk_competitive_price_or_ai_feature_response';
+      expect(levelIssueFactorIds(fx.graph), 'precondition: before exclusion the risk had a cause').not.toContain(ORPHANED);
+      const graph = excluding(fx.graph, [EXCLUDED]);
+      const guard = sent(graph);
+      expect(guard.excludedNodeIds).toEqual([EXCLUDED]);
+      const onSent = levelIssueFactorIds(guard.graph);
+      expect(onSent).toContain(ORPHANED);
+      expect(onSent).not.toContain(EXCLUDED);
+      expect(levelIssueFactorIds(graph)).toEqual(onSent);
+      expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    });
+
+    it('a lever target excluded too: the Run refuses rather than withhold anything, so readiness withholds nothing either', () => {
+      const fx = load('journey-a-run2-final-214311Z');
+      const TARGET = 'pro_plan_price';
+      const graph = excluding(fx.graph, ['fac_new_pro_customer_price', TARGET]);
+      const guard = sent(graph);
+      expect(guard.refusals).toEqual([{ node_id: TARGET, reason: 'option_intervention_target' }]);
+      expect(guard.excludedNodeIds).toEqual([]);
+      expect(levelIssueFactorIds(graph)).toEqual(levelIssueFactorIds(guard.graph));
+      expect(levelIssueFactorIds(graph)).toEqual(levelIssueFactorIds(fx.graph));
     });
   });
 });

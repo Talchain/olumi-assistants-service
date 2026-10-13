@@ -40,6 +40,7 @@ import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analys
 // ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
 import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
+import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
@@ -1219,7 +1220,25 @@ function relationshipAsk(option: unknown): string | undefined {
  * remain supported through their held level; binary shape supplies none.
  * Every sampled root kind is covered; risks carry a likelihood/magnitude ask.
  * Goal, option, decision and constraint (limit) nodes are not sampled roots.
+ *
+ * ⭐ JUDGED ON THE GRAPH THE RUN SENDS (T4i). The participation guard
+ * (`run-analysis-participation-guard.ts`) withholds every `retained_excluded`
+ * node and each edge touching it, so that node owes no level, and a node whose
+ * only cause it was is a root the engine samples. Where the guard would refuse
+ * instead (the goal, a compared option or a lever's target is excluded) it
+ * withholds nothing, and neither does this reader.
  */
+function leftOutOfRun(graph: GraphV3T, payload: AnalysisReadyPayload): ReadonlySet<string> {
+  const options = (payload.options ?? []) as ReadonlyArray<{ option_id?: unknown; interventions?: unknown }>;
+  const refusing = new Set<string>([
+    payload.goal_node_id,
+    ...options.flatMap((option) => (typeof option.option_id === 'string' ? [option.option_id] : [])),
+    ...options.flatMap((option) => (isPlainObject(option.interventions) ? Object.keys(option.interventions) : [])),
+  ]);
+  const excluded = graph.nodes.filter(isRetainedExcluded).map((node) => node.id);
+  return excluded.some((id) => refusing.has(id)) ? new Set() : new Set(excluded);
+}
+
 function goalRootsWithoutStatusQuoLevel(
   graph: GraphV3T,
   payload: AnalysisReadyPayload,
@@ -1237,10 +1256,12 @@ function goalRootsWithoutStatusQuoLevel(
     const kind = kindOf.get(id);
     return kind === 'option' || kind === 'decision' || kind === 'constraint';
   };
+  const notSent = leftOutOfRun(graph, payload);
   const parents = new Map<string, number>();
   const children = new Map<string, string[]>();
   for (const edge of graph.edges) {
     if (nonCausal(edge.from) || nonCausal(edge.to)) continue;
+    if (notSent.has(edge.from) || notSent.has(edge.to)) continue;
     parents.set(edge.to, (parents.get(edge.to) ?? 0) + 1);
     children.set(edge.from, [...(children.get(edge.from) ?? []), edge.to]);
   }
@@ -1275,6 +1296,7 @@ function goalRootsWithoutStatusQuoLevel(
   const gaps: Array<{ id: string; label: string; kind: GraphV3T['nodes'][number]['kind'] }> = [];
   for (const node of graph.nodes) {
     if (node.kind === 'goal' || nonCausal(node.id) || node.id === payload.goal_node_id) continue;
+    if (notSent.has(node.id)) continue;
     if (alreadyFactorBlocked.has(node.id)) continue;
     if ((parents.get(node.id) ?? 0) > 0) continue;
     const observed = (node as { observed_state?: { value?: unknown } }).observed_state;
