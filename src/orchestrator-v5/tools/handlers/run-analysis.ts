@@ -1,4 +1,4 @@
-import { unresolvedRetainedLimits, withholdRetainedLimitFrames, RETAINED_LIMIT_WITHHELD, RETAINED_LIMIT_WITHHOLD_CODE } from '../../../graph/retained-limit.js';
+import { unresolvedRetainedLimits, withholdRetainedLimitFrames, retainedLimitWithheldLine, RETAINED_LIMIT_WITHHOLD_CODE } from '../../../graph/retained-limit.js';
 import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
 import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
@@ -2001,6 +2001,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⛔ DL gate 1 v2 (`identical-arms.ts`): read the engine's INTACT outcomes, before any withholder deletes
     // `downside` or the shares. Applied after every other withhold (below), so each keeps its own reason.
     const unresolvedLimits = unresolvedRetainedLimits(snapshot.rawPersistedGraph ?? snapshot.graph);
+    const retainedLimitReason = retainedLimitWithheldLine(snapshot.rawPersistedGraph ?? snapshot.graph);
     if (unresolvedLimits.length > 0) {
       const ids = unresolvedLimits.map((c) => c.constraint_id);
       const optionIds = new Set(finalWireOptions.flatMap((o) => {
@@ -2010,7 +2011,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       response = withholdOptionLimitScores(response, new Map(ids.map((id) => [id, optionIds])));
       response = withholdOptionGoalFigures(response, optionIds, {
         code: RETAINED_LIMIT_WITHHOLD_CODE, severity: 'warning', source: 'cee',
-        message: RETAINED_LIMIT_WITHHELD, constraint_ids: ids,
+        message: retainedLimitReason, constraint_ids: ids,
       });
       // Existing per-limit/joint refusal carriers. CEE's retained-question evidence, not an engine claim.
       const env = response as Record<string, unknown>;
@@ -2024,7 +2025,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       env.joint_withheld = { reason: 'limit_unscored', constraint_ids: [...new Set([...(priorJoint?.constraint_ids ?? []), ...ids])] };
       response = appendInferenceWarning(response, {
         code: 'CONSTRAINT_TARGET_UNRELIABLE', severity: 'warning', source: 'cee', constraint_ids: ids,
-        reason: 'retained_limit_equivalence_unresolved', message: RETAINED_LIMIT_WITHHELD,
+        reason: unresolvedLimits.some((c) => c.retained_unresolved_limit?.reason === 'retained_limit_quantity_unresolved')
+          ? 'retained_limit_quantity_unresolved' : 'retained_limit_equivalence_unresolved', message: retainedLimitReason,
       });
     }
     const identicalArms = detectIdenticalArms(response, finalWireOptions);
@@ -2927,7 +2929,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
-      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun,
+      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun, perLimit: constraintVerdict.perLimit,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
@@ -3070,7 +3072,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       return disclosedHeadline !== null && headline !== null
         ? disclosedHeadline + summary.slice(headline.length) : summary;
     })();
-    const summary = unresolvedLimits.length > 0 ? RETAINED_LIMIT_WITHHELD : composedSummary;
+    const summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases

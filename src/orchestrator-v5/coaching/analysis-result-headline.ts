@@ -55,7 +55,7 @@ import {
   readRobustnessLevel,
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
-import { RETAINED_LIMIT_WITHHELD } from '../../graph/retained-limit.js';
+import { RETAINED_LIMIT_WITHHELD, RETAINED_LIMIT_QUANTITY_WITHHELD } from '../../graph/retained-limit.js';
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
 import { orderFragilityPriorityRows } from '../../orchestrator/shared/fragile-edge-authority.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
@@ -3125,7 +3125,7 @@ export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail
   // (provisional_doctrine_v0) — see MAX_ASSISTANT_TEXT_CHARS.
   if (text.length === 0 || text.length > MAX_ASSISTANT_TEXT_CHARS) return false;
   if (text.includes('\n') || text.includes('\r')) return false;
-  if (text === RETAINED_LIMIT_WITHHELD) return true;
+  if (text === RETAINED_LIMIT_WITHHELD || text === RETAINED_LIMIT_QUANTITY_WITHHELD) return true;
   if (RUN_ANALYSIS_LOCKED_TEMPLATES.has(text)) return true;
   // D-ask-1 (2.11 P0-1) + T1: a locked template may carry the scaffold
   // disclosure suffix and/or the constraint-gap disclosure suffix (the headline
