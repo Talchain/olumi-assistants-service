@@ -122,12 +122,21 @@ export function comparedMembersOf(raw: unknown, goalId: string, requested: { rea
     not_compared: [...(denominator ? [] : ['denominator']), 'reference', 'period'] };
 }
 
-/** AIE_TEXT_PENDING: the card's words, built from the stored question and the reading it answers with. */
-export const CONFIRM_GOAL_READING_LABEL_TEMPLATE = 'Read your target as {reading}. This answers: {question}';
-/** AIE_TEXT_PENDING: the Agent's note on the card. */
-export const CONFIRM_GOAL_READING_NOTE = 'Nothing has changed yet. This card answers the question the saved goal holds about how its target is read, '
-  + 'with the reading shown on it. Offer it only when the user has said that is the reading they mean; show its words, never the id, '
-  + 'and call authorise_change with this proposal_id once they agree.';
+/** The card's words, the AIE's AMEND byte for byte (`AIE-GOAL-READING-2995-TEXT-RULINGS-20261013.json` card.replacement). */
+export const CONFIRM_GOAL_READING_LABEL_TEMPLATE = 'Confirm this reading of your target: {reading}. Question being answered: {question}.';
+/** The Agent's note on the card, the AIE's AMEND byte for byte (same ruling, agent_note.replacement). */
+export const CONFIRM_GOAL_READING_NOTE = 'Nothing has changed yet. This card proposes confirming the saved target reading shown on it, as an answer to the '
+  + 'stored question. Offer it only when the user\u2019s actual source or bound answer supports that complete reading, including its quantity, unit, '
+  + 'comparator, reference, denominator, period and conditions; matching a figure alone is insufficient. Show the full reading and question, never the '
+  + 'proposal id. Use authorise_change only when the user\u2019s bound approval for this shown card permits this proposal_id. It confirms the reading only; '
+  + 'it does not change the underlying claim\u2019s authorship or give permission to Run.';
+/**
+ * AIE_TEXT_PENDING (DL final ruling 3, 13 Oct): beside `already_saved`, so the reply states the saved reading and never claims
+ * that a member the request could not carry (reference, period, denominator) matched what the user meant.
+ */
+export const ALREADY_SAVED_NOTE = 'Nothing was prepared. The saved target already has this figure, unit and comparator; its saved reading is '
+  + 'saved_reading. Tell the user that saved reading, and that only the figure, unit and comparator were compared: never say its reference, period or '
+  + 'denominator match what the user meant unless their own words say so.';
 
 /**
  * The answer for a requested target that restates the goal's held change target, or `undefined` when it does not (the
@@ -153,7 +162,8 @@ export function heldChangeTargetAnswer(args: {
   const stored = goal?.goal_target_basis;
   const reading = basis === undefined ? undefined : goalReadingWords(graph.raw, goalId, basis);
   if (basis?.open_question === undefined || basis.open_question === CONDITIONS_NOT_KEPT || !isRec(stored) || reading === undefined) {
-    return { ok: true, mutated: false, already_saved: true, saved_goal: saved, ...comparedMembersOf(graph.raw, goalId, args.requested) };
+    return { ok: true, mutated: false, already_saved: true, saved_goal: saved, ...comparedMembersOf(graph.raw, goalId, args.requested),
+      ...(reading !== undefined ? { saved_reading: reading } : {}), note: ALREADY_SAVED_NOTE };
   }
   // The user's words are the ANSWER only when THIS turn states the target about this goal; an earlier statement that matched
   // never credits an unrelated current turn (the card, pressed, is still the user's choice of the reading it shows).

@@ -85,18 +85,21 @@ export function goalReadingWords(graph: unknown, goalId: string, basis: GoalTarg
   return `‘${label}’ ${change} ${periodWords(basis)}${basis.denominator !== undefined ? `, measured against ${basis.denominator}` : ''}`;
 }
 
-/** AIE_TEXT_PENDING: the receipt after the approved answer, with the user's words verbatim. Facts only; no promise of a chance. */
-export const GOAL_READING_RECORDED_TEMPLATE = 'Recorded your answer: “{answer}”. Your target is read as {reading}. Run the analysis again.';
-/** AIE_TEXT_PENDING: the same receipt when the answer's words are not held (or too long to quote whole). */
-export const GOAL_READING_RECORDED_NO_WORDS_TEMPLATE = 'Recorded your answer. Your target is read as {reading}. Run the analysis again.';
+/**
+ * The receipt, the AIE's AMEND byte for byte (`AIE-GOAL-READING-2995-TEXT-RULINGS-20261013.json` receipt): said only after the
+ * writer's confirmed commit and a matching read-back; no "again" and no Run (the existing Run action offers its own step).
+ */
+export const GOAL_READING_CONFIRMED_TEMPLATE = 'Confirmed the saved target reading: {reading}.';
+/** The AIE's optional sentence: only the retained verbatim human answer bound to this card (typed, never chip text). */
+export const GOAL_READING_ANSWER_TEMPLATE = 'Your recorded answer was: \u201c{answer}\u201d.';
 const ANSWER_QUOTE_MAX = 300;
 
-/** The receipt: the user's answer quoted whole (never cut), else said without it. */
+/** The receipt: the confirmed reading, then the user's answer quoted whole (never cut) when it is held. */
 export function goalReadingRecordedWords(reading: string, answer: string | undefined): string {
   const words = answer?.trim() ?? '';
+  const base = GOAL_READING_CONFIRMED_TEMPLATE.replace('{reading}', reading);
   return words !== '' && words.length <= ANSWER_QUOTE_MAX && !/[\r\n]/.test(words)
-    ? GOAL_READING_RECORDED_TEMPLATE.replace('{answer}', words).replace('{reading}', reading)
-    : GOAL_READING_RECORDED_NO_WORDS_TEMPLATE.replace('{reading}', reading);
+    ? `${base} ${GOAL_READING_ANSWER_TEMPLATE.replace('{answer}', words)}` : base;
 }
 
 export function applyGoalReadingEdit(persistedGraph: unknown, approved: ApprovedGoalReading): GoalReadingEditResult {

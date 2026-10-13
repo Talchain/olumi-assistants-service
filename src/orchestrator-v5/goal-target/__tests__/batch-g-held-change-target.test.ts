@@ -30,7 +30,7 @@ import type { SessionTurnWrite } from '../../session/store.js';
 import { CONDITIONS_NOT_KEPT } from '../goal-target-basis.js';
 import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
 import { answeredBasisOf, applyGoalReadingEdit } from '../goal-reading-write.js';
-import { heldChangeTargetAnswer, savedGoalMeaningOf } from '../held-change-target.js';
+import { ALREADY_SAVED_NOTE, heldChangeTargetAnswer, savedGoalMeaningOf } from '../held-change-target.js';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: vi.fn(async () => undefined) }));
 
 type Rec = Record<string, any>;
@@ -43,9 +43,9 @@ const GOAL = 'productivity';
 const QUESTION = 'Does “increase productivity by at least 10%” mean 10% relative to today\'s productivity, or 10 percentage points on a productivity score?';
 /** The card's words, its button and the receipt, exactly (AIE_TEXT_PENDING templates, filled from the stored reading). */
 const READING = '‘productivity’ up at least 10% from today at three months, measured against today\'s development productivity';
-const CARD = `Read your target as ${READING}. This answers: ${QUESTION}`;
+const CARD = `Confirm this reading of your target: ${READING}. Question being answered: ${QUESTION}.`;
 const BUTTON = { label: 'Yes, read it that way', message: 'Yes, read my target that way.' };
-const RECEIPT = `Recorded your answer: “${CLARIFIED}”. Your target is read as ${READING}. Run the analysis again.`;
+const RECEIPT = `Confirmed the saved target reading: ${READING}. Your recorded answer was: “${CLARIFIED}”.`;
 /** At least 10 %: the reconstructed second turn-14 call, as the hook passes it (`TARGET_OPERATOR[type]`, value, unit). */
 const AT_LEAST_10 = { operator: '>=', value: 10, unit: '%' };
 const goalOf = (body: Rec): Rec => (body.graph.nodes as Rec[]).find((n) => n.id === GOAL)!;
@@ -80,7 +80,8 @@ describe('G14: restating the saved change target is "already saved", never a ref
       label: 'Productivity', target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=',
       reference: 'today', denominator: 'today’s productivity', effect_unit: '% of today’s productivity', period_months: 3, period_kind: 'at_end',
       also_required: ['maintaining code quality'],
-    }, compared: ['target_frame', 'target_raw', 'unit', 'comparator'], not_compared: ['denominator', 'reference', 'period'] });
+    }, compared: ['target_frame', 'target_raw', 'unit', 'comparator'], not_compared: ['denominator', 'reference', 'period'],
+    saved_reading: '‘Productivity’ up at least 10% from today at three months, measured against today’s productivity', note: ALREADY_SAVED_NOTE });
     expect(proposals.outstanding(String(SAVED.scenario_id), null)).toEqual([]);
   });
 
@@ -275,7 +276,7 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     const r = await press(pid);
     expect(r).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' });
     expect(r.follow_up).toBeUndefined();
-    expect(JSON.stringify(r)).not.toContain('Recorded your answer');
+    expect(JSON.stringify(r)).not.toContain('Confirmed the saved target reading');
     expect(proposals.isApplied(pid)).toBe(false);
     // It did not land, so the base is unchanged and a plain retry goes through again — never "superseded" (Codex buddy r2).
     expect(w.rows).toHaveLength(0);
@@ -319,7 +320,7 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     w.setGraph(moved);
     const r = await press(pid);
     expect(r.ok).toBe(false);
-    expect(JSON.stringify(r)).not.toContain('Recorded your answer');
+    expect(JSON.stringify(r)).not.toContain('Confirmed the saved target reading');
     expect(w.rows).toHaveLength(0);
     expect(w.graph()).toEqual(moved);
   });
