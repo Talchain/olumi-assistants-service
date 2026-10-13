@@ -10139,7 +10139,8 @@ export function createAgentCapabilities(
         turn_class: 'decide',
         source: 'chip_click',
         message: args.reason,
-        chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
+        chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis',
+          parameters: { effects_timing: args.effects_timing } },
       });
       /**
        * ⛔ A RUN THAT FAILED IS NOT A RUN THAT WAS REFUSED (served 319dde1, 01:42Z). The run turn answered 500

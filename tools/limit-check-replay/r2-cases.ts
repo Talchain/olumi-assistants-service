@@ -39,5 +39,5 @@ export async function runCarrier(s: Rec, attested = true): Promise<Rec> {
     } };
     throw new Error(`Unexpected local replay dispatch: ${path}`);
   }, new ProposalStore());
-  return capabilities.runAnalysis({ scenario_id: s.scenario_id, authenticated_user_id: null, request_id: 'lim1-r2-replay' }, { reason: 'Run it.' });
+  return capabilities.runAnalysis({ scenario_id: s.scenario_id, authenticated_user_id: null, request_id: 'lim1-r2-replay' }, { reason: 'Run it.', effects_timing: null });
 }

@@ -48,7 +48,10 @@ const hiringRun = (): Rec => ({
     { option_id: 'carry_on', probability_of_goal: 0 },
   ],
 });
-const hiringConstraints = (g: Rec) => ({ storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints) });
+// ⛔ CHANGED EXPECTATION (G / D2, AIE #94 6133027121): a change goal's status quo is read as paired only from what the PRODUCER
+// scored — the goal CEE SENT for this Run (`sentRunPairsChange`), never the goal's own frame — so the Run's request rides here.
+const hiringConstraints = (g: Rec) => ({ storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints),
+  sentRun: { graph: g } });
 
 describe('hiring — a change of +10% from today has its ruled sentence (ruling 20) and its disclosures (amendments 1, 2, 4)', () => {
   it('RED: licensed per option, worded "productivity being at least 10% higher than today at three months"', () => {
@@ -1001,11 +1004,20 @@ describe('AIE status-quo disposition — the same-draw reference is decided by t
     const g = hiringGraph();
     expect(goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!.status_quo?.option_id).toBe('carry_on');
     // Hiring's status quo whose change is NOT 0 disagrees with its own reference: withheld with that reason.
-    const drift = hiringRun();
-    (drift.option_comparison as Rec[])[2]!.outcome = { mean: 2, std: 1, p10: 1, p50: 2, p90: 3 };
-    const l = goalChanceLicenceOf(drift, g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
-    expect(l.withheld_reason_by_option?.carry_on).toEqual({ reason: 'reference_moved', line: MOVED('Productivity') });
-    expect(l.status_quo).toBeUndefined();
+    // ⛔ CHANGED EXPECTATION (G; DL ruling 12 Oct: the AIE's D2 exact equality IN THE RUN'S OWN RECORDED FRAME). A change goal is
+    // scored as the PAIRED change, so the drift is read where the Run records it — its chance: a zero change cannot score 1
+    // against "at least +10%", nor anything strictly between. The row's `outcome` is the goal's raw LEVEL samples (served run 4,
+    // turns/07.json: std 0.188 beside an earned 0), another frame, and is no longer compared with the change's 0.
+    for (const p of [1, 0.4]) {
+      const drift = hiringRun();
+      (drift.option_comparison as Rec[])[2]!.probability_of_goal = p;
+      const l = goalChanceLicenceOf(drift, g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
+      expect(l.withheld_reason_by_option?.carry_on, String(p)).toEqual({ reason: 'reference_moved', line: MOVED('Productivity') });
+      expect(l.status_quo, String(p)).toBeUndefined();
+    }
+    const level = hiringRun();
+    (level.option_comparison as Rec[])[2]!.outcome = { mean: 2, std: 1, p10: 1, p50: 2, p90: 3 };
+    expect(goalChanceLicenceOf(level, g, 'productivity', () => false, undefined, g, hiringConstraints(g))!.status_quo?.option_id).toBe('carry_on');
   });
 });
 

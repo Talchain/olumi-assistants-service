@@ -38,7 +38,7 @@ function world(enrichment: Json, leader = { permitted: false, withheld_reason: '
 
 describe('run_analysis carries the run\'s withheld goal chance, with the sentence and the rule', () => {
   it('RED (PLoT #416\'s shape): every option withheld → `goal_chance` says why, in AIQ\'s words, and forbids any chance', async () => {
-    const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Json;
     expect(r.goal_chance, JSON.stringify(Object.keys(r))).toEqual(expect.objectContaining({ withheld: true, node_ids: ['mrr'] }));
     // The reply's opening, then PLoT's reason verbatim (its UI-slot "Not shown." is not a sentence in a reply).
     expect(r.goal_chance.say).toBe("This run doesn’t yet show each option’s chance of meeting your goal. 'MRR' depends on Pro plan price × Pro paying "
@@ -48,7 +48,7 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
   });
 
   it('CONTROL (Paul\'s evaluated MRR): no warning, chances present → no `goal_chance`, the run reads as today', async () => {
-    const r = await world({ option_comparison: SHOWN_ROWS, inference_warnings: [] }, { permitted: true } as never).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    const r = await world({ option_comparison: SHOWN_ROWS, inference_warnings: [] }, { permitted: true } as never).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Json;
     expect(r.ran).toBe(true);
     expect(r).not.toHaveProperty('goal_chance');
   });
@@ -66,7 +66,7 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
   });
 
   it('LATER TURNS read the selected Run afresh; retained history never repeats the old warning or chance', async () => {
-    const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Json;
     const computed_at = '2026-09-29T13:07:48.159Z';
     const run = { ...r, run_identity: { scenario_id: ctx.scenario_id, graph_hash_at_run: 'aaaaaaaaaaaaaaaa', computed_at } };
     const history = [

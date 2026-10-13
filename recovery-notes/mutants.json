@@ -1,0 +1,32 @@
+[
+  {
+    "mutant": "current-turn-only",
+    "exit": 1,
+    "counts": "1 failed | 47 passed (48)",
+    "spec": "agent-add-factor-door-seam.test.ts"
+  },
+  {
+    "mutant": "drop-retained-range",
+    "exit": 1,
+    "counts": "1 failed | 47 passed (48)",
+    "spec": "agent-add-factor-door-seam.test.ts"
+  },
+  {
+    "mutant": "relabel-unknown",
+    "exit": 1,
+    "counts": "1 failed | 47 passed (48)",
+    "spec": "agent-add-factor-door-seam.test.ts"
+  },
+  {
+    "mutant": "agent-reference-override",
+    "exit": 1,
+    "counts": "1 failed | 45 passed (46)",
+    "spec": "time-close-chain.test.ts"
+  },
+  {
+    "mutant": "truncate-card-source",
+    "exit": 1,
+    "counts": "1 failed | 69 passed (70)",
+    "spec": "deadline-card-chain.test.ts"
+  }
+]

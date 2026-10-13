@@ -84,7 +84,7 @@ describe('⛔ the Agent says whose range makes a factor decision-sensitive (AIQ 
     const block = withRows(0, { 0: { spread_source: 'template' } });
     const dispatch: InternalDispatch = async () => ({ status: 200, json: { analysis_ready: { status: 'ready', options: [], blockers: [] }, blocks: [block] } });
     const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full', () => {});
-    const r = await caps.runAnalysis(ctx, { reason: 'compare the options' });
+    const r = await caps.runAnalysis(ctx, { reason: 'compare the options', effects_timing: null });
     const ds = (r.result as { decision_sensitivity: Measured }).decision_sensitivity;
     expect(ds.most_sensitive!.range).toBe('olumi_assumed');
     expect(ds.say).toContain('Within the range Olumi assumed for');

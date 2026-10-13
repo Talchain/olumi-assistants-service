@@ -21,7 +21,10 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // the share of runs; chat quotes the screen's goal-chance display: 09f7b6ac… → f6cec112….
 // S-E GOALS S2b (7 Oct): #34 and #35 gain the share-by-date sentences (goal_chance_words; a stated_time range says slow to
 // fast end, never causal doubt): 22,393 → 23,075 bytes (+682, exactly the two added sentences). 0732df33… → a9c847ef….
-const HOST_SHA = 'a9c847ef37063cd1e5e25c6b8810cbe9b6f16aef83f188dce728923d5ea46add';
+// G (12 Oct, AIE #94 6133027121): the range rule in #34 and #35 says goal_chance_words when given (else “chance of meeting
+// your goal”), and #35's headline is “its chance, in this model”, so a part-goal Run is never called the whole goal's chance:
+// 23,075 → 23,185 bytes (+110). Reversing exactly those three edits on the module's string reproduces a9c847ef… and 23,075.
+const HOST_SHA = 'ba7dee9095a0317e96c1dd5cab8c720bca010677d4e87c0e1c17b0b09cbff05b';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -47,10 +50,19 @@ const HOST_SHA = 'a9c847ef37063cd1e5e25c6b8810cbe9b6f16aef83f188dce728923d5ea46a
 // Combined (#2762 merge of staging): 34,302 + 682 + 193 = 35,177 bytes; sha re-derived from the SENT body.
 // + S-E GOALS S4 propose_new_limit clause in the proposing-tool instruction: staging 35,177 + 241 = 35,418 bytes.
 //   Removing exactly that clause from the SENT body reproduces staging's 915133ba… sha and 35,177 bytes.
-const RENDERED_SHA = 'a8a9845b846a3739da5e2ec4d0f5c084b7034548de36e2fbc85b9348db99b45e';
-const RENDERED_BYTES = 35_418;
+// + G (12 Oct, AIE #94 6133027121): the AIE's selected-Run scope line, verbatim and ONCE, appended to
+//   GOAL_CHANCE_RANKING_INSTRUCTION (where the Agent receives analysis.goal_chance_licence); that rule's three whole-goal
+//   phrases (“their chance of meeting the goal”, “highest chance of meeting the goal”, “similar chances of meeting the
+//   goal”) become goal chances / chance / similar chances; plus the +110-byte host edits above: 35,418 → 35,782 bytes (+364).
+//   Derived from the SENT body; reversing exactly those edits on the SENT body reproduces a8a9845b… and 35,418 bytes.
+const RENDERED_SHA = '96cd8417fa4c8d5c1874f553f9addb164106d8872c2fa3da40211bf225063add';
+const RENDERED_BYTES = 35_782;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
+/** G (AIE #94 6133027121): the approved selected-Run scope line, verbatim; SENT once on every coaching path. */
+const AIE_SCOPE_LINE = 'Describe the selected Run using its licensed target wording and scope. If it scores only part of the user\'s goal, '
+  + 'name that target and retain the unscored conditions; never call its chance the chance of meeting the whole goal. Keep its provisional '
+  + 'or timing-assumption qualification in your own explanation.';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';
@@ -223,6 +235,9 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(sent[0]!.instructions).toContain(HOST_TOOL_CONTRACT);
     // WORDING BATCH: the served conversation prompt carries the model-relative naming rule (agent.converse).
     expect(sent[0]!.instructions).toContain(NAMING_RULE_FORM);
+    // G: the coaching conversation carries the AIE's scope line exactly once, and no whole-goal headline or superlative.
+    expect(sent[0]!.instructions.split(AIE_SCOPE_LINE)).toHaveLength(2);
+    expect(sent[0]!.instructions).not.toMatch(/headline is its chance of meeting|highest chance of meeting|similar chances of meeting/);
   });
 
   it('keeps the same selected prompt on a tool-followup conversation; the narrating hop is low effort (P44 S1)', async () => {
@@ -266,6 +281,9 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(body.instructions).toContain(interpreterV02);
     // WORDING BATCH: the Run's narration call (agent.interpret) carries the rule too, inside the selected-coach prefix.
     expect(prefix.toString('utf8')).toContain(NAMING_RULE_FORM);
+    // G: the Run's narration carries the AIE's scope line once, inside the selected-coach prefix, and nowhere else.
+    expect(prefix.toString('utf8').split(AIE_SCOPE_LINE)).toHaveLength(2);
+    expect(body.instructions.split(AIE_SCOPE_LINE)).toHaveLength(2);
   });
 
   it('keeps Terra-low for every hop of a known-empty construction, then uses Sol-high on the next turn', async () => {

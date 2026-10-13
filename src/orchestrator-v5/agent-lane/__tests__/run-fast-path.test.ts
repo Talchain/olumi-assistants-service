@@ -332,7 +332,7 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
       if (path === '/orchestrate/v2/turn') return { status: 500, json: { error: 'INTERNAL_ERROR' } };
       return { status: 200, json: {} };
     }, new ProposalStore());
-    const res = await caps.runAnalysis({ scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r' }, { reason: 'asked' });
+    const res = await caps.runAnalysis({ scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r' }, { reason: 'asked', effects_timing: null });
     expect(res).toEqual(expect.objectContaining({ ok: false, ran: false, refusal: 'run_failed' }));
     expect(String(res.detail)).toMatch(/do not give any other reason/);
   });
