@@ -9,6 +9,7 @@ import { sayDate, timeBetween } from './deadline-date.js';
 import { cappedTeamShareMean, teamShareMoments } from './event-by-date-share.js';
 import { displayedPctAt } from './goal-chance-driver.js';
 import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
+import { confirmationQuoteLine, confirmedSelection, verbatimSourceLine, type QuoteConfirmation } from '../agent-lane/quote-confirmation.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 type Rec = Record<string, any>;
@@ -159,9 +160,46 @@ export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonl
     forecast_months: stated.low_months, forecast_words: quoted, range_origin: 'olumi_estimate', range_rule: rule } };
 }
 
+/**
+ * ⭐ B2-c CONFIRMATION (DL re-scope, 12 Oct; PL #94 6131809231; AIE #94 6132054663), AI-first Lane 1 (DL 12 Oct, PL 6134071898):
+ * whose time a sentence states is never parsed, and no regex refuses the Agent's reading. The Agent's arguments carry the
+ * figure; this finds only the complete line of the user's own typed words that holds the quote VERBATIM, for the card's quote
+ * line (provenance: a quote line is shown only for words the user typed). The card is the check: only the user's press on it
+ * records the figure as their selected forecast (`teamTimeConfirmationCard`); until then it is Olumi's reading.
+ */
+/** The team-time use of the one confirmation mechanism (`agent-lane/quote-confirmation.ts`). */
+export type TeamTimeConfirmation = QuoteConfirmation;
+export function quotedTeamTime(texts: { readonly now?: string | null; readonly conversation?: string | null },
+  args: { readonly quote?: unknown; readonly low_months?: unknown; readonly high_months?: unknown } | undefined):
+  { readonly kind: 'found'; readonly time: BoundTeamTime; readonly confirmation: TeamTimeConfirmation } | { readonly kind: 'refused'; readonly detail: string } {
+  const low = Number(args?.low_months), high = Number(args?.high_months);
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high < low) return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
+  const quoted = typeof args?.quote === 'string' ? args.quote.trim() : '';
+  const source = quoted === '' ? undefined : verbatimSourceLine(texts, quoted);
+  const confirmation = { source: source ?? '', quote: quoted };
+  return { kind: 'found', confirmation, time: withAssumedTeamRange({ low_months: low, high_months: high }, quoted,
+    source === undefined ? '' : sentencesHolding(plainWords(source), plainWords(quoted))) };
+}
+/**
+ * AI-first Lane 1 (DL 12 Oct, PLAN-AI-FIRST-SUBTRACT): a single time is the user's forecast with Olumi's assumed range by the
+ * E2 (a) convention, on EVERY path: typed as the whole answer or quoted from their words. A single time is never held alone
+ * as a "most likely" time that keeps the Run closed until the user types a range. A range is kept as given.
+ */
+export function withAssumedTeamRange(stated: BoundTeamTime, words: string, sentence: string): BoundTeamTime {
+  if (stated.low_months !== stated.high_months) return stated;
+  const rule: TeamTimeRangeRule = TEAM_TIME_LOW_CONFIDENCE.test(sentence) ? 'low_confidence' : 'default';
+  return { ...widenedTeamTime(stated.low_months, rule),
+    forecast_months: stated.low_months, forecast_words: words, range_origin: 'olumi_estimate', range_rule: rule };
+}
+
 export interface ApprovedTeamTime {
   readonly goal_id: string;
   readonly team_id: string;
+  /**
+   * B2-c: the card is Olumi's interpretation of the user's own words (`quotedTeamTime`), confirmed only by the press on it.
+   * The source line and quote, verbatim, ride the card and the write; the press records a NEW selected forecast.
+   */
+  readonly confirmation?: TeamTimeConfirmation;
   readonly low_months: number;
   readonly high_months: number;
   readonly deadline: string;
@@ -203,9 +241,13 @@ export function teamObservedState(a: ApprovedTeamTime, unit: string): Rec {
     stated_time: { quantity: 'months_to_finish', low: a.low_months, high: a.high_months, unit: 'months',
       deadline: a.deadline, reference_date: a.reference_date,
       // EBD E2: the human forecast and its words (qualifier kept), apart from Olumi's assumed range. Never read back as theirs.
+      // B2-c: a figure from a confirmation card is the user's SELECTION at the press (`user_confirmed`), never an earlier
+      // human fact; its source line and Olumi's reading of it are linked beside it, unchanged.
       ...(a.forecast_months !== undefined && a.range_origin === 'olumi_estimate' ? {
-        forecast: a.forecast_months, forecast_origin: 'user', ...(a.forecast_words !== undefined ? { forecast_words: a.forecast_words } : {}),
-        range_origin: 'olumi_estimate', range_rule: a.range_rule } : {}) } };
+        forecast: a.forecast_months, forecast_origin: a.confirmation !== undefined ? 'user_confirmed' : 'user',
+        ...(a.forecast_words !== undefined ? { forecast_words: a.forecast_words } : {}),
+        range_origin: 'olumi_estimate', range_rule: a.range_rule } : {}),
+      ...(a.confirmation !== undefined ? { selection: confirmedSelection(a.confirmation) } : {}) } };
 }
 /** Single estimates live on the held definition carrier, outside modelled numeric observed_state. */
 export function teamTimeIsHeld(team: Rec, a: ApprovedTeamTime, unit: string, graph: unknown): boolean {
@@ -240,6 +282,29 @@ export function teamTimeSummary(a: ApprovedTeamTime, unit: string, deliverable: 
     return both.length <= 80 ? both : `Team time: Olumi’s assumed ${a.low_months}–${a.high_months}-month range`;
   }
   return teamTimeCardParts(a, unit, deliverable).question.replace(/\?$/, '');
+}
+/**
+ * ⭐ B2-c: the confirmation card, AIE #94 6132054663 verbatim: the user's complete source line, then the question; before the
+ * press it is a proposed interpretation, never "your forecast". A single figure keeps the b1 disclosure of Olumi's assumed range
+ * apart from the user's point and confidence (the AIE 6125204695 (3) clause and the b1 confidence sentence, existing words); a
+ * range is the existing full-range card. The question is the edit fact's summary.
+ */
+export function teamTimeConfirmationCardParts(a: ApprovedTeamTime, deliverable: string): { readonly quoteLine: string; readonly question: string; readonly disclosure: string } {
+  // A quote line only for words the user typed, verbatim; otherwise the card is Olumi's reading alone.
+  const quoteLine = a.confirmation !== undefined && a.confirmation.source !== '' ? confirmationQuoteLine(a.confirmation) : '';
+  if (a.forecast_months === undefined || a.range_origin !== 'olumi_estimate') {
+    const { confirmation: _source, ...range } = a;
+    const parts = teamTimeCardParts(range, '', deliverable);
+    return { quoteLine, question: parts.question, disclosure: parts.explanation };
+  }
+  return { quoteLine,
+    question: `Do you want to use ${a.forecast_months} months as your forecast for today's team to finish ${deliverable}?`,
+    disclosure: `Olumi’s assumed ${a.low_months}–${a.high_months}-month range informs this approximate calculation; modelled outcomes can fall outside those time bounds.`
+      + (a.range_rule === 'low_confidence' ? ' You described low confidence in that forecast.' : '') };
+}
+export function teamTimeConfirmationCard(a: ApprovedTeamTime, deliverable: string): string {
+  const { quoteLine, question, disclosure } = teamTimeConfirmationCardParts(a, deliverable);
+  return [quoteLine, question, disclosure].filter((t) => t !== '').join(' ');
 }
 export function teamTimeCard(a: ApprovedTeamTime, unit: string, deliverable: string): string {
   const { question, explanation } = teamTimeCardParts(a, unit, deliverable);

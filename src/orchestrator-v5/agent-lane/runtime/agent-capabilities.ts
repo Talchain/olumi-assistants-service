@@ -2,7 +2,7 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
@@ -5309,24 +5309,35 @@ export function createAgentCapabilities(
       };
     },
 
-    /** Parse and propose this turn's current-team duration; a singleton is only the most likely time. */
+    /** Propose the current-team duration from the Agent's reading of the user's words; a single time carries Olumi's assumed range. */
     async proposeTeamTime(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const stated = readTeamTime(ctx.user_turn_text);
-      if (stated === null || !teamTimeArgumentsMatch(ctx.user_turn_text, args, stated)) {
-        return { ok: false, mutated: false, refusal: 'team_time_not_stated',
-          detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
-      }
+      const typed = readTeamTime(ctx.user_turn_text);
+      // A single typed time carries Olumi's assumed range (`withAssumedTeamRange`), so its approval opens the Run.
+      const typedNow = typed !== null && teamTimeArgumentsMatch(ctx.user_turn_text, args, typed)
+        ? withAssumedTeamRange(typed, String(ctx.user_turn_text).trim(), String(ctx.user_turn_text)) : null;
+      /**
+       * ⭐ B2-c CONFIRMATION (DL re-scope, 12 Oct; PL #94 6131809231; AIE #94 6132054663), AI-first Lane 1 (DL 12 Oct, PL
+       * 6134071898): a duration the user did not type as this whole answer is the Agent's reading, offered ONLY as a confirmation
+       * card and never refused by a reader of their words. The card quotes their complete source line where the quote stands
+       * verbatim in their typed words (`quotedTeamTime`, never whose it is), and only its press records the figure as their
+       * selected forecast (`hasCardOnlyOperations`).
+       */
+      const quoted = typedNow === null ? quotedTeamTime({ now: ctx.user_turn_text, conversation: ctx.user_text }, args as never) : undefined;
+      if (quoted?.kind === 'refused') return { ok: false, mutated: false, refusal: 'team_time_not_stated', detail: quoted.detail };
+      const stated = typedNow ?? (quoted as Extract<NonNullable<typeof quoted>, { kind: 'found' }>).time;
+      const confirmation = quoted?.kind === 'found' ? quoted.confirmation : undefined;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
-        detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
+        detail: 'First type and confirm the deadline, for example "7 April 2027".' };
       const read = teamTimeReadDigest(g.raw);
       const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
-        reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}) };
+        reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}),
+        ...(confirmation !== undefined ? { confirmation } : {}) };
       if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
-        detail: 'That deadline has passed. Type a future deadline and confirm it, then give the soonest and latest times with your current team.' };
+        detail: 'That deadline has passed. Type a future deadline and confirm it.' };
       if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), g.raw)) {
         return { ok: false, mutated: false, refusal: 'already_held',
           detail: a.low_months === a.high_months ? 'Your most likely time is already held. Type the soonest and latest times with your current team, for example "6–10 months".'
@@ -5334,9 +5345,12 @@ export function createAgentCapabilities(
       }
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
-        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
+        // B2-c: Olumi's interpretation of the user's words until their press; the source line is its basis.
+        provenance: confirmation !== undefined ? { authored_by: 'model_proposed', basis: confirmation.source !== '' ? confirmation.source : confirmation.quote }
+          : { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
+        public_label: confirmation !== undefined ? teamTimeConfirmationCard(a, part.deliverable)
+          : teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
         if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === 'set_team_time')) proposals.discard(pending.proposal_id);
       }

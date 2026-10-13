@@ -4649,6 +4649,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     rememberResearchOffers(approveKey, wireBody.suggested_actions);
     // B2/B3: whole AI answer, no face, status headline or appendix. K1 is the final prose check.
     const { _answer_shape: _retiredShape, ...wholeAnswer } = wireBody as OlumiResponse & { _answer_shape?: unknown };
+    // A route-issued deadline card's own question stands in only when the AI wrote nothing this turn (B2 merge, DL).
+    if (automaticDeadlineLabel !== undefined && String(wholeAnswer.assistant_text ?? '').trim() === '')
+      (wholeAnswer as { assistant_text?: unknown }).assistant_text = automaticDeadlineLabel;
     const beforeNumericalCheck = String(wholeAnswer.assistant_text ?? '');
     wireBody = withEstimateGoalPointsAtEgress(wholeAnswer, {
       analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,
