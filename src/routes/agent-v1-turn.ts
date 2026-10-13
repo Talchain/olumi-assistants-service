@@ -4029,7 +4029,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       log.error({ err: String(err), scenario_id: scenarioId }, 'agent-lane turn failed');
       // A completed Run survives a failed explanation. Keep its identity and commit the ordinary
       // result-first reply, so resending this press replays it instead of leaving an unknown outcome.
-      if (runPress && runPressResult?.ran === true
+      if (runPress && runPressResult !== undefined
         && !(err instanceof ModelReadFailedError) && !isRevisionConflict(err)) {
         const ms = Date.now() - loopStartedAt;
         result = { assistant_text: '', items: [],

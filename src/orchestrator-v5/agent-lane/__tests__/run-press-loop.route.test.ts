@@ -27,6 +27,7 @@ let writes: Rec[] = [];
 let timing: unknown = 'in_place_by_period';
 let behavior: 'run' | 'skip' | 'attack' = 'run';
 let interpretationFailure: 'throw' | 'http500' | undefined;
+let engineFails = false;
 let turnToolResult: Rec | undefined;
 let licensedRecord: Rec | undefined;
 let modelWords = '';
@@ -89,6 +90,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
       const payload = req.body as Rec;
       if (payload.chip?.action_type !== 'run_analysis') { writes.push(payload); return { error: 'unexpected_write' }; }
       runs.push(payload);
+      if (engineFails) throw new Error('engine failed');
       const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'r1-load', store as never);
       const handler = createRunAnalysisHandler({ plotClient: { run: async () => ({ ...structuredClone(FX.envelope), analysis_status: 'computed',
         meta: { seed_used: 1, n_samples: 1000, response_hash: 'r1-timing' }, response_hash: 'r1-timing' }) } as never,
@@ -111,7 +113,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; writes = []; rows.length = 0;
     STATE.run_state.computed_at = AT;
-    claimCurrent = false; behavior = 'run'; interpretationFailure = undefined; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
+    claimCurrent = false; behavior = 'run'; interpretationFailure = undefined; engineFails = false; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
   const press = (extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, ...extra,
@@ -207,6 +209,23 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(first.json().suggested_actions).toContainEqual(expect.objectContaining({ id: expect.stringMatching(/^agent-explain-run:/) }));
     expect(replay.json().suggested_actions).toEqual(first.json().suggested_actions);
     expect(replay.json().narration).toEqual(first.json().narration);
+  });
+
+  it.each(['throw', 'http500'] as const)('R1 review N1: a FAILED Run whose interpretation then %s → 200, the host truth and Run again, never a 502', async (failure) => {
+    engineFails = true;
+    interpretationFailure = failure;
+    const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
+    const first = await press(request);
+    expect(first.statusCode, first.body).toBe(200);
+    const live = first.json();
+    expect(runs).toHaveLength(1);
+    expect(writes).toEqual([]);
+    expect(live.assistant_text).not.toMatch(/analysis finished|graph has changed/i);
+    expect(live.suggested_actions).toContainEqual(expect.objectContaining({ action_type: 'run_analysis' }));
+    const replay = await press(request);
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json().assistant_text).toBe(live.assistant_text);
+    expect(runs).toHaveLength(1);
   });
 
   it.each(['throw', 'http500'] as const)('completed Run survives interpretation %s and resends identically without calls', async (failure) => {
