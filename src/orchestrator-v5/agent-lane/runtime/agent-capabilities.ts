@@ -4058,12 +4058,16 @@ export function createAgentCapabilities(
       const named = lastWeekdayNamedIn(words);
       const parsed = dating?.required !== undefined && datedWeekday?.weekday !== dating.required ? null
         : readStatedDeadline(words, today, { ...(datedWeekday !== null ? { lastWeekday: datedWeekday } : {}), relativeWeekdays: reference !== undefined });
-      if (args.deadline_date !== undefined && (!isCalendarDate(args.deadline_date) || args.deadline_date <= today)) {
+      // ⛔ DLf5 (served ffe10d51 deadline journey, 12 refusals): the model's OPTIONAL date is a fallback only. A blank one
+      // (`""`, whitespace, null) is absent, and it is checked only when the user's own phrase did not resolve: "in six
+      // months time" places 2027-04-13 whatever the model put beside it.
+      const modelDate = typeof args.deadline_date === 'string' && args.deadline_date.trim() !== '' ? args.deadline_date : undefined;
+      if (parsed === null && modelDate !== undefined && (!isCalendarDate(modelDate) || modelDate <= today)) {
         return { ok: false, mutated: false, refusal: 'unreadable_deadline', detail: 'The proposed deadline must be a valid future ISO calendar date.' };
       }
       // A resolved source owns both its date and stated count; a model date is only an interpretation fallback.
-      const stated: StatedDeadline | null = parsed ?? (args.deadline_date === undefined ? null
-        : { words, form: 'date' as const, date: args.deadline_date as string, reference: today });
+      const stated: StatedDeadline | null = parsed ?? (modelDate === undefined ? null
+        : { words, form: 'date' as const, date: modelDate, reference: today });
       const authoredBy = userWords && userReference && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
       if (stated === null) {
         const deadlineAsk = chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
