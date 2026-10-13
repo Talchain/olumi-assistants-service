@@ -3737,12 +3737,16 @@ export function createAgentCapabilities(
       ...(v.expected_goal !== undefined ? { expected_goal: v.expected_goal } : {}) };
     const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
       turn_id: authorisationTurnId(pid), links: [], levels: [], goal_reading: approved });
-    // A write that may have landed keeps this proposal's expected bytes, so a retry recovers through the writer's verified
-    // no-op instead of reading its own landed write as another writer's change (the deadline card's recovery).
+    // A write that LANDED keeps this proposal's expected bytes, so a retry recovers through the writer's verified no-op instead
+    // of reading its own landed write as another writer's change. Only a landed one: committed, or an unconfirmed commit whose
+    // re-read holds exactly that postimage. An unconfirmed write that did not land leaves the base as it was, so a plain retry
+    // goes through again (Codex buddy r2).
     if (res.status === 'committed' || res.status === 'unconfirmed') {
       const written = applyGoalReadingEdit(before.raw, approved);
       const postimage = written.kind === 'mutated' ? written.mutatedGraph : written.kind === 'unchanged' ? before.raw : undefined;
-      if (postimage !== undefined) proposals.markPartial(pid, { revision: computeAnalysisAffectingGraphHash(postimage as never)!,
+      const landed = postimage !== undefined && (res.status === 'committed'
+        || isDeepStrictEqual((await readGraph(ctx.scenario_id).catch(() => null))?.raw, postimage));
+      if (landed) proposals.markPartial(pid, { revision: computeAnalysisAffectingGraphHash(postimage as never)!,
         landed: [op.path], receipts: [], expected_postimage: postimage });
     }
     if (res.status === 'stale' || res.status === 'refused') {

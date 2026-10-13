@@ -277,6 +277,12 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     expect(r.follow_up).toBeUndefined();
     expect(JSON.stringify(r)).not.toContain('Recorded your answer');
     expect(proposals.isApplied(pid)).toBe(false);
+    // It did not land, so the base is unchanged and a plain retry goes through again — never "superseded" (Codex buddy r2).
+    expect(w.rows).toHaveLength(0);
+    const retry = await press(pid);
+    expect(retry, JSON.stringify(retry)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(w.commits).toHaveLength(2);
+    expect(w.rows).toHaveLength(1);
   });
 
   it('landed but unconfirmed: the retry recovers through the writer\'s verified no-op — applied once, never "superseded" by its own write', async () => {
