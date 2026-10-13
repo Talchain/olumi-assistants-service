@@ -5387,11 +5387,7 @@ export function createAgentCapabilities(
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
       const asOfPattern = /(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu;
       const typedAsOfDates = [...typed.matchAll(asOfPattern)].map(match => match[1]);
-      const { clausesOf } = await import('../stated-by-user.js');
-      const deadlineAsOfDates = clausesOf(ctx.user_turn_text ?? '').map(plainOf).filter(writes)
-        .flatMap(clause => [...clause.matchAll(asOfPattern)].map(match => match[1]));
-      // Without a verified model echo, only dating in the deadline words' own clause supplies the reference.
-      const asOf = typedAsOfDates.find(date => date === args.reference_date) ?? deadlineAsOfDates[0];
+      const asOf = typedAsOfDates.find(date => date === args.reference_date);
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
       const reference = draftReferenceDate({ ...(isCalendarDate(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       if (args.reference_date !== undefined && args.reference_date !== asOf) {

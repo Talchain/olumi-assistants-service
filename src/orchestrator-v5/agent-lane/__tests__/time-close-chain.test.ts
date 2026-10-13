@@ -204,13 +204,11 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
       user_text: 'as of 2027-02-01\n' + said, user_turn_text: said };
     const before = w.read();
     const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', reference_date: '2027-02-01', rationale: '' });
-    const reference = variant === 'earlier context' ? R : '2027-01-01';
-    const deadline = variant === 'earlier context' ? '2027-04-09' : '2027-07-01';
+    const reference = R;
+    const deadline = '2027-04-09';
     expect(offered.ok).toBe(true);
     expect(offered.mutated).toBe(false);
-    expect(offered.public_label).toBe(variant === 'earlier context'
-      ? 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.'
-      : 'Is your deadline 1 July 2027 (6 months from 1 January 2027)? Your words: “within 6 months”.');
+    expect(offered.public_label).toBe('Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.');
     const proposal = w.proposals.get(String(offered.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: goal(before).id,
       value: { deadline, expected_deadline: null, words: 'within 6 months', reference, stated_months: 6 } }]);
@@ -222,7 +220,7 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     expect(goal(w.read()).goal_horizon_reference_date).toBe(reference);
     expect(goal(w.read()).goal_horizon_stated_months).toBe(6);
   });
-  it('R-d: verified current-turn as-of supplies the exact reference without a model echo', async () => {
+  it('R-d: current-turn as-of without a model echo retains the host reference', async () => {
     const w = world(draft(), false, null, undefined, '2026-10-09T10:00:00Z');
     const said = 'within 6 months as of 2026-10-01';
     const context = { scenario_id: SID, authenticated_user_id: null, request_id: 'absent-reference', user_text: said, user_turn_text: said };
@@ -230,10 +228,10 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', rationale: '' });
     expect(offered.ok).toBe(true);
     expect(offered.mutated).toBe(false);
-    expect(offered.public_label).toBe('Is your deadline 1 April 2027 (6 months from 1 October 2026)? Your words: “within 6 months”.');
+    expect(offered.public_label).toBe('Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.');
     const proposal = w.proposals.get(String(offered.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: goal(before).id,
-      value: { deadline: '2027-04-01', expected_deadline: null, words: 'within 6 months', reference: '2026-10-01', stated_months: 6 } }]);
+      value: { deadline: '2027-04-09', expected_deadline: null, words: 'within 6 months', reference: R, stated_months: 6 } }]);
     expect(proposal.provenance).toEqual({ authored_by: 'user_stated', basis: '' });
     expect(w.read()).toEqual(before); expect(w.writes).toEqual([]);
   });
