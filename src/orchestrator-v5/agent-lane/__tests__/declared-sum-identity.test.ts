@@ -1,6 +1,6 @@
 /**
  * ⭐ L2 (DL brief "BRIEF-L2-declared-sum-identity", 12 Oct; AIE #94 6134029017 Q1) — A SUM THE DRAFTER DECLARES IS CARRIED
- * ON ITS TOTAL THROUGH R3-2's EXISTING CARRIER, CHECKED WHOLE, AND WHOSE IT IS FOLLOWS THE BRIEF'S OWN SENTENCE.
+ * ON ITS TOTAL THROUGH R3-2's EXISTING CARRIER, CHECKED WHOLE, AND IT REMAINS OLUMI'S READING UNTIL USER APPROVAL.
  *
  * Run 5 (served CEE 551258bb, capacity brief): "Total weekly support capacity is defined as the existing 80 tickets per week
  * plus the additional specialist capacity" reached the engine as two uncertain links (exists 0.8, ±0.5), and the reply
@@ -67,7 +67,7 @@ const partWithLevel = (c: Rec, value = 0, unit = 'tickets per week'): Rec => ({ 
 const run5Shape = (): Rec => partWithLevel(goalLevelAsRun5(served()));
 
 // ── Construction and the Run request, on the production path ──────────────────────────────────────────────────────────
-async function construct(raw: Rec): Promise<{ graph: Rec; result: Rec }> {
+async function construct(raw: Rec, brief = FX.brief): Promise<{ graph: Rec; result: Rec }> {
   let registered: unknown;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
@@ -77,7 +77,7 @@ async function construct(raw: Rec): Promise<{ graph: Rec; result: Rec }> {
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
   const call = (async () => ({ text: JSON.stringify(raw) })) as unknown as CallStructuredModel;
-  const result = await buildModelFromBrief(SCENARIO, FX.brief, dispatch, call) as Rec;
+  const result = await buildModelFromBrief(SCENARIO, brief, dispatch, call) as Rec;
   expect(result.ok, JSON.stringify(result).slice(0, 400)).toBe(true);
   return { graph: GraphV3.parse(registered) as unknown as Rec, result };
 }
@@ -176,16 +176,16 @@ describe('PRECONDITIONS: the served draft, and the approved text now sent', () =
   });
 });
 
-describe('GREEN — the run-5 shape: the user\'s defined sum is an identity of its parts on the PLoT request', () => {
-  it('construction carries the user\'s sum on the total; its part links are the definition, at existence 1 and the floor', async () => {
+describe('GREEN — the run-5 shape: Olumi\'s declared sum is an identity of its parts on the PLoT request', () => {
+  it('construction carries Olumi\'s sum on the total; its part links are the definition, at existence 1 and the floor', async () => {
     const { graph } = await construct(declare(run5Shape(), { quote: SENTENCE }));
-    expect(node(graph, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: true });
+    expect(node(graph, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: false });
     for (const [from, to] of [[EXISTING, GOAL], [PART, GOAL]] as const) {
       const e = edge(graph, from, to);
       expect(e.exists_probability, `${from}→${to}`).toBe(1);
       expect(e.defaulted, `${from}→${to}`).toBeUndefined();
       expect(e.strength.std, `${from}→${to}`).toBeLessThanOrEqual(LLM_STRENGTH_STD_FLOOR);
-      expect(e.provenance, `${from}→${to}`).toMatchObject({ source: 'brief_extraction', source_quote: SENTENCE, magnitude: 'user_stated', definitional: true,
+      expect(e.provenance, `${from}→${to}`).toMatchObject({ source: 'cee_hypothesis', source_quote: SENTENCE, magnitude: 'olumi_estimate', definitional: true,
         natural_effect: { amount: 1, per_source_change: 1, amount_unit: 'tickets per week', per_source_change_unit: 'tickets per week' } });
       // Still a CURRENT definitional carrier after construction's frame fit (the held-link readers read exactly this).
       expect(currentDefinitionalCarrier(e), `${from}→${to}`).toBe('tickets per week');
@@ -196,14 +196,14 @@ describe('GREEN — the run-5 shape: the user\'s defined sum is an identity of i
     const { graph: stored } = await construct(declare(run5Shape(), { quote: SENTENCE }));
     const declared = (await runRequest(stored)).graph as Rec;
     const plain = (await runRequest((await construct(run5Shape())).graph)).graph as Rec;
-    // The identity rides the goal node to PLoT, over exactly the two parts, as the user's.
-    expect(node(declared, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: true });
+    // The identity rides the goal node to PLoT, over exactly the two parts, as Olumi's reading.
+    expect(node(declared, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: false });
     expect(node(plain, GOAL).nonlinear_identity).toBeUndefined();
     // Today's levels in natural units reconcile exactly: the stated 80 is the existing 80 plus no specialist capacity.
     expect([rawToday(declared, GOAL), rawToday(declared, EXISTING), rawToday(declared, PART)].map((x) => Number(x.toPrecision(12)))).toEqual([80, 80, 0]);
     // The two definition links go certain; every other link — the user's 20 ± 10 per specialist above all — is untouched.
     const [d, p] = [naturalLinks(declared), naturalLinks(plain)];
-    for (const k of OPERANDS) expect(d.get(k), k).toMatchObject({ exists: 1, mean: 1, source: 'brief_extraction', magnitude: 'user_stated' });
+    for (const k of OPERANDS) expect(d.get(k), k).toMatchObject({ exists: 1, mean: 1, source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
     for (const k of OPERANDS) expect(p.get(k), k).toMatchObject({ mean: 1, std: 0.5, magnitude: 'olumi_estimate' });
     expect(without(d, OPERANDS)).toEqual(without(p, OPERANDS));
     expect(d.get(RATE_LINK)).toEqual({ mean: 20, std: 10, exists: 0.8, source: 'brief_extraction', magnitude: 'user_stated' });
@@ -214,6 +214,26 @@ describe('GREEN — the run-5 shape: the user\'s defined sum is an identity of i
 });
 
 describe('CONTRASTS', () => {
+  it.each([
+    'Weekly support capacity is not Existing team capacity plus Additional specialist capacity.',
+    'Total weekly support capacity is not the existing 80 tickets per week plus the additional specialist capacity.',
+  ])('negative evidence never confers human authorship: %s', async (quote) => {
+    const brief = FX.brief.replace(SENTENCE, quote);
+    const { graph } = await construct(declare(run5Shape(), { quote }), brief);
+    expect(node(graph, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: false });
+    for (const from of [EXISTING, PART]) {
+      expect(edge(graph, from, GOAL).provenance).toMatchObject({
+        source: 'cee_hypothesis', magnitude: 'olumi_estimate', source_quote: quote, definitional: true,
+      });
+    }
+    const inconsistent = partWithLevel(goalLevelAsRun5(served()), 15);
+    const { graph: rejected, result } = await construct(declare(inconsistent, { quote }), brief);
+    const { graph: plain } = await construct(inconsistent, brief);
+    expect(node(rejected, GOAL).nonlinear_identity).toBeUndefined();
+    expect(naturalLinks(rejected)).toEqual(naturalLinks(plain));
+    expect(result.not_represented).toContain(refused('today "Weekly support capacity" is 80 while those parts add up to 95'));
+  });
+
   it('Olumi\'s reading: a declared sum with NO brief quote is carried, still Olumi\'s, whatever provenance the drafter typed', async () => {
     const { graph, result } = await construct(declare(run5Shape(), null));
     expect(node(graph, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: false });

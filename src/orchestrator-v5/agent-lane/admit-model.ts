@@ -1385,12 +1385,12 @@ const quotedList = (items: readonly string[]): string => {
   return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
 };
 
-/** A declared `sum` that held whole (`checkDeclaredSums`): what the carrier persists, and the located sentence when it is the user's. */
+/** A declared `sum` that held whole (`checkDeclaredSums`): Olumi's reading, with any located evidence. */
 export interface AcceptedDeclaredSum {
   readonly outcome_id: string;
   readonly factor_ids: readonly string[];
-  readonly stated_in_brief: boolean;
-  /** The brief's own defining sentence, as `locatedBriefSentence` found it; only when `stated_in_brief`. */
+  readonly stated_in_brief: false;
+  /** Located brief sentence retained as evidence only, never authorship authority. */
   readonly quote?: string;
 }
 
@@ -1413,12 +1413,11 @@ const ISL_IDENTITY_RECONCILIATION_TOLERANCE = 0.05;
  *  · the total and every part have a scale and a level today, and today's levels add up within ISL's own reconciliation
  *    (|total − Σ parts| ≤ 5% × max(|total|, Σ |parts|)), so a stated sum is never one ISL would refuse the Run over. A
  *    constant is only ever a part with its own level: the candidate has no other place for one.
- * The arithmetic is necessary, never authority (AIE Q1). WHOSE it is follows the brief's own words: a quote CEE locates as
- * one direct sentence of the brief (`locatedBriefSentence`) that names the total and every part (each label's words,
- * `labelHoldsQuantity`, or the part's own figure today, `findStatedAmounts`) makes it the user's (`stated_in_brief:
- * true`). With no quote it is Olumi's reading, whatever provenance the drafter typed. A quote CEE cannot locate or bind is
- * of unknown origin, which the carrier cannot say, so nothing is written. Any failure writes nothing: the links stay as
- * drafted, and the refusal is said once (`nonlinear_identity_rejected`). Pure.
+ * The arithmetic is necessary, never authorship authority. Every admitted declaration is Olumi's reading until the
+ * user approves it through the existing declaration authority. A quote CEE locates and binds to the quantities is
+ * retained as evidence only: word or number overlap does not prove that the sentence asserts addition. A quote CEE
+ * cannot locate or bind is rejected as before. Any failure writes nothing: the links stay as drafted, and the refusal
+ * is said once (`nonlinear_identity_rejected`). Pure.
  */
 function checkDeclaredSums(
   allDeclared: readonly CandidateIdentity[],
@@ -1496,7 +1495,7 @@ function checkDeclaredSums(
       reject(`today "${totalLabel}" is ${sayFigure(total, '')} while those parts add up to ${sayFigure(sum, '')}`);
       continue;
     }
-    // WHOSE: the brief's own sentence, located by CEE and naming the total and every part; else Olumi's; else unknown.
+    // Evidence validation only. A located sentence cannot confer human authorship on the drafter's reading.
     const quoted = d.evidence?.quote;
     if (quoted === undefined || quoted === null) {
       accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: false });
@@ -1510,7 +1509,7 @@ function checkDeclaredSums(
       reject('the sentence it was read from is not one Olumi can find in your brief naming each of them');
       continue;
     }
-    accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: true, quote: sentence });
+    accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: false, quote: sentence });
   }
   return { accepted, loss };
 }
@@ -5567,7 +5566,7 @@ function admitOnce(
     }
   }
   // ⭐ L2: a SUM the drafter declared, checked whole against the FINAL structure (`checkDeclaredSums`) and carried on its
-  // total, the user's only where the brief's own sentence defines it. A declared product wins its node; a declared sum
+  // total as Olumi's reading until approved by the user. A declared product wins its node; a declared sum
   // wins over R3-2's minted tally. Said once among what was done with the brief (`declaredSumSentence`).
   const declaredSums = checkDeclaredSums(Array.isArray(model.identities) ? model.identities : [], resolveEntity, levers.nodes,
     finalEdges, (id) => { const m = magnitudeNodeById.get(id); return m === undefined ? undefined : resolveMagnitudeFrame(m); }, brief);
@@ -5631,9 +5630,8 @@ function admitOnce(
   }
   // ⭐ L2: a carried DECLARED sum's parts are its definition too, at existence 1 and the spread floor, as R3-2's. The size is
   // the one admission already checked (`holdsByDefinition`: ±1 per 1 in one unit, β on the two frames), kept as it is so
-  // the frame fits after admission move it like any other link. WHOSE the link is follows the declaration: the brief's
-  // sentence (`source_quote`, the user's size) or Olumi's reading (as R3-2). Olumi's pending fit and basis are dropped:
-  // a definition has no estimate to refit.
+  // the frame fits after admission move it like any other link. The link remains Olumi's reading (as R3-2); a located
+  // `source_quote` is evidence only. Olumi's pending fit and basis are dropped: a definition has no estimate to refit.
   if (declaredCarried.length > 0) {
     const declaredOf = new Map(declaredCarried.map((s) => [s.outcome_id, s] as const));
     finalEdges = finalEdges.map((e) => {
@@ -5643,9 +5641,8 @@ function admitOnce(
       const { reasoning: _guess, basis: _guessBasis, source: _drafted, source_quote: _drafterQuote, olumi_fit_candidate: _fit,
         mean_projected: _projected, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
       return { ...edge, strength: { mean: e.strength.mean, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,
-        provenance: declared.stated_in_brief && declared.quote !== undefined
-          ? { ...provenance, source: 'brief_extraction', source_quote: declared.quote, magnitude: 'user_stated' as const, definitional: true as const }
-          : { ...provenance, source: 'cee_hypothesis', magnitude: 'olumi_estimate' as const, definitional: true as const } };
+        provenance: { ...provenance, source: 'cee_hypothesis', magnitude: 'olumi_estimate' as const, definitional: true as const,
+          ...(declared.quote !== undefined ? { source_quote: declared.quote } : {}) } };
     });
     for (const s of declaredCarried) definedParts.set(s.outcome_id, new Set(s.factor_ids));
   }
