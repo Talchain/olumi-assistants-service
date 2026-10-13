@@ -226,6 +226,15 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(sent[0]!.instructions).toContain(NAMING_RULE_FORM);
   });
 
+  it('PL condition 2: the actual ordinary model input keeps source, withholding and saved-Run facts', async () => {
+    await sendTurn('What limits this result?', [say('The result is conditional on the current model.')]);
+    const input = JSON.stringify(sent[0]!.input);
+    expect(input).toContain('reasoning_source');
+    expect(input).toContain('run_explanation');
+    expect(input).toContain('withheld_reason');
+    expect(input).toContain('goal_chance');
+  });
+
   it('keeps the same selected prompt on a tool-followup conversation; the narrating hop is low effort (P44 S1)', async () => {
     await sendTurn('Timing strongly shapes how the price lands, so add that link.',
       [proposeLink, say('The proposed link is ready for approval.')]);

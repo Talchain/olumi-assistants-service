@@ -20,7 +20,19 @@ describe('B2/B3/B4: whole AI answer, one final licence boundary', () => {
     expect(replay).toContain('assistant_text: withoutProposalIds(replayText)');
     expect(replay).toContain('enforceLeaderLicenceAtFinalEgress(');
     expect(replay).toContain('withEstimateGoalPointsAtEgress(');
-    expect(replay).toContain('prior.suggested_actions_run_key');
+    expect(replay).toContain('explanationId.slice(RUN_EXPLANATION_PREFIX.length)');
+    expect(replay).not.toContain('prior.suggested_actions_run_key');
     expect(replay).toContain("replayNarration?.status !== 'stale'");
+  });
+});
+
+// N13 is retained: answer offers use their existing Run key and validator.
+describe('N13 base persistence contract', () => {
+  it('persists only eligible offers with the original selected-Run key', () => {
+    expect(route).toContain('suggested_actions_run_key: answerOffersRunKey');
+    expect(route).not.toContain('suggested_actions_run_key: narrationKey');
+    expect(route).toContain('nextStepOffersForTurn(NEXT_STEP_CHIPS,');
+    expect(route).toContain('const actionBar = await');
+    expect(route).toContain('model_gap: gap');
   });
 });

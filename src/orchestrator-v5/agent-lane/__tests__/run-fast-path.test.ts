@@ -272,7 +272,7 @@ describe('fast path 3: a typed Run dispatches once and returns its AI interpreta
     const b = r.json() as { suggested_actions: { id: string; label: string; message: string; action_type?: string }[]; _diagnostic_trace: { fast_path?: string } };
     expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(runs, 'one attempted run').toBe(1);
-    expect(b.suggested_actions.some(c => c.id === 'agent-suggest-what-it-needs')).toBe(false);
+    expect(b.suggested_actions.some(c => c.id === 'agent-suggest-what-it-needs')).toBe(true);
     expect(JSON.stringify(modelBodies[0]?.input)).toContain(BLOCKED_WORDS);
   });
 

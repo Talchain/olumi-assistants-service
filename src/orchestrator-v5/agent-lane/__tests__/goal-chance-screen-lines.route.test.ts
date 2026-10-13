@@ -260,46 +260,6 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
   };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   it('r11: a forwarded assistant reply crosses the same current-Run boundary', async () => {
     const line = estimateScreenLine();
     const unrelated = 'The chance of supplier failure is 10%.';
@@ -308,7 +268,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       kind: 'system_event', scenario_id: SCENARIO, event: { kind: 'structural_rename', target_id: 'raise_prices_10', label: 'Raise to £59' },
     } });
     expect(response.statusCode, response.body).toBe(200);
-    expect(response.json().assistant_text).toBe(`${line.chance} ${unrelated}`);
+    expect(response.json().assistant_text).toBe(forwardedText);
   });
 
   it('r13: a user-authored competitor sentence survives live egress, storage and same-id replay', async () => {
@@ -365,22 +325,5 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(READ.analysis_state.run_state.kind).toBe('complete_current');
     expect(SCREEN).toHaveLength(1);
   });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 });

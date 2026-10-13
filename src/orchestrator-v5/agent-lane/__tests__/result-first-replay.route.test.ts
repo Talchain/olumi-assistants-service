@@ -42,7 +42,7 @@ const store = {
   readCommittedTurn: vi.fn(async (_scenario: string, id: string) => {
     const r = rows.find((x) => x.turn_id === id);
     return r === undefined ? null : { id: String(r.turn_id), request_hash: r.request_hash, assistant_message: r.assistantMessage ?? null,
-      user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [], suggested_actions_run_key: r.suggested_actions_run_key ?? null };
+      user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [] };
   }),
   append: vi.fn(async (row: Row) => { rows.push({ ...row }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => []),
@@ -99,56 +99,53 @@ describe('result-first on retry, lost response and failed explanation (live rout
   const post = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: SCENARIO, ...payload } });
   const runTurn = (turnId: string) => post({ turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
 
-  it('Run dispatches once, interprets once, and replays the saved words and original binding after restart', async () => {
+  it('Run dispatches and interprets once; unbound retry withholds narration after restart', async () => {
     const id = randomUUID();
     const first = (await runTurn(id)).json() as Body;
     expect(first.assistant_text).toContain(PROSE);
     expect(first.narration?.status).toBe('ready');
     expect(first._answer_shape).toBeUndefined();
-    expect(first.suggested_actions.some(c => c.id === 'agent-run-analysis')).toBe(true);
+    expect(first.suggested_actions.some(c => isRunExplanationChip(c.id))).toBe(true);
     expect(runs).toBe(1); expect(modelCalls).toBe(1);
-    for (const restart of [false, true]) {
-      if (restart) { await app.close(); app = await freshApp(); }
-      const replay = (await runTurn(id)).json() as Body;
-      expect(replay.assistant_text).toBe(first.assistant_text);
-      expect(replay.narration).toEqual(first.narration);
-      expect(replay._answer_shape).toBeUndefined();
-      expect(runs).toBe(1); expect(modelCalls).toBe(1);
-    }
-  });
-  it.each(['complete_current', 'stale'])('a newer or stale result never rebinds old narration (%s)', async kind => {
-    const id = randomUUID();
-    const first = (await runTurn(id)).json() as Body;
-    computedAt = RUN_B; runKind = kind;
-    const saved = structuredClone(rows);
-    store.append.mockClear();
     await app.close(); app = await freshApp();
     const replay = (await runTurn(id)).json() as Body;
-    expect(replay.assistant_text).toBe(first.assistant_text);
-    expect(replay.narration).toEqual({ status: 'stale', run_key: first.narration!.run_key });
+    expect(replay.assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+    expect(replay.narration).toBeUndefined();
+    expect(replay.blocks).toBeUndefined();
+    expect(runs).toBe(1); expect(modelCalls).toBe(1);
+  });
+  it.each(['complete_current', 'stale'])('Explain keeps its request-bound key after a newer or stale Run (%s)', async kind => {
+    const first = (await runTurn(randomUUID())).json() as Body;
+    const chip = first.suggested_actions.find(c => isRunExplanationChip(c.id))!;
+    const id = randomUUID();
+    const payload = { turn_id: id, message: RUN_EXPLANATION_MESSAGE, source: 'chip_click', chip };
+    const explained = (await post(payload)).json() as Body;
+    expect(explained.assistant_text).toContain(PROSE);
+    expect(explained.narration?.status).toBe('ready');
+    await app.close(); app = await freshApp();
+    const same = (await post(payload)).json() as Body;
+    expect(same.assistant_text).toBe(explained.assistant_text);
+    expect(same.narration).toEqual(explained.narration);
+    computedAt = RUN_B; runKind = kind;
+    const saved = structuredClone(rows); store.append.mockClear();
+    const replay = (await post(payload)).json() as Body;
+    expect(replay.assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+    expect(replay.narration).toEqual({ status: 'stale', run_key: explained.narration!.run_key });
     expect(replay.blocks).toBeUndefined();
     expect(store.append).not.toHaveBeenCalled();
-    expect(rows).toEqual(saved); expect(runs).toBe(1); expect(modelCalls).toBe(1);
+    expect(rows).toEqual(saved); expect(runs).toBe(1); expect(modelCalls).toBe(2);
   });
-  it.each(['empty', 'fetch_failed'] as const)('failed interpretation stays unavailable without rerunning (%s)', async failure => {
+  it.each(['empty', 'fetch_failed'] as const)('failed interpretation offers the existing Explain control without rerunning (%s)', async failure => {
     provider = failure;
     const id = randomUUID();
     const first = (await runTurn(id)).json() as Body;
     expect(first.narration?.status).toBe('unavailable');
     expect(first.assistant_text).not.toContain(PROSE);
+    expect(first.suggested_actions.some(c => isRunExplanationChip(c.id))).toBe(true);
     const calls = modelCalls;
-    const replay = (await runTurn(id)).json() as Body;
-    expect(replay.assistant_text).toBe(first.assistant_text);
-    expect(replay.narration?.status).toBe('unavailable');
-    expect(modelCalls).toBe(calls); expect(runs).toBe(1);
-  });
-  it('legacy rows without a durable binding cannot claim a current narration', async () => {
-    const id = randomUUID(); await runTurn(id);
-    for (const row of rows) delete row.suggested_actions_run_key;
     const replay = (await runTurn(id)).json() as Body;
     expect(replay.narration).toBeUndefined();
     expect(replay.blocks).toBeUndefined();
-    expect(replay.assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
-    expect(runs).toBe(1); expect(modelCalls).toBe(1);
+    expect(modelCalls).toBe(calls); expect(runs).toBe(1);
   });
 });

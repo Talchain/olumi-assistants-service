@@ -94,8 +94,6 @@ describe('goalChanceLineOwed', () => {
     expect(goalChanceLineOwed([runWithheld], `• ${SAY.replace(/'/g, '**').replace(/\s+/g, '  ')}`)).toBeNull();
   });
 
-
-
 });
 
 

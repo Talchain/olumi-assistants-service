@@ -169,12 +169,6 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(count(b.assistant_text, sentence === SENTENCE ? NO_FLIP_SENTENCE : SENTENCE)).toBe(0);
   };
 
-
-
-
-
-
-
   // W7: a caveat marker preserves headline-first rendering and narrator bullet order.
 
   // Exact narrator copies in a shaped answer must move to bullet 1, without surviving elsewhere.
@@ -202,11 +196,6 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   // W14: an exact caveat used as the first sentence must not consume the narrator's real headline.
 
   // W15: reuse the B3 question-tail variants; neither the caveat nor the independent basis may fold away.
-
-
-
-
-
 
   // One class row: seven narrator variants crossed with both host-obligation states.
 

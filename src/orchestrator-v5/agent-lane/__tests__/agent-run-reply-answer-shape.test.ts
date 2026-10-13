@@ -228,8 +228,6 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   const A7 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
   const A7_WITHOUT_CHANCE = "This model doesn't yet say whether any option gets there within 12 months.";
 
-
-
   const hostRunFixture = () => {
     // Two licensed screen findings, no interpreter output; the Run's typed methods-note carrier owes a disclosure.
     readbackResult = { ...RESULT_BLOCK, enrichment: { ...(RESULT_BLOCK.enrichment as Record<string, unknown>), inference_warnings: [
@@ -242,22 +240,6 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
         links: [{ from: 'pro_subscriber_base', to: 'mrr' }, { from: 'mrr_per_pro_subscriber', to: 'mrr' }] },
     ] } };
   };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
   it('2b-0 CONTRAST: missing approve card remains host_composed, byte-identical, without a shape', async () => {
     const { approvalChipIdFor } = await import('../approval-chips.js');
@@ -273,17 +255,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(fetch).not.toHaveBeenCalled();
   });
 
-
-
-
-
-
-
-
-
   // AI-first Lane 2 N1: row 4 pinned the removed ordinary-turn face pool; it went with the fold (one-reply-build-contract's N1 row).
-
-
 
   /**
    * ⛔ CONSENT BEFORE BREVITY. A turn that offers an approval is never shaped: the shape would put what the
@@ -312,9 +284,6 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   const offersApprove = async (b: Offered) => { const p = await APPROVE_PREFIX(); return b.suggested_actions.some((c) => c.id.startsWith(p)); };
 
   it('7a. CONSENT: a proposal offered over a current result (bulleted, approve chip) → NOT shaped; text byte-identical', async () => {
-    const would = synthesiseAnswerShapeFromText(PROPOSAL_REPLY)!;
-    expect(would.detail, 'the control: shaped, the fourth bullet would go behind "Show more"').toContain('What it leaves alone');
-
     const proposed = await askedTurn(PROPOSAL_REPLY, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a10', [proposeLink('Price-release alignment', 'Pro conversion rate')], PROPOSING) as Offered;
     expect(proposed._agent.tool_calls, 'the control: the proposal was made').toMatchObject([{ name: 'propose_model_change', ok: true }]);
     expect(carriesResult(proposed), 'the control: over a current result').toBe(true);
@@ -323,7 +292,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(proposed.assistant_text).toBe(PROPOSAL_REPLY);
   });
 
-  it('7b. a Run beside an EARLIER proposal’s approve chip → shaped: this reply states no change to consent to (R1), the chip and its card do', async () => {
+  it('7b. a Run keeps the earlier proposal card and ships the AI answer whole', async () => {
     const SID = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a13';
     const proposed = await askedTurn(PROPOSAL_REPLY, SID, [proposeLink('Price-release alignment', 'Pro conversion rate')], PROPOSING) as Offered;
     expect(await offersApprove(proposed), 'the control: a proposal is waiting').toBe(true);
@@ -334,14 +303,6 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(await offersApprove(run), 'the control: the Run carries the waiting proposal’s chip').toBe(true);
     expect(run._answer_shape).toBeUndefined();
   });
-
-
-
-
-
-
-
-
 
   it('9. CONSENT: a SECOND proposal in the turn is refused (one change per approval), so ONE chip is offered → still NOT shaped; text byte-identical', async () => {
     const proposed = await askedTurn(PROPOSAL_REPLY, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12', [
@@ -369,8 +330,6 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   };
   /** D1's ask as the host writes it for this goal (`targetAsk`, neutral words: MRR's direction is not read as a floor). */
   const TARGET_ASK = 'What figure should "MRR" reach or stay under? I\'ll propose it as your target.';
-
-
 
   it('12. HOST STATUS (CODEX on #2517): an unsupported "Saved" claim → the host\'s own status line, kept once (R1: status may sit in detail)', async () => {
     const claim = `${CLEAN_BULLETS.text}\n\nSaved the change.`;

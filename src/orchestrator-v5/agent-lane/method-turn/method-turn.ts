@@ -1,3 +1,4 @@
+import { scienceReasonForMethod } from '../turn-context/guidance-wire.js';
 import { isGuidanceVariant } from '../turn-context/guidance-history.js';
 /**
  * ⭐ T3: AN ASKED PRE-MORTEM RUNS THE REASONING COACH'S METHOD ON TYPED INPUTS, AND ITS REPLY IS CHECKED BEFORE IT IS
@@ -323,6 +324,7 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
   const decision = ctx.decision_level === true;
   return [
     "Use the selected method and its supplied facts to develop a useful answer for the actual question. Keep it concise without omitting relevant reasoning, evidence, dissent or uncertainty to fit an arbitrary word limit. Preserve this role’s required response schema.",
+    `Method reason: ${scienceReasonForMethod('RC-PREMORTEM')!.why}`,
     `${decision ? 'Stress-test the whole decision' : `The plan to stress-test is ${plan}`}.${ctx.goal_label !== null ? ` The goal is ${quote(ctx.goal_label)}.` : ''}`,
     ...(decision ? [CONTRACT.decision_plan.rule,
       `The current option labels are: ${ctx.current_option_labels.map(quote).join(', ')}.`] : []),

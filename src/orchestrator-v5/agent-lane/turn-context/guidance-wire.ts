@@ -156,6 +156,15 @@ function whyOf(row: (typeof POLICY.rows)[number], variant: string | undefined): 
   const own = typeof row.why_now === 'string' || variant === undefined ? undefined : (row.why_now as Readonly<Record<string, string>>)[variant];
   return typeof own === 'string' && own.trim() !== '' ? own : undefined;
 }
+/** A pressed method needs its own reason even when the display selector suppresses a row.
+ * This reads the same approved variant reason; it grants no eligibility or write authority. */
+export function scienceReasonForMethod(policyId: SelectedRow['policy_id'], variant?: string) {
+  const row = POLICY.rows.find(row => row.policy_id === policyId);
+  if (row === undefined) return undefined;
+  const why = whyOf(row, variant);
+  return why === undefined ? undefined : { policy_id: policyId, name: row.name, why };
+}
+
 export function eligibleInterventionFor(wire: GuidanceWire | undefined): EligibleIntervention | undefined {
   const selected = wire?.slot1;
   if (selected === undefined) return undefined;
