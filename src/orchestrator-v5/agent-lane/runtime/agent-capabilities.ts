@@ -5461,9 +5461,12 @@ export function createAgentCapabilities(
               lead_low: prior.figures.lead_low, lead_high: prior.figures.lead_high } } : {}) };
         }));
         if (!('parts' in plan)) {
-          if (plan.refusal === 'hiring_bound_conflict') return { ok: false, mutated: false, refusal: plan.refusal, calculation_supported: false,
-            statement: { quote: plan.quote, source: plan.source, bound: plan.bound, value: plan.value },
-            detail: `${isHumanStatementSource(plan) ? 'You gave' : 'Olumi proposed'} ‘${plan.quote}’. That gives a ${plan.bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` };
+          if (plan.refusal === 'hiring_bound_conflict') {
+            const completeSource = verbatimSourceLine(texts, plan.quote) ?? plan.quote;
+            return { ok: false, mutated: false, refusal: plan.refusal, calculation_supported: false,
+              statement: { quote: completeSource, source: plan.source, bound: plan.bound, value: plan.value },
+              detail: `${isHumanStatementSource(plan) ? 'You gave' : 'Olumi proposed'} ‘${completeSource}’. That gives a ${plan.bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` };
+          }
           if (plan.refusal === 'too_many_starts') return refuse('too_many_starts', `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly, and ask once which two starts to use; until then Olumi’s own hiring estimate for ‘${label}’ stays in the model, labelled as Olumi’s.`);
           if (plan.refusal === 'fewer_starts_than_held') {
             return refuse('fewer_starts_than_held', heldQuotes.length === held.length

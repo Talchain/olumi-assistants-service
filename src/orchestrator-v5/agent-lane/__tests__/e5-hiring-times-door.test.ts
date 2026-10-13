@@ -96,7 +96,7 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     expect(r.public_label).toBe('Use these hiring assumptions? ‘Hire a Tech lead’: you said “at least 3 months”. Modelled timing: starts after 3–4 months, '
       + 'with Olumi’s estimate of the latest start (4 months), and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month). '
       + '‘Hire two developers’: you said “within 2 months”, then “another a month or so later”. Modelled timing: one person after 2 months and another after 3 months, '
-      + 'with Olumi’s estimate of the soonest start (2 months), the second start taken as 1 month after the first (Olumi’s reading of “another a month or so later”), '
+      + 'with an assumption that this start is exactly 2 months from the reference date, Olumi’s estimate of the soonest start (2 months), the second start taken as 1 month after the first (Olumi’s reading of “another a month or so later”), '
       + 'and Olumi’s estimate of the additional progress from the hires (20% of next feature launch per month, split equally between the two starts).');
     expect(w.registers).toHaveLength(0);
   });
@@ -126,7 +126,7 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     expect(shareOptionEstimateWords(after, TECH)).toBe('using your hiring time (“at least 3 months”) as modelled: 3–4 months, with Olumi’s estimate of the latest start (4 months), '
       + 'and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month)');
     expect(shareOptionEstimateWords(after, DEVS)).toBe('using your hiring times (“within 2 months”, then “another a month or so later”) as modelled: 2 and 3 months, '
-      + 'with Olumi’s estimate of the soonest start (2 months), the second start taken as 1 month after the first (Olumi’s reading of “another a month or so later”), '
+      + 'with an assumption that this start is exactly 2 months from the reference date, Olumi’s estimate of the soonest start (2 months), the second start taken as 1 month after the first (Olumi’s reading of “another a month or so later”), '
       + 'and Olumi’s estimate of the additional progress from the hires (20% of next feature launch per month, split equally between the two starts)');
     // The model summary the Agent reads carries each option's starts and pace, with whose.
     const summary = projectModelContext({ nodes: after.nodes, edges: after.edges, raw: after, analysis_state: null, analysis_ready: null } as never) as Rec;
@@ -377,5 +377,54 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     const r2 = await dispatchTool('propose_hiring_times', JSON.stringify(PAULS_ARGS), ctx(PAUL) as never, lost.caps) as Rec;
     lost.knobs.afterStore = g => { delete g.nodes.find((n: Rec) => n.id === 'event_capacity_2_start_2').observed_state.extra_share_by_date.figures; };
     expect(await press(lost, r2.proposal_id)).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' });
+  });
+});
+
+// Fresh Claude probes H1–H4, promoted to exact regression assertions (A2i8).
+describe('A2i8 fresh Claude hiring regressions', () => {
+  it('B1 H3: a short bound quote retains the complete qualified source', async () => {
+    const w = world(), before = w.graph();
+    const text = "For the tech lead it would be at least 6 months, though I'm not sure and it depends on funding.";
+    const out = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
+      starts: [{ quote: 'at least 6 months' }] }] }), ctx(text) as never, w.caps) as Rec;
+    expect(out).toEqual({ ok: false, mutated: false, refusal: 'hiring_bound_conflict', calculation_supported: false,
+      statement: { quote: text, source: 'user_stated', bound: 'lower', value: 6 },
+      detail: `You gave ‘${text}’. That gives a lower bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` });
+    expect(w.graph()).toEqual(before);
+    expect(w.registers).toEqual([]);
+    expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);
+  });
+
+  it.each([true, false])('B2 H4: a pairing conflict keeps user authorship (source complete: %s)', async complete => {
+    const w = world(), before = w.graph();
+    const text = 'With two developers, I think it would take at least 6 months.';
+    const out = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
+      starts: [{ quote: 'at least 6 months' }] }] }), { ...ctx(text), user_text_complete: complete } as never, w.caps) as Rec;
+    expect(out).toEqual({ ok: false, mutated: false, refusal: 'hiring_bound_conflict', calculation_supported: false,
+      statement: { quote: text, source: 'user_stated', bound: 'lower', value: 6 },
+      detail: `You gave ‘${text}’. That gives a lower bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` });
+    expect(w.graph()).toEqual(before);
+    expect(w.registers).toEqual([]);
+    expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);
+  });
+
+  it.each([
+    ['H1', 'at least 4 months', 4, 4, 'an assumption that this start is exactly 4 months from the reference date, Olumi’s estimate of the latest start (4 months)'],
+    ['H2', 'within 2 months', 2, 2, 'an assumption that this start is exactly 2 months from the reference date, Olumi’s estimate of the soonest start (2 months)'],
+    ['interval', 'at least 3 months', 3, 4, 'Olumi’s estimate of the latest start (4 months)'],
+  ] as const)('B3 %s: disclose an exact start exactly when the modelled interval is degenerate', async (_row, quote, low, high, assumptions) => {
+    const w = world();
+    const text = `For the tech lead it would be ${quote}.`;
+    const out = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
+      starts: [{ quote }] }] }), ctx(text) as never, w.caps) as Rec;
+    expect(out.ok).toBe(true);
+    const timing = low === high ? `${low}` : `${low}–${high}`;
+    expect(out.public_label).toBe(`Use these hiring assumptions? ‘Hire a Tech lead’: you said “${quote}”. Modelled timing: starts after ${timing} months, with ${assumptions}, and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month).`);
+    const part = (w.proposals.get(out.proposal_id)!.operations[0]!.value as Rec).options[0].parts[0];
+    expect([part.lead_low.value, part.lead_high.value]).toEqual([low, high]);
+    expect(await press(w, out.proposal_id)).toMatchObject({ ok: true, applied: true });
+    const carrier = w.graph().nodes.find((n: Rec) => n.id === 'event_capacity_1').observed_state.extra_share_by_date;
+    expect([carrier.lead_low, carrier.lead_high]).toEqual([low, high]);
+    expect(shareOptionEstimateWords(w.graph(), TECH).includes('an assumption that this start is exactly')).toBe(low === high);
   });
 });

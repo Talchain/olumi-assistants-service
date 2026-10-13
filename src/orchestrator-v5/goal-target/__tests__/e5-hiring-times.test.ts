@@ -119,6 +119,17 @@ describe('Paul\'s sentence → each start, with whose figure it is (AIE S8 rule 
     ['3-5 months', { kind: 'range', low: 3, high: 5 }],
     ['in two months', { kind: 'about', months: 2 }],
   ] as const)('%s', (quote, form) => expect(readHiringStart(quote)).toEqual(form));
+  it.each([
+    ['at least 6 months', 'lower', 6],
+    ['within 1 month', 'upper', 1],
+  ] as const)('B2 pairing conflict plans retain the original user source: %s', (quote, bound, value) => {
+    const text = `With two developers, I think it would take ${quote}.`;
+    expect(planStarts([quote], { lead_low: 2, lead_high: 4, monthly_share: 12 }, 1, [{ stated: false,
+      original_source: { text, authored_by: 'user_stated' },
+      pairing: { option_id: 'event_option_1', authored_by: 'model_proposed' },
+    }])).toEqual({ refusal: 'hiring_bound_conflict', quote: text, bound, value, source: 'user_stated' });
+  });
+
   it.each(['soon', 'at least 3 months, within 5 months', 'a while', '3 months then 5 months'])('unreadable: %s', q => expect(readHiringStart(q)).toBeNull());
 
   it.each([NaN, Infinity, -Infinity, -1, 61])('W13 rejects non-finite or out-of-bounds typed months %s', months => {

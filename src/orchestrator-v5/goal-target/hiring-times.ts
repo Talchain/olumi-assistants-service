@@ -202,10 +202,10 @@ export function planStarts(quotes: readonly string[], estimate: PlannedOption['o
       low = olumiFigure(prev.lead_low.value + form.months, 'derived', quote);
       high = olumiFigure(prev.lead_high.value + form.months, 'derived', quote);
     } else if (form.kind === 'at_least') {
-      if (form.months > estimate.lead_high) return { refusal: 'hiring_bound_conflict', quote, bound: 'lower', value: form.months, source: own ? 'user_stated' : 'model_proposed' };
+      if (form.months > estimate.lead_high) return { refusal: 'hiring_bound_conflict', quote: reading?.original_source?.text ?? quote, bound: 'lower', value: form.months, source: reading?.original_source || own ? 'user_stated' : 'model_proposed' };
       low = stated(form.months, quote); high = olumiFigure(estimate.lead_high, 'olumi_estimate');
     } else if (form.kind === 'within') {
-      if (form.months < estimate.lead_low) return { refusal: 'hiring_bound_conflict', quote, bound: 'upper', value: form.months, source: own ? 'user_stated' : 'model_proposed' };
+      if (form.months < estimate.lead_low) return { refusal: 'hiring_bound_conflict', quote: reading?.original_source?.text ?? quote, bound: 'upper', value: form.months, source: reading?.original_source || own ? 'user_stated' : 'model_proposed' };
       low = olumiFigure(estimate.lead_low, 'olumi_estimate'); high = stated(form.months, quote);
     } else if (form.kind === 'about' && APPROXIMATE.test(plainWords(quote))) {
       // AIE 6122738619: the exact figure modelled from "about N" is Olumi's disclosed choice, never a human-stated endpoint.
@@ -374,7 +374,12 @@ type StartView = { readonly statement?: Statement; readonly low: HeldFigure; rea
 function assumptionsOf(starts: readonly StartView[], deliverable: string): string[] {
   const items: string[] = [];
   for (const s of starts) {
-    if ((s.statement?.source === 'model_proposed' || s.statement?.pairing?.authored_by === 'model_proposed') && s.low.value === s.high.value) {
+    // DL A2i8 (B3, AIE fact 4): a zero-width start is disclosed as exact when Olumi proposed it, or when a user's one-sided
+    // bound met Olumi's opposite end (one end stated, the other Olumi's) — never on Olumi's own plain point estimate, whose card
+    // already reads as one figure.
+    const boundCollapsed = (s.low.role === 'stated') !== (s.high.role === 'stated');
+    if ((s.statement?.source === 'model_proposed' || s.statement?.pairing?.authored_by === 'model_proposed' || boundCollapsed)
+      && s.low.value === s.high.value) {
       items.push(`an assumption that this start is exactly ${figure(s.low.value)} months from the reference date`);
     }
     const derived = s.low.role === 'derived' && s.high.role === 'derived';
