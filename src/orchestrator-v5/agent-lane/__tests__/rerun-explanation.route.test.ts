@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
-import { rerunExplanationPlan, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
+import { withoutUnlicensedRerunMovement, rerunExplanationPlan, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
   analysis_state: Record<string, unknown>;
@@ -115,25 +115,21 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     return post({ turn_id: turnId, agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id } });
   };
 
-  it('Q4: Paul\'s two entering links are named by the real turn builder, stored and replayed', async () => {
+  it('Q4: the AI explains the two entering links; its complete text is stored and replayed', async () => {
     runDelta = { ...RUN_DELTA, input_coverage: 'partial', input_changes: [
       { entity_kind: 'link', entity_id: 'risk->mrr', field: 'presence', link: { from: 'risk', to: 'mrr' },
         before: null, after: { raw: true }, change: 'added' },
       { entity_kind: 'link', entity_id: 'price->risk', field: 'presence', link: { from: 'price', to: 'risk' },
         before: null, after: { raw: true }, change: 'added' },
     ] };
-    modelText = WHY;
+    modelText = `The model now includes links from Feature release slips to MRR and from Pro plan price to Feature release slips.\n\n${WHY}`;
     const first = (await runTurn(randomUUID())).json() as Body;
     const id = randomUUID();
     const response = await explainTurn(id, first);
     expect(response.statusCode).toBe(200);
     const explained = response.json() as Body;
-    const entered = ['The link from ‘Feature release slips’ to ‘MRR’ is now part of the analysis.',
-      'The link from ‘Pro plan price’ to ‘Feature release slips’ is now part of the analysis.'];
-    for (const _line of entered) { /* Host prose assertions retired by B2. */
-
-
-    }
+    expect(explained.assistant_text).toBe(modelText);
+    expect(rows.find(row => row.turn_id === id)?.assistantMessage).toBe(modelText);
     expect(explained.assistant_text).not.toContain(RERUN_NO_CHANGE_LINES.unknown);
     expect(explained.assistant_text).not.toContain('Nothing else changed.');
     expect(interpretCalls).toBe(1);
@@ -142,25 +138,32 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     expect(interpretCalls, 'replay serves the recorded explanation').toBe(1);
   });
 
-  it('RED: the model claims "rose" with no prior figures → the wire says RC\'s fallback; no stored row holds "rose"; a replay re-serves the fallback', async () => {
+  it('RED: the model claims "rose" with no prior figures → only the movement sentence is removed; storage and replay retain the AI remainder', async () => {
     const first = (await runTurn(randomUUID())).json() as Body;
     const e1 = randomUUID();
     const explained = (await explainTurn(e1, first)).json() as Body;
     expect(interpretCalls, 'the model really answered').toBe(1);
 
+    expect(explained.assistant_text).toBe(`${SAID}\n`);
     expect(explained.assistant_text).not.toMatch(/\brose\b/);
     expect(rows.length, 'the control: rows were written').toBeGreaterThan(0);
     expect(JSON.stringify(rows)).not.toMatch(/\brose\b/);
     const replay = (await explainTurn(e1, first)).json() as Body;
     expect(interpretCalls, 'a replay calls no model').toBe(1);
 
+    expect(replay.assistant_text).toBe(explained.assistant_text);
     expect(replay.assistant_text).not.toMatch(/\brose\b/);
   });
 
-  it('CONTROL: a clean model sentence is sent after Olumi\'s code line', async () => {
+  it('CONTROL: the complete AI explanation ships unchanged, with no host paragraph', async () => {
     modelText = WHY;
     const first = (await runTurn(randomUUID())).json() as Body;
-    const _explained = (await explainTurn(randomUUID(), first)).json() as Body;
+    const id = randomUUID();
+    const explained = (await explainTurn(id, first)).json() as Body;
+    expect(explained.assistant_text).toBe(WHY);
+    expect(explained.assistant_text).not.toContain(FALLBACK);
+    expect(rows.find(row => row.turn_id === id)?.assistantMessage).toBe(WHY);
+    expect((await explainTurn(id, first)).json().assistant_text).toBe(WHY);
 
   });
 
@@ -171,11 +174,11 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
    */
   // Re-pinned for S-A (lane COPY-SHAPE, 7 Oct): the ONE composer shapes over the FINAL text, so "the host composed it" no
   // longer decides the shape; the withheld finding leads, and every original line is kept once in detail.
-  it('IDENTICAL RECONSTRUCTION: the narrator repeats Olumi\'s code line, the host restores it → one composer: the withheld finding leads, every line kept once', async () => {
+  it('AI-owned explanation retains all paragraphs and bullets byte for byte', async () => {
     modelText = `${FALLBACK}\n\n${WHY}\n- Both options are compared on the same goal.\n- The comparison is provisional.\nAsk me what would change it.`;
     const first = (await runTurn(randomUUID())).json() as Body;
     const explained = (await explainTurn(randomUUID(), first)).json() as Body & { _answer_shape?: unknown; blocks?: { type?: string }[] };
-    expect(explained.assistant_text, 'the control: the host rebuilt the narrator\'s text (now through the one composer)').toContain(WHY);
+    expect(explained.assistant_text).toBe(modelText);
     expect((explained.blocks ?? []).some((b) => b.type === 'analysis_result'), 'the control: an analysis-bearing reply').toBe(true);
     const _shape = explained._answer_shape as AnswerShape | undefined;
 
@@ -204,4 +207,12 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     expect(explained._agent.provisional_view !== undefined, JSON.stringify(explained._agent.provisional_view ?? null)).toBe(shown);
     expect(JSON.stringify(explained)).not.toMatch(/\brose\b/);
   });
+});
+
+
+it('B2q the remaining movement guard removes a whole decimal-bearing sentence only', () => {
+  const plan = rerunExplanationPlan(RUN_DELTA, id => labels.get(id), ['AI Reporting Sprint'], false)!;
+  expect(withoutUnlicensedRerunMovement(`${WHY} Its chance rose from 40.5% to 57.5%.`, plan)).toBe(WHY);
+  const original = `${SAID}\n\n${WHY}  A further model check is useful.`;
+  expect(withoutUnlicensedRerunMovement(original, plan)).toBe(original);
 });

@@ -307,11 +307,12 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
   }, 60_000);
 
-  it.skipIf(CAPTURE_BASELINE).each([false, true])('retired exact narrator horizon identities are removed (steady=%s)', async steady => {
+  it.skipIf(CAPTURE_BASELINE).each([false, true])('AI horizon limitations stay verbatim while unlicensed percentages are removed (steady=%s)', async steady => {
     if (steady) Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
     const copies = [OLD_HORIZON, untestedHorizonLine(graph, { normalizationOnly: true }),
       untestedHorizonLine(graph, { plural: true, normalizationOnly: true })].filter((line): line is string => line !== null);
     const body = await turn([NARRATOR, ...copies].join(' '));
+    for (const copy of copies) expect(body.assistant_text).toContain(copy);
     // P1a (DL 87114 #2895): neither stored triple nor narrator wording unlocks.
     expect(body.assistant_text).not.toContain(WHY);
     expect(body.assistant_text).not.toContain('%');
@@ -333,9 +334,10 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(body.assistant_text).not.toContain(WHY);
   }, 60_000);
 
-  it('a horizon-withheld Run replays its bulletless _answer_shape deep-equal to live', async () => {
+  it('a horizon-withheld Run has no host answer shape and replays its AI text exactly', async () => {
     const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
-    const _body = await turn(); // turn asserts deep equality on the real same-id replay, without a model call.
+    const body = await turn(); // turn asserts deep equality on the real same-id replay, without a model call.
+    expect(body._answer_shape).toBeUndefined();
     expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
 
 

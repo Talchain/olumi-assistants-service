@@ -7,12 +7,12 @@ import { readGoalRecord } from '../goal-target/goal-record.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
-const plain = (s: string): string => foldQuotes(s).replace(/['"`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
+const plain = (s: string): string => foldQuotes(s.replace(/â€˜|â€™|â€œ|â€\u009d/g, "'")).replace(/['"`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
 
 /**
  * The shared live, stored-answer replay and conversation-reload boundary. A named licensed option and its goal
- * bind any narrated percentage, so a wrong figure cannot escape the producer's attribution. Goal-only narration
- * still needs one exact licensed value; explicit other subjects and exact user-authored spans stay untouched.
+ * bind every narrated percentage to the licence display or a verified input in that sentence. Goal-only narration
+ * cannot invent an option identity. Exact user-authored spans and producer-bound statements stay untouched.
  * The screen producer owns the replacement, including its attribution and notes; each option is said once.
  */
 export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unknown }>(body: T, context: {
@@ -32,11 +32,10 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const goalIds = new Set([licence.goal_node_id, rec(run?.input_snapshot)?.goal_node_id,
     rec(enrichment?.input_snapshot)?.goal_node_id, run?.goal_node_id, enrichment?.goal_node_id]
     .filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
-  if (goalIds.size > 1) return body;
-  const [goalId] = goalIds;
+  const goalId = goalIds.size === 1 ? [...goalIds][0] : undefined;
   const goal = goals.find(n => n?.id === goalId);
   const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
-  const lines = licensedGoalChanceLinesForAgent(context.analysisResult, context.graph, true);
+  const lines = goalIds.size > 1 ? [] : licensedGoalChanceLinesForAgent(context.analysisResult, context.graph, true);
   // Zero links is not zero estimates: the licence also counts shared starting
   // values and this option's own settings. Never borrow another option's setting.
   const positiveCount = (value: unknown): boolean => typeof value === 'number' && value > 0;
@@ -44,12 +43,6 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
     positiveCount(line.olumi_estimate_link_count)
     || positiveCount(licence.olumi_estimate_value_count)
     || positiveCount(rec(licence.olumi_estimate_settings_by_option)?.[line.option_id]);
-  // Specialized goals (for example launching by a recorded date) carry their own producer-owned predicate.
-  // Match that goal wording rather than assuming every licence says 'meeting your goal'.
-  const producerGoalPredicates = lines.flatMap(l => {
-    const match = plain(l.chance).match(/\bchance of (.+?), in this model\b/);
-    return match === null ? [] : [match[1]!];
-  });
   // Also resolve explicitly named unlicensed options: they cannot fall through to another option's goal-only tuple.
   const labelsById = new Map((Array.isArray(nodes) ? nodes : []).map(rec).flatMap(n =>
     n?.kind === 'option' && typeof n.id === 'string' && typeof n.label === 'string' ? [[n.id, n.label] as const] : []));
@@ -94,7 +87,8 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
       if (piece === '') continue;
       const needle = foldQuotes(piece);
       for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) {
-        const span = { start: at, end: at + needle.length };
+        const quoted = /["'‘’“”]/.test(text[at - 1] ?? '') && /["'‘’“”]/.test(text[at + needle.length] ?? '');
+        const span = { start: at - (quoted ? 1 : 0), end: at + needle.length + (quoted ? 1 : 0) };
         protectedSpans.push(span); userSpans.push(span);
       }
     }
@@ -113,6 +107,29 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
       }
     }
   }
+  // Protected quotes/producer spans exempt their own figures, not the identity of the
+  // sentence around them. Keep full sentence context when checking a gap beside a quote.
+  const sentenceContexts: { start: number; end: number; subject: string }[] = [];
+  let contextRowStart = 0;
+  for (const row of text.split('\n')) {
+    let boundaries = row;
+    const foldedRow = foldQuotes(row).toLowerCase();
+    for (const label of [...optionLabels.map(o => o.label), ...goals.flatMap(g => typeof g?.label === 'string' ? [g.label] : [])]) {
+      const needle = foldQuotes(label).toLowerCase();
+      if (needle === '') continue;
+      for (let at = foldedRow.indexOf(needle); at >= 0; at = foldedRow.indexOf(needle, at + needle.length)) {
+        boundaries = boundaries.slice(0, at) + ' '.repeat(needle.length) + boundaries.slice(at + needle.length);
+      }
+    }
+    const ends = [...boundaries.matchAll(/[.!?]["'”’`*_)]*(?=\s|$)/g)].map(m => m.index! + m[0].length);
+    if (ends.at(-1) !== row.length) ends.push(row.length);
+    let cursor = 0;
+    for (const end of ends) {
+      sentenceContexts.push({ start: contextRowStart + cursor, end: contextRowStart + end, subject: plain(row.slice(cursor, end)) });
+      cursor = end;
+    }
+    contextRowStart += row.length + 1;
+  }
   // Walk only the gaps between producer spans: a canonical sentence never shields adjacent narration.
   const gaps: { start: number; end: number }[] = [];
   let protectedEnd = 0;
@@ -129,7 +146,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
       // A stop inside a licence label is part of the name, even when it is followed by a space.
       let boundaries = row;
       const foldedRow = foldQuotes(row).toLowerCase();
-      for (const label of [...lines.map(l => l.label), ...(typeof goalLabel === 'string' ? [goalLabel] : [])]) {
+      for (const label of [...optionLabels.map(o => o.label), ...goals.flatMap(g => typeof g?.label === 'string' ? [g.label] : []), ...(typeof goalLabel === 'string' ? [goalLabel] : [])]) {
         const needle = foldQuotes(label).toLowerCase();
         if (needle === '') continue;
         for (let at = foldedRow.indexOf(needle); at >= 0; at = foldedRow.indexOf(needle, at + needle.length)) {
@@ -145,6 +162,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         cursor = sentenceEnd;
         const start = rowStart + at, end = start + sentence.length;
         const subject = plain(sentence);
+        const bindingSubject = sentenceContexts.find(context => context.start <= start && start < context.end)?.subject ?? subject;
         // K-a: bind a positive timed-attainment assertion to this turn's goal and
         // period. Questions and limitations are not assertions. This deliberately
         // recognises the narrow month-based claim, not arbitrary timing vocabulary.
@@ -179,15 +197,13 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         }
         // Percentages inside node labels are names, not narrated figures (e.g. 'Raise prices 10%').
         let figures = subject;
-        for (const label of [...lines.map(l => l.label), ...(typeof goalLabel === 'string' ? [goalLabel] : [])]) {
-          figures = figures.split(plain(label).trim()).join('');
+        for (const label of [...optionLabels.map(o => o.label), ...goals.flatMap(g => typeof g?.label === 'string' ? [g.label] : []), ...(typeof goalLabel === 'string' ? [goalLabel] : [])]) {
+          const name = plain(label).trim();
+          if (name !== '') figures = figures.split(name).join(' '.repeat(name.length));
         }
         // Parse the percentage expression, including stacked approximation/comparison qualifiers, never a reply shape.
         const percentages = [...figures.matchAll(/((?:(?:(?:no\s+)?(?:less|more|greater)\s+than|at\s+(?:least|most)|up\s+to|under|over|below|above|[<>]=?|[≤≥]|about|roughly|around|approximately|circa)\s*)*)([-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+))\s*(?:%|\bpercent\b|\bper\s+cent\b)/g)];
-        // A named option binds its ID, even when another option licenses this percentage. A named other goal conflicts.
-        const namedOptions = optionLabels.filter(o => names(subject, o.label) || names(subject, o.id));
-        if (namedOptions.length > 1 || (goalId !== undefined && goals.some(g => g?.id !== goalId
-          && typeof g?.label === 'string' && names(subject, g.label)))) continue;
+        const namedOptions = optionLabels.filter(o => names(bindingSubject, o.label) || names(bindingSubject, o.id));
         if (percentages.length === 0) continue;
         let withoutFigures = subject;
         for (const p of percentages) withoutFigures = withoutFigures.replace(p[0], ' ');
@@ -212,55 +228,67 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
           } else if (lines.every(l => said.has(l.option_id))) edits.push({ start, end, replacement: '' });
           continue;
         }
-        const genericGoalPoint = /\b(?:chance|probability|likelihood) (?:of |to )?(?:meet(?:ing)?|reach(?:ing)?|achiev(?:e|ing)|hit(?:ting)?) (?:your|the|our|this) (?:goal|target)\b/.test(subject);
-        const goalSubject = typeof goalLabel === 'string' && plain(goalLabel).trim() !== ''
-          ? subject.split(plain(goalLabel).trim()).join('__scored_goal__') : subject;
-        const namedGoalPoint = /\b(?:chance|probability|likelihood) (?:of |to )?(?:meet(?:ing)?|reach(?:ing)?|achiev(?:e|ing)|hit(?:ting)?) (?:the )?__scored_goal__\b/.test(goalSubject)
-          || (/\b__scored_goal__ (?:meets|reaches|achieves|hits) (?:its |the |your )?(?:goal|target)\b/.test(goalSubject)
-            && /\bruns\b/.test(subject))
-          || (/\b(?:meets|reaches|achieves|hits) (?:the )?__scored_goal__ (?:in|on)\b/.test(goalSubject)
-            && /\bruns\b/.test(subject));
-        const producerGoalPoint = producerGoalPredicates.some(predicate =>
-          ['chance', 'probability', 'likelihood'].some(word => names(subject, `${word} of ${predicate}`)));
-        let shorthand = withoutFigures;
-        for (const o of namedOptions) {
-          shorthand = shorthand.split(plain(o.label).trim()).join('').split(plain(o.id).trim()).join('');
-        }
-        shorthand = shorthand.replace(/^\s*[-•]\s*/, '').replace(/\bin this model\b/g, '')
-          .replace(/[:;,.!?]/g, '').replace(/\s+/g, ' ').trim();
-        // The familiar option: percentage display and recorded option chance imply the licensed goal. Any named
-        // alternate subject (supplier failure, competitor launch, market share) prevents this shorthand binding.
-        const optionGoalPoint = namedOptions.length === 1 && (genericGoalPoint || namedGoalPoint || producerGoalPoint
-          || shorthand === '' || /^(?:has|gives) (?:a )?chance$/.test(shorthand)
-          || /^(?:the )?recorded (?:chance|figure|probability) for (?:is|was)$/.test(shorthand));
-        const matched = lines.filter(l => {
-          const pct = rec(licence.pct_by_option)?.[l.option_id];
-          const valueMatches = percentages.some(p => {
-            const value = Number(p[2]!.replace(/,/g, ''));
-            const prefix = p[1]!.trim();
-            const comparison = prefix.replace(/\b(?:about|roughly|around|approximately|circa)\b/g, '').trim();
-            // pct_by_option is already rounded by the licence producer; only its exact value or ruled edge display binds.
-            return comparison === '' ? value === pct
-              : (pct === 0 && value === 1 && ['<', 'less than'].includes(prefix))
-                || (pct === 100 && value === 99 && ['>', 'more than'].includes(prefix));
+        // B2q: sentence-level admission, independent of the narrator's predicate/word order.
+        // A number in a different sentence or in an unverified history is never evidence.
+        const namesGoal = goals.some(g => typeof g?.label === 'string' && names(bindingSubject, g.label))
+          || (typeof goalLabel === 'string' && names(bindingSubject, goalLabel))
+          || /\b(?:your|the|our|this) (?:goal|target)\b/.test(bindingSubject);
+        if (namedOptions.length === 0 && !namesGoal) continue;
+        const matched = lines.filter(l => namedOptions.some(o => o.id === l.option_id));
+        const licensedFigures = matched.length === 1 ? figureParts(matched[0]!.figure) : [];
+        const target = goalIds.size > 1 ? undefined : rec(licence.target);
+        const percentageUnit = (unit: unknown): unit is string => typeof unit === 'string'
+          && /^(?:%|percent\b|per cent\b)/i.test(unit.trim());
+        const inputFigure = (p: RegExpMatchArray): boolean => {
+          const value = Number(p[2]!.replace(/,/g, ''));
+          const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          // A matching number somewhere in the sentence is insufficient: the input's label and
+          // unit must bind this occurrence as an input value. In particular, a 10% target cannot
+          // license "a 10% chance of meeting your goal" beside a different licensed chance.
+          const inputOccurrence = (label: string, unit: string): boolean => {
+            const tail = plain(unit).replace(/^(?:%|percent|per cent)/, '').trim();
+            const before = subject.slice(0, p.index);
+            const after = figures.slice(p.index! + p[0].length);
+            const labelAtValue = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escape(plain(label))}\\s*(?:(?:is|of|at|was|equals|being|up)\\s*|[:=]\\s*)$`, 'u');
+            return labelAtValue.test(before) && (tail === '' || after.trimStart().startsWith(tail));
+          };
+          if (namesGoal && percentageUnit(target?.unit) && target?.value === value
+            && ['target', ...(typeof goalLabel === 'string' ? [goalLabel] : [])].some(label => inputOccurrence(label, target.unit as string))) return true;
+          // Only typed raw values with an explicit percentage unit can exempt a model input.
+          // Internal normalized values and analysis outputs (win shares, sensitivities) cannot.
+          return (Array.isArray(nodes) ? nodes : []).some(raw => {
+            const n = rec(raw), observed = rec(n?.observed_state), unit = observed?.unit;
+            if (typeof n?.label !== 'string' || !names(subject, n.label) || !percentageUnit(unit)) return false;
+            return observed?.raw_value === value && inputOccurrence(n.label, unit);
           });
-          return namedOptions.length === 1 ? optionGoalPoint && namedOptions[0]!.id === l.option_id
-            : valueMatches && goalId !== undefined && namedGoalPoint;
+        };
+        const residual = percentages.filter(p => !inputFigure(p));
+        // A complete range is one licensed display; endpoints alone cannot become point chances.
+        // Compare with the producer's formatted figure, never a locally rounded probability.
+        const parts = residual.flatMap(p => figureParts(p[0]));
+        const correctSingle = matched.length === 1 && (licensedFigures.length === 1
+          ? parts.length > 0 && parts.every(part => part === licensedFigures[0])
+          : parts.length === licensedFigures.length && parts.every((part, i) => part === licensedFigures[i]));
+        // Multiple named options can share a sentence only when each percentage has one
+        // unambiguous option in its own clause; a matching number cannot choose an option.
+        const clauses = [...subject.matchAll(/[^,;]+?(?=\s+and\s+|[,;]|$)/g)];
+        const correctMultiple = namedOptions.length > 1 && residual.every(p => {
+          const clause = clauses.find(c => p.index! >= c.index! && p.index! < c.index! + c[0].length);
+          if (clause === undefined) return false;
+          const owners = namedOptions.filter(o => names(clause[0], o.label) || names(clause[0], o.id));
+          const line = owners.length === 1 ? matched.find(l => l.option_id === owners[0]!.id) : undefined;
+          return line !== undefined && exactFigure(p[0], line.figure);
         });
-        // Goal-only narration still needs one exact (option_id, scored goal_id, displayed value), never a guessed tie.
-        if (matched.length !== 1) {
-          // No licensed option/goal/figure tuple: suppress only this numerical claim,
-          // never substitute a share, another option's figure or an invented reason.
-          if (optionGoalPoint || namedGoalPoint || (namedOptions.length > 0 && (genericGoalPoint || producerGoalPoint))) edits.push({ start, end, replacement: '' });
-          continue;
-        }
-        if (namedOptions.length === 0) {
-          edits.push({ start, end, replacement: '' }); // A matching number alone never licenses a goal claim or option attribution.
-          continue;
-        }
-        if (exactFigure(figures, matched[0]!.figure) && (context.preserveLicensedWords || !hasOlumiEstimates(matched[0]!))) continue;
-        const replacement = matched.filter(l => !said.has(l.option_id)).map(l => { said.add(l.option_id); return l.chance; }).join(' ');
-        edits.push({ start, end, replacement });
+        const correct = correctSingle || correctMultiple;
+        if (residual.length === 0 || correct) continue;
+        // Existing mismatch path: replace with the producer's own sentence, once per option;
+        // an absent/ambiguous tuple is suppressed, never guessed from another option's figure.
+        const replacement = matched.length === 1
+          ? matched.filter(l => !said.has(l.option_id)).map(l => { said.add(l.option_id); return l.chance; }).join(' ')
+          : '';
+        const separator = replacement !== '' && start > 0 && !/\s/.test(text[start - 1]!)
+          && protectedSpans.some(span => span.end === start) ? ' ' : '';
+        edits.push({ start, end, replacement: separator + replacement });
       }
       rowStart += row.length + 1;
     }

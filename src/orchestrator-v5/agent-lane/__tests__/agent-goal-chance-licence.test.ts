@@ -215,17 +215,7 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(await saved(fixture())).not.toHaveProperty('goal_horizon_line');
     expect(await run(fixture())).not.toHaveProperty('goal_horizon_line');
   });
-  it('(10) both reporting rules add the exact range/deadline words and retain the existing bans', () => {
-    const _rangeRule = 'For other options in goal_chance_range_display, say its range text exactly as given, then “ chance of meeting your goal, in this model” (for example “between less than 1% and 40% chance of meeting your goal, in this model”). Then state what it depends on: for link_strength, “It depends most on how strongly ‘{from}’ affects ‘{to}’, which isn\'t sized in the model yet.”; for link_existence, “It depends most on whether ‘{from}’ affects ‘{to}’ at all, which Olumi assumed.” Use depends_on.from_label and depends_on.to_label for {from} and {to}. Prefix “Of the links not sized yet, ” when depends_on.among is unsized_links. Never state a single figure for that option, and never compare or order ranges.';
-    const _horizonRule = 'When goal_horizon_line is present and you state any goal chance or range, add that sentence verbatim once, right after the chance or range.';
-    const runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
-    const savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
-    for (const _rule of [runRule, savedRule]) { /* Host prose assertions retired by B2. */
-
-
-
-
-    }
+  it('(10) AI reporting retains exact licence authority, model-relative scope and recommendation bans', () => {
     expect(HOST_TOOL_CONTRACT).toContain("Use the current licensed goal chance with its target, scope, assumptions and limits. Never substitute an option's winning share or ranking credit for that chance. You may explain a supplied chance as the proportion of scored simulation draws meeting its licensed target when that is how the supplied result was computed.");
     expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
     expect(HOST_TOOL_CONTRACT).toContain('When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward');

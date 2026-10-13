@@ -39,6 +39,8 @@ const RISK = { factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', b
 const FACTOR = { factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' };
 const LEVEL = { option_label: 'Hire two developers', factor_label: 'Onboarding load', value: 60, basis: 'more onboarding' };
 
+const OMISSION = 'Not included in this proposal: Hiring ramp-up delay (a risk). Only a factor can hold a starting value, so it was left out — approving adds nothing for it.';
+
 type Chip = { id: string; label: string };
 describe('a starting point that leaves a named input out says so in the response itself', () => {
   let app: FastifyInstance;
@@ -77,7 +79,10 @@ describe('a starting point that leaves a named input out says so in the response
 
 
     // The committed answer (what a replay returns) carries the same disclosure.
-    const _persisted = JSON.stringify(store.append.mock.calls);
+    expect(b.assistant_text).toContain(OMISSION);
+    const saved = [...rows.values()].find(row => row.assistant_message === b.assistant_text);
+    expect(saved?.assistant_message).toBe(b.assistant_text);
+    expect((await turn('0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d')).assistant_text).toBe(b.assistant_text);
 
   });
 
@@ -92,6 +97,7 @@ describe('a starting point that leaves a named input out says so in the response
     args = { assumptions: [RISK], option_levels: [] };
     const b = await turn();
     expect(b.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:'))).toBe(false);
+    expect(b.assistant_text).toContain(OMISSION);
 
   });
 });

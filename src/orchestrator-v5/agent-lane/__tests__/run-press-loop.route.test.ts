@@ -32,6 +32,7 @@ let turnToolResult: Rec | undefined;
 let licensedRecord: Rec | undefined;
 let modelWords = '';
 let claimCurrent = false;
+let extraModelWords = '';
 const rows: Rec[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -76,7 +77,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
           ...(licence.notes ?? []),
           ...Object.values(result.goal_chance_driver_display ?? {}),
         ].join(' ') : 'The analysis ran, but the model has not established how much of the hiring effects would be in place by month three.';
-        output = [answer(`${claimCurrent ? 'The result is current. ' : ''}${modelWords}`)];
+        output = [answer(`${claimCurrent ? 'The result is current. ' : ''}${modelWords}${extraModelWords}`)];
       }
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));
@@ -113,7 +114,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; writes = []; rows.length = 0;
     STATE.run_state.computed_at = AT;
-    claimCurrent = false; behavior = 'run'; interpretationFailure = undefined; engineFails = false; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
+    extraModelWords = ''; claimCurrent = false; behavior = 'run'; interpretationFailure = undefined; engineFails = false; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
   const press = (extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, ...extra,
@@ -155,6 +156,23 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
       expect(r.json().assistant_text).not.toMatch(/\b(best|winner|you should|recommend)\b/i);
     }
     expect(writes).toEqual([]); expect(graph).toEqual(FX.graph);
+  });
+
+  it('B2q: 12% against licensed 24% never ships, is stored as sent and replays byte for byte', async () => {
+    extraModelWords = ' There is a 12% chance that Hire a tech lead meets your goal.';
+    const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
+    const first = await press(request);
+    expect(first.statusCode).toBe(200);
+    expect(licensedRecord!.pct_by_option.hire_a_tech_lead).toBe(24);
+    const text = first.json().assistant_text;
+    expect(text).not.toContain('12%');
+    expect(text).toContain('24%');
+    expect(rows.find(row => row.turn_id === request.turn_id)?.assistant_message).toBe(text);
+    const count = bodies.length;
+    const replay = await press(request);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(replay.json().assistant_text).toBe(text);
+    expect(bodies).toHaveLength(count);
   });
 
   it('N1: client chip/body timing cannot override the agent reading', async () => {

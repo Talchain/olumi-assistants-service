@@ -52,7 +52,7 @@ import { parseAnswerOffers, storedOfferId } from '../orchestrator-v5/agent-lane/
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
 import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { tippingPointCoachingFor, settleTippingPointCoaching, settleNoSignalThresholdClaims, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
-import { composeRerunExplanation, rerunViewFailures, rerunExplanationPlan } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
+import { withoutUnlicensedRerunMovement, rerunViewFailures, rerunExplanationPlan } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
@@ -116,7 +116,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
-import { narrateWriteOutcome, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { notAdoptedLine, narrateWriteOutcome, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { untestedHorizonLineForCells, CHANCE_FREE_HORIZON_PREFIX, UNTESTED_HORIZON_PREFIXES } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 
 import { analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
@@ -3412,13 +3412,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         else if (answer.trim().length > 0) {
           explanationReady = true;
           narratorWords = answer;
-          // M2: Olumi's code line first, then the model's sentences that pass RC's checker (a hit drops that sentence only).
-          const composed = rerunPlan !== null ? composeRerunExplanation(answer, rerunPlan) : null;
-          if (composed !== null && composed.dropped.length > 0) log.info({ scenario_id: scenarioId, failed: composed.failed, dropped: composed.dropped.length }, 'agent-lane: rerun explanation sentences failed RC checks — dropped');
-          const said = composed?.text ?? answer;
-          interpreted = typed !== null || composed !== null
-            // The history keeps the ANSWER, never the JSON: one id-less assistant message, which needs no reasoning item
-            // (the f828a61 refusal is for a message WITH its id and without its reasoning). The same for a composed rerun text.
+          const said = rerunPlan === null ? answer : withoutUnlicensedRerunMovement(answer, rerunPlan);
+          interpreted = typed !== null || said !== answer
+            // A typed or fact-checked answer gets one id-less message with exactly the sent words.
             ? { answer: said, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }] }
             : { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
         }
@@ -4810,7 +4806,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
     // An authorised revision says what it did to the result on screen, from this turn's typed readback (R&C 5842738466).
     const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
-    const statusText = [narration.status, staleLine, ...heldLapseLines].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') || null;
+    const statusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, ...heldLapseLines].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') || null;
     const freshScopeAsk = freshScopeIssues.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.expected !== 'approval' && retainedScopeIssues.some(held => held.chip_id === p.chip_id));
     const rawScopeQuestion = freshScopeAsk?.action.kind === 'reconcile_goal_scope' ? freshScopeAsk.action.question : null;
     const _freshScopeQuestion = rawScopeQuestion === null ? null : withoutProposalIds(rawScopeQuestion);

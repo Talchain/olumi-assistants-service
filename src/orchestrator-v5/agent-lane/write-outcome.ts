@@ -614,6 +614,10 @@ export function notAdoptedLine(
   toolResults: readonly ToolResult[],
 ): string | null {
   const PROPOSERS = ['propose_assumptions', 'propose_starting_point'];
+  const levelOmissions = toolCalls.flatMap((call, i) => {
+    const line = (toolResults[i] as { current_level_left_out?: { host_line?: unknown } } | undefined)?.current_level_left_out?.host_line;
+    return call.name === 'propose_goal_target' && typeof line === 'string' && line.trim() !== '' ? [line] : [];
+  });
   const seen = new Set<string>();
   const items: string[] = [];
   toolCalls.forEach((c, i) => {
@@ -631,8 +635,8 @@ export function notAdoptedLine(
       items.push(kind !== '' ? `${label} (${/^[aeiou]/i.test(kind) ? 'an' : 'a'} ${kind})` : label);
     }
   });
-  if (items.length === 0) return null;
-  return `Not included in this proposal: ${items.join('; ')}. Only a factor can hold a starting value, so ${items.length === 1 ? 'it was' : 'they were'} left out — approving adds nothing for ${items.length === 1 ? 'it' : 'them'}.`;
+  const factorOmission = items.length === 0 ? [] : [`Not included in this proposal: ${items.join('; ')}. Only a factor can hold a starting value, so ${items.length === 1 ? 'it was' : 'they were'} left out — approving adds nothing for ${items.length === 1 ? 'it' : 'them'}.`];
+  return [...new Set([...levelOmissions, ...factorOmission])].join(' ') || null;
 }
 
 export function withWriteOutcome(body: string, status: string | null): string {

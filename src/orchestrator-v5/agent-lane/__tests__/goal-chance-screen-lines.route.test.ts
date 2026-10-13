@@ -261,7 +261,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   };
 
   it('r11: a forwarded assistant reply crosses the same current-Run boundary', async () => {
-    const _line = estimateScreenLine();
+    const line = estimateScreenLine();
     const unrelated = 'The chance of supplier failure is 10%.';
     forwardedText = `Raise to £59: 67%. ${unrelated}`;
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -269,6 +269,12 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     } });
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json().assistant_text).toBe(forwardedText);
+    forwardedText = `There is a 68% chance that Raise to £59 meets your goal. ${unrelated}`;
+    const wrong = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'system_event', scenario_id: SCENARIO, event: { kind: 'structural_rename', target_id: 'raise_prices_10', label: 'Raise to £59' },
+    } });
+    expect(wrong.statusCode).toBe(200);
+    expect(wrong.json().assistant_text).toBe(`${line.chance} ${unrelated}`);
   });
 
   it('r13: a user-authored competitor sentence survives live egress, storage and same-id replay', async () => {

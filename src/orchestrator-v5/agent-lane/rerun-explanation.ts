@@ -528,6 +528,25 @@ export function composeRerunExplanation(reply: string, plan: RerunExplanationPla
   return { text: kept === '' ? plan.codeLine : `${plan.codeLine}\n\n${kept}`, dropped, failed: [...failed] };
 }
 
+/** B6 retired: retain only the fact-bound prohibition on movement without prior figures.
+ * Preserve every other AI byte; no record paragraph, repeat removal or prose shaping.
+ */
+export function withoutUnlicensedRerunMovement(reply: string, plan: RerunExplanationPlan): string {
+  const ends = [...reply.matchAll(/[.!?](?=\s|$)|\n/gu)].map(match => match.index! + match[0].length);
+  if (ends.at(-1) !== reply.length) ends.push(reply.length);
+  const spans: { start: number; end: number }[] = [];
+  let start = 0;
+  for (const end of ends) { spans.push({ start, end }); start = end; }
+  let text = reply;
+  for (const span of spans.reverse()) {
+    const sentence = reply.slice(span.start, span.end);
+    const failed = checkMethodTurn('RERUN-EXPLANATION', sentence, plan.inputs, true, sentence).failed;
+    if (!failed.includes('RX-NO-MOVEMENT-WITHOUT-PRIOR')) continue;
+    text = text.slice(0, span.start) + text.slice(span.end);
+  }
+  return text;
+}
+
 /**
  * The typed provisional view (C5b) is the model's words too (Codex pre-review e1c7c788 P1: "Its chance rose from 40% to
  * 57%." rode `provisional_view.reasoning` past the check). Each field passes the same bans beside the code line, except the

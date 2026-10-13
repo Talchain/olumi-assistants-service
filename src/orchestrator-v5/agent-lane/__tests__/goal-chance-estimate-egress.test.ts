@@ -1,3 +1,4 @@
+import sentenceFrames from './fixtures/b2q-percentage-sentence-frames.json';
 import { describe, expect, it, vi } from 'vitest';
 import * as screenLines from '../goal-chance-screen-lines.js';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
@@ -73,7 +74,7 @@ describe('r16 option and goal bound estimate points', () => {
     const body = { assistant_text: '‘Raise to £59’: about 67% in this model.' };
     const out = withEstimateGoalPointsAtEgress(body, { analysisResult: current ? unlabelled : result, graph, current });
     if (!current) expect(out).toBe(body);
-    else { expect(out.assistant_text).toContain('67%'); expect(out.assistant_text).not.toContain("Olumi's estimates"); }
+    else expect(out).toBe(body);
   });
   it.each([
     'The chance of supplier failure is 10%.',
@@ -280,4 +281,158 @@ describe('B2k fact-bound timed attainment', () => {
     const limitation = 'The goal is not on track by month 9; this model cannot establish that.';
     expect(timed(limitation)).toBe(limitation);
   });
+});
+
+
+describe('B2q sentence-class sweep: 15 verbatim served sources and 28 review-probe frames', () => {
+  for (const frame of sentenceFrames) {
+    const model = { nodes: [
+      { id: 'choice', kind: 'option', label: frame.label },
+      { id: 'goal', kind: 'goal', label: 'Productivity' },
+      { id: 'input', kind: 'factor', label: 'User capacity', observed_state: { raw_value: 25, unit: '%', source: 'user' } },
+    ], edges: [] };
+    const analysisResult = { enrichment: { inference_warnings: [{ code: 'GOAL_CHANCE_LICENSED', form: 'each',
+      option_ids: ['choice'], option_labels_by_option: { choice: frame.label }, pct_by_option: { choice: 67 },
+      goal_node_id: 'goal', goal_label: 'Productivity', target: { comparator: 'at_least', value: 10, unit: '%' },
+      olumi_estimate_link_count: 0,
+    }] } };
+    const apply = (text: string) => withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+      graph: model, analysisResult, current: true,
+    }).assistant_text;
+    const licensed = screenLines.licensedGoalChanceLinesForAgent(analysisResult, model, true)[0]!;
+    // Parameterise only the displayed figure; the full original served sentence remains in the fixture.
+    const render = (figure: string) => frame.frame.replace('{figure}', figure);
+    it.each([
+      ['licensed', () => render(licensed.figure), true],
+      ['licensed-1', () => render('about 66%'), false],
+      ['licensed+1', () => render('about 68%'), false],
+      ['target 10%', () => render(licensed.figure).replace(/\.$/, '; the goal target is 10%.'), true],
+      ['user input 25%', () => render(licensed.figure).replace(/\.$/, '; User capacity is 25%.'), true],
+    ] as const)(`${frame.id}: %s`, (_variant, text, unchanged) => {
+      const input = text();
+      expect(apply(input), `${frame.source}\n${frame.sentence}`).toBe(unchanged ? input : licensed.chance);
+      expect(apply(apply(input))).toBe(apply(input));
+    });
+  }
+});
+
+it('B2q every percentage is checked, including an otherwise licensed sentence and unknown input claims', () => {
+  const correct = 'Raise to £59 is 67% likely to meet your goal';
+  expect(clean(`${correct}, with a further 68% figure.`)).toBe(line.chance);
+  expect(clean('Raise to £59: the chance of supplier failure is 10%.')).toBe(line.chance);
+  const inputGraph = { ...graph, nodes: [...graph.nodes, { id: 'capacity', kind: 'factor', label: 'Capacity',
+    observed_state: { raw_value: 25, value: 0.25, unit: '% of monthly time' } }] };
+  const apply = (assistant_text: string) => withEstimateGoalPointsAtEgress({ assistant_text }, {
+    graph: inputGraph, analysisResult: result, current: true,
+  }).assistant_text;
+  const input = `${correct}; Capacity is 25% of monthly time.`;
+  expect(apply(input)).toBe(input);
+  expect(apply(`${correct}; Capacity is 26% of monthly time.`)).toBe(line.chance);
+  expect(apply(`${correct}; Capacity is 25%.`)).toBe(line.chance);
+  expect(apply(`${correct}; Capacity is 0.25% of monthly time.`)).toBe(line.chance);
+});
+
+it('B2q input evidence binds the occurrence, not another use of the same number', () => {
+  const analysisResult = { enrichment: { inference_warnings: [{ ...licence, olumi_estimate_link_count: 0,
+    target: { comparator: 'at_least', value: 10, unit: '%' } }] } };
+  const apply = (assistant_text: string) => withEstimateGoalPointsAtEgress({ assistant_text }, {
+    graph, analysisResult, current: true,
+  }).assistant_text;
+  const expected = screenLines.licensedGoalChanceLinesForAgent(analysisResult, graph, true)[0]!.chance;
+  expect(apply('There is a 10% chance that Raise to £59 meets your goal.')).toBe(expected);
+  expect(apply('Raise to £59 reaches the target 10% of the time.')).toBe(expected);
+  expect(apply('Raise to £59 has a 10% chance; the goal target is 10%.')).toBe(expected);
+  const allowed = 'Raise to £59 has a 67% chance; the goal target is 10%.';
+  expect(apply(allowed)).toBe(allowed);
+  const repeated = 'Raise to £59 has a 67% chance; its recorded chance is 67%.';
+  expect(apply(repeated)).toBe(repeated);
+});
+
+it('B2q separate option clauses bind their own figures, including with the figure first', () => {
+  const analysisResult = { enrichment: { inference_warnings: [{ ...licence, olumi_estimate_link_count: 0,
+    option_ids: ['raise', 'keep'], option_labels_by_option: { raise: line.label, keep: 'Keep at £49' },
+    pct_by_option: { raise: 67, keep: 40 } }] } };
+  const apply = (assistant_text: string) => withEstimateGoalPointsAtEgress({ assistant_text }, {
+    graph, analysisResult, current: true,
+  }).assistant_text;
+  for (const text of ['Raise to £59 is 67% likely to meet your goal and Keep at £49 is 40% likely.',
+    'There is a 67% chance for Raise to £59; there is a 40% chance for Keep at £49.']) expect(apply(text)).toBe(text);
+  expect(apply('Raise to £59 is 40% likely to meet your goal and Keep at £49 is 67% likely.')).toBe('');
+});
+
+it.each(sentenceFrames.filter(frame => frame.id.startsWith('served-')))(
+  'B2q verbatim served sentence: $id', frame => {
+    const percentages = [...frame.sentence.matchAll(/(\d+)%/g)].map(match => Number(match[1]));
+    const range = frame.sentence.includes('between about');
+    const model = { nodes: [
+      { id: 'choice', kind: 'option', label: frame.label },
+      { id: 'goal', kind: 'goal', label: 'Productivity' },
+      { id: 'from', kind: 'factor', label: 'Additional specialist capacity' },
+      { id: 'to', kind: 'factor', label: 'Specialist onboarding delay' },
+    ], edges: [] };
+    const record = range ? {
+      code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'A link is not sized yet.', option_ids: ['choice'],
+      range_by_option: { choice: { from: 'from', to: 'to', kind: 'link_existence', among: 'unsized_links',
+        low_pct: percentages[0], high_pct: percentages[1], low_rounding: 'whole', high_rounding: 'whole' } },
+    } : {
+      code: 'GOAL_CHANCE_LICENSED', form: 'each', option_ids: ['choice'],
+      option_labels_by_option: { choice: frame.label }, goal_node_id: 'goal', goal_label: 'Productivity',
+      pct_by_option: { choice: frame.sentence.includes('less than 1%') ? 0 : percentages[0] },
+      target: { comparator: 'at_least', value: 10, unit: '%' },
+      olumi_estimate_link_count: Number(frame.sentence.match(/(\d+) relationships?/)?.[1] ?? 0),
+      olumi_estimate_value_count: Number(frame.sentence.match(/(\d+) starting values?/)?.[1] ?? 0),
+      olumi_estimate_settings_by_option: { choice: Number(frame.sentence.match(/(\d+) option settings?/)?.[1] ?? 0) },
+    };
+    const analysisResult = { enrichment: { inference_warnings: [record] } };
+    expect(screenLines.licensedGoalChanceLinesForAgent(analysisResult, model, true)).toHaveLength(1);
+    const body = { assistant_text: frame.sentence };
+    expect(withEstimateGoalPointsAtEgress(body, { graph: model, analysisResult, current: true })).toBe(body);
+  },
+);
+
+it('B2q range endpoints and edge precision come from the actual licence formatter', () => {
+  const model = { nodes: [{ id: 'choice', kind: 'option', label: 'Add one specialist' },
+    { id: 'from', kind: 'factor', label: 'Capacity' }, { id: 'to', kind: 'factor', label: 'Delay' }], edges: [] };
+  const analysisResult = { enrichment: { inference_warnings: [{ code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'A link is not sized yet.', option_ids: ['choice'],
+    range_by_option: { choice: { from: 'from', to: 'to', kind: 'link_existence', among: 'unsized_links',
+      low_pct: 21, high_pct: 36, low_rounding: 'whole', high_rounding: 'whole' } } }] } };
+  const licensed = screenLines.licensedGoalChanceLinesForAgent(analysisResult, model, true)[0]!;
+  const apply = (assistant_text: string) => withEstimateGoalPointsAtEgress({ assistant_text }, { graph: model, analysisResult, current: true }).assistant_text;
+  const correct = `Add one specialist is ${licensed.figure} likely to meet your goal.`;
+  expect(apply(correct)).toBe(correct);
+  expect(apply(correct.replace('21%', '22%'))).toBe(licensed.chance);
+  expect(apply(correct.replace('36%', '35%'))).toBe(licensed.chance);
+  expect(apply('Add one specialist is 21% likely to meet your goal.')).toBe(licensed.chance);
+  for (const pct of [0, 100]) {
+    const analysisResult = { enrichment: { inference_warnings: [{ ...licence, pct_by_option: { raise: pct } }] } };
+    const face = screenLines.licensedGoalChanceLinesForAgent(analysisResult, graph, true)[0]!;
+    const text = `Raise to £59 is ${face.figure} likely to meet your goal.`;
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { graph, analysisResult, current: true }).assistant_text).toBe(text);
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text.replace(face.figure, `${pct}%`) }, {
+      graph, analysisResult, current: true,
+    }).assistant_text).toBe(face.chance);
+  }
+});
+
+
+it('B2q an exact goal name is checked even when the Run has no usable goal identity', () => {
+  const text = 'Monthly recurring revenue is reached in 68% of cases.';
+  expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { graph, analysisResult: {}, current: true }).assistant_text).toBe('');
+  const conflict = { input_snapshot: { goal_node_id: 'another' }, ...result };
+  expect(withEstimateGoalPointsAtEgress({ assistant_text: 'Raise to £59 is 68% likely.' }, {
+    graph, analysisResult: conflict, current: true,
+  }).assistant_text).toBe('');
+});
+
+
+it('B2q a protected user quote cannot hide the adjacent AI percentage in the same sentence', () => {
+  const quote = 'Raise to £59';
+  const apply = (assistant_text: string) => withEstimateGoalPointsAtEgress({ assistant_text }, {
+    graph, analysisResult: result, current: true, userAuthoredTexts: [quote],
+  }).assistant_text;
+  const licensed = `You named “${quote}”, with a 67% chance in this model.`;
+  expect(apply(licensed)).toBe(licensed);
+  expect(apply(`You named “${quote}”, with a 68% chance in this model.`)).toBe(`You named “${quote}” ${line.chance}`);
+  const separate = `You named “${quote}”. The chance of supplier failure is 68%.`;
+  expect(apply(separate)).toBe(separate);
 });
