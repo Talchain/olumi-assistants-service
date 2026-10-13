@@ -27,12 +27,24 @@ const OWN_AT_START = new RegExp(String.raw`^(?:(?:but|however|still|actually)[,\
  * estimates.", "I withdraw all my earlier estimates.") credits NO link: the withhold reaches every target, and it supersedes
  * every earlier statement.
  */
-const DISOWNS = new RegExp([
+const WITHDRAWS = new RegExp([
   String.raw`\b(?:withdraw|retract|take\s+back|scrap|disregard|ignore)\s+(?:all\s+(?:of\s+)?|every\s+one\s+of\s+)?(?:my|those|these|the)\s+(?:earlier\s+|previous\s+|other\s+)?(?:estimates|figures|numbers|bands|strengths)\b`,
-  String.raw`\b(?:none|neither)\s+of\s+(?:these|those|them|the\s+\w+)\s+(?:are|is|were|was)\s+(?:my|mine)\b`,
-  String.raw`\b(?:these|those|they)\s+(?:are|were)\s+not\s+my\s+(?:estimates|figures|numbers|bands|views?)\b`,
   String.raw`\bI\s+(?:disagree|don['\u2019]?t\s+agree|do\s+not\s+agree)\s+with\s+(?:all|any|both|each)\b`,
 ].join('|'), 'i');
+const DISCLAIMS = new RegExp([
+  String.raw`\b(?:none|neither)\s+of\s+(?:these|those|them|the\s+\w+)\s+(?:are|is|were|was)\s+(?:my|mine)\b`,
+  String.raw`\b(?:these|those|they)\s+(?:are|were)\s+not\s+my\s+(?:estimates|figures|numbers|bands|views?)\b`,
+].join('|'), 'i');
+/** "I do not withdraw my estimates." keeps them: a negator before the withdrawing verb cancels it. */
+const disowns = (clause: string): boolean => {
+  if (DISCLAIMS.test(clause)) return true;
+  const m = WITHDRAWS.exec(clause);
+  return m !== null && !/\b(?:not|never|no\s+longer)\b|n['\u2019]t\b/i.test(clause.slice(0, m.index + (m[0].match(/^I\s+/i)?.[0].length ?? 0)));
+};
+/** A band that names the link's own effect just before its source: "a weak effect of Price", "a strong link from Price". */
+const LEAD_BAND = /\b(very\s+strong|strong|moderate|weak|slight)\s+(?:effect|influence|impact|link|relationship|connection)\s+(?:of|from)\s+$/i;
+/** A word that joins a second statement on ("Price is £49 AND strong MRR growth continues"). */
+const JOINING_WORD = /\b(?:and|but|while|whereas|or|although|though|yet)\b/i;
 /** Where a phrase stops being about what it started on: a comma, a semicolon, or a joining word. */
 const CONJUNCTION = /[,;]|\b(?:and|but|while|whereas|or|although|though|yet)\b/i;
 const upToConjunction = (text: string): string => { const m = CONJUNCTION.exec(text); return m === null ? text : text.slice(0, m.index); };
@@ -91,7 +103,17 @@ export function latestLinkBands(
     if (/\b(?:by|from|due\s+to|because\s+of)\b/i.test(between)) return null;
     // ⛔ T2A3 buddy review: "Price is £49 and MRR growth is strong" names no link strength; a band after the target
     // counts only when nothing joins another statement between the ends or before the band.
-    return [...new Set([...bandsIn(between), ...(CONJUNCTION.test(between) ? [] : bandsIn(upToConjunction(clause.slice(targetAt))))])];
+    const joined = JOINING_WORD.exec(between);
+    // "I estimate a weak effect of Price on MRR": the band names the link's own effect, right before its source.
+    const source = ends.find(node => node.id === from)!;
+    const sourceStart = [...clause.matchAll(/[\p{L}\p{N}]+/gu)]
+      .find(w => wordsOf(source.label).some(x => sameWord(x, w[0].toLowerCase())))?.index ?? 0;
+    const lead = LEAD_BAND.exec(clause.slice(0, sourceStart));
+    return [...new Set([
+      ...bandsIn(joined === null ? between : between.slice(0, joined.index)),
+      ...(joined !== null || CONJUNCTION.test(between) ? [] : bandsIn(upToConjunction(clause.slice(targetAt)))),
+      ...(lead !== null ? bandsIn(` ${lead[1]}`) : []),
+    ])];
   };
   // ⛔ T2A3 (#2993 check, blocking 1; PL 22:07Z): the selection must bind ONE directed link, and the words name an end of it.
   const bound = current?.bound ?? [];
@@ -129,7 +151,7 @@ export function latestLinkBands(
   let latest: readonly InfluenceBand[] | null = null;
   for (const text of typeof messages === 'string' ? [messages] : messages ?? []) {
     const clauses = clausesOf(text);
-    if (clauses.some(clause => DISOWNS.test(clause))) { latest = []; continue; }
+    if (clauses.some(disowns)) { latest = []; continue; }
     let framedAsOlumis = false;
     for (const [i, whole] of clauses.entries()) {
       if (OWN_AT_START.test(whole)) framedAsOlumis = false;
@@ -141,7 +163,12 @@ export function latestLinkBands(
         const after = whole.slice(said.index + said[0].length);
         const own = CONTRAST_THEN_OWN.exec(after);
         if (own === null && namedIn(whole).length === 0) framedAsOlumis = true;
-        parts = [whole.slice(0, said.index), ...(own === null ? [] : [after.slice(own.index)])];
+        // (5) A contrast still inside Olumi's own quotation is Olumi's: an odd count of quote marks before it.
+        const quoted = own !== null && ((after.slice(0, own.index).match(/["\u201C\u201D]/g) ?? []).length % 2 === 1);
+        const before = whole.slice(0, said.index);
+        // "Price has a weak effect on MRR, according to Olumi." is Olumi's claim; "…, while Olumi says …" sets Olumi's beside it.
+        parts = [...(/\b(?:while|whereas|but|although|though|however)\s*$/i.test(before) ? [before] : []),
+          ...(own === null || quoted ? [] : [after.slice(own.index)])];
       }
       const next = clauses[i + 1];
       if (next !== undefined && DISPUTES_WHAT_CAME_BEFORE.test(next) && namedIn(next).length === 0) continue;

@@ -306,3 +306,17 @@ describe('T2A3 buddy review 3 (Codex, read-only, 35aae691): the band belongs to 
     expect(latestLinkBands('Price effects are strong.', nodes, 'price', 'mrr', { bound: [] }), 'control: the outgoing link').toEqual(['strong']);
   });
 });
+
+describe('T2A3 buddy review 4 (Codex, read-only, 07323ca6)', () => {
+  it.each([
+    ['Price is £49 and strong MRR growth continues.', 'strong', 'model_proposed'],
+    ['Olumi says "Quality is weak, but I think Price has a strong effect on MRR."', 'strong', 'model_proposed'],
+    ['Price has a weak effect on MRR, according to Olumi.', 'weak', 'model_proposed'],
+    ['I do not withdraw my estimates. Price has a weak effect on MRR.', 'weak', 'user_stated'],
+    ['I estimate a weak effect of Price on MRR.', 'weak', 'user_stated'],
+  ] as const)('"%s" proposing %s → %s', async (words, strength, want) => {
+    const result = await journey('Price', { strength }, words, { user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
+    expect(author(result)).toBe(want);
+    expect(result.edge.provenance.source).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
+  });
+});
