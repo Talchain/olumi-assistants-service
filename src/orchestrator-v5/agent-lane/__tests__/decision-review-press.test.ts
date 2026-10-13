@@ -14,7 +14,7 @@ import {
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
 import { goalChanceWithheldForAgent, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../goal-chance-withheld.js';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
-import { TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroReplyLine, missingRootUnnamedLine } from '../root-line.js';
+import { TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany, treatedAsZeroReplyLine, missingRootUnnamedLine } from '../root-line.js';
 
 type Rec = Record<string, unknown>;
 const json = (p: string): Rec => JSON.parse(readFileSync(new URL(p, import.meta.url), 'utf8')) as Rec;
@@ -97,13 +97,13 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
       edge('carry_on', 'tech_leads'), edge('carry_on', 'developers'), edge('tech_leads', 'productivity'), edge('developers', 'productivity'),
       edge('productivity', 'goal'), edge('demand_shortfall', 'goal', true)] };
   })();
-  const ROOT_SENTENCE = 'How likely or how large is "Demand shortfall" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.';
+  const ROOT_SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is "Demand shortfall" today?';
   it('F1: the unvalued risk root is said with its ask (the outcome metric M1 shape), and a data-gap warning naming it adds nothing', () => {
     const gap = { code: 'GOAL_ANCESTOR_DATA_GAP', message: "Goal node 'goal' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'demand_shortfall' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)." };
     const turn = decisionReviewFor(SCENARIO, readOf({ graph: G2_GRAPH, enrichment: { inference_warnings: [gap] } }));
     expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${ROOT_SENTENCE}`]);
     expect(turn.reply.split(ROOT_SENTENCE)).toHaveLength(2);
-    expect(turn.reply.split('Demand shortfall')).toHaveLength(2); // The canonical next step names the missing risk.
+    expect(turn.reply.split('Demand shortfall')).toHaveLength(3); // The saved treatment and its ask both name the risk.
   });
 
   it('RED (Codex r2 P2): an unnamed risk root (F1) and an unnamed default-0 factor (F2) are counted as two, in one sentence', () => {
@@ -111,7 +111,7 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
       : n.id === 'productivity' ? { ...n, label: 'prop_abcdef13 output' } : n)) };
     const gap = { code: 'GOAL_ANCESTOR_DATA_GAP', message: "Root ancestor(s) 'demand_shortfall', 'productivity' carry no observed value and defaulted to 0.0." };
     const turn = decisionReviewFor(SCENARIO, readOf({ graph, enrichment: { inference_warnings: [gap] } }));
-    expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${missingRootUnnamedLine(1)}`, `- ${TREATED_AS_ZERO_UNNAMED_ONE}`]);
+    expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${treatedAsZeroUnnamedMany(2)}`]);
   });
 
   const withRoots = (labels: Record<string, string>, extraRoot = false): Rec => {
@@ -134,7 +134,7 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
     const graph = withRoots({ demand_shortfall: '', productivity: 'prop_abcdef13 output' });
     const gap = { code: 'GOAL_ANCESTOR_DATA_GAP', message: "Root ancestor(s) 'demand_shortfall', 'productivity' carry no observed value and defaulted to 0.0." };
     const turn = decisionReviewFor(SCENARIO, readOf({ graph, enrichment: { inference_warnings: [gap] } }));
-    expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${missingRootUnnamedLine(1)}`, `- ${TREATED_AS_ZERO_UNNAMED_ONE}`]);
+    expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${treatedAsZeroUnnamedMany(2)}`]);
   });
 
   it('CONTROL (F1): two named roots keep their labels', () => {

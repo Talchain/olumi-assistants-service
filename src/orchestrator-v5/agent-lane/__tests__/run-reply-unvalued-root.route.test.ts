@@ -67,6 +67,12 @@ function graphWith(riskValued: boolean, riskLabel = 'Demand shortfall'): Rec {
   return { nodes, edges, options, goal_node_id: 'goal' };
 }
 
+let historicalZero = false;
+let historicalWarning = false;
+const savedResult = () => historicalWarning ? { ...SERVED.block, enrichment: { ...(SERVED.block.enrichment as Rec), inference_warnings: [
+  { code: 'GOAL_ANCESTOR_DATA_GAP', message: "Root ancestor(s) 'demand_shortfall' carry no observed value and defaulted to 0.0." },
+] } } : SERVED.block;
+const ready = () => ({ ...READY, ...(historicalZero ? { unvalued_roots: [{ node_id: 'demand_shortfall', label: riskLabel, kind: 'risk', treated_as: 'zero' }] } : {}) });
 let riskValued = false;
 let riskLabel = 'Demand shortfall';
 /** What the readback says about the Run: current (bound), stale after an edit, or no result at all. */
@@ -101,11 +107,11 @@ async function freshApp(): Promise<FastifyInstance> {
   const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
   const app = Fastify({ logger: false });
   app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
-    graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY }));
+    graph_hash: HASH, blocks: [savedResult()], analysis_state: state(), analysis_ready: ready() }));
   app.post('/assist/v1/scenarios/:id/graph', async () => {
     const graph = graphWith(riskValued, riskLabel);
     const analysis_state = readback === 'stale' ? staleState() : state();
-    const analysis_result = readback === 'no_result' ? null : SERVED.block;
+    const analysis_result = readback === 'no_result' ? null : savedResult();
     // Reconstruct only the successful fact wrapper for the captured Run; the read's public result owns cell gating.
     const canonical_analysis_view = projectCanonicalAnalysisView({ graph,
       runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
@@ -113,8 +119,8 @@ async function freshApp(): Promise<FastifyInstance> {
         leading_option_id: SERVED.block.leading_option_id, enrichment: SERVED.block.enrichment,
         graph_hash_at_run: HASH, computed_at: analysis_state.run_state.computed_at,
       } } as never,
-      analysisState: analysis_state as never, analysisReady: READY, currentResult: analysis_result as never });
-    return { graph, graph_hash: HASH, analysis_ready: READY, analysis_state, canonical_analysis_view,
+      analysisState: analysis_state as never, analysisReady: ready(), currentResult: analysis_result as never });
+    return { graph, graph_hash: HASH, analysis_ready: ready(), analysis_state, canonical_analysis_view,
       ...(analysis_result === null ? {} : { analysis_result }) };
   });
   await app.register(agentV1TurnRoute);
@@ -160,7 +166,7 @@ describe('a native Run with an unvalued risk root carries the numerical withhold
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; riskValued = false; riskLabel = 'Demand shortfall'; readback = 'current'; });
+  beforeEach(() => { rows.length = 0; historicalZero = false; historicalWarning = false; riskValued = false; riskLabel = 'Demand shortfall'; readback = 'current'; });
 
   const runTurn = (turnId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
     payload: { scenario_id: SCENARIO, turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
@@ -171,6 +177,29 @@ describe('a native Run with an unvalued risk root carries the numerical withhold
     expectWithheldContract(body, riskValued ? undefined : SENTENCE);
     expect(body.assistant_text).toContain(SENTENCE);
     expect(body.assistant_text.split(SENTENCE)).toHaveLength(2); // said once
+  });
+
+  it('a saved Run with warning-only zero evidence retains its actual assumption at the route', async () => {
+    historicalWarning = true;
+    const first = (await runTurn(randomUUID())).json() as Body;
+    expectWithheldContract(first, 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is "Demand shortfall" today?');
+  });
+
+  it('a saved zero-treatment receipt retains its actual assumption and Run identity through replay and restart', async () => {
+    historicalZero = true;
+    const turnId = randomUUID();
+    const line = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is "Demand shortfall" today?';
+    const first = (await runTurn(turnId)).json() as Body;
+    expectWithheldContract(first, line);
+    expect(first.assistant_text.includes('numerical analysis is withheld')).toBe(false);
+    for (const restart of [false, true]) {
+      if (restart) { await app.close(); app = await freshApp(); }
+      const replay = (await runTurn(turnId)).json() as Body;
+      expect(replay.assistant_text).toBe(first.assistant_text);
+      expect(replay._answer_shape).toEqual(first._answer_shape);
+      expect(replay.narration).toEqual(first.narration);
+    }
+    expect(SERVED.block.computed_against_hash).toBe(HASH);
   });
 
   it('RED: a lost Run response replays the same words (also after a restart)', async () => {

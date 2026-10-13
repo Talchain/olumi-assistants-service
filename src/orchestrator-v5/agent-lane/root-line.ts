@@ -8,6 +8,8 @@
  */
 
 import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { placeholderZeroFactorIds } from '../coaching/unvalued-driver-card.js';
+import { treatedAsZeroLine } from './readiness-view.js';
 import { withoutProposalIds } from './display-ids.js';
 import { textAtRest } from './decision-input-ask.js';
 import { sentencesOf } from './reply/compose-reply.js';
@@ -40,11 +42,24 @@ export function survivesReplyEditors(line: string, graph: unknown, analysisReady
   return !textAssertsLeadingOption(line);
 }
 
-/** The old export name is retained for callers. T4e retires inferred zero
- * treatment: these are the canonical non-factor root refusal and next step. */
-export function treatedAsZeroReplyLine(graph: unknown, analysisReady: unknown): string | null {
+/** A bound saved Run keeps its explicit zero treatment; without that evidence,
+ * current unknown non-factor roots retain their canonical refusal and ask. */
+export function treatedAsZeroReplyLine(graph: unknown, analysisReady: unknown, analysisResult?: unknown): string | null {
   const nodes = graph !== null && typeof graph === 'object' && Array.isArray((graph as { nodes?: unknown }).nodes)
-    ? (graph as { nodes: Array<{ id?: unknown; kind?: unknown }> }).nodes : [];
+    ? (graph as { nodes: Array<{ id?: unknown; kind?: unknown; label?: unknown }> }).nodes : [];
+  // Historical treatment is an explicit saved fact, never inferred from a missing current value.
+  const savedRoots = (analysisReady as { unvalued_roots?: unknown } | null)?.unvalued_roots;
+  const recorded = new Set(Array.isArray(savedRoots) ? savedRoots.filter(root => root?.treated_as === 'zero').map(root => root.node_id) : []);
+  const candidates = nodes.filter(n => (n.kind === 'risk' || n.kind === 'outcome') && typeof n.id === 'string');
+  for (const id of placeholderZeroFactorIds(analysisResult, candidates.map(n => n.id as string))) recorded.add(id);
+  const historical = candidates.filter(n => recorded.has(n.id));
+  if (historical.length > 0) {
+    const labels = historical.map(n => typeof n.label === 'string' ? n.label : '');
+    const labelled = treatedAsZeroLine({ checked: true, may_run: true, treated_as_zero: labels,
+      needs_from_user: [], olumi_can_offer: [], will_run_without: [], levels_not_set: [] })!;
+    if (labels.slice(0, 2).every(label => label.trim() !== '') && survivesReplyEditors(labelled, graph, analysisReady)) return labelled;
+    return historical.length === 1 ? TREATED_AS_ZERO_UNNAMED_ONE : treatedAsZeroUnnamedMany(historical.length);
+  }
   const nonFactors = new Set(nodes.filter(n => n.kind !== 'factor').map(n => n.id));
   const gaps = assessCanonicalAnalysisReadiness(graph).blockingIssues.filter(issue =>
     issue.code === 'MISSING_FACTOR_LEVEL' && nonFactors.has(issue.factor_id));

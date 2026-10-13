@@ -290,9 +290,14 @@ describe('§3 — the precondition, the user\'s direction, and the one exemption
     expect(out.pure_limits).toBeUndefined();
     expect(out.pure_limit_asks).toBeUndefined();
   });
-  it('a goal identity that does NOT contain the cost (the served MRR = price × subscribers) exempts nothing', () => {
+  it('a goal identity that does NOT contain the cost keeps the cost link as an Olumi hypothesis', () => {
     expect(G.candidate.identities).toEqual([{ outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Pro paying subscribers'], provenance: 'inferred' }]);
-    expect(admit(candidate(G), G.brief).pure_limits).toBeUndefined();
+    const model = admit(candidate(G), G.brief);
+    expect(model.nodes.find(n => n.id === GOAL)?.nonlinear_identity).toEqual({ operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: false });
+    const edge = model.edges.find(e => e.from === TALLY && e.to === GOAL);
+    expect(edge).toBeDefined();
+    expect(edge?.provenance).toEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', mean_projected: true });
+    expect(model.pure_limits).toBeUndefined();
   });
   it('a limit Olumi inferred (not the user\'s) leaves the goal edge alone — and still mints the sum (the ≤ level limit names it)', () => {
     const m = admit(candidate(G, (c) => { c.constraints[0].provenance = 'inferred'; }), G.brief);

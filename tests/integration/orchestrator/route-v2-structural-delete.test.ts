@@ -928,19 +928,18 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
     // pre-mutation graph. This lane REPORTS the transition; it does not decide
     // it — the readiness-authority consolidation owns the policy.
     expect(body.analysis_ready).toBeDefined();
-    expect(body.analysis_ready.status).toBe('ready');
+    expect(body.analysis_ready.status).not.toBe('ready');
     expect(body.analysis_ready.may_run).toBe(false);
     expect(body.analysis_ready.blockers).toEqual([]);
 
     const issues = (body.analysis_ready.readiness_issues as Array<{ code: string }>).map(
       (i) => i.code,
     );
-    // R5 no longer demands an option mapping for the held budget. Structural readiness is ready;
-    // the independent comparison gate still forbids numerical Run when no options remain.
+    // The held budget needs no option mapping, but zero options still cannot support a Run.
     expect(issues).toEqual(['UNREACHABLE_CONTROLLABLE_FACTOR']);
     expect(body.analysis_ready.analysis_admission.structurally_analysable).toBe(false);
     expect(body.analysis_ready.analysis_admission.reasons.map((r: { code: string }) => r.code)).toEqual([
-      'NOTHING_TO_COMPARE', 'NO_COMPARISON_SUBSTRATE', 'NOTHING_TO_COMPARE',
+      'MODEL_HAS_BLOCKERS', 'NO_COMPARISON_SUBSTRATE', 'MODEL_HAS_BLOCKERS',
     ]);
     // P6 — the delete REMOVES obligations rather than manufacturing them: the
     // per-option "choose the missing effect value" asks for the deleted options

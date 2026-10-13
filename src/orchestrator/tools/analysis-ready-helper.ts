@@ -1669,7 +1669,8 @@ export function assessCanonicalAnalysisReadiness(
           ...semantic,
           ...(policyIssues.length > 0 ? {
             blockers: activeSemanticBlockers,
-            ...(blockingIssues.length === 0 && semantic.options.every((option) => option.status === 'ready')
+            ...(blockingIssues.length === 0 && semantic.options.length >= 2
+              && semantic.options.every((option) => option.status === 'ready')
               ? { status: 'ready', blocked_reason: undefined } : {}),
           } : {}),
           ...(levelGaps.length > 0
