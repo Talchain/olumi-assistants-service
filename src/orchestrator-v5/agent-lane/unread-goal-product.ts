@@ -111,13 +111,21 @@ export function unreadGoalProduct(graph: unknown): UnreadGoalProduct | null {
 }
 
 /**
- * ⭐ COACH (DL coaching-on-press): the ONE next step for a goal Olumi has not read as rate × count. When the reading can be
- * confirmed (the action bar's `confirm_reading`: a reading is on offer and no other change waits for its yes), that press
- * owns the step: the user checks the reading and the chance can follow. Otherwise it is a CAPABILITY gap, never asked.
+ * What can unlock an unread rate × count reading, from the route's own facts (`actions/state.ts` identityReading: a card the
+ * sole writer accepts on this base; `approvalWaiting` and a pending goal-scope question are other owners of the step).
  */
-export function unreadGoalProductBlockerOf(p: UnreadGoalProduct, confirmable: boolean): PressBlocker {
-  return confirmable ? { kind: 'confirm', by: 'confirm_reading' }
-    : { kind: 'missing_implementation', what: `how likely any option is to reach ‘${p.goal.label}’ read as ‘${p.rate.label}’ × ‘${p.count.label}’` };
+export type ProductUnlock = 'confirm_reading' | 'owned_elsewhere' | 'no_writer';
+
+/**
+ * ⭐ COACH (DL coaching-on-press; PL #94 6135017311): the ONE next step for a goal Olumi has not read as rate × count, bound
+ * to its actual cause. A writable reading card is the step (the user checks the reading and the chance can follow); while
+ * another held change or the scope question owns the step, nothing is added. Only where no card or writer can record the
+ * reading is it a CAPABILITY gap, said as such and never asked.
+ */
+export function unreadGoalProductBlockerOf(p: UnreadGoalProduct, unlock: ProductUnlock): PressBlocker | null {
+  if (unlock === 'confirm_reading') return { kind: 'confirm', by: 'confirm_reading' };
+  if (unlock === 'owned_elsewhere') return null;
+  return { kind: 'missing_implementation', what: `how likely any option is to reach ‘${p.goal.label}’ read as ‘${p.rate.label}’ × ‘${p.count.label}’` };
 }
 
 /**

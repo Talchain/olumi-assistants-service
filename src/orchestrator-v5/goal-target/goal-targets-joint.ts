@@ -116,12 +116,13 @@ export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupp
 
 /**
  * ⭐ COACH (DL coaching-on-press): the ONE next step for a withheld joint chance, typed by the same reason
- * `jointWithheldLine` says. A change target that can't be combined, a stated comparison or figure the analysis did not
- * keep, or a condition that can't be said in the user's units is a CAPABILITY gap: said as such, never asked. Olumi's own
- * assumed starting value needs the user's; with no option there is nothing to compare. A missing precision or result is
- * the line's own "Run the analysis again".
+ * `jointWithheldLine` says. A change target that can't be combined, or a strict comparison the joint did not keep, is a
+ * CAPABILITY gap: said as such, never asked. Olumi's own assumed starting value needs the user's; with no option there is
+ * nothing to compare. A missing precision or result is the line's own "Run the analysis again". A condition that can't be
+ * named, or a figure not used as stated, has no typed cause here (an input might or might not unlock it): no step is
+ * invented and the line stands alone (PL #94 6135017311: "can't" only where no writer, card or input could unlock it).
  */
-export function jointBlockerOf(n: number, reason: JointWithholdReason, unsupported: readonly string[] = []): PressBlocker {
+export function jointBlockerOf(n: number, reason: JointWithholdReason, unsupported: readonly string[] = []): PressBlocker | null {
   const all = n === 2 ? 'both targets' : 'all of the targets';
   switch (reason) {
     case 'target_not_supported':
@@ -129,9 +130,10 @@ export function jointBlockerOf(n: number, reason: JointWithholdReason, unsupport
         ? `the chance of meeting ${all} together while ${listWords(unsupported.map((x) => `‘${x}’`))} ${unsupported.length === 1 ? 'is' : 'are'} stated as a change`
         : `the chance of meeting ${all} together` };
     case 'strict_not_preserved':
+      return { kind: 'missing_implementation', what: `the chance of meeting ${all} together with the strict comparison you stated` };
     case 'figure_not_preserved':
     case 'condition_not_named':
-      return { kind: 'missing_implementation', what: `the chance of meeting ${all} together exactly as you stated them` };
+      return null;
     case 'olumi_base':
       return { kind: 'missing_input', ask: AIE_TEXT_PENDING_STARTING_VALUE_ASK };
     case 'no_option':

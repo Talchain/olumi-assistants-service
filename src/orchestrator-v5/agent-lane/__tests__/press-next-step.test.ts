@@ -52,13 +52,16 @@ describe('target: the failing cases type the ONE step', () => {
 });
 
 describe('joint: the same reason the withheld line says types the step', () => {
-  const kinds: Record<JointWithholdReason, PressBlocker['kind']> = {
+  const kinds: Record<JointWithholdReason, PressBlocker['kind'] | null> = {
     target_not_supported: 'missing_implementation', strict_not_preserved: 'missing_implementation',
-    figure_not_preserved: 'missing_implementation', condition_not_named: 'missing_implementation',
     olumi_base: 'missing_input', no_option: 'missing_input', precision_missing: 'run_again', not_returned: 'run_again',
+    // No typed cause: an input might or might not unlock it, so no step is invented (PL 6135017311).
+    figure_not_preserved: null, condition_not_named: null,
   };
   it.each(Object.entries(kinds))('%s → %s', (reason, kind) => {
-    expect(jointBlockerOf(2, reason as JointWithholdReason, ['Churn'])).toHaveProperty('kind', kind);
+    const blocker = jointBlockerOf(2, reason as JointWithholdReason, ['Churn']);
+    if (kind === null) expect(blocker).toBeNull();
+    else expect(blocker).toHaveProperty('kind', kind);
   });
 
   it('a change target that can\'t be combined is named as the gap, never asked', () => {
@@ -85,11 +88,12 @@ describe('chance goal, unread product and stale', () => {
     expect(held).not.toHaveProperty('ask');
   });
 
-  it('an unread product is confirmed by its reading press when one is on offer; otherwise the gap is said', () => {
+  it('an unread product: the writable reading card is the step; another owner keeps it; "can\'t" only with no writer', () => {
     const p = { goal: { id: 'g', label: 'Monthly revenue', level: 50, unit: '£k', typed: true },
       rate: { id: 'r', label: 'Price', level: 50, unit: '£' }, count: { id: 'c', label: 'Customers', level: 1000, unit: 'customers' } } as UnreadGoalProduct;
-    expect(unreadGoalProductBlockerOf(p, true)).toEqual({ kind: 'confirm', by: 'confirm_reading' });
-    expect(unreadGoalProductBlockerOf(p, false)).toEqual({ kind: 'missing_implementation',
+    expect(unreadGoalProductBlockerOf(p, 'confirm_reading')).toEqual({ kind: 'confirm', by: 'confirm_reading' });
+    expect(unreadGoalProductBlockerOf(p, 'owned_elsewhere')).toBeNull();
+    expect(unreadGoalProductBlockerOf(p, 'no_writer')).toEqual({ kind: 'missing_implementation',
       what: 'how likely any option is to reach ‘Monthly revenue’ read as ‘Price’ × ‘Customers’' });
   });
 
