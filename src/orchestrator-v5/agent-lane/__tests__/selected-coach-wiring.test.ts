@@ -2,7 +2,7 @@ import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /** Selected coaching reaches the real Agent route on every conversation path. No provider is called. */
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
@@ -22,7 +22,7 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // the share of runs; chat quotes the screen's goal-chance display: 09f7b6ac… → f6cec112….
 // S-E GOALS S2b (7 Oct): #34 and #35 gain the share-by-date sentences (goal_chance_words; a stated_time range says slow to
 // fast end, never causal doubt): 22,393 → 23,075 bytes (+682, exactly the two added sentences). 0732df33… → a9c847ef….
-const HOST_SHA = '7fa54b742222688264dbdf6107022ec0b2c9424b061fe7d8666467e2297bdafe';
+const HOST_SHA = 'f0918a13ab77f0c43318659d787ba2fd5c7a687c3ce9e0ff3fa1a73788529bbc';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -48,8 +48,8 @@ const HOST_SHA = '7fa54b742222688264dbdf6107022ec0b2c9424b061fe7d8666467e2297bda
 // Combined (#2762 merge of staging): 34,302 + 682 + 193 = 35,177 bytes; sha re-derived from the SENT body.
 // + S-E GOALS S4 propose_new_limit clause in the proposing-tool instruction: staging 35,177 + 241 = 35,418 bytes.
 //   Removing exactly that clause from the SENT body reproduces staging's 915133ba… sha and 35,177 bytes.
-const RENDERED_SHA = 'a11666a1b28c3734af7b1c58282254c5e7bca27d68e12706d1f62460755a195c';
-const RENDERED_BYTES = 31895;
+const RENDERED_SHA = '8e08fb3a53a04fbf4a3d955ad01857429ad29e7c6563342931c92e91f02f2ba4';
+const RENDERED_BYTES = 32129;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 // AIE 6134666922 exact replacements; old/new pins are in recovery-notes/b2-assembled-pins.json.
 const NAMING_RULE_FORM = "Run result replies: lead with the selected Run's licensed goal-chance or withholding lines.";
@@ -121,6 +121,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body?: unknown }) => {
       const body = asSent(JSON.parse(String(init.body))) as Sent;
       sent.push(body);
+      if (process.env.B2R_SELECTED_CAPTURE) writeFileSync(process.env.B2R_SELECTED_CAPTURE, JSON.stringify(sent));
       const runCall = runPressToolResponse(body as unknown as Record<string, unknown>);
       if (runCall) return runCall;
       registeredAtCall.push(registered);

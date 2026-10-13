@@ -1,0 +1,73 @@
+{
+  "DL_request": 6141902927,
+  "page_lines": [
+    "TARGET-ARCHITECTURE step11/K1 conditional goal chance",
+    "step20/build condition2: actual quantity/uncertainty/limits supplied to AI",
+    "step17-19: AI reply and whole rendering"
+  ],
+  "actual_source": [
+    "Full JUDGE-HIRING-074403Z-codex.md",
+    "actual immutable ISL0b3321d191f2e2e5d2e58241277bf7d91c99f159 src/models/goal_chance.py:32-56,66-108,111-135",
+    "same ISL src/services/goal_chance_drivers.py:1-9,54-68,131-157,258-262",
+    "actual served turn15 option comparison precision/drivers"
+  ],
+  "minimum_ruling": "Display the chance as conditional on the named current model/target/period; distinguish finite-simulation precision from uncertainty in inputs, source and model structure; show the existing resolved chance-driver comparison when available and label its method; explicitly say which uncertainty has not been quantified. A generic ranking warning or sampling interval alone is not assumption uncertainty. No new fragile-assumption sweep is universally required: the existing same-Run resolved driver groups are useful quantitative sensitivity evidence, though not a causal intervention or total epistemic probability interval. With no resolved driver, say this limit rather than invent a range or call the chance robust.",
+  "range_distinction": "An actual range from deliberately varied plausible assumptions can be shown as scenario sensitivity with its varied/held assumptions, source and scope. The Wilson interval is simulation precision only. Low/high driver-group probabilities are conditional fractions in existing draws, not bounds on the true chance or a controlled one-input sweep. Preserve correlated flags and presence conditioning. None establishes real-world calibration or complete goal/horizon validity.",
+  "exact_copy": {
+    "precision_template": "Simulation sampling: {n_met} of {n_informative} cases met this target; the {confidence_level}% sampling interval is {interval_lower_percent}–{interval_upper_percent}%. This interval treats the model and its input distributions as fixed; it does not cover mistakes or missing evidence in them.",
+    "driver_template": "Model sensitivity: for {driver}, {presence_scope}the goal was met in about {p_goal_if_low_percent}% of cases in the weaker third of sampled strengths and about {p_goal_if_high_percent}% in the stronger third ({n_low} and {n_high} cases). These are conditional groups from this Run, not a confidence interval or a test of changing only this link.",
+    "assumption_limit": "Olumi supplied this uncertain link. Evidence about its strength could materially change this model estimate. Uncertainty from missing evidence, alternative assumptions and model structure is not quantified here.",
+    "no_resolved_driver": "This Run did not resolve a reliable comparison of how uncertain assumptions affect this chance. Its sampling interval does not answer that question.",
+    "hiring_tech_lead_precision": "Simulation sampling: 1,344 of 10,000 cases met this target; the 95% sampling interval is 12.8–14.1%. This interval treats the model and its input distributions as fixed; it does not cover mistakes or missing evidence in them.",
+    "hiring_tech_lead_driver": "Model sensitivity: for the Tech lead → Leadership capacity link, where the link was present, the goal was met in about 0.15% of cases in the weaker third of sampled strengths and about 42% in the stronger third (2,668 cases per group). These are conditional groups from this Run, not a confidence interval or a test of changing only this link.",
+    "hiring_developers_low_count": "Only 1 of 10,000 simulated cases reached this target. The 95% simulation sampling interval is about 0.0018–0.0566%. This Run did not resolve a reliable assumption-sensitivity comparison. A low estimate in this model does not rule out the target in reality."
+  },
+  "actual_values": {
+    "tech_lead": {
+      "precision": {
+        "basis": "simulation_precision",
+        "n_met": 1344,
+        "method": "wilson_score",
+        "n_informative": 10000,
+        "interval_lower": 0.12785512320476278,
+        "interval_upper": 0.1412256564038759,
+        "confidence_level": 0.95
+      },
+      "driver": {
+        "to": "leadership_capacity",
+        "from": "tech_lead_headcount",
+        "kind": "link_strength",
+        "n_low": 2668,
+        "n_high": 2668,
+        "spread": 0.4164167916041979,
+        "status": "resolved",
+        "quantity_id": "tech_lead_headcount->leadership_capacity",
+        "p_goal_if_low": 0.0014992503748125937,
+        "p_goal_if_high": 0.4179160419790105,
+        "low_upper_value": 0.7727112853211383,
+        "high_lower_value": 1.2065210370766388,
+        "spread_noise_floor": 0.04138846181724388
+      }
+    },
+    "developers": {
+      "precision": {
+        "basis": "simulation_precision",
+        "n_met": 1,
+        "method": "wilson_score",
+        "n_informative": 10000,
+        "interval_lower": 1.7652673601122363e-05,
+        "interval_upper": 0.0005662688974013379,
+        "confidence_level": 0.95
+      },
+      "driver_statuses": [
+        "below_resolution",
+        "below_resolution",
+        "below_resolution",
+        "below_resolution",
+        "below_resolution"
+      ]
+    }
+  },
+  "implementation": "Use the existing selected Run precision/driver/source/licence facts in AI input through step20. AI explains them; exact text is source-bound wording support, not a new host answer composer, forced paragraph, probability law, reader, store, model call or sweep harness. K1 must match the correct computed statistic and scope: conditional driver fractions cannot be substituted for or rewritten into the headline probability. Only use numeric copy where the existing contract actually licenses that statistic; otherwise record the representation limit, never fabricate or weaken a guard.",
+  "acceptance_limit": "Original hiring judge FAIL remains. This ruling gives an honest minimum uncertainty face, not a retrospective condition5 PASS or waived original rubric. Actual supported horizon, saved source/assumptions, complete useful rendered answer, full four journeys and cold continuation still need the existing independent witness/judge. No automatic full-readiness or calibrated real-world probability claim."
+}

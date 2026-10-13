@@ -216,9 +216,9 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(await run(fixture())).not.toHaveProperty('goal_horizon_line');
   });
   it('(10) AI reporting retains exact licence authority, model-relative scope and recommendation bans', () => {
-    expect(HOST_TOOL_CONTRACT).toContain("Use the current licensed goal chance with its target, scope, assumptions and limits. Never substitute an option's winning share or ranking credit for that chance. You may explain a supplied chance as the proportion of scored simulation draws meeting its licensed target when that is how the supplied result was computed.");
-    expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
-    expect(HOST_TOOL_CONTRACT).toContain('When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward');
+    expect(HOST_TOOL_CONTRACT).toContain("Explain the selected Run’s currently licensed figures in your own words, retaining the exact licensed number or range, named option and target, unit, reference and period, in-this-model meaning, and supplied provisional or timing qualifications. A narrower target is not the chance of meeting the whole goal. Do not derive, invent, re-round or substitute a goal chance, or replace a missing chance with a share of model runs.");
+    expect(HOST_TOOL_CONTRACT).toContain('Never write recommend or recommendation, including negated forms.');
+    expect(HOST_TOOL_CONTRACT).toContain('A computed comparative leader may be named only in dedicated comparative reasoning when the selected CURRENT Run explicitly sets leader_may_be_named to true. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
     expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
   });
   it('CONTROL: similar licences and whole-percentage displays also work without a leader', async () => {
@@ -395,12 +395,12 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
 
   it('both reporting rules contain the exact driver rule, with the old bans retained', () => {
     const _driverRule = "When you state an option's chance and goal_chance_driver_display has a sentence for that option, say that sentence exactly, right after the chance (before any deadline sentence). While goal_chance_driver_display has any sentence, never say that no assumption is established, measurable, or most worth investigating, in any wording.";
-    const _runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
+    const _runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf("Run result replies: lead with the selected Run's licensed goal-chance or withholding lines."), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
     const _savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
 
-    expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
-    expect(HOST_TOOL_CONTRACT).toContain('When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward');
-    expect(HOST_TOOL_CONTRACT).toContain("Use the current licensed goal chance with its target, scope, assumptions and limits. Never substitute an option's winning share or ranking credit for that chance. You may explain a supplied chance as the proportion of scored simulation draws meeting its licensed target when that is how the supplied result was computed.");
+    expect(HOST_TOOL_CONTRACT).toContain('Never write recommend or recommendation, including negated forms.');
+    expect(HOST_TOOL_CONTRACT).toContain('A computed comparative leader may be named only in dedicated comparative reasoning when the selected CURRENT Run explicitly sets leader_may_be_named to true. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
+    expect(HOST_TOOL_CONTRACT).toContain("Explain the selected Run’s currently licensed figures in your own words, retaining the exact licensed number or range, named option and target, unit, reference and period, in-this-model meaning, and supplied provisional or timing qualifications. A narrower target is not the chance of meeting the whole goal. Do not derive, invent, re-round or substitute a goal chance, or replace a missing chance with a share of model runs.");
     expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
     expect(HOST_TOOL_CONTRACT).toContain('Name an assumption the ordering is sensitive to ONLY from the result’s `decision_sensitivity`');
     expect(HOST_TOOL_CONTRACT).toContain('Never translate either EVPPI status into no measurable assumption or no measurable goal-chance driver');

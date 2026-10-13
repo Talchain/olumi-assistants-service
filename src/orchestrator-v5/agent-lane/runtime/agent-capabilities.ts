@@ -10194,7 +10194,7 @@ export function createAgentCapabilities(
       }
       return {
         ok: true, mutated: false, provisional_view: checked.view,
-        detail: "Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions.",
+        detail: "Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions. A provisional view directs investigation in this model. It may name and explain options and their unresolved assumptions only from current supplied facts; preserve scope, source, uncertainty and conditions, and do not favour an option or turn the view into a recommendation.",
       };
     },
 

@@ -236,7 +236,7 @@ export const RUN_INTERPRETATION_VIEW_INSTRUCTION =
   // challenge carried none, 2/2 (its output was the answer alone). The user lost Olumi's view just when they had changed
   // the model. The call is made only when the analysis withholds the leader, which is when Paul's ruling wants the view.
   + 'This call is made only because the analysis cannot put an option forward, so give your view on every such run, including a rerun or after a view you gave earlier: say it again, updated for this run. '
-  + "Set it to null only when the model and the user’s words give you no basis for any view. Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions.";
+  + "Set it to null only when the model and the user’s words give you no basis for any view.";
 
 /**
  * The typed answer of that one call — or `null` when the text is not it (a plain-text interpretation stays the reply,

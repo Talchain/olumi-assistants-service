@@ -319,17 +319,22 @@ describe('B2q sentence-class sweep: 15 verbatim served sources and 28 review-pro
 it('B2q every percentage is checked, including an otherwise licensed sentence and unknown input claims', () => {
   const correct = 'Raise to £59 is 67% likely to meet your goal';
   expect(clean(`${correct}, with a further 68% figure.`)).toBe(line.chance);
-  expect(clean('Raise to £59: the chance of supplier failure is 10%.')).toBe(line.chance);
+  // DL ruling 2 (B2r): a non-goal percentage beside an option is not a goal chance and keeps every byte.
+  expect(clean('Raise to £59: the chance of supplier failure is 10%.')).toBe('Raise to £59: the chance of supplier failure is 10%.');
   const inputGraph = { ...graph, nodes: [...graph.nodes, { id: 'capacity', kind: 'factor', label: 'Capacity',
     observed_state: { raw_value: 25, value: 0.25, unit: '% of monthly time' } }] };
+  // DL ruling 3 (B2r): an estimate-backed licence keeps its provisional attribution, so this input-binding row uses a
+  // licence with no Olumi estimates (as the occurrence row below does) to isolate what it tests.
+  const plain = { enrichment: { inference_warnings: [{ ...licence, olumi_estimate_link_count: 0 }] } };
+  const plainLine = screenLines.licensedGoalChanceLinesForAgent(plain, inputGraph, true)[0]!.chance;
   const apply = (assistant_text: string) => withEstimateGoalPointsAtEgress({ assistant_text }, {
-    graph: inputGraph, analysisResult: result, current: true,
+    graph: inputGraph, analysisResult: plain, current: true,
   }).assistant_text;
   const input = `${correct}; Capacity is 25% of monthly time.`;
   expect(apply(input)).toBe(input);
-  expect(apply(`${correct}; Capacity is 26% of monthly time.`)).toBe(line.chance);
-  expect(apply(`${correct}; Capacity is 25%.`)).toBe(line.chance);
-  expect(apply(`${correct}; Capacity is 0.25% of monthly time.`)).toBe(line.chance);
+  expect(apply(`${correct}; Capacity is 26% of monthly time.`)).toBe(plainLine);
+  expect(apply(`${correct}; Capacity is 25%.`)).toBe(plainLine);
+  expect(apply(`${correct}; Capacity is 0.25% of monthly time.`)).toBe(plainLine);
 });
 
 it('B2q input evidence binds the occurrence, not another use of the same number', () => {
@@ -404,7 +409,8 @@ it('B2q range endpoints and edge precision come from the actual licence formatte
   expect(apply(correct.replace('36%', '35%'))).toBe(licensed.chance);
   expect(apply('Add one specialist is 21% likely to meet your goal.')).toBe(licensed.chance);
   for (const pct of [0, 100]) {
-    const analysisResult = { enrichment: { inference_warnings: [{ ...licence, pct_by_option: { raise: pct } }] } };
+    // DL ruling 3 (B2r): no Olumi estimates here, so the precision edge is tested without the provisional attribution.
+    const analysisResult = { enrichment: { inference_warnings: [{ ...licence, olumi_estimate_link_count: 0, pct_by_option: { raise: pct } }] } };
     const face = screenLines.licensedGoalChanceLinesForAgent(analysisResult, graph, true)[0]!;
     const text = `Raise to £59 is ${face.figure} likely to meet your goal.`;
     expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { graph, analysisResult, current: true }).assistant_text).toBe(text);
@@ -427,12 +433,15 @@ it('B2q an exact goal name is checked even when the Run has no usable goal ident
 
 it('B2q a protected user quote cannot hide the adjacent AI percentage in the same sentence', () => {
   const quote = 'Raise to £59';
+  // DL ruling 3 (B2r): no Olumi estimates here, so the quote-binding is tested without the provisional attribution.
+  const plain = { enrichment: { inference_warnings: [{ ...licence, olumi_estimate_link_count: 0 }] } };
+  const plainLine = screenLines.licensedGoalChanceLinesForAgent(plain, graph, true)[0]!;
   const apply = (assistant_text: string) => withEstimateGoalPointsAtEgress({ assistant_text }, {
-    graph, analysisResult: result, current: true, userAuthoredTexts: [quote],
+    graph, analysisResult: plain, current: true, userAuthoredTexts: [quote],
   }).assistant_text;
-  const licensed = `You named “${quote}”, with a 67% chance in this model.`;
+  const licensed = `You named “${quote}”, with a ${plainLine.figure} chance in this model.`;
   expect(apply(licensed)).toBe(licensed);
-  expect(apply(`You named “${quote}”, with a 68% chance in this model.`)).toBe(`You named “${quote}” ${line.chance}`);
+  expect(apply(`You named “${quote}”, with a 68% chance in this model.`)).toBe(`You named “${quote}” ${plainLine.chance}`);
   const separate = `You named “${quote}”. The chance of supplier failure is 68%.`;
   expect(apply(separate)).toBe(separate);
 });

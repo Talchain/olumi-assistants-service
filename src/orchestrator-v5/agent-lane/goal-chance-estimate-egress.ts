@@ -11,7 +11,7 @@ const plain = (s: string): string => foldQuotes(s.replace(/â€˜|â€™|â�
 
 /**
  * The shared live, stored-answer replay and conversation-reload boundary. A named licensed option and its goal
- * bind every narrated percentage to the licence display or a verified input in that sentence. Goal-only narration
+ * bind goal-attainment percentages to the licence display or a verified input in that sentence. Goal-only narration
  * cannot invent an option identity. Exact user-authored spans and producer-bound statements stay untouched.
  * The screen producer owns the replacement, including its attribution and notes; each option is said once.
  */
@@ -43,6 +43,11 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
     positiveCount(line.olumi_estimate_link_count)
     || positiveCount(licence.olumi_estimate_value_count)
     || positiveCount(rec(licence.olumi_estimate_settings_by_option)?.[line.option_id]);
+  // Reuse the old producer-owned goal predicates, including dated/compound targets.
+  const producerGoalPredicates = lines.flatMap(l => {
+    const match = plain(l.chance).match(/\bchance of (.+?), in this model\b/);
+    return match === null ? [] : [match[1]!];
+  });
   // Also resolve explicitly named unlicensed options: they cannot fall through to another option's goal-only tuple.
   const labelsById = new Map((Array.isArray(nodes) ? nodes : []).map(rec).flatMap(n =>
     n?.kind === 'option' && typeof n.id === 'string' && typeof n.label === 'string' ? [[n.id, n.label] as const] : []));
@@ -233,7 +238,37 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         const namesGoal = goals.some(g => typeof g?.label === 'string' && names(bindingSubject, g.label))
           || (typeof goalLabel === 'string' && names(bindingSubject, goalLabel))
           || /\b(?:your|the|our|this) (?:goal|target)\b/.test(bindingSubject);
+        // Keep the old scored-goal identity rules: another goal and ambiguous labels do not bind.
+        if (goalId !== undefined && goals.some(g => g?.id !== goalId
+          && typeof g?.label === 'string' && names(bindingSubject, g.label))) continue;
+        const duplicateLabel = namedOptions.some((o, i) => namedOptions.some((other, j) => i !== j
+          && plain(o.label) === plain(other.label)));
+        if (duplicateLabel) continue;
+        let shorthand = withoutFigures.split(';')[0]!;
+        for (const o of namedOptions) shorthand = shorthand.split(plain(o.label)).join('').split(plain(o.id)).join('');
+        shorthand = shorthand.replace(/^\s*[-•]\s*/, '').replace(/\bin this model\b/g, '')
+          .replace(/[:;,.!?]/g, '').replace(/\s+/g, ' ').trim();
+        const optionShorthand = namedOptions.length === 1 && (shorthand === ''
+          || /^(?:has|gives) (?:a )?chance$/.test(shorthand)
+          || /^is likely$/.test(shorthand)
+          || /^(?:the )?recorded (?:chance|figure|probability) for (?:is|was)$/.test(shorthand));
+        const goalSubject = [...(typeof goalLabel === 'string' ? [goalLabel] : []),
+          ...goals.filter(g => goalId === undefined || g?.id === goalId).flatMap(g => typeof g?.label === 'string' ? [g.label] : [])]
+          .reduce((s, label) => s.split(plain(label)).join('__scored_goal__'), bindingSubject);
+        const goalAttainment = /\b(?:meet(?:s|ing)?|reach(?:es|ing)?|achiev(?:e|es|ing)|hit(?:s|ting)?) (?:its |the |your |our |this )?(?:goal|target|__scored_goal__)\b/.test(goalSubject)
+          || /\b(?:goal|target|__scored_goal__) (?:is |was )?(?:met|reached|achieved|hit)\b/.test(goalSubject)
+          || /\b(?:chance|probability|likelihood) (?:of |to )?__scored_goal__\b/.test(goalSubject)
+          || /\b(?:chance|probability|likelihood) (?:of |to )?(?:meet(?:ing)?|reach(?:ing)?|achiev(?:e|ing)|hit(?:ting)?) [£$€]?\d/.test(goalSubject)
+          || /\bchance(?: in this model)?(?:[.!?]|$)/.test(goalSubject)
+          || producerGoalPredicates.some(predicate => ['chance', 'probability', 'likelihood']
+            .some(word => names(bindingSubject, `${word} of ${predicate}`)))
+          || (typeof licence.chance_words === 'string' && names(bindingSubject, licence.chance_words));
+        // B2r narrow trigger: the old shorthand still binds, but unrelated option percentages do not.
+        if (!optionShorthand && !goalAttainment) continue;
         if (namedOptions.length === 0 && !namesGoal) continue;
+        if (optionShorthand && goalIds.size > 1 && !/^is likely$/.test(shorthand)) continue;
+        if (namedOptions.length === 0 && goalId === undefined && goalIds.size === 0
+          && percentages.every(p => Object.values(rec(licence.pct_by_option) ?? {}).includes(Number(p[2]!.replace(/,/g, ''))))) continue;
         const matched = lines.filter(l => namedOptions.some(o => o.id === l.option_id));
         const licensedFigures = matched.length === 1 ? figureParts(matched[0]!.figure) : [];
         const target = goalIds.size > 1 ? undefined : rec(licence.target);
@@ -280,7 +315,10 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
           return line !== undefined && exactFigure(p[0], line.figure);
         });
         const correct = correctSingle || correctMultiple;
-        if (residual.length === 0 || correct) continue;
+        const attributionOwed = correct && matched.length === 1 && hasOlumiEstimates(matched[0]!)
+          && !context.preserveLicensedWords
+          && !/\busing olumis estimates? for\b/.test(subject);
+        if (residual.length === 0 || (correct && !attributionOwed)) continue;
         // Existing mismatch path: replace with the producer's own sentence, once per option;
         // an absent/ambiguous tuple is suppressed, never guessed from another option's figure.
         const replacement = matched.length === 1
