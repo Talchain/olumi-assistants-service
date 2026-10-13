@@ -154,7 +154,7 @@ describe('an approved option level carries WHOSE level it is, through the real w
     const p = product(start);
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const sp = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Onboarding share', value: 0.4, unit: '', basis: 'the user: it is 40%', revise: true } as never],
+      assumptions: [{ user_stated: true, factor_label: 'Onboarding share', value: 0.4, unit: '', basis: 'the user: it is 40%', revise: true } as never],
       option_levels: [
         { option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire' },
         { option_label: 'Hire Two Developers', factor_label: 'Onboarding share', value: 0.45, basis: 'the user: two starters', user_stated: true },

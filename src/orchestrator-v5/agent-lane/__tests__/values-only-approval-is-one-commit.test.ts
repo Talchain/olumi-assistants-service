@@ -23,9 +23,9 @@ const served = JSON.parse(readFileSync(new URL('./fixtures/served-f1s-before-app
 const ctx = { scenario_id: '38b6c2a6-0000-4000-8000-000000000001', authenticated_user_id: null, request_id: 'r', user_text: 'Work out whether £59 improves MRR.' };
 /** The three figures F1s approved, as Olumi's assumptions (served reply: "Olumi assumptions, not measurements"). */
 const F1S = { assumptions: [
-  { factor_label: 'AI feature availability', value: 0, basis: 'not available today; the release options set it' },
-  { factor_label: 'Pro paying subscribers', value: 300, basis: 'a working baseline' },
-  { factor_label: 'Monthly churn', value: 7, unit: '%', basis: 'below the 10% limit, to test price sensitivity' },
+  { user_stated: false, factor_label: 'AI feature availability', value: 0, basis: 'not available today; the release options set it' },
+  { user_stated: false, factor_label: 'Pro paying subscribers', value: 300, basis: 'a working baseline' },
+  { user_stated: false, factor_label: 'Monthly churn', value: 7, unit: '%', basis: 'below the 10% limit, to test price sensitivity' },
 ], option_levels: [] };
 
 function product() {

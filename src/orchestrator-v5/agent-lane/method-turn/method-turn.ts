@@ -580,7 +580,7 @@ export type CardCall =
       readonly tool: 'propose_assumptions';
       readonly args: {
         readonly assumptions: readonly [{
-          readonly factor_label: string; readonly value: number; readonly unit: string; readonly basis: string; readonly keep: true;
+          readonly factor_label: string; readonly value: number; readonly unit: string; readonly basis: string; readonly user_stated: false; readonly keep: true;
         }];
       };
     };
@@ -625,7 +625,7 @@ export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: str
       args: {
         assumptions: [{
           factor_label: label, value: os.value, unit: typeof os.unit === 'string' ? os.unit : '',
-          basis: 'Olumi\u2019s current estimate', keep: true,
+          basis: 'Olumi\u2019s current estimate', user_stated: false, keep: true,
         }],
       },
     };

@@ -126,7 +126,7 @@ function fakeProduct(nodes0: Node[], edges: Edge[]) {
   return { d, posted, read: () => nodes };
 }
 
-const VALUES = [{ factor_label: 'Onboarding workload', value: 30, unit: 'score (0-100)', basis: 'a settled team of five' }];
+const VALUES = [{ user_stated: false, factor_label: 'Onboarding workload', value: 30, unit: 'score (0-100)', basis: 'a settled team of five' }];
 const ORDINARY_LEVELS = [
   { option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire' },
   { option_label: 'Hire Two Developers', factor_label: 'Developers hired', value: 2, basis: 'two hires' },
@@ -409,7 +409,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       const caps = createAgentCapabilities(p.d, new ProposalStore());
       // Developers hired starts at 0; this starting point revises it to 3, and the user says carrying on stays at 0.
       const r = await caps.proposeStartingPoint({ ...ctx, user_text: 'We hire 3 developers this year. Carrying on hires 0 developers.' }, {
-        assumptions: [{ factor_label: 'Developers hired', value: 3, unit: 'hires', basis: 'the user: three this year', revise: true } as never],
+        assumptions: [{ user_stated: true, factor_label: 'Developers hired', value: 3, unit: 'hires', basis: 'the user: three this year', revise: true } as never],
         option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Developers hired', value: 0, basis: 'the user: carrying on hires nobody', user_stated: true }],
       });
       expect(r.ok, JSON.stringify(r)).toBe(true);

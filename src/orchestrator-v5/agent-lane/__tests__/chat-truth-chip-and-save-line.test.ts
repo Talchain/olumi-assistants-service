@@ -240,7 +240,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const { store, caps } = capsOver(graph);
     const r = await caps.proposeAssumptions({ ...ctx, user_text: 'Suggest starting figures.', user_text_complete: false,
       unverified_user_text: 'Recruitment fee is £5,000.' },
-      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', basis: 'a starting estimate', ...{ user_stated } }] });
+      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', basis: 'a starting estimate', ...{ user_stated } }] } as never); // Deliberately malformed undefined flag exercises runtime refusal.
     expect(r).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
     expect(store.outstanding(SCENARIO, 'user-a')).toEqual([]);
     expect(chipsFor(store, [{ name: 'propose_assumptions', result: r }])).toEqual([]);
