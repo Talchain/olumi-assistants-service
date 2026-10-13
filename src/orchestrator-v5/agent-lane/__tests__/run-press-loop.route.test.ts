@@ -13,7 +13,7 @@ const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-tu
 const SCENARIO = '3ad403fc-caf8-48e4-bd5b-578e20c1c48a';
 const HASH = '0123456789abcdef';
 const AT = '2026-10-13T01:00:00.000Z';
-const CURRENTNESS = 'This answer was about an earlier analysis; the model has changed since. Run the analysis again to see the current result.';
+const CURRENTNESS = 'This saved answer is not verified for the current analysis. Run the analysis again to see the current result.';
 const READY = { status: 'ready', options: [], blockers: [] };
 const STATE = { run_state: { kind: 'complete_current', computed_at: AT }, usable_for_chips: true,
   leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } };

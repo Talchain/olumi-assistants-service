@@ -1192,7 +1192,7 @@ export const RUN_FAILED_TEXT = 'I couldn\u2019t run the analysis: something went
 export const RUN_RESULT_UNVERIFIED_TEXT = 'The analysis finished, but I can’t verify a current result. Check the current results before asking again.';
 
 /** K2 receipt: appended by the host to historical loop answers, never supplied by a prompt. */
-const LOOP_REPLAY_CURRENTNESS_TEXT = 'This answer was about an earlier analysis; the model has changed since. Run the analysis again to see the current result.';
+const LOOP_REPLAY_CURRENTNESS_TEXT = 'This saved answer is not verified for the current analysis. Run the analysis again to see the current result.';
 
 export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }, modelChangedThisTurn = false): string {
   if (ran.ran === true) {
