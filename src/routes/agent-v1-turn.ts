@@ -3900,7 +3900,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       } else {
         result = await runAgentTurn(
           {
-            ctx: { ...toolCtx,
+            ctx: runPress ? toolCtx : { ...toolCtx,
               // A qualified confirmation retains the user's ORIGINAL figure quote after a restart; never Olumi's restatement.
               ...(levelAnswerTool !== undefined && levelAsk?.action.figure_quote !== undefined
                 ? { user_text: userWordsOf([...histories.typedWords(sessionId), levelAsk.action.figure_quote], typedNow) } : {}),
@@ -3993,7 +3993,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (outcome !== undefined) { runOutcomeText = outcome.text; runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
     }
     // A hop limit is never returned as an empty answer.
-    let text = runOutcomeText ?? (result.stopped_reason === 'incomplete'
+    const runPressSkipped = runPress && !runPressConsumed;
+    let text = runPressSkipped ? 'The analysis did not run. Press Run to try again.' : runOutcomeText ?? (result.stopped_reason === 'incomplete'
       ? unfinishedAnswerText(result)
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
         ? hopLimitText(result)
@@ -5186,6 +5187,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const firstRunRiskMarker = faceContract === 'draft' && screenLines.length > 0
         ? runWidenWords.widenedRiskMarker : undefined;
       if (firstRunRiskMarker !== undefined && !reply.includes(firstRunRiskMarker)) reply = withDisclosures(reply, [firstRunRiskMarker]);
+      // A skipped Run has no result to narrate. Its host receipt crosses the same qualification and composer as every reply.
+      if (runPressSkipped) {
+        reply = 'The analysis did not run. Press Run to try again.';
+        wireBody = { ...wireBody, suggested_actions: firstOfEachId([RUN_OFFER_CHIP, ...(wireBody.suggested_actions ?? [])]) };
+      }
       // Every prose writer, including cell-owned horizons and the build's Run risk marker, crosses the ONE chokepoint
       // before shaping, history and storage. The unchanged-body branch below retains this same gated carrier.
       wireBody = withEstimateGoalPointsAtEgress({ ...wireBody, assistant_text: reply }, {
@@ -5270,7 +5276,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // No model wrote words this turn (a card press, an uninterpreted Explain, the action bar's typed reply: S-B #2751's
       // can't-yet / already-waiting words): every line is the host's, shipped as composed. The bar's sidecars (`_action`)
       // are attached after this block and never pass the composer.
-      const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
+      const narratorModel = runPressSkipped || actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
         : fastPath === 'run' || fastPath === 'explain' ? (narratorWords !== null ? interpretBudget().model : null) : budget.model;
       const a7Repeat = await a7SaidLastTurn(readbackGraph, chanceCells, historyReader, scenarioId, turnId);
       const estimates = actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady,
@@ -5320,11 +5326,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? { ...unshaped, assistant_text: composedReply.text,
           ...(composedReply.shape !== null ? { _answer_shape: composedReply.shape } : {}) }
         : unshaped) as OlumiResponse & Record<string, unknown>;
-      if (runPress && !runPressConsumed) {
-        const { _answer_shape: _skippedShape, ...withoutShape } = wireBody;
-        wireBody = { ...withoutShape, assistant_text: 'The analysis did not run. Press Run to try again.',
-          suggested_actions: firstOfEachId([RUN_OFFER_CHIP, ...(wireBody.suggested_actions ?? [])]) };
-      }
       log.info({
         event: 'agent_lane.reply_shaped', request_id: String(req.id), ...(turnId !== undefined ? { turn_id: turnId } : {}),
         outcome: composedReply.outcome, ...(composedReply.reason !== undefined ? { reason: composedReply.reason } : {}),

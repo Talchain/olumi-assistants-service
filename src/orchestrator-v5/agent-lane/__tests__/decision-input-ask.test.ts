@@ -12,7 +12,6 @@ import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest, 
 import { narrateWriteOutcome, openQuestionsForReply, withWriteOutcome } from '../write-outcome.js';
 import { sentencesOf } from '../reply/compose-reply.js';
 import type { AnswerShape } from '../../routing/answer-shape.js';
-import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 type Rec = Record<string, unknown>;
 const SERVED_FX = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')) as { goal_after_build: Rec; goal_after_target: Rec };

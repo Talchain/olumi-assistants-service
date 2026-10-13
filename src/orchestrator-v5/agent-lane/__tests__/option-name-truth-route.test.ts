@@ -20,7 +20,7 @@ const result = { type: 'analysis_result', computed_against_hash: HASH, leading_o
 const state = { run_state: { kind: 'complete_current', computed_at: '2026-09-30T09:00:00.000Z', graph_hash_at_run: HASH },
   leader_claim: { permitted: true, separation: 'separated' } };
 const writes: string[] = [];
-const modelRequests: unknown[] = [];
+const modelRequests: { input?: unknown; tool_choice?: unknown }[] = [];
 const latestRunContext = (): Record<string, unknown> | undefined => {
   return explanationContext((modelRequests.at(-1) as { input?: unknown } | undefined)?.input);
 };
