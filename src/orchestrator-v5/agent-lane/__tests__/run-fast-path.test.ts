@@ -94,7 +94,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
-    expect(modelBodies, 'Run calls the tool through the model, then interprets').toHaveLength(2);
+    expect(modelBodies, 'Run calls the tool through one pre-tool interpretation').toHaveLength(1);
     const r = await explain(first);
     expect(r.statusCode).toBe(200);
     const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string }[] } };
@@ -155,7 +155,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
-    expect(modelBodies, 'Run calls the tool through the model, then interprets').toHaveLength(2);
+    expect(modelBodies, 'Run calls the tool through one pre-tool interpretation').toHaveLength(1);
     const r = await explain(first);
     const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
     expect(b._diagnostic_trace.fast_path).toBe('explain');
@@ -180,7 +180,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
-    expect(modelBodies, 'Run calls the tool through the model, then interprets').toHaveLength(2);
+    expect(modelBodies, 'Run calls the tool through one pre-tool interpretation').toHaveLength(1);
     await explain(first);
     expect(modelBodies).toHaveLength(1);
     const instructions = String(modelBodies[0]!['instructions']);
@@ -207,7 +207,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
       const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
         kind: 'message', scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
       } });
-      expect(modelBodies, 'Run calls the tool through the model, then interprets').toHaveLength(2);
+      expect(modelBodies, 'Run calls the tool through one pre-tool interpretation').toHaveLength(1);
       const r = await explain(first);
       expect(r.statusCode).toBe(200);
       const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; ok: boolean }[] } };
@@ -304,7 +304,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
-    expect(modelBodies, 'Run calls the tool through the model, then interprets').toHaveLength(2);
+    expect(modelBodies, 'Run calls the tool through one pre-tool interpretation').toHaveLength(1);
     const r = await explain(first);
     const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
     expect(b._diagnostic_trace.fast_path).toBe('explain');

@@ -272,7 +272,7 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
   it('RED: an explicit Run on the same model → its OWN card (explicit copy, a different block_id)', async () => {
     const auto = coachingOf(await buildTurn(app))[0];
     const r = await turn(app, { message: 'Run analysis.', source: 'chip', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
-    expect(r._diagnostic_trace.fast_path).toBeUndefined();
+    expect(r._diagnostic_trace.fast_path).toBe('run');
     expect(st(SID).injectRuns, 'control: the explicit Run ran').toBe(1);
     const cards = coachingOf(r);
     expect(cards).toHaveLength(1);

@@ -85,7 +85,7 @@ describe('the turn after a typed Run is accepted by the model API', () => {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
     expect(run.statusCode).toBe(200);
-    expect((run.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path, 'the control: Run uses the loop').toBeUndefined();
+    expect((run.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path, 'the control: Run returns before narration').toBe('run');
     await explainRun(app, SCENARIO, run);
     const sessionId = (run.json() as { _agent: { session_id?: string } })._agent.session_id;
 
@@ -94,8 +94,8 @@ describe('the turn after a typed Run is accepted by the model API', () => {
     } });
     const sent = inputs[inputs.length - 1]!;
     // Vacuity guard: the next turn really did send the Run's interpretation back as history.
-    expect(sent.some((i) => i['id'] === 'msg_2'), 'the Explain turn is in the next turn’s history (Run was message 1)').toBe(true);
+    expect(sent.some((i) => i['id'] === 'msg_1'), 'the Explain turn is in the next turn’s history (Explain is the first narrated reply)').toBe(true);
     expect(next.statusCode, JSON.stringify(next.json()).slice(0, 300)).toBe(200);
-    expect(sent.findIndex((i) => i['id'] === 'rs_2')).toBeLessThan(sent.findIndex((i) => i['id'] === 'msg_2'));
+    expect(sent.findIndex((i) => i['id'] === 'rs_1')).toBeLessThan(sent.findIndex((i) => i['id'] === 'msg_1'));
   });
 });
