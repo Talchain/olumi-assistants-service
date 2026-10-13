@@ -298,7 +298,7 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
       [call('propose_goal_deadline', { deadline_words: DEADLINE_WORDS, rationale: PAUL.deadline }), say('Please confirm the date.')]);
     seen.push(t2);
     const deadline = proposed(t2, 'propose_goal_deadline');
-    expect(cardOf(t2, deadline.proposal_id)).toBe('Is your deadline 12 April 2027 (6 months from 12 October 2026)?');
+    expect(cardOf(t2, deadline.proposal_id)).toBe('Is your deadline 12 April 2027 (6 months from 12 October 2026)? Basis supplied for this interpretation: ' + PAUL.deadline);
     const t2yes = await turn(approve(t2, deadline.proposal_id));
     seen.push(t2yes);
     expect(t2yes._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));

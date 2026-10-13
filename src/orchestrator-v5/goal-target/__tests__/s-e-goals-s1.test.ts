@@ -252,11 +252,11 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     const hashBefore = computeAnalysisAffectingGraphHash(w.graph() as never);
     const r = await w.caps.proposeGoalDeadline!(ctxSaying(PAUL_0913), { deadline_words: 'a deadline in 6 months', rationale: PAUL_0913 }) as Rec;
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(r.public_label).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)?');
+    expect(r.public_label).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)? Basis supplied for this interpretation: ' + PAUL_0913);
     const chips = approvalChipsFor([{ name: 'propose_goal_deadline', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
       (id) => ({ proposal: w.proposals.get(id), result: r as never }));
     expect(chips.map((c) => c.label)).toEqual(['Yes', 'Change date']);
-    expect(chips[0]!.detail).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)?');
+    expect(chips[0]!.detail).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)? Basis supplied for this interpretation: ' + PAUL_0913);
     expect(chips[1]).toEqual(DEADLINE_CHANGE_CHIP);
     // Nothing is written by the proposal.
     expect(goalOf(w.graph()).goal_horizon).toBeUndefined();
@@ -279,7 +279,7 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     g.nodes[1].goal_horizon = { deadline: '2027-04-07' };
     const w = world(stored(g));
     const r = await w.caps.proposeGoalDeadline!(ctxSaying('Actually the deadline is end of March.'), { deadline_words: 'end of March', rationale: 'x' }) as Rec;
-    expect(r.public_label).toBe('Is your deadline 31 March 2027 (about 5.8 months from 7 October 2026)? This replaces 7 April 2027.');
+    expect(r.public_label).toBe('Is your deadline 31 March 2027 (about 5.8 months from 7 October 2026)? This replaces 7 April 2027. Basis supplied for this interpretation: x');
     // Another write moves the date before the Yes.
     const moved = w.graph();
     goalOf(moved).goal_horizon = { deadline: '2027-05-01' };
@@ -305,7 +305,11 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     const w = world(stored());
     // CONTROL: the same words typed in this message are the user's.
     const typed = await w.caps.proposeGoalDeadline!(ctxSaying('The deadline is 6 months away.'), { deadline_words: '6 months', rationale: 'x' }) as Rec;
-    expect(typed).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 7 April 2027 (6 months from 7 October 2026)?' }));
+    expect(w.proposals.get(String(typed.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: 'x' });
+    expect(typed.deadline.words).toBe('6 months');
+    expect(goalOf(w.graph()).goal_horizon).toBeUndefined();
+    expect(w.commits).toHaveLength(0);
+    expect(typed).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 7 April 2027 (6 months from 7 October 2026)? Basis supplied for this interpretation: x' }));
   });
   it('Codex r2: an approval whose write landed but came back unconfirmed is confirmed on the retry, never "nothing was recorded"', async () => {
     const w = world(stored(), undefined, { unconfirmFirst: true });

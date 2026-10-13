@@ -93,8 +93,8 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
       expect(text).not.toContain('ONLY for a figure the user stated');
       expect(text).not.toContain('Never invent a level or a direction');
     }
-    expect(tools).toContain('never invent one');
-    expect(tools).toContain('Never invent a unit, reference or level');
+    // AIE #94 6136098330: the deadline rule must still forbid an invented level.
+    expect(tools).toContain('Never invent or silently replace a reference, unit or level');
     // A new factor's direction: ONE rule, stated the same way in the prompt, the tool, and the field.
     const rule = 'where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask';
     expect(route).toContain(rule);
