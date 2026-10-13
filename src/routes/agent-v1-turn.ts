@@ -3070,7 +3070,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const fastStartedAt = Date.now();
       const st = await readBackState(readingDispatch, scenarioId);
       explanationRead = st;
-      interpretedRunId = boundRun !== undefined ? runExplanationChip(scenarioId, st)?.id : explanationId;
+      interpretedRunId = boundRun !== undefined ? runExplanationChip(scenarioId, st)?.id : (typeof explanationId === 'string' ? explanationId : undefined);
       // This is the same cached canonical read, carrying the producer's selected-Run delta.
       // Never recover a delta from an earlier tool output or calculate one in the narration layer.
       const selectedRead = await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
@@ -4026,7 +4026,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const narrated = await runAgentTurn({ ctx: toolCtx, history,
         message: JSON.stringify({ request: message, facts: methodFacts }),
         instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode,
-        selectionNote: selection.note, withheldTools: toolsFor(mode).map(t => t.name), maxHops: 1,
+        selectionNote: selection?.note, withheldTools: toolsFor(mode).map(t => t.name), maxHops: 1,
       }, capabilities, callModelFor(budget));
       text = narrated.stopped_reason === 'answered' ? narrated.assistant_text : unfinishedAnswerText(narrated);
       narratorWords = narrated.assistant_text;
