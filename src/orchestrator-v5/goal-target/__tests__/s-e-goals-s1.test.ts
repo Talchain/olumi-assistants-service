@@ -252,11 +252,11 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     const hashBefore = computeAnalysisAffectingGraphHash(w.graph() as never);
     const r = await w.caps.proposeGoalDeadline!(ctxSaying(PAUL_0913), { deadline_words: 'a deadline in 6 months', rationale: PAUL_0913 }) as Rec;
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(r.public_label).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)?');
+    expect(r.public_label).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)? Your words: “a deadline in 6 months”. Basis supplied for this interpretation: ' + PAUL_0913);
     const chips = approvalChipsFor([{ name: 'propose_goal_deadline', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
       (id) => ({ proposal: w.proposals.get(id), result: r as never }));
     expect(chips.map((c) => c.label)).toEqual(['Yes', 'Change date']);
-    expect(chips[0]!.detail).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)?');
+    expect(chips[0]!.detail).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)? Your words: “a deadline in 6 months”. Basis supplied for this interpretation: ' + PAUL_0913);
     expect(chips[1]).toEqual(DEADLINE_CHANGE_CHIP);
     // Nothing is written by the proposal.
     expect(goalOf(w.graph()).goal_horizon).toBeUndefined();
@@ -279,7 +279,7 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     g.nodes[1].goal_horizon = { deadline: '2027-04-07' };
     const w = world(stored(g));
     const r = await w.caps.proposeGoalDeadline!(ctxSaying('Actually the deadline is end of March.'), { deadline_words: 'end of March', rationale: 'x' }) as Rec;
-    expect(r.public_label).toBe('Is your deadline 31 March 2027 (about 5.8 months from 7 October 2026)? This replaces 7 April 2027.');
+    expect(r.public_label).toBe('Is your deadline 31 March 2027 (about 5.8 months from 7 October 2026)? This replaces 7 April 2027. Your words: “end of March”. Basis supplied for this interpretation: x');
     // Another write moves the date before the Yes.
     const moved = w.graph();
     goalOf(moved).goal_horizon = { deadline: '2027-05-01' };
@@ -291,7 +291,6 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     expect(goalOf(w2.graph()).goal_horizon).toEqual({ deadline: '2027-05-01' });
   });
   it.each([
-    ['words the user never wrote', 'we need to ship soon', 'a deadline in 6 months', 'deadline_not_stated'],
     ['a phrase no calendar places without guessing', 'the deadline is next sprint', 'next sprint', 'deadline_not_placed'],
     ['the date the goal already holds', 'we have a deadline in 6 months', 'a deadline in 6 months', 'already_held'],
   ])('refused, nothing prepared: %s', async (_name, said, words, refusal) => {
@@ -302,16 +301,30 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal }));
     expect(w.proposals.get(String(r.proposal_id))).toBeUndefined();
   });
-  it('Codex r1: the words must be WHOLE words of THIS message — "6 months" inside "16 months", or only in an earlier message, is refused', async () => {
+  it('A2h earlier verified deadline remains user-stated with its words on the card', async () => {
     const w = world(stored());
-    const inside = await w.caps.proposeGoalDeadline!(ctxSaying('The deadline is 16 months away.'), { deadline_words: '6 months', rationale: 'x' }) as Rec;
-    expect(inside).toEqual(expect.objectContaining({ ok: false, refusal: 'deadline_not_stated' }));
-    const earlier = await w.caps.proposeGoalDeadline!({ ...ctxSaying('Yes, add the freelance option.'), user_text: `${PAUL_0913}\nYes, add the freelance option.` },
-      { deadline_words: 'a deadline in 6 months', rationale: 'x' }) as Rec;
-    expect(earlier).toEqual(expect.objectContaining({ ok: false, refusal: 'deadline_not_stated' }));
+    const out = await w.caps.proposeGoalDeadline!({ ...ctxSaying('Yes, add the freelance option.'), user_text: PAUL_0913 + '\nYes, add the freelance option.' },
+      { deadline_words: 'a deadline in 6 months', rationale: '' }) as Rec;
+    expect(w.proposals.get(String(out.proposal_id))!.provenance.authored_by).toBe('user_stated');
+    expect(out.public_label).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)? Your words: “a deadline in 6 months”.');
+    expect(w.commits).toHaveLength(0);
+  });
+  it.each(['words the user never wrote', 'The deadline is 16 months away.'])('A2h %s cannot author the proposed six months', async said => {
+    const w = world(stored());
+    const out = await w.caps.proposeGoalDeadline!(ctxSaying(said), { deadline_words: '6 months', rationale: '' }) as Rec;
+    expect(out).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(w.proposals.get(String(out.proposal_id))).toBeUndefined();
+    expect(w.commits).toHaveLength(0);
+  });
+  it('a deadline typed in this message keeps its user-authored card', async () => {
+    const w = world(stored());
     // CONTROL: the same words typed in this message are the user's.
     const typed = await w.caps.proposeGoalDeadline!(ctxSaying('The deadline is 6 months away.'), { deadline_words: '6 months', rationale: 'x' }) as Rec;
-    expect(typed).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 7 April 2027 (6 months from 7 October 2026)?' }));
+    expect(w.proposals.get(String(typed.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: 'x' });
+    expect(typed.deadline.words).toBe('6 months');
+    expect(goalOf(w.graph()).goal_horizon).toBeUndefined();
+    expect(w.commits).toHaveLength(0);
+    expect(typed).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 7 April 2027 (6 months from 7 October 2026)? Your words: “6 months”. Basis supplied for this interpretation: x' }));
   });
   it('Codex r2: an approval whose write landed but came back unconfirmed is confirmed on the retry, never "nothing was recorded"', async () => {
     const w = world(stored(), undefined, { unconfirmFirst: true });

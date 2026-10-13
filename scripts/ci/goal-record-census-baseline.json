@@ -201,7 +201,7 @@
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 1,
       "src/orchestrator-v5/agent-lane/proposal-object/record.ts": 1,
       "src/orchestrator-v5/agent-lane/proposal.ts": 2,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 4,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 3,
       "src/orchestrator-v5/agent-lane/science/method-science-context.ts": 3,
       "src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts": 3,
       "src/orchestrator-v5/agent-lane/turn-context/selector-signals.ts": 3,
@@ -821,7 +821,7 @@
     "goal_constraints": 450,
     "goal_deadline_as_stated": 11,
     "goal_direction": 99,
-    "goal_horizon": 52,
+    "goal_horizon": 51,
     "goal_horizon_months": 43,
     "goal_level_reading": 19,
     "goal_node_id": 287,
@@ -847,7 +847,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2469,
+  "total_references": 2468,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

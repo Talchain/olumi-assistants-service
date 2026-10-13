@@ -556,6 +556,19 @@ export class HistoryStore {
     return this.typed.get(sessionId) ?? [];
   }
 
+  /** Authorship inputs retain message boundaries and the source of restored rows. */
+  authorshipWords(sessionId: string): { verified: readonly string[]; unknown: readonly string[] } {
+    const older = this.older.get(sessionId) ?? [];
+    const restored = (this.items.get(sessionId) ?? []).filter(isUserMessage)
+      .slice(0, this.unknownAhead.get(sessionId) ?? 0).flatMap(i => {
+        const text = textOf(i); return text === undefined ? [] : [text];
+      });
+    return {
+      verified: [...older.filter(e => e.source === 'typed').map(e => e.text), ...this.typedWords(sessionId)],
+      unknown: [...older.filter(e => e.source === 'unknown').map(e => e.text), ...restored],
+    };
+  }
+
   recordTyped(sessionId: string, text: string): void {
     if (text.trim() === '') return;
     const next = [...(this.typed.get(sessionId) ?? []), text].slice(-MAX_TYPED_WORDS);

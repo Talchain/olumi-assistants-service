@@ -24,6 +24,7 @@ import {
   GM_HELD_USER_TODAY_KEY,
   isNewFactorTarget,
   isUserTodayObservedState,
+  levelRangePointBasis,
   readUserTodayMember,
   stampNewUserTodayLevels,
   USER_TODAY_SOURCE,
@@ -100,12 +101,32 @@ describe('PJ-E-FIG — the figure and its frame', () => {
     expect(isUserTodayObservedState(JUNIOR)).toBe(true);
   });
 
-  it('S2: only the user\'s framed figure is a door level — never the brief\'s source, never the illegal literal, never an extra member', () => {
+  it('S2: a door level preserves its typed frame and source — never the brief\'s source, never the illegal literal, never an extra member', () => {
     expect(isUserTodayObservedState({ ...SENIOR, source: 'brief_extraction' })).toBe(false);
     expect(isUserTodayObservedState({ ...SENIOR, source: 'user_specified' })).toBe(false);
     expect(isUserTodayObservedState({ ...SENIOR, provenance: 'user_set' })).toBe(false);
     expect(isUserTodayObservedState({ ...SENIOR, value: 0.5 })).toBe(false);
     expect(isUserTodayObservedState({ value: 120000, source: USER_TODAY_SOURCE })).toBe(false);
+  });
+});
+
+describe('W14 — proposed figures retain source and finite quantities', () => {
+  it('accepts Olumi figures only with inferred source and the matching approval basis', () => {
+    const os = { ...SENIOR, source: 'cee_inference', extractionType: 'inferred' };
+    expect(isUserTodayObservedState(os)).toBe(true);
+    const range = { low: 100000, high: 140000, meaning: 'min_max', source: USER_TODAY_SOURCE, source_quote: 'between 100000 and 140000' };
+    expect(levelRangePointBasis({ ...os, range })).not.toBe('stated_figure');
+
+    expect(readUserTodayMember([{ factor_id: 'f', observed_state: os, basis: 'olumi_estimate' }])).toHaveLength(1);
+    for (const basis of [undefined, 'written_about', 'confirmed_by_approval']) {
+      expect(readUserTodayMember([{ factor_id: 'f', observed_state: os, basis, quote: '120000' }])).toBeUndefined();
+    }
+    expect(readUserTodayMember([{ factor_id: 'f', observed_state: SENIOR, basis: 'olumi_estimate' }])).toBeUndefined();
+    expect(isUserTodayObservedState({ ...os, extractionType: 'explicit' })).toBe(false);
+    expect(isUserTodayObservedState({ ...SENIOR, extractionType: 'inferred' })).toBe(false);
+    for (const value of [NaN, Infinity, -Infinity]) {
+      expect(isUserTodayObservedState({ value, unit: UNIT, source: 'cee_inference', extractionType: 'inferred' })).toBe(false);
+    }
   });
 });
 

@@ -6,6 +6,7 @@ import { buildModelFromBrief } from '../../agent-lane/runtime/build-model.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { withEventNumberLoss, withEventShareDate } from '../event-by-date-model.js';
 import { applyTeamShareEdit } from '../team-share-write.js';
+import { sharePartsForOption } from '../share-by-date-run.js';
 
 type Rec = Record<string, any>;
 const eventCandidate = (metric = 'launch', deliverable = metric): CandidateModel => ({
@@ -54,6 +55,30 @@ describe('R4 ordinary event briefs through real candidate checks', () => {
       value: 200000, operator: '<=', unit: 'GBP', provenance: 'explicit',
     }));
     expect(admitted.nodes.some(n => n.id === admitted.goal_constraints[0]!.node_id)).toBe(true);
+  });
+
+  it('R3 a missing option pace leaves only that option unresolved through real build', async () => {
+    const base = eventCandidate();
+    const candidate: CandidateModel = { ...base, options: [
+      ...base.options, { label: 'Hire another team', provenance: 'ai_proposed', added_capacity: null },
+    ] };
+    const { result, graph } = await build(candidate, 'Launch by April with extra delivery capacity or another team.');
+    expect(result.ok).toBe(true);
+    expect(graph).toBeDefined();
+    const team = graph!.edges.find((e: Rec) => e.provenance?.share_by_date?.role === 'team');
+    expect(team.provenance.share_by_date.unresolved_option_ids).toEqual(['event_option_3']);
+    expect(graph!.nodes.find((n: Rec) => n.id === 'event_capacity_2')).toBeDefined();
+    expect(graph!.nodes.find((n: Rec) => n.id === 'event_capacity_3')).toBeUndefined();
+    expect(graph!.nodes.find((n: Rec) => n.id === 'event_team').observed_state).toBeUndefined();
+    const dated = withEventShareDate(graph, '2027-04-30', '2026-10-01');
+    const timed = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team',
+      low_months: 4, high_months: 6, deadline: '2027-04-30', reference_date: '2026-10-01' },
+    computeAnalysisAffectingGraphHash(dated as never)!);
+    expect(timed.kind).toBe('mutated');
+    if (timed.kind !== 'mutated') throw new Error('Team-time write failed');
+    expect(sharePartsForOption(timed.mutatedGraph, 'event_option_2')).not.toBeNull();
+    expect(sharePartsForOption(timed.mutatedGraph, 'event_option_3')).toBeNull();
+
   });
 
   it('R4-3A-BUILD contextual budget passes production candidate gate and registers the limit', async () => {
@@ -205,7 +230,7 @@ describe('R7 class boundaries: whole numbers, canonical currency, and uncarried 
     await expectNumberDisclosure(eventCandidate(), brief, '3 engineers');
   });
 
-  it('R7-C-INTERVENTION unflagged context carries stated amounts; flagged cost-only option refuses missing capacity', async () => {
+  it('R7-C-INTERVENTION unflagged context carries stated amounts; flagged cost-only option retains its amounts with capacity unresolved', async () => {
     const candidate: CandidateModel = { ...eventCandidate(), options: [
       ...eventCandidate().options,
       { label: 'Increase hiring cost', provenance: 'explicit', interventions: [
@@ -223,9 +248,16 @@ describe('R7 class boundaries: whole numbers, canonical currency, and uncarried 
       .toMatchObject({ raw_value: 200000, unit: 'GBP' });
     expect(numberLosses(admitted)).toEqual([]);
     const { result, graph } = await build(candidate, brief);
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'event_goal_unadmitted',
-      detail: "Olumi couldn't connect your options to the launch date yet: it needs how much capacity each option adds." });
-    expect(graph).toBeUndefined();
+    expect(result).toMatchObject({ ok: true, mutated: true });
+    const costFactor = graph!.nodes.find((node: Rec) => node.label === 'Hiring cost')!;
+    expect(costFactor.observed_state).toMatchObject({ raw_value: 100000, unit: 'GBP' });
+    const costOption = graph!.nodes.find((node: Rec) => node.id === 'event_option_3')!;
+    expect(costFactor.analysis_participation).toBe('retained_excluded');
+    expect(costOption.description).toContain('Your stated setting: Hiring cost = 200000 GBP. Kept for review;');
+    expect(costOption.interventions[costFactor.id]).toBeUndefined();
+    const team = graph!.edges.find((edge: Rec) => edge.provenance?.share_by_date?.role === 'team');
+    expect(team.provenance.share_by_date.unresolved_option_ids).toContain(costOption.id);
+    expect(graph!.nodes.find((node: Rec) => node.id === 'event_capacity_3')).toBeUndefined();
   });
 
   it.each([
