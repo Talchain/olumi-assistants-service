@@ -131,12 +131,16 @@ describe('deterministic deadline card on the first Agent turn', () => {
     expect(out.proposal_id).toBeUndefined();
     expect(w.writes).toHaveLength(0);
   });
-  it('W3 unbound deadline words prepare an Olumi-labelled card without writing', async () => {
+  it('W3 unbound deadline words stay origin_unknown without a proposal or write', async () => {
     const w = world(); w.setBrief('Plan the launch.'); // These words occur nowhere in retained user material.
+    const before = w.read();
     const out = await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'ten months', rationale: '' }), w.ctx('Run the analysis.'), w.caps, 'full');
-    expect(out).toMatchObject({ ok: true, mutated: false });
-    expect(w.proposals.get(String(out.proposal_id))?.provenance.authored_by).toBe('model_proposed');
-    expect(out.public_label).toBe('Is your deadline 10 August 2027 (10 months from 10 October 2026)? Olumi’s wording: “ten months”. Olumi’s interpretation; check the date and reference before approving.');
+    expect(out).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown',
+      detail: 'The retained source is not verified. Its origin stays unknown; nothing was prepared. Ask for its source.' });
+    expect(out.proposal_id).toBeUndefined();
+    expect(w.proposals.outstanding(w.sid, null)).toEqual([]);
+    expect(w.writes).toEqual([]);
+    expect(w.read()).toEqual(before);
   });
   it('A2h a verified pending deadline retains human words when history is unknown', async () => {
     const w = world();
