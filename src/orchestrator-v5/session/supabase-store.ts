@@ -2068,11 +2068,12 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
-    const columns = 'id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance, suggested_actions_run_key';
+    const columns = 'id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance';
     const read = (select: string) => this.client.from('v5_conversation_turns').select(select)
       .eq('scenario_id', scenarioId).eq('turn_id', turnId).limit(1);
-    let { data, error } = await read(`${columns}, run_narration`);
-    // Order-safe: before migration 20261013230000 the column is absent; the row is read without it (narration unknown).
+    let { data, error } = await read(`${columns}, suggested_actions_run_key, run_narration`);
+    // Order-safe: without migrations 20261006230000 / 20261013230000 those two columns are absent; the row is then read
+    // as before T1h, its Run identity unknown, never refused.
     if (error && errCode(error) === '42703') ({ data, error } = await read(columns));
     // A failed read is an UNKNOWN and is thrown, never folded into "no row":
     // the caller would otherwise re-execute a turn that may already have run.

@@ -75,7 +75,7 @@ const client = {
       order: (key: string, options: { ascending: boolean }) => { orders.push({ key, ...options }); return chain; },
       abortSignal: () => chain,
       limit: (n: number) => { cap = n; return chain; },
-      then: (resolve: (v: unknown) => void) => resolve(selectMissingColumn && columns.includes('run_narration')
+      then: (resolve: (v: unknown) => void) => resolve(selectMissingColumn && (columns.includes('run_narration') || columns.includes('suggested_actions_run_key'))
         ? { data: null, error: { code: '42703', message: 'column v5_conversation_turns.run_narration does not exist' } }
         : { data: table.filter(row => checks.every(check => check(row)))
           .sort((a, b) => { for (const o of orders) { const c = String(a[o.key]).localeCompare(String(b[o.key])); if (c) return o.ascending ? c : -c; } return 0; })
@@ -249,7 +249,7 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     expect(await read('later')).toEqual({ key: 'bbbbbbbbbbbbbbbb', narration: { status: 'pending', run_key: 'bbbbbbbbbbbbbbbb' } });
     expect(await read('legacy')).toEqual({ key: null, narration: null });
     expect(await read('malformed')).toEqual({ key: null, narration: null });
-    // Before the migration the column is absent: the same row is still read, its narration unknown (never a 503).
+    // Before the migrations the columns are absent: the same row is still read, its Run identity unknown (never a 503).
     selectMissingColumn = true;
     expect(await read('earlier')).toEqual({ key: null, narration: null });
     expect((await realStore.readCommittedTurn(SCENARIO, 'earlier'))?.assistant_message).toBe('a');
