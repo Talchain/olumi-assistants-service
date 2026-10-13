@@ -83,7 +83,7 @@ function product() {
   return { d, byId: () => Object.fromEntries(nodes.map((n) => [n.id, n])), graph, writes: () => writes, otherWriter };
 }
 
-const keepOf = (factor_label: string, value: number, unit: string) => ({ factor_label, value, unit, basis: 'the user said it is about right', keep: true });
+const keepOf = (factor_label: string, value: number, unit: string) => ({ user_stated: false, factor_label, value, unit, basis: 'the user said it is about right', keep: true });
 
 async function keep(items: ReturnType<typeof keepOf>[]) {
   const p = product();
@@ -216,7 +216,7 @@ describe('only Olumi’s own figure may be kept', () => {
 
   it('NEGATIVE: a keep beside another value is refused whole — one Yes never stands for two different acts', async () => {
     const { stored, proposed } = await keep([keepOf('Hours per week finding warm connections', 4, 'hours/week'),
-      { factor_label: 'Intro quality', value: 50, unit: 'index points (0-100)', basis: 'a guess' } as never]);
+      { user_stated: false, factor_label: 'Intro quality', value: 50, unit: 'index points (0-100)', basis: 'a guess' } as never]);
     expect(proposed).toMatchObject({ ok: false, refusal: 'keep_with_other_changes' });
     expect(stored()).toBe(0);
   });
@@ -224,7 +224,7 @@ describe('only Olumi’s own figure may be kept', () => {
   it('CONTROL: without `keep`, Olumi’s figure is left alone exactly as before (the door is opt-in)', async () => {
     const p = product();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
-    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Hours per week finding warm connections', value: 4, unit: 'hours/week', basis: 'x' }] });
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: false, factor_label: 'Hours per week finding warm connections', value: 4, unit: 'hours/week', basis: 'x' }] });
     expect(r).toMatchObject({ ok: false, refusal: 'nothing_to_adopt', already_valued: [{ label: 'Hours per week finding warm connections', current_value: 4 }] });
   });
 });
@@ -242,7 +242,7 @@ describe('the button says what the Yes records — never "Set … to" for a figu
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const c = { ...ctx, user_text: 'Make it 6 hours a week.', user_turn_text: 'Make it 6 hours a week.' };
-    const r = await caps.proposeAssumptions(c, { assumptions: [{ factor_label: 'Hours per week finding warm connections', value: 6, unit: 'hours/week', basis: 'their figure', revise: true }] });
+    const r = await caps.proposeAssumptions(c, { assumptions: [{ user_stated: true, factor_label: 'Hours per week finding warm connections', value: 6, unit: 'hours/week', basis: 'their figure', revise: true }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const [approve] = approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: String(r.proposal_id) }], (id) => ({ proposal: store.get(id)!, result: r }) as never);
     expect(approve!.label).toBe(`Set Hours per week\u2026 to ${figureInUserUnits(6, 'hours/week')}`);
@@ -277,7 +277,7 @@ describe('the receipt of a keep names the acceptance, never "starting values"', 
 
   it('RED: a pressed keep says "Recorded that you accept Olumi’s estimate."', async () => {
     const { caps } = compound();
-    const r = await caps.proposeAssumptions(sctx, { assumptions: [{ factor_label: LABEL, value: 5, unit: 'connections/month', basis: 'the user agreed', keep: true }] } as never);
+    const r = await caps.proposeAssumptions(sctx, { assumptions: [{ user_stated: false, factor_label: LABEL, value: 5, unit: 'connections/month', basis: 'the user agreed', keep: true }] } as never);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const out = await caps.authoriseChange(sctx, { proposal_id: String(r.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
@@ -288,7 +288,7 @@ describe('the receipt of a keep names the acceptance, never "starting values"', 
   it('CONTROL: the user’s own revision through the same door keeps its existing receipt', async () => {
     const { caps } = compound();
     const c = { ...sctx, user_text: 'Make it 3 a month.', user_turn_text: 'Make it 3 a month.' };
-    const r = await caps.proposeAssumptions(c, { assumptions: [{ factor_label: LABEL, value: 3, unit: 'connections/month', basis: 'their figure', revise: true }] } as never);
+    const r = await caps.proposeAssumptions(c, { assumptions: [{ user_stated: true, factor_label: LABEL, value: 3, unit: 'connections/month', basis: 'their figure', revise: true }] } as never);
     const out = await caps.authoriseChange(c, { proposal_id: String(r.proposal_id) });
     expect(status(out)).toBe('Saved 1 of 1 starting values.');
   });

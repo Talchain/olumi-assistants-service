@@ -1,3 +1,4 @@
+import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * The real Run/replay route carries the canonical unknown-risk withholding ask.
@@ -136,17 +137,17 @@ function expectWithheldContract(body: Body, rootLine?: string): void {
   expect(shape!.headline).toBe('Not shown yet; why is under More detail');
   const rootOwnsAsk = rootLine?.includes('?') === true;
   const targetAsk = rootOwnsAsk ? null : decisionInputAsk(graphWith(riskValued, riskLabel), {
-    restingText: [RUN_INTERPRETATION, rootLine, WITHHELD_FINDING].filter(Boolean).join('\n\n'),
+    restingText: [RUN_RESULT_READY_TEXT, rootLine, WITHHELD_FINDING].filter(Boolean).join('\n\n'),
     questionsToggle: false, awaitingApproval: false, builtOrRan: true,
   });
   if (!rootOwnsAsk) expect(targetAsk).toBe('What figure should "Meet our next feature-launch deadline" reach or stay under? I\'ll propose it as your target.');
   const targetSentences = targetAsk === null ? [] : sentencesOf(targetAsk);
   expect(shape!.bullets).toEqual([rootOwnsAsk ? rootLine! : targetSentences[0]!]);
-  expect(shape!.detail).toBe([RUN_INTERPRETATION, rootOwnsAsk ? undefined : rootLine, ...targetSentences.slice(1), WITHHELD_FINDING].filter(Boolean).join('\n\n'));
+  expect(shape!.detail).toBe([RUN_RESULT_READY_TEXT, rootOwnsAsk ? undefined : rootLine, ...targetSentences.slice(1), WITHHELD_FINDING].filter(Boolean).join('\n\n'));
   expect(shape!.detail.split(WITHHELD_FINDING)).toHaveLength(2);
   expect(body.assistant_text.split(WITHHELD_FINDING)).toHaveLength(2);
   expect(body.assistant_text).toBe(deriveAnswerTextFromShape(shape!));
-  expect(body.assistant_text.split(RUN_INTERPRETATION)).toHaveLength(2);
+  expect(body.assistant_text.split(RUN_RESULT_READY_TEXT)).toHaveLength(2);
   if (rootLine !== undefined) expect(body.assistant_text.split(rootLine)).toHaveLength(2);
   for (const sentence of targetSentences) expect(body.assistant_text.split(sentence)).toHaveLength(2);
   const face = [shape!.headline, ...shape!.bullets].join('\n');

@@ -2453,7 +2453,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ...[rootNow, owedNow.find((l) => l !== say && l !== askNow && l !== rootNow && !indexNow.includes(l) && !l.includes('?'))]
               .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text): FaceObligation => ({ role: 'evidence', text })),
             // The live turn types its decision lines and break-even arithmetic as host parts (a line that asks is the ask).
-            ...lines.filter((l) => !l.includes('?')).map((text): FaceObligation => ({ role: 'host', text })),
+            ...lines.filter((l) => !l.includes('?')).flatMap(sentencesOf).map((text): FaceObligation => ({ role: 'host', text })),
             ...(breakEvenNow !== null ? [{ role: 'host' as const, text: breakEvenLine(breakEvenNow, { afterIdentityAsk: false }) }] : []),
             // The live turn's typing of the same lines (one finding = chance + depends; lead: true).
             ...screenNow.flatMap((l): FaceObligation[] => [
@@ -3067,7 +3067,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.
     const authorshipWords = histories.authorshipWords(sessionId);
-    const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(authorshipWords.verified, typedNow), verified_user_messages: [...authorshipWords.verified, ...(typedNow === null ? [] : [typedNow])], unverified_user_text: authorshipWords.unknown.join("\n") };
+    const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(authorshipWords.verified, typedNow), verified_user_messages: [...authorshipWords.verified, ...(typedNow === null ? [] : [typedNow])], unverified_user_text: authorshipWords.unknown.join("\n"), user_text_complete: refusal !== 'unknown_session' && earlierWordsKnown && authorshipWords.complete };
     // The existing K2-bound press authorises one calculation on this turn, not model writes.
     const runPress = approvedProposal === undefined && typedRunOf(body);
     let runPressConsumed = false;
@@ -3089,7 +3089,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
       },
     };
-    if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
+    if (typedNow !== null) histories.recordTyped(sessionId, typedNow, toolCtx.user_text_complete);
     // Publishing typed words to in-memory session history is not a durable save, but "Nothing was saved" can't cover it.
     if (typedNow !== null) recordUnsavableEffect();
 
@@ -3980,7 +3980,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
             ...(methodTurn?.kind === 'run' || widenRun !== undefined || risksRun !== undefined ? { maxHops: 1 } : {}),
             // Before the widen and chip forcings below, which win if both were ever set.
-            ...(runPress ? { firstCallTool: 'run_analysis' } : {}),
+            ...(runPress ? { firstCallTool: 'run_analysis', stopAfterSuccessfulRun: () => {
+              fastPath = 'run';
+              return RUN_RESULT_READY_TEXT;
+            } } : {}),
             ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
             ...(levelAnswerTool !== undefined ? { firstCallTool: levelAnswerTool } : {}),
             ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
@@ -4079,6 +4082,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
         ? hopLimitText(result)
         : result.assistant_text);
+    // The AIE conflict copy is a source-owned limitation, not a narration to paraphrase.
+    const hiringConflicts = result.tool_results.filter(r => r.refusal === 'hiring_bound_conflict' && typeof r.detail === 'string');
+    if (hiringConflicts.length > 0) text = hiringConflicts.map(r => r.detail).join(' ');
     if (fastPath === undefined && result.stopped_reason === 'answered') narratorWords = result.assistant_text;
 
     // ⭐ T3: the method turn's draft is checked BEFORE it is sent; a failed check sends RC's deterministic fallback
@@ -4936,7 +4942,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const explanationChip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult });
     if (fastPath === 'run' || firstAnalysisResultFirst) narrationStatus = explanationChip !== null
       && resultFirstRunCompleted ? 'pending' : 'unavailable';
-    if (runPress && resultFirstRunCompleted) narrationStatus = explanationChip !== null
+    if (runPress && fastPath !== 'run' && resultFirstRunCompleted) narrationStatus = explanationChip !== null
       && result.stopped_reason === 'answered' && result.assistant_text.trim() !== '' ? 'ready' : 'unavailable';
     const narrationKey = fastPath === 'explain' && typeof explanationId === 'string'
       ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : explanationChip?.id.slice(RUN_EXPLANATION_PREFIX.length);
@@ -5338,7 +5344,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // A host line that carries the open-questions segment is typed up to it: the segment has its own place (detail,
         // DGAI's questions toggle), and a part spanning it could not be located as one unit.
         // The first automatic result uses the same server-authored ready line as an explicit uninterpreted Run.
-        ...[...(uninterpretedRun || firstAnalysisResultFirst ? [RUN_RESULT_READY_TEXT, ...decisionLines] : []), ...owed.filter((l) => l !== goalChanceOwed), guidedReplyText.progress, narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
+        // Keep each named risk, while the existing composer states their identical exclusion sentence once.
+        ...[...(uninterpretedRun || firstAnalysisResultFirst ? [RUN_RESULT_READY_TEXT,
+          ...decisionLines.flatMap(line => line.includes('?') ? [line] : sentencesOf(line))] : []), ...owed.filter((l) => l !== goalChanceOwed), guidedReplyText.progress, narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
           .map((l) => (typeof l === 'string' ? (openQuestionsSegment(l)?.lead ?? l).trim() : l))
           .filter((l): l is string => typeof l === 'string' && l !== '')
           .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),

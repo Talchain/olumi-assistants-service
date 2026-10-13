@@ -1,3 +1,4 @@
+import { RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
 import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
 /** Route harness follows agent-lane/__tests__/result-first-run.test.ts: real Run capability + final read. */
 import { createHash, randomUUID } from 'node:crypto';
@@ -202,7 +203,7 @@ describe('canonical view on the same-page turn wire', () => {
     expect(body.analysis_state).toEqual(finalRead.analysis_state);
     expect(body.canonical_analysis_view.run.run_id).not.toBe(runRead.current_read.run_id);
     expect(graphReads, 'one pre-Run context read and one final view read').toBe(2);
-    expect(modelBodies).toHaveLength(2);
+    expect(modelBodies).toHaveLength(1);
     // The UI separates additive keys before its strict schema parse.
     const shape = (OlumiResponseSchema as unknown as { shape: Json }).shape;
     const declared = Object.fromEntries(Object.entries(body).filter(([key]) => Object.hasOwn(shape, key)));
@@ -264,12 +265,12 @@ describe('canonical view on the same-page turn wire', () => {
     const adoptedRunFields = new Set(['assistant_text', '_answer_shape', 'narration', '_provider_calls', '_agent', '_diagnostic_trace']);
     const unchanged = (record: Json) => Object.fromEntries(Object.entries(record).filter(([key]) => !adoptedRunFields.has(key)));
     expect(unchanged(hashes)).toEqual(unchanged(legacyHashes));
-    expect(body.assistant_text).toContain('The result depends on the assumptions in your model.');
-    expect(body.narration.status).toBe('ready');
+    expect(body.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+    expect(body.narration.status).toBe('pending');
     expect(_agent.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis', ok: true })]);
-    expect(timing.provider_calls).toBe(2);
+    expect(timing.provider_calls).toBe(1);
     expect(timing.tool_calls).toBe(1);
-    expect(_diagnostic_trace.fast_path).toBeUndefined();
+    expect(_diagnostic_trace.fast_path).toBe('run');
   });
 
   it.each([
@@ -348,7 +349,7 @@ describe('canonical view on the same-page turn wire', () => {
     expect(runResponse.statusCode, runResponse.body).toBe(200);
     const first = runResponse.json();
     expect(first.canonical_analysis_view.options.some((row: Json) => row.cell.kind === 'withheld' && row.cell.reasons.length > 0)).toBe(true);
-    expect(modelBodies).toHaveLength(2); // Run tool selection and same-turn interpretation.
+    expect(modelBodies).toHaveLength(1); // Pre-tool Run interpretation only.
     modelBodies.length = 0; // Inspect the next turn's retained history independently.
     const next = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       turn_id: randomUUID(), scenario_id: SCENARIO, agent_session_id: first._agent.session_id,
@@ -390,7 +391,7 @@ describe('canonical view on the same-page turn wire', () => {
       expect(explanation.statusCode).toBe(200);
       expect(explanation.json().narration.status).toBe('ready');
     }
-    expect(modelBodies).toHaveLength(4); // Two Run loop calls, then warm and cold Explain.
+    expect(modelBodies).toHaveLength(3); // Pre-tool Run interpretation, then warm and cold Explain.
     for (const modelBody of modelBodies) noViewBytes(modelBody);
     // Ordinary Agent AI projection + actual serialised provider input, using the same carrying read/rows.
     const ordinary = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {

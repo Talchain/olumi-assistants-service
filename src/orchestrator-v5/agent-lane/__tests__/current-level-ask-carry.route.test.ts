@@ -176,7 +176,7 @@ describe('real Agent final-answer persistence, captured founder requests', () =>
   };
   const run = async () => {
     const body = await turn(FX.requests.run);
-    expect(body._diagnostic_trace?.fast_path).toBeUndefined();
+    expect(body._diagnostic_trace?.fast_path).toBe('run');
     return body;
   };
   const explain = async () => {

@@ -82,7 +82,7 @@ function product(opts: { refuse?: string; extra?: Node[]; thenOtherWriter?: { ta
   return { d, byId: () => Object.fromEntries(nodes.map((n) => [n.id, n])), graph, writes: () => writes, registers: () => registers };
 }
 
-const OLUMIS = [{ factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
+const OLUMIS = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
 
 async function adoptValuesOnly() {
   const p = product();
@@ -183,7 +183,7 @@ describe('an accepted Olumi figure keeps Olumi as its origin and records the acc
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
     } as never);
     expect(store.get(String(proposed.proposal_id))!.provenance.authored_by, 'precondition: the user named it').toBe('user_stated');
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
@@ -231,7 +231,7 @@ describe('the user’s own figure stays theirs', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
     } as never);
     expect(store.get(String(proposed.proposal_id))!.provenance.authored_by).toBe('user_stated');
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
@@ -264,7 +264,7 @@ describe('a collaborator changes the same target after our write', () => {
   ])('RED: a collaborator moves our %s by £1 — reported exactly, never absorbed by a magnitude band', async (ours, theirs) => {
     const p = product({ extra: [BUDGET], thenOtherWriter: { target: 'monthly_budget', raw: theirs } });
     const caps = createAgentCapabilities(p.d, new ProposalStore());
-    const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly budget', value: ours, basis: 'the user said it', revise: true }] } as never);
+    const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: 'Monthly budget', value: ours, basis: 'the user said it', revise: true }] } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
     expect(p.byId().monthly_budget.observed_state?.value, 'PRECONDITION: theirs is what the model holds').toBe(theirs);
@@ -275,7 +275,7 @@ describe('a collaborator changes the same target after our write', () => {
     const p = product({ extra: [BUDGET], thenOtherWriter: { target: 'monthly_budget', raw: 800 } });
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
-    const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true }] } as never);
+    const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true }] } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
     // PRECONDITIONS, proven: our write landed, and the collaborator's figure is what the model now holds.
@@ -295,7 +295,7 @@ describe('a collaborator changes the same target after our write', () => {
     const p = product({ extra: [BUDGET] });
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
-    const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true }] } as never);
+    const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true }] } as never);
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
     expect(String(applied.not_represented)).toContain('Monthly budget is the user’s own figure, stored as theirs.');
@@ -316,8 +316,8 @@ describe('a partial approval: one value lands, one is refused', () => {
 
   it('RED: the refused, unframed factor gets NO range written, and the note does not call it stored', async () => {
     const { p, applied } = await approve('monthly_budget', [
-      { factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true },
-      { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+      { user_stated: true, factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true },
+      { user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
     ]);
     // PRECONDITIONS, proven: exactly one value landed, and the refused factor is the unframed >1 kind.
     expect(p.writes(), 'only Coordination load landed').toBe(1);
@@ -332,8 +332,8 @@ describe('a partial approval: one value lands, one is refused', () => {
 
   it('RED: the reverse — the user’s revision lands, Olumi’s figure is refused — says each truthfully', async () => {
     const { p, applied } = await approve('coordination_load', [
-      { factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
-      { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+      { user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
+      { user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
     ]);
     expect(p.writes()).toBe(1);
     expect(p.byId().coordination_load.observed_state).toBeUndefined();
@@ -356,8 +356,8 @@ describe('a proposal holding BOTH the user’s revision and Olumi’s figure', (
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, {
       assumptions: [
-        { factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
-        { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+        { user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
+        { user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
       ],
     } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
@@ -392,8 +392,8 @@ describe('a proposal holding BOTH the user’s revision and Olumi’s figure', (
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, {
       assumptions: [
-        { factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
-        { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+        { user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
+        { user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
       ],
     } as never);
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
@@ -408,8 +408,8 @@ describe('a proposal holding BOTH the user’s revision and Olumi’s figure', (
     const caps = createAgentCapabilities(product().d, store);
     const proposed = await caps.proposeAssumptions(ctx, {
       assumptions: [
-        { factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
-        { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+        { user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
+        { user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
       ],
     } as never);
     const ops = store.get(String(proposed.proposal_id))!.operations;

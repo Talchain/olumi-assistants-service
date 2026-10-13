@@ -46,8 +46,8 @@ const BASE: Node[] = [
 ];
 const ASK = {
   assumptions: [
-    { factor_label: 'Monthly churn rate', value: 3.5, unit: '%', basis: 'typical B2B SaaS baseline' },
-    { factor_label: 'Pro subscribers', value: 400, unit: 'subscribers', basis: 'implied by a target' },
+    { user_stated: false, factor_label: 'Monthly churn rate', value: 3.5, unit: '%', basis: 'typical B2B SaaS baseline' },
+    { user_stated: false, factor_label: 'Pro subscribers', value: 400, unit: 'subscribers', basis: 'implied by a target' },
   ],
 };
 

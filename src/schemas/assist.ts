@@ -537,6 +537,22 @@ export const GoalConstraintSchema = z.object({
    * PLoT wire copy never carries it (`wireGoalConstraints`). Declared because this object strips undeclared keys.
    */
   role: z.enum(["goal_target"]).optional(),
+  /** M1b: a retained original or isolated proposed limit, bound to the pending equivalence question. Never a default. */
+  retained_unresolved_limit: z.union([z.object({
+    state: z.literal('unscored'),
+    role: z.enum(['original', 'proposed']),
+    reason: z.literal('retained_limit_equivalence_unresolved'),
+    previous_constraint_id: z.string().min(1),
+    proposed_constraint_ids: z.array(z.string().min(1)).min(1),
+    question: z.literal('Do these describe the same limit?'),
+  }), z.object({
+    state: z.literal('unscored'),
+    role: z.literal('original'),
+    reason: z.literal('retained_limit_quantity_unresolved'),
+    previous_constraint_id: z.string().min(1),
+    proposed_constraint_ids: z.array(z.string()).length(0),
+    question: z.literal('What forecast and basis should be used to evaluate this retained limit?'),
+  })]).optional(),
   /** Deadline metadata for temporal constraints */
   deadline_metadata: z.object({
     deadline_date: z.string().optional(),

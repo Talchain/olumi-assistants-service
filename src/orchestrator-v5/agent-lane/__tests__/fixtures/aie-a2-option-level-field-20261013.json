@@ -1,0 +1,49 @@
+{
+  "DL_requests": [
+    6141245615,
+    6141333216,
+    6141459796
+  ],
+  "reviewed_head": "e263ea1256f0b56b8a36bf61f9e0b1f36cd7e259",
+  "actual_source_read": [
+    "agent-tools.ts:654-751",
+    "agent-capabilities.ts:5755-5930",
+    "agent-capabilities.ts:5990-6017",
+    "agent-capabilities.ts:6230-6299",
+    "hiring-times.ts:185-224,374-404",
+    "REVIEW-2985-claude.md (complete)"
+  ],
+  "option_level_user_stated": {
+    "sites": [
+      "propose_option_interventions.parameters.interventions.items.properties.user_stated",
+      "propose_starting_point.parameters.option_levels.items.properties.user_stated"
+    ],
+    "schema": {
+      "type": "boolean",
+      "description": "Set true ONLY for a level the user supplied for this option and factor, with its actual source; the host must verify that source before recording it as theirs. A verified retained human statement counts. Set false ONLY when explicitly proposing a new Olumi estimate now, with its own basis. Never infer false from missing, truncated or unmatched source, or from the absence of a user-authorship claim. Do not use false to relabel an old quoted, copied or recorded figure. Keep the original statement, subject and qualifications separate from any new interpretation. This flag is a claim to check, not proof of authorship; accepting an Olumi estimate does not turn it into a user-supplied fact. On an option in `status_quo_held`, a level is permitted only with true and verified user words saying that carrying on changes this factor and giving that level. Never restate the factor's starting value: carrying on as now already keeps that, so such a level is not recorded."
+    },
+    "required": true,
+    "required_arrays_after": {
+      "propose_option_interventions.parameters.interventions.items.required": [
+        "option_label",
+        "factor_label",
+        "value",
+        "basis",
+        "user_stated"
+      ],
+      "propose_starting_point.parameters.option_levels.items.required": [
+        "option_label",
+        "factor_label",
+        "value",
+        "basis",
+        "user_stated"
+      ]
+    }
+  },
+  "assumption_basis_line": "Olumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “{basis}”",
+  "card_scope": "Show the complete verbatim basis per model_proposed assumption beside its factor, value and unit on the actual approval card, including the combined starting-point card, before bound approval. Do not label a verified human figure with this line. A kept canonical Olumi estimate remains a retained estimate, not a newly authored figure. Preserve original statements, subjects, qualifications and source status separately; no missing basis, summary-only consent or truncation to remove material qualifications.",
+  "source_limit": "The basis line makes the proposed basis visible; it does not verify an earlier-source claim or establish that a copied old figure is a genuinely new estimate. False plus 'From your earlier note...' must retain that original unverified statement separately and require an actual new Olumi estimate with its own basis; existing verified/tier-2/unknown guards remain. No phrase-list parser or marker-only provenance closure.",
+  "B3_disposition": "The existing disclosed exact-start scenario route (b) is within the prior AIE science disposition only as a new Olumi modelling assumption on the complete bound approval card. Equality with an opposite AI endpoint does not make the human one-sided bound an exact forecast or establish a distribution. Preserve the full original bound, subject, reference, qualifications and rate/quality/period conditions; keep the compatible opposite endpoint labelled Olumi's. This is scoped source support, not final-head/provider/served acceptance or durable A2j closure.",
+  "implementation_scope": "Replace both obsolete user_stated descriptions once and add the required Boolean at both existing option-level item sites; preserve the existing schema shapes, ranges, status_quo_held restrictions, shared caller forwarding, native units and permission/revision/write checks. Add the basis face through the existing card carrier actually read by the UI. No new tool, parser, store, writer, API, model call or generic wording gate.",
+  "proof_limit": "Exact text/schema/card-copy handback only. Original fresh-review FAIL and five blockers remain banked. Existing owner/checker/operator proves actual amended immutable assembly and reached request bodies, verified-human/new-AI/missing/unverifiable/tier-2/status-quo-held contrasts and full visible approval/readback. No test/scorer/gold change or provider-quality/CI/serving/manual readiness claim."
+}

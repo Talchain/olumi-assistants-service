@@ -51,7 +51,7 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
   for (const [rep, label, id, unit] of [['r0', 'GCP unit-cost discount', 'gcp_unit_cost_discount', 'share'], ['r1', 'GCP unit-cost advantage', 'gcp_unit_cost_advantage', 'proportion']] as const) {
     it(`RED (served ${rep}): ${label} 0.25 → stored as the user's, marked your_figure, never called an assumption`, async () => {
       const { caps, store } = setup(F[rep]);
-      const r = await caps.proposeAssumptions(ctxSaying(EDIT), { assumptions: [{ factor_label: label, value: 0.25, unit, basis: 'the team\'s quote', revise: true }] }) as R;
+      const r = await caps.proposeAssumptions(ctxSaying(EDIT), { assumptions: [{ user_stated: true, factor_label: label, value: 0.25, unit, basis: 'the team\'s quote', revise: true }] }) as R;
       expect(r.ok, JSON.stringify(r)).toBe(true);
       expect(authorOf(store, r.proposal_id, id)).toBe('user_stated');
       expect(r.assumptions).toEqual([expect.objectContaining({ factor: label, your_figure: true })]);
@@ -63,7 +63,7 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
 
   it('CONTROL (AIQ): a figure Olumi worked out from theirs (not written) stays Olumi\'s, and is said as an assumption', async () => {
     const { caps, store } = setup(F.r0);
-    const r = await caps.proposeAssumptions(ctxSaying(EDIT), { assumptions: [{ factor_label: 'GCP unit-cost discount', value: 0.3, unit: 'share', basis: 'derived', revise: true }] }) as R;
+    const r = await caps.proposeAssumptions(ctxSaying(EDIT), { assumptions: [{ user_stated: false, factor_label: 'GCP unit-cost discount', value: 0.3, unit: 'share', basis: 'derived', revise: true }] }) as R;
     expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('model_proposed');
     expect(r.assumptions[0]).not.toHaveProperty('your_figure');
     expect(r.note).toMatch(ASSUMPTION_WORDS);
@@ -72,7 +72,7 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
 
   it('CONTROL: a figure the matcher already binds keeps today\'s approval words (no sentence added)', async () => {
     const { caps, store } = setup(F.r0);
-    const r = await caps.proposeAssumptions(ctxSaying('Set the GCP unit-cost discount to 25%.'), { assumptions: [{ factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the user', revise: true }] }) as R;
+    const r = await caps.proposeAssumptions(ctxSaying('Set the GCP unit-cost discount to 25%.'), { assumptions: [{ user_stated: true, factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the user', revise: true }] }) as R;
     expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('user_stated');
     expect(r.public_label).not.toContain('in your words');
   });
@@ -80,7 +80,7 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
   it('CONTROL: two figures written → the strict matcher decides, as before (no pairing credited by the card)', async () => {
     const { caps, store } = setup(F.r0);
     const r = await caps.proposeAssumptions(ctxSaying("Our team's quote shows GCP would be about 25% cheaper than AWS, and we'd move 60% of workloads."),
-      { assumptions: [{ factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the quote', revise: true }] }) as R;
+      { assumptions: [{ user_stated: true, factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the quote', revise: true }] }) as R;
     expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('model_proposed');
     expect(r.public_label).not.toContain('in your words');
   });
@@ -89,7 +89,7 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
     const g = JSON.parse(JSON.stringify(F.r0)) as Json;
     delete (g.nodes as Json[]).find((n) => n.id === 'gcp_unit_cost_discount')!.observed_state;
     const { caps, store } = setup(g);
-    const r = await caps.proposeAssumptions(ctxSaying(EDIT), { assumptions: [{ factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the quote' }] }) as R;
+    const r = await caps.proposeAssumptions(ctxSaying(EDIT), { assumptions: [{ user_stated: true, factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the quote' }] }) as R;
     expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('model_proposed');
   });
 });

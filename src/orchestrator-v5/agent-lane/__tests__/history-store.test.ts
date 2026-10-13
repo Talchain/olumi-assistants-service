@@ -149,3 +149,31 @@ describe('A2h authorship grounding keeps boundaries and source tiers', () => {
     expect(store.authorshipWords('s').verified).toContain('q1');
   });
 });
+
+
+describe('A2i source coverage for K3 search misses', () => {
+  it('a complete live source may classify a miss; the typed-history cap makes it incomplete', () => {
+    const store = new HistoryStore();
+    store.recordTyped('s', 'The opening message.');
+    store.set('s', conversation(1));
+    expect(store.authorshipWords('s').complete).toBe(true);
+    for (let i = 1; i < 40; i++) store.recordTyped('s', `message ${i}`);
+    expect(store.authorshipWords('s').complete).toBe(false);
+  });
+  it('fresh or failed source coverage stays incomplete on later turns', () => {
+    const store = new HistoryStore();
+    expect(store.authorshipWords('s').complete).toBe(false);
+    store.recordTyped('s', 'A later message.', false);
+    store.set('s', conversation(1));
+    store.recordTyped('s', 'Another message.');
+    expect(store.authorshipWords('s').complete).toBe(false);
+    expect(store.authorshipWords('s').verified).toEqual(['A later message.', 'Another message.']);
+  });
+  it('an empty restored source is incomplete even after fresh typing', () => {
+    const store = new HistoryStore();
+    store.seed('s', [], []);
+    store.recordTyped('s', 'A later message.');
+    store.set('s', conversation(1));
+    expect(store.authorshipWords('s').complete).toBe(false);
+  });
+});

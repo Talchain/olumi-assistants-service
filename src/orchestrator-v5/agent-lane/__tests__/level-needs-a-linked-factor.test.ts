@@ -160,7 +160,7 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team' }],
+      assumptions: [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team' }],
       option_levels: [
         { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two' },
         { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one' },

@@ -191,7 +191,7 @@ describe('propose_option_interventions: `user_stated` stands only on a figure th
 });
 
 describe('propose_assumptions: a revision is the user\'s only when they wrote the figure', () => {
-  const revise = { assumptions: [{ factor_label: 'Monthly churn', value: 4, unit: '%', basis: 'x', revise: true }] };
+  const revise = { assumptions: [{ factor_label: 'Monthly churn', value: 4, unit: '%', basis: 'x', user_stated: true, revise: true }] };
   const opAuthor = (store: ProposalStore, id: unknown) =>
     ((store.get(String(id))?.operations[0]?.value ?? {}) as { authored_by?: unknown }).authored_by;
 
@@ -227,7 +227,7 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     expect(route).toContain("capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' })");
     expect(route).toContain('const typedNow = typedByUser(body) ? message : null;');
     expect(route).toContain('user_text: userWordsOf(authorshipWords.verified, typedNow)');
-    expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow);');
+    expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow, toolCtx.user_text_complete);');
     expect(route).not.toContain('userWordsOf(history');
     expect(route).not.toContain('{ scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }');
     // Declared once; used at the eight dispatch sites (incl. the route-issued confirm card, #2310, the M1 Strengthen card,
@@ -251,6 +251,6 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // Item 3 (Canvas, 7 Oct; DL D1): the drawn-link press's ONE forced call is a dispatch site on the SAME typed carrier.
     expect(route).toContain('result = await drawnLinkPress(');
     expect(route).toContain('{ ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS,');
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier)').toBe(20);
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), and the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i)').toBe(21);
   });
 });

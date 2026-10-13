@@ -16,6 +16,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createAgentCapabilities, draftGateDetail, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { humanMaterialAfterTheDraft } from '../runtime/draft-replacement.js';
+import { isAllowedRunAnalysisAssistantText } from '../../coaching/analysis-result-headline.js';
+import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
+import { buildAnalysisResultBlock } from '../../compose.js';
+import { retainedLimitOnlyNodeIds, RETAINED_LIMIT_QUANTITY_WITHHELD } from '../../../graph/retained-limit.js';
+import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
@@ -40,6 +45,7 @@ const FX = JSON.parse(readFileSync(new URL('./fixtures/marketing-020148Z-draft-b
   scenario_id: string; brief_text: string; graph_hash: string; graph_identity_hash: string; graph: Rec;
   l1: { turn_id: string; message: string }; l20: { turn_id: string; message: string }; construction_commit_turn_id: string;
 };
+const CAPTURE_1318 = JSON.parse(readFileSync(new URL('./fixtures/marketing-131858Z-run-state.json', import.meta.url), 'utf8')) as Rec;
 const SID = FX.scenario_id;
 const L20 = FX.l20.message;
 
@@ -161,20 +167,32 @@ const pressed = (proposalId: string) => ({ scenario_id: SID, authenticated_user_
   turn_id: 'approve-turn-0001', user_turn_text: '', user_text: `${FX.l1.message}\n${L20}`, typed_approval_of: proposalId });
 
 /** The production Run loader and handler over the stored bytes: the exact PLoT request and its Run-input record. */
-async function runFromStore(bytes: string): Promise<{ payload: Rec; snapshot: Rec }> {
+async function runFromStore(bytes: string, complete = false, recorded?: Rec): Promise<{ payload: Rec; snapshot: Rec; outcome: Rec }> {
   const port = {
-    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: FX.brief_text, revision: 2 })),
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: recorded?.brief_text ?? FX.brief_text, revision: 2 })),
     readMostRecentPendingActions: vi.fn(async () => []),
   };
   const snap = await loadScenarioSnapshotForRunAnalysis(SID, 'req-run', port as never);
   let payload: Rec | undefined;
   let inputSnapshot: Rec | undefined;
   const handler = createRunAnalysisHandler({
-    plotClient: { run: vi.fn(), validatePatch: vi.fn() } as never,
+    plotClient: { run: vi.fn(async (sent: Rec) => {
+      payload = structuredClone(sent);
+      if (recorded !== undefined) return { ...structuredClone(recorded.enrichment), analysis_status: 'computed', response_hash: 'captured-131858Z', meta: { seed_used: 42, n_samples: 1000 } };
+      const results = sent.options.map((o: Rec, i: number) => ({ option_id: o.id, option_label: o.label,
+        win_probability: i === 0 ? 0.7 : 0.3, probability_of_goal: 0.8, probability_of_joint_goal: 0.7,
+        probability_of_joint_goal_precision: { n: 1000, standard_error: 0.01 },
+        outcome: { mean: 20, p10: 15, p50: 20, p90: 25 },
+        constraint_probabilities: Object.fromEntries(sent.goal_constraints.map((c: Rec) => [c.constraint_id, 0.9])) }));
+      return { analysis_status: 'computed', response_hash: 'm1b-scripted-engine',
+        meta: { seed_used: 42, n_samples: 1000 }, results, option_comparison: results,
+        constraint_results: sent.goal_constraints.map((c: Rec) => ({ constraint_id: c.constraint_id, decision_grade: true })),
+        constraints_status: 'computed', constraint_analysis: { joint_probability: 0.7 }, robustness: { level: 'moderate' } };
+    }), validatePatch: vi.fn() } as never,
     scenarioReader: async () => snap,
-    probe: async (sent) => { payload = sent.plotPayload as Rec; inputSnapshot = sent.runInputSnapshot as Rec; },
+    ...(complete ? {} : { probe: async (sent: { plotPayload: unknown; runInputSnapshot: unknown }) => { payload = sent.plotPayload as Rec; inputSnapshot = sent.runInputSnapshot as Rec; } }),
   });
-  await handler({
+  const outcome = await handler({
     context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [],
       session_id: SID, request_id: 'req-run', budgets: { turn_ms: 180000, llm_narrate_ms: 60000 },
       prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
@@ -182,8 +200,227 @@ async function runFromStore(bytes: string): Promise<{ payload: Rec; snapshot: Re
     requestId: 'req-run', signal: new AbortController().signal, orientationText: '',
   } as never);
   expect(payload, 'the Run handler built a PLoT request').toBeDefined();
-  return { payload: payload!, snapshot: inputSnapshot ?? {} };
+  return { payload: payload!, snapshot: inputSnapshot ?? {}, outcome };
 }
+
+// M1: exact base goal_constraints from marketing/turns/02.json (2026-10-12T172858Z).
+// Other base graph/ledger scaffolding remains the existing served L20 fixture.
+const capturedLimits = [
+  {
+    "unit": "£/year",
+    "label": "Annual campaign spend",
+    "value": 100000,
+    "node_id": "annual_campaign_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:annual_campaign_spend:<="
+  },
+  {
+    "unit": "%",
+    "label": "Founder time on campaign",
+    "value": 25,
+    "node_id": "founder_time_on_campaign",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:founder_time_on_campaign:<="
+  }
+];
+const marketingBase = (): Rec => {
+  const g = JSON.parse(JSON.stringify(FX.graph)
+    .replaceAll('annual_marketing_spend', 'annual_campaign_spend')
+    .replaceAll('Annual marketing spend', 'Annual campaign spend')
+    .replaceAll('founder_marketing_time', 'founder_time_on_campaign')
+    .replaceAll('Founder marketing time', 'Founder time on campaign')) as Rec;
+  g.goal_constraints = structuredClone(capturedLimits);
+  return g;
+};
+
+// Drafter goal/target/limits verbatim from a5ada94b as recorded in DIAGNOSIS §1–2.
+// The remaining construction scaffold is scripted, not a fresh provider response.
+const marketingCandidate = (): Rec => {
+  const c = JSON.parse(JSON.stringify(candidate())
+    .replaceAll('New customers', 'New customers in first 3 months')
+    .replaceAll('Conversion rate', 'conversion rate')
+    .replaceAll('Annual marketing spend', 'Annual campaign spend')) as Rec;
+  c.goal = { ...c.goal, metric: 'conversion rate', operator: '>', value: 15, unit: '%',
+    baseline_known: false, baseline_value: null,
+    basis: { ...c.goal.basis, reference: 'launch', period_months: 3, effects_at_period_end: false,
+      also_required: ['secure 20 new customers within the first 3 months'] } };
+  c.constraints[0] = { metric: 'New customers in first 3 months', operator: '>=', value: 20,
+    unit: 'customers', provenance: 'explicit', frame: 'level', role: 'target' };
+  c.factors = c.factors.filter((f: Rec) => f.label !== 'conversion rate');
+  c.outcomes = [{ label: 'New customers in first 3 months', unit: 'customers', provenance: 'explicit' }];
+  return c;
+};
+
+const marketingCard = 'Replace the early draft with a revised one built from your brief and the goal you just gave: '
+  + '‘conversion rate’ above 15% and ‘New customers in first 3 months’ at least 20 customers over the first 3 months after launch '
+  + '(the draft modelled ‘product feature launch’). '
+  + 'Limits in the revised draft: ‘Annual campaign spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
+  + 'Previous: ‘Founder time on campaign’ at most 25%; proposed: ‘Founder marketing time’ at most 25%. '
+  + 'Do these describe the same limit? Both are retained unless you explicitly ask to remove one. '
+  + 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded. '
+  + 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
+  + 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
+  + 'Check the targets, limits and options on this card before choosing.';
+
+const cardStart = 'Replace the early draft with a revised one built from your brief and the goal you just gave: '
+  + '‘New customers’ at least 20 customers and ‘Conversion rate’ above 15% over the first 3 months after launch '
+  + '(the draft modelled ‘product feature launch’). ';
+const carriedCardEnd = 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
+  + 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
+  + 'Check the targets, limits and options on this card before choosing.';
+const omissionCard = cardStart
+  + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year. '
+  + 'Carried forward unchanged because the draft omitted it: ‘Founder marketing time’ at most 25%. ' + carriedCardEnd;
+const uncertainCard = cardStart
+  + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year; ‘Advertising time’ at most 25%. '
+  + 'Previous: ‘Founder marketing time’ at most 25%; proposed: ‘Advertising time’ at most 25%. '
+  + 'Do these describe the same limit? Both are retained unless you explicitly ask to remove one. '
+  + 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded. ' + carriedCardEnd;
+
+const pendingLimit = (previous: Rec, proposedId: string): Rec => ({ ...previous, retained_unresolved_limit: {
+  state: 'unscored', role: 'original', reason: 'retained_limit_equivalence_unresolved', previous_constraint_id: previous.constraint_id,
+  proposed_constraint_ids: [proposedId], question: 'Do these describe the same limit?',
+} });
+
+const withheldReason = 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded.';
+function assertUnresolvedRun(outcome: Rec, rows: Rec[]) {
+  const reason = rows.some((r) => r.retained_unresolved_limit?.reason === 'retained_limit_quantity_unresolved')
+    ? RETAINED_LIMIT_QUANTITY_WITHHELD : withheldReason;
+  expect(outcome.assistant_text).toBe(reason);
+  const fact = outcome.handler_facts[0];
+  expect(fact.result.summary).toBe(reason);
+  expect(fact.result.constraint_verdict.may_name_leading_option).toBe(false);
+  expect(fact.result.constraint_verdict.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored',
+    constraint_ids: expect.arrayContaining(rows.filter((r) => r.retained_unresolved_limit).map((r) => r.constraint_id)) });
+  expect(buildAnalysisResultBlock(fact).summary).toBe(reason);
+  const enrichment = fact.result.enrichment;
+  expect(enrichment.constraint_analysis?.joint_probability).toBeUndefined();
+  expect(enrichment.joint_withheld).toEqual({ reason: 'limit_unscored',
+    constraint_ids: rows.filter((r) => r.retained_unresolved_limit).map((r) => r.constraint_id) });
+  for (const result of enrichment.option_comparison) {
+    expect(result.probability_of_joint_goal).toBeUndefined();
+    expect(result.probability_of_goal).toBeUndefined();
+    expect(result.win_probability).toBeUndefined();
+    for (const row of rows.filter((r) => r.retained_unresolved_limit)) {
+      expect(result.constraint_probabilities[row.constraint_id]).toBeUndefined();
+    }
+  }
+}
+
+async function expectStoredRunAndReopen(s: ReturnType<typeof server>, rows: Rec[]) {
+  expect(s.graph().goal_constraints).toEqual(rows);
+  expect(JSON.parse(s.commits[0]!.bytes).goal_constraints).toEqual(rows);
+  const wire = rows.map(({ role: _role, operator_as_stated, ...row }) => {
+    const sent: Rec = { ...row, operator: operator_as_stated ?? row.operator };
+    if (row.retained_unresolved_limit !== undefined) delete sent.value_frame;
+    return sent;
+  });
+  const complete = rows.some((r) => r.retained_unresolved_limit !== undefined);
+  const { payload, outcome } = await runFromStore(s.bytes(), complete);
+  expect(payload.goal_constraints).toEqual(wire);
+  if (complete) {
+    assertUnresolvedRun(outcome, rows);
+    const licence = goalChanceLicenceForAgent(outcome.handler_facts[0].result);
+    expect(agentLicenceRecordOf(outcome.handler_facts[0].result)?.pct_by_option).toEqual({});
+    expect(licence?.targets?.conditions.map((c) => c.constraint_id)).toEqual(rows.map((r) => r.constraint_id));
+    expect(licence?.targets?.joint.status).toBe('withheld');
+    expect(JSON.stringify(licence)).not.toMatch(/Run the analysis again|Run again/);
+    expect(licence?.targets?.conditions.filter((c) => c.role === 'target').every((c) => c.clause.endsWith('over the first three months after launch'))).toBe(true);
+    expect(licence?.notes?.some((n) => n.includes('retained') || n.includes('limits'))).toBe(true);
+  }
+  if (complete && rows.some((r) => r.node_id === 'founder_time_on_campaign') && process.env.M1B_EVIDENCE_DIR) {
+    writeFileSync(`${process.env.M1B_EVIDENCE_DIR}/marketing-run.json`, JSON.stringify({ constraints: payload.goal_constraints, outcome }, null, 2));
+  }
+  // Fresh store adapter and production scenario loader: no reuse of the capability's in-memory graph.
+  const reopened = server({ graph: GraphV3.parse(JSON.parse(s.commits[0]!.bytes)) });
+  expect(reopened.graph().goal_constraints).toEqual(rows);
+  const next = await runFromStore(reopened.bytes(), complete);
+  expect(next.payload.goal_constraints).toEqual(wire);
+  if (complete) assertUnresolvedRun(next.outcome, rows);
+}
+
+describe('MA2 original 13:18Z evidence, kept separate from the scripted revised-draft continuation', () => {
+  it('replays the captured saved old model through Run: both exact unscored-limit reasons persist, and no absent AND target is invented', async () => {
+    const { payload, outcome } = await runFromStore(JSON.stringify(CAPTURE_1318.graph), true, CAPTURE_1318);
+    expect(payload.goal_constraints).toEqual(CAPTURE_1318.graph.goal_constraints);
+    expect(outcome.handler_facts[0].result.constraint_verdict.per_limit).toEqual(CAPTURE_1318.limit_verdicts.per_limit);
+    expect(goalChanceLicenceForAgent(outcome.handler_facts[0].result)).toBeUndefined();
+    expect(CAPTURE_1318.graph.nodes.filter((n: Rec) => n.kind === 'goal').map((n: Rec) => n.label)).toEqual(['Product feature launch']);
+    expect(CAPTURE_1318.graph.goal_constraints.filter((c: Rec) => c.role === 'goal_target')).toEqual([]);
+  });
+});
+
+describe('M1 captured marketing limit spellings through revised-draft offer and approval', () => {
+  it('offers both captured targets and limits through approval, saved postimage, Run and cold reopen', async () => {
+    const s = server({ graph: marketingBase() });
+    const { caps } = lane(s, new ProposalStore(), marketingCandidate);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offer.ok, JSON.stringify(offer)).toBe(true);
+    expect(offer.public_label).toBe(marketingCard);
+    expect(s.commits).toHaveLength(0);
+    s.said(FX.l20.turn_id);
+    const applied = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(applied).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(s.commits).toHaveLength(1);
+    const expectedRows: Rec[] = [
+      { constraint_id: 'agent-lane:conversion_rate:>=', node_id: 'conversion_rate', operator: '>=', operator_as_stated: '>',
+        value: 15, label: 'conversion rate', unit: '%', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'agent-lane:new_customers_in_first_3_months:>=', node_id: 'new_customers_in_first_3_months', operator: '>=',
+        value: 20, label: 'New customers in first 3 months', unit: 'customers', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'agent-lane:annual_campaign_spend:<=', node_id: 'annual_campaign_spend', operator: '<=',
+        value: 100000, label: 'Annual campaign spend', unit: 'GBP/year', provenance: 'explicit', value_frame: 'level' },
+      { constraint_id: 'agent-lane:founder_marketing_time:<=', node_id: 'founder_marketing_time', operator: '<=',
+        value: 25, label: 'Founder marketing time', unit: '%', provenance: 'explicit', value_frame: 'level' },
+    ];
+    expectedRows.push(pendingLimit(capturedLimits[1]!, 'agent-lane:founder_marketing_time:<='));
+    await expectStoredRunAndReopen(s, expectedRows);
+  });
+});
+
+describe('M1b retained-limit disclosure reaches the Run text forwarder', () => {
+  it('admits the exact truthful withheld reason; never arbitrary added prose', () => {
+    expect(isAllowedRunAnalysisAssistantText(withheldReason)).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(withheldReason + ' You should choose the winner.')).toBe(false);
+  });
+});
+
+describe('M1b connectivity exception is only for a question-bound retained limit', () => {
+  it('question identity, sole role and currentness stay bound to the saved rows', async () => {
+    const { caps, proposals } = lane(server({ graph: marketingBase() }), new ProposalStore(), marketingCandidate);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    const g = (proposals.get(offer.proposal_id as string)!.operations[0]!.value as Rec).candidate;
+    expect([...retainedLimitOnlyNodeIds(g)]).toEqual(['founder_time_on_campaign']);
+    const unmarked = structuredClone(g);
+    delete unmarked.goal_constraints.find((r: Rec) => r.node_id === 'founder_time_on_campaign').retained_unresolved_limit;
+    expect([...retainedLimitOnlyNodeIds(unmarked)]).toEqual([]);
+    expect(computeAnalysisAffectingGraphHash(unmarked as never)).not.toBe(computeAnalysisAffectingGraphHash(g as never));
+    const missingQuestionPartner = structuredClone(g);
+    missingQuestionPartner.goal_constraints = missingQuestionPartner.goal_constraints.filter((r: Rec) => r.node_id !== 'founder_marketing_time');
+    expect([...retainedLimitOnlyNodeIds(missingQuestionPartner)]).toEqual([]);
+    const linked = structuredClone(g);
+    linked.edges.push({ from: 'founder_time_on_campaign', to: 'conversion_rate' });
+    expect([...retainedLimitOnlyNodeIds(linked)]).toEqual([]);
+    const set = structuredClone(g);
+    set.nodes.find((n: Rec) => n.kind === 'option').interventions.founder_time_on_campaign = { value: 10 };
+    expect([...retainedLimitOnlyNodeIds(set)]).toEqual([]);
+  });
+
+  it('an ordinary disconnected factor still refuses with ORPHAN_NODE', async () => {
+    const s = server();
+    const { caps, proposals } = lane(s);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    const g = structuredClone((proposals.get(offer.proposal_id as string)!.operations[0]!.value as Rec).candidate);
+    g.nodes.push({ id: 'ordinary_orphan', kind: 'factor', label: 'Ordinary orphan', category: 'observable',
+      observed_state: { value: 10, unit: '%' } });
+    expect(validateGraphStructure(g as never).violations.filter((v) => v.code === 'ORPHAN_NODE').map((v) => v.factor_id))
+      .toEqual(['ordinary_orphan']);
+    await expect(runFromStore(JSON.stringify(g))).rejects.toThrow('ORPHAN_NODE');
+  });
+});
 
 describe('the served draft and its record (preconditions, else nothing below proves anything)', () => {
   it('the draft holds neither quantity; its goal is "% complete"; the construction commit id is derived from the stored brief', () => {
@@ -217,7 +454,7 @@ describe('L20 on the served early draft: ONE revised-draft card, prepared once, 
     expect(a.public_label).toBe('Replace the early draft with a revised one built from your brief and the goal you just gave: '
       + '‘New customers’ at least 20 customers and ‘Conversion rate’ above 15% over the first 3 months after launch '
       + '(the draft modelled ‘product feature launch’). '
-      + 'Kept from your brief: ‘Annual marketing spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
+      + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
       + 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
       + 'Not carried: Olumi’s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.');
     // ONE chip, the card's own button, and the card rides in its detail.
@@ -325,12 +562,76 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }));
   });
 
-  it('a revised draft that drops one of the brief\'s limits is never offered (the 25%-of-time limit, here)', async () => {
+  it('an omission carries the founder-time row forward unchanged through approval, Run and reopen', async () => {
     const s = server();
-    const losesTime = () => { const c = candidate(); c.constraints = (c.constraints as Rec[]).filter((x) => x.metric !== 'Founder marketing time'); return c; };
-    const r = await lane(s, new ProposalStore(), losesTime).caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_dropped_a_limit' });
-    expect(String(r.detail)).toMatch(/\u2018Founder marketing time\u2019 at most 25%/);
+    const losesTime = () => {
+      const c = candidate();
+      c.constraints = c.constraints.filter((x: Rec) => x.metric !== 'Founder marketing time');
+      return c;
+    };
+    const { caps, proposals } = lane(s, new ProposalStore(), losesTime);
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: true, mutated: false });
+    const proposed = (proposals.get(r.proposal_id as string)!.operations[0]!.value as Rec).candidate;
+    const original = FX.graph.goal_constraints.find((row: Rec) => row.node_id === 'founder_marketing_time');
+    // First assertion kills a missing carry-forward even if its disclosure remains on the card.
+    expect(proposed.goal_constraints.find((row: Rec) => row.node_id === original.node_id)).toEqual(original);
+    expect(r.public_label).toBe(omissionCard);
+    expect(String(r.public_label).match(/\?/g) ?? []).toHaveLength(0);
+    expect(s.commits).toHaveLength(0);
+    s.said(FX.l20.turn_id);
+    expect(await caps.authoriseChange(pressed(r.proposal_id as string), { proposal_id: r.proposal_id } as never))
+      .toMatchObject({ ok: true, mutated: true, applied: true });
+    await expectStoredRunAndReopen(s, [
+      { constraint_id: 'agent-lane:new_customers:>=', node_id: 'new_customers', operator: '>=', value: 20,
+        label: 'New customers', unit: 'customers', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'agent-lane:conversion_rate:>=', node_id: 'conversion_rate', operator: '>=', operator_as_stated: '>',
+        value: 15, label: 'Conversion rate', unit: '%', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'agent-lane:annual_marketing_spend:<=', node_id: 'annual_marketing_spend', operator: '<=',
+        value: 100000, label: 'Annual marketing spend', unit: 'GBP/year', provenance: 'explicit', value_frame: 'level' },
+      original,
+    ]);
+  });
+
+  it('a limit omitted WITH its node is retained unscored through approval, production Run and reopen', async () => {
+    const s = server();
+    const draft = () => {
+      const c = candidate();
+      c.constraints = c.constraints.filter((x: Rec) => x.metric !== 'Founder marketing time');
+      c.factors = c.factors.filter((x: Rec) => x.label !== 'Founder marketing time');
+      c.links = c.links.filter((x: Rec) => x.from !== 'Founder marketing time' && x.to !== 'Founder marketing time');
+      return c;
+    };
+    const { caps, proposals } = lane(s, new ProposalStore(), draft);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offer.ok).toBe(true);
+    const prepared = (proposals.get(offer.proposal_id as string)!.operations[0]!.value as Rec).candidate;
+    const original = FX.graph.goal_constraints.find((r: Rec) => r.node_id === 'founder_marketing_time');
+    const retained = { ...original, retained_unresolved_limit: { state: 'unscored', role: 'original',
+      reason: 'retained_limit_quantity_unresolved', previous_constraint_id: original.constraint_id,
+      proposed_constraint_ids: [], question: 'What forecast and basis should be used to evaluate this retained limit?' } };
+    expect(prepared.goal_constraints.find((r: Rec) => r.constraint_id === original.constraint_id)).toEqual(retained);
+    expect(prepared.nodes.find((n: Rec) => n.id === original.node_id)).toEqual(FX.graph.nodes.find((n: Rec) => n.id === original.node_id));
+    expect(prepared.edges.filter((e: Rec) => e.from === original.node_id || e.to === original.node_id)).toEqual([]);
+    expect(offer.public_label).toBe(omissionCard.replace(carriedCardEnd, RETAINED_LIMIT_QUANTITY_WITHHELD + ' ' + carriedCardEnd));
+    expect(isAllowedRunAnalysisAssistantText(RETAINED_LIMIT_QUANTITY_WITHHELD)).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(RETAINED_LIMIT_QUANTITY_WITHHELD + ' All conditions passed.')).toBe(false);
+    s.said(FX.l20.turn_id);
+    expect(await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never))
+      .toMatchObject({ ok: true, mutated: true, applied: true });
+    await expectStoredRunAndReopen(s, prepared.goal_constraints);
+  });
+
+  it('a revised draft with no target is still refused', async () => {
+    const s = server();
+    const noTarget = () => {
+      const c = candidate();
+      c.goal = { ...c.goal, target_stated: false, value: null };
+      c.constraints = c.constraints.filter((row: Rec) => row.role !== 'target');
+      return c;
+    };
+    const r = await lane(s, new ProposalStore(), noTarget).caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_has_no_target' });
     expect(s.commits).toHaveLength(0);
   });
 
@@ -428,7 +729,7 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     expect(r).toMatchObject({ ok: true });
   });
 
-  it('RED (quantity): "<= 25%" on ANOTHER quantity is not the founder-time limit; the card is not offered', async () => {
+  it('uncertain equivalence: one question, previous and proposed limits retained side by side', async () => {
     const elsewhere = () => {
       const c = candidate();
       c.constraints = (c.constraints as Rec[]).map((x) => (x.metric === 'Founder marketing time' ? { ...x, metric: 'Advertising time' } : x));
@@ -436,9 +737,24 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
       return c;
     };
     const s = server();
-    const r = await offerOn(s, elsewhere);
-    expect(r).toMatchObject({ ok: false, refusal: 'revised_draft_dropped_a_limit' });
-    expect(String(r.detail)).toMatch(/\u2018Founder marketing time\u2019 at most 25%/);
+    const { caps, proposals } = lane(s, new ProposalStore(), elsewhere);
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: true, mutated: false });
+    expect(r.public_label).toBe(uncertainCard);
+    expect(String(r.public_label).match(/\?/g)).toHaveLength(1);
+    const rows = (proposals.get(r.proposal_id as string)!.operations[0]!.value as Rec).candidate.goal_constraints;
+    expect(rows.filter((row: Rec) => row.value === 25)).toEqual([
+      { constraint_id: 'agent-lane:advertising_time:<=', node_id: 'advertising_time', operator: '<=',
+        value: 25, label: 'Advertising time', unit: '%', provenance: 'explicit', value_frame: 'level',
+        retained_unresolved_limit: { state: 'unscored', role: 'proposed', reason: 'retained_limit_equivalence_unresolved',
+          previous_constraint_id: 'agent-lane:founder_marketing_time:<=', proposed_constraint_ids: ['agent-lane:advertising_time:<='],
+          question: 'Do these describe the same limit?' } },
+      pendingLimit(FX.graph.goal_constraints.find((row: Rec) => row.node_id === 'founder_marketing_time'), 'agent-lane:advertising_time:<='),
+    ]);
+    s.said(FX.l20.turn_id);
+    expect(await caps.authoriseChange(pressed(r.proposal_id as string), { proposal_id: r.proposal_id } as never))
+      .toMatchObject({ ok: true, mutated: true, applied: true });
+    await expectStoredRunAndReopen(s, rows);
   });
 
   it('RED (measures): a target call names its quantity; the same figure on ANOTHER quantity is not "held"', async () => {

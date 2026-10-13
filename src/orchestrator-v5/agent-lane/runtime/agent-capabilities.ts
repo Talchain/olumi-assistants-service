@@ -1,3 +1,4 @@
+import { verbatimSourceLine } from '../quote-confirmation.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
@@ -294,7 +295,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
-import { heldFigureOwnerOf, provenanceOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { heldFigureOwnerOf, isHumanStatementSource, provenanceOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
@@ -3537,13 +3538,13 @@ export function createAgentCapabilities(
       const n = ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []).find((x) => x?.id === id);
       return typeof n?.label === 'string' ? n.label : id;
     };
-    const limits = limitsKeptBy(g.raw, candidate);
+    const limits = limitsKeptBy(g.raw, candidate, targetFigure);
     const sayRow = (raw: unknown, r: { node_id: string; operator: string; value: number; unit: string }): string =>
       `\u2018${labelIn(raw, r.node_id)}\u2019 ${TARGET_COMPARATOR_WORDS[r.operator] ?? r.operator} ${targetFigure(r.value, r.unit)}`;
-    if (limits.dropped.length > 0) {
-      return notOffered('revised_draft_dropped_a_limit', `The revised draft did not keep ${limits.dropped.map((r) => sayRow(g.raw, r)).join(' and ')}, `
-        + 'so it was not offered and the model is unchanged. Tell the user plainly; never offer a draft that loses their limit.');
+    if (limits.conflict) {
+      return notOffered('revised_draft_not_prepared', 'An earlier limit could not be carried forward unchanged because its saved identity conflicts with the revised draft. Nothing was offered or changed.');
     }
+    Object.assign(candidate, limits.replacement);
     const held = targetsHeldBy(candidate);
     if (held.length === 0) {
       return notOffered('revised_draft_has_no_target', 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
@@ -3556,9 +3557,16 @@ export function createAgentCapabilities(
     const options = nodesOf(candidate).filter((n) => n?.kind === 'option' && typeof n.label === 'string').map((n) => `\u2018${n.label as string}\u2019`);
     const card = `Replace the early draft with a revised one built from your brief and the goal you just gave: `
       + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
-      + (limits.kept.length > 0 ? `Kept from your brief: ${limits.kept.map((r) => sayRow(g.raw, r)).join('; ')}. ` : '')
+      + (limits.limits.length > 0 ? `Limits in the revised draft: ${limits.limits.map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
+      + limits.carried.map((r) => `Carried forward unchanged because the draft omitted it: ${sayRow(g.raw, r)}. `).join('')
+      + (limits.uncertain.length > 0 ? limits.uncertain.map(({ previous, proposed }) =>
+        `Previous: ${sayRow(g.raw, previous)}; proposed: ${proposed.map((r) => sayRow(candidate, r)).join('; ')}. `).join('')
+        + 'Do these describe the same limit? Both are retained unless you explicitly ask to remove one. ' : '')
+      + (limits.withheld === undefined ? '' : `${limits.withheld} `)
       + (options.length > 0 ? `Options: ${options.join(', ')}. ` : '')
-      + 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.';
+      + (limits.dropped.length > 0 ? 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
+        : 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. ')
+      + 'Check the targets, limits and options on this card before choosing.';
     const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
     const proposal = createProposal({
       scenario_id: sid,
@@ -3656,7 +3664,6 @@ export function createAgentCapabilities(
     // …and the acknowledged graph IS the approved candidate, whole (AIE B34): every component it carries held unchanged.
     const landed = after !== null && acknowledged !== '' && after.graph_identity_hash === acknowledged
       && approvedGraphHeld(v.candidate, after.raw)
-      && limitsKeptBy(before.raw, after.raw).dropped.length === 0
       && targetsHeldBy(v.candidate).every((t) => heldTargets.some((h) => h.node_id === t.node_id && h.comparator === t.comparator && h.value === t.value && h.unit === t.unit));
     if (!landed) {
       return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
@@ -3671,7 +3678,7 @@ export function createAgentCapabilities(
       : [];
     proposals.markApplied(pid, receipts);
     return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
-      follow_up: 'Your model is now the revised draft, with your goal as its targets and your limits kept. The earlier analysis was of the old draft; run the analysis again.' };
+      follow_up: 'Your model is now the revised draft, with the targets and limits shown on the card you approved. The earlier analysis was of the old draft; run the analysis again.' };
   };
 
   /** Consume the exact held card through the approved batch, then read back through the door's verdict on its committed bytes. */
@@ -4054,8 +4061,9 @@ export function createAgentCapabilities(
       if (args.deadline_date !== undefined && (!isCalendarDate(args.deadline_date) || args.deadline_date <= today)) {
         return { ok: false, mutated: false, refusal: 'unreadable_deadline', detail: 'The proposed deadline must be a valid future ISO calendar date.' };
       }
-      const stated: StatedDeadline | null = args.deadline_date === undefined ? parsed
-        : { words, form: 'date' as const, date: args.deadline_date as string, reference: today };
+      // A resolved source owns both its date and stated count; a model date is only an interpretation fallback.
+      const stated: StatedDeadline | null = parsed ?? (args.deadline_date === undefined ? null
+        : { words, form: 'date' as const, date: args.deadline_date as string, reference: today });
       const authoredBy = userWords && userReference && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
       if (stated === null) {
         const deadlineAsk = chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
@@ -5375,15 +5383,22 @@ export function createAgentCapabilities(
           op.op === 'set_goal_deadline' && writes(plainOf(String((op.value as { words?: unknown })?.words ?? ''))));
       });
       const origin = statementOrigin(writes(typed) || writes(plainOf(ctx.user_text ?? '')) || heldHumanWords,
-        writes(plainOf(ctx.unverified_user_text ?? '')) || writes(plainOf(g.brief_text ?? '')));
+        writes(plainOf(ctx.unverified_user_text ?? '')) || writes(plainOf(g.brief_text ?? '')), ctx.user_text_complete);
       if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
-      const typedAsOfDates = [...typed.matchAll(/(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu)].map(match => match[1]);
-      const asOf = args.reference_date;
+      const asOfPattern = /(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu;
+      const typedAsOfDates = [...typed.matchAll(asOfPattern)].map(match => match[1]);
+      const asOf = typedAsOfDates.find(date => date === args.reference_date);
+      // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
+      const reference = draftReferenceDate({ ...(isCalendarDate(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
+      if (args.reference_date !== undefined && args.reference_date !== asOf) {
+        // Trace only: keep the ignored model argument out of the card, saved tuple and model-context projection.
+        const { log } = await import('../../../utils/telemetry.js');
+        log.info({ event: 'v5.agent.deadline_reference_ignored', request_id: ctx.request_id, reference_date: reference, ignored_reference_date: args.reference_date },
+          'Ignored model deadline reference without verified current-turn user dating');
+      }
       if (asOf !== undefined && !isCalendarDate(asOf)) return { ok: false, mutated: false, refusal: 'reference_invalid',
         detail: 'The reference must be a valid ISO calendar date. Nothing was prepared.' };
-      // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
-      const reference = draftReferenceDate({ ...(typeof asOf === 'string' && typedAsOfDates.includes(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
@@ -5424,23 +5439,48 @@ export function createAgentCapabilities(
         const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
         const heldQuotes = heldStatementsOf(held);
         const starts = o.starts as readonly { months?: unknown }[];
-        const origins = quotes.map(quote => statementOrigin(
-          quoteStatedFor(texts, quote, label) === 'ok' || held.some(n => {
-            const statement = n.observed_state.extra_share_by_date.statement;
-            return heldQuotes.includes(quote) && statement?.quote === quote && statement.source !== 'model_proposed';
-          }),
-          quoteSpansIn(plainWords(ctx.unverified_user_text ?? ''), plainWords(quote)).length > 0
-          || quoteSpansIn(plainWords(g.brief_text ?? ''), plainWords(quote)).length > 0));
+        const pairings = quotes.map(quote => {
+          const source = verbatimSourceLine(texts, quote);
+          if (source !== undefined && quoteStatedFor(texts, quote, label) === 'not_for_option') {
+            return { original_source: { text: source, authored_by: 'user_stated' as const },
+              pairing: { option_id: id, authored_by: 'model_proposed' as const } };
+          }
+          const retained = heldQuotes.includes(quote)
+            ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date.statement
+            : undefined;
+          return retained?.original_source?.authored_by === 'user_stated' && retained?.pairing?.option_id === id
+            && retained.pairing.authored_by === 'model_proposed'
+            ? { original_source: retained.original_source, pairing: retained.pairing } : undefined;
+        });
+        const origins = quotes.map((quote, i) => {
+          const retained = heldQuotes.includes(quote)
+            ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date.statement
+            : undefined;
+          const heldOlumi = retained?.source === 'model_proposed' || retained?.pairing?.authored_by === 'model_proposed';
+          return statementOrigin(pairings[i] !== undefined || quoteStatedFor(texts, quote, label) === 'ok' || (retained !== undefined && !heldOlumi),
+            !heldOlumi && (quoteSpansIn(plainWords(ctx.unverified_user_text ?? ''), plainWords(quote)).length > 0
+              || quoteSpansIn(plainWords(g.brief_text ?? ''), plainWords(quote)).length > 0), ctx.user_text_complete,
+            heldOlumi || (quote === '' && typeof starts[i]?.months === 'number'));
+        });
         if (origins.includes('unknown')) return refuse('origin_unknown', UNKNOWN_ORIGIN_DETAIL);
+        // An empty source plus explicit months is a NEW Olumi estimate, never an old quote relabelled.
+        quotes.forEach((quote, i) => { if (quote === '' && origins[i] === 'ai' && typeof starts[i]?.months === 'number') quotes[i] = `in ${starts[i]!.months} months`; });
         const plan = planStarts(quotes, estimate, held.length, quotes.map((quote, i) => {
           const prior = starts[i]?.months === undefined && heldQuotes.includes(quote)
             ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date
             : undefined;
-          return { months: starts[i]?.months, stated: origins[i] === 'human',
+          return { months: starts[i]?.months, stated: origins[i] === 'human' && pairings[i] === undefined,
+            ...pairings[i],
             ...(prior?.figures ? { held: { statement: prior.statement,
               lead_low: prior.figures.lead_low, lead_high: prior.figures.lead_high } } : {}) };
         }));
         if (!('parts' in plan)) {
+          if (plan.refusal === 'hiring_bound_conflict') {
+            const completeSource = verbatimSourceLine(texts, plan.quote) ?? plan.quote;
+            return { ok: false, mutated: false, refusal: plan.refusal, calculation_supported: false,
+              statement: { quote: completeSource, source: plan.source, bound: plan.bound, value: plan.value },
+              detail: `${isHumanStatementSource(plan) ? 'You gave' : 'Olumi proposed'} ‘${completeSource}’. That gives a ${plan.bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` };
+          }
           if (plan.refusal === 'too_many_starts') return refuse('too_many_starts', `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly, and ask once which two starts to use; until then Olumi’s own hiring estimate for ‘${label}’ stays in the model, labelled as Olumi’s.`);
           if (plan.refusal === 'fewer_starts_than_held') {
             return refuse('fewer_starts_than_held', heldQuotes.length === held.length
@@ -5459,7 +5499,7 @@ export function createAgentCapabilities(
       if (!hiringTimesHeld(withHiringTimes(g.raw, a), a)) return unusable();
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_HIRING_TIMES, path: goalId, value: a }],
-        provenance: { authored_by: planned.some(o => o.parts.some(p => p.statement.source === 'model_proposed')) ? 'model_proposed' : 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
+        provenance: { authored_by: planned.some(o => o.parts.some(p => p.statement.source === 'model_proposed' || p.statement.pairing?.authored_by === 'model_proposed')) ? 'model_proposed' : 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: hiringTimesCard(a, part.deliverable) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
@@ -5629,6 +5669,12 @@ export function createAgentCapabilities(
 
       for (const given of input) {
         let a = given;
+        // AIE #94 6140145484: incomplete source never supplies a missing authorship declaration.
+        // Keep retains the recorded Olumi estimate; it cannot claim a new human origin.
+        if (ctx.user_text_complete === false && (typeof a?.user_stated !== 'boolean'
+          || (a.keep === true && a.user_stated !== false))) {
+          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        }
         const requested = String(a?.factor_label ?? '');
         const identified = a?.factor_id !== undefined ? g.nodes.find(n => n.id === a.factor_id) : undefined;
         const res = a?.factor_id === undefined ? resolveNamed(g, requested, writable)
@@ -5765,7 +5811,7 @@ export function createAgentCapabilities(
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
         if (statementOrigin(writtenAbout || quote !== null,
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
-          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text)) === 'unknown') {
+          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, a.user_stated === false && a.revise !== true) === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         adopted.push({
@@ -5878,7 +5924,13 @@ export function createAgentCapabilities(
         // offered to them; `leftOutClause` is staging’s disclosure of the labels that
         // were not factors. Both are required — the heading alone drops the disclosure,
         // and staging’s label alone calls a revision an adoption.
-        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
+        public_label: heading + ordered.map(a => {
+          const figure = describe(a);
+          // AIE 6141593167: the complete basis belongs on the bound card, beside its figure.
+          // Keeping a canonical estimate is retention, not a newly authored estimate.
+          return usersOwn(a) || a.kept ? figure
+            : `${figure}\nOlumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “${a.basis}”`;
+        }).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
       return {
@@ -6253,7 +6305,7 @@ export function createAgentCapabilities(
         const userWrote = claimedByUser && (likelyRange !== undefined
           || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
         if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
-          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text)) === 'unknown') {
+          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false) === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
@@ -8987,7 +9039,7 @@ export function createAgentCapabilities(
            */
           const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
           if (statementOrigin(wrote, figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
-            || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text)) === 'unknown') {
+            || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text), ctx.user_text_complete, lvl.estimate !== undefined) === 'unknown') {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: UNKNOWN_ORIGIN_DETAIL });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
@@ -9106,7 +9158,7 @@ export function createAgentCapabilities(
           const levelUnit = unit ?? today.unit;
           const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
           if (statementOrigin(wrote, figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text)
-            || figureTheUserWrote(asked, levelUnit, g.brief_text)) === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
+            || figureTheUserWrote(asked, levelUnit, g.brief_text), ctx.user_text_complete, lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '') === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
           const basis = lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' ? lv.basis.trim() : undefined;
           if (!wrote && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
           if (!wrote && contradictsItsName(asked, levelUnit, plan.label)) {
@@ -9644,6 +9696,7 @@ export function createAgentCapabilities(
       const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string;
         range?: { low: number; high: number; quote: string } }[] = [];
       const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
+      let originUnknown = false;
       const ambiguous: AmbiguousTarget[] = [];
       const recordOf = (x: unknown): Record<string, unknown> => (x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {});
       // Every new factor named in THIS call, with its declared unit: each one's figure is never another's (`newFactorScopeIn`).
@@ -9739,9 +9792,10 @@ export function createAgentCapabilities(
         const origin = statementOrigin(source !== undefined || priorHuman,
           (prior !== undefined && prior.member === undefined)
           || quoteOfFigure(t.value, todayUnit, ctx.unverified_user_text ?? '') !== null
-          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null);
+          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null, ctx.user_text_complete);
         const ownsIt = origin === 'human';
         if (origin === 'unknown') {
+          originUnknown = true;
           todayNotSet.push({ factor: label, value: t.value,
             reason: `The retained source of ${shown} for "${label}" is not verified. Its origin stays unknown; nothing was prepared. Ask for its source rather than relabelling it as Olumi’s estimate.` });
           continue;
@@ -9781,8 +9835,8 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
       }
       if (todayNotSet.length > 0) {
-        return { ok: false, mutated: false, refusal: 'today_not_set', today_not_set: todayNotSet,
-          detail: 'Nothing was prepared or held: each new factor needs a finite figure in its known unit. '
+        return { ok: false, mutated: false, refusal: originUnknown ? 'origin_unknown' : 'today_not_set', today_not_set: todayNotSet,
+          detail: originUnknown ? UNKNOWN_ORIGIN_DETAIL : 'Nothing was prepared or held: each new factor needs a finite figure in its known unit. '
             + 'Explain the invalid figure or unit from today_not_set; do not substitute zero or invent a unit.' };
       }
       // The door's own builder, run here purely: a spec it would refuse is never sent.

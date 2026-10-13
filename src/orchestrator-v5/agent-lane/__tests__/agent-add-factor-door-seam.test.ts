@@ -391,6 +391,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
 
   it.each(['verified', 'unknown', 'model'])('A2h deadline phrase on real route (%s)', async origin => {
     graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
     const words = '30 April 2028';
     if (origin !== 'model') await turn({ message: `Our deadline is ${words}.` });
     let output: Record<string, any> = {};
@@ -398,13 +399,19 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       body => { output = toolOutputIn(body); return say('Check the deadline card.'); }];
     const result = await turn({ message: 'Prepare the deadline.', ...(origin === 'unknown' ? { agent_session_id: randomUUID() } : {}) });
     const call = result._agent.tool_calls.find(c => c.name === 'propose_goal_deadline');
-    expect(call, JSON.stringify(output)).toMatchObject(origin === 'unknown' ? { ok: false, refusal: 'origin_unknown' } : { ok: true });
-    if (origin !== 'unknown') {
+    expect(call, JSON.stringify(output)).toMatchObject(origin !== 'verified' ? { ok: false, mutated: false, refusal: 'origin_unknown' } : { ok: true });
+    if (origin === 'verified') {
       const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
       const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
-      expect(proposal?.provenance.authored_by).toBe(origin === 'verified' ? 'user_stated' : 'model_proposed');
-      expect(proposal?.public_label).toContain(`${origin === 'verified' ? 'Your words' : 'Olumi’s wording'}: “${words}”.`);
+      expect(proposal?.provenance.authored_by).toBe('user_stated');
+      expect(proposal?.public_label).toContain(`Your words: “${words}”.`);
+    } else {
+      expect(output).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown',
+        detail: 'The retained source is not verified. Its origin stays unknown; nothing was prepared. Ask for its source.' });
+      expect(await heldOnLatestRow()).toEqual([]);
+      expect(approveChipOf(result)).toBeUndefined();
     }
+    expect(bytes()).toBe(before);
   });
 
   it('A2h multiline verified figure retains its subject across a line break', async () => {
@@ -427,7 +434,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       body => { output = toolOutputIn(body); return say('Please confirm the source.'); }];
     const result = await turn({ message: 'Add those two to the model.', agent_session_id: randomUUID() });
     expect(saw).toBe(true);
-    expect(callOf(result)).toMatchObject({ ok: false, refusal: 'today_not_set' });
+    expect(callOf(result)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
     expect(JSON.stringify(output)).toContain('origin stays unknown');
     expect(await heldOnLatestRow()).toHaveLength(0);
     expect(bytes()).toBe(before);
@@ -458,6 +465,65 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       expect(JSON.stringify(result)).toContain('at least 3 months');
       expect(JSON.stringify(result)).toContain('you said');
     }
+  });
+
+  it.each(['fresh', 'restored', 'capped'])('A2i incomplete %s source miss refuses the quoted figure; explicit own estimate is a new act', async source => {
+    const { admitCandidateModel } = await import('../admit-model.js');
+    const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
+    const admitted = admitCandidateModel({ goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+      unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+    graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
+
+    if (source === 'restored') await turn({ message: 'We discussed the recruitment process.' });
+    if (source === 'capped') for (let i = 0; i < 40; i++) await turn({ message: `Recruitment discussion ${i}.` });
+    const before = bytes();
+    let output: Record<string, any> = {};
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote: 'in 6 months', months: 6 }] }] }),
+      body => { output = toolOutputIn(body); return say(String(output.detail)); }];
+    const session = source === 'restored' ? { agent_session_id: randomUUID() } : {};
+    const result = await turn({ message: 'Use the previously quoted hiring time.', ...session });
+    expect(result._agent.tool_calls.find(c => c.name === 'propose_hiring_times')).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(output).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(result)).toBeUndefined();
+    expect(bytes()).toBe(before);
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote: '', months: 6 }] }] }),
+      body => { output = toolOutputIn(body); return say(String(output.public_label)); }];
+    const own = await turn({ message: 'Show a new Olumi timing estimate for review.', ...session });
+    expect(own._agent.tool_calls.find(c => c.name === 'propose_hiring_times')).toMatchObject({ ok: true });
+    const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
+    const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
+    expect(proposal.provenance.authored_by).toBe('model_proposed');
+    expect(proposal.operations[0].value.options[0].parts[0].statement).toEqual({ quote: 'in 6 months', form: 'about', source: 'model_proposed' });
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  it.each([['at least 6 months', 'lower', 6], ['within 1 month', 'upper', 1]])('A2i real route bound conflict: %s', async (phrase, bound, value) => {
+    const { admitCandidateModel } = await import('../admit-model.js');
+    const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
+    const admitted = admitCandidateModel({ goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+      unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+    graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
+
+    const quote = `A Tech lead would take ${phrase}, but that is uncertain`;
+    const before = bytes();
+    let output: Record<string, any> = {};
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote }] }] }),
+      body => { output = toolOutputIn(body); return say('The timing can be treated as exact.'); }];
+    const result = await turn({ message: quote });
+    const detail = `You gave ‘${quote}’. That gives a ${bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.`;
+    expect(output).toEqual({ ok: false, mutated: false, refusal: 'hiring_bound_conflict', calculation_supported: false,
+      statement: { quote, source: 'user_stated', bound, value }, detail });
+    expect(result.assistant_text).toBe(detail);
+    expect(approveChipOf(result)).toBeUndefined();
+    expect(bytes()).toBe(before);
   });
 
   // ⛔ DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it ABOUT it. The
@@ -575,27 +641,22 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis?: string }[])[0]!.basis).toBe('written_about');
     nextScenario();
     graphOf.set(SCENARIO, journeyE());
+    const before = bytes();
     const t2 = await propose(one(120000, 'Junior engineer salary'), 'Senior engineers cost £120k a year each.');
-    expect(callOf(t2)).toMatchObject({ ok: true, mutated: false });
-    expect((await heldOnLatestRow())[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([{ basis: 'olumi_estimate' }]);
+    expect(callOf(t2)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(t2)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
   }, 120_000);
 
-  it('W14 real path: an unquoted estimate remains Olumi’s after card approval and reload', async () => {
+  it('W14 real path: an absent salary in incomplete source stays unknown, with no proposal or write', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
     const t1 = await propose(factorArgs(), 'Senior engineers cost £120k a year each.');
-    expect(callOf(t1)).toMatchObject({ ok: true, mutated: false });
+    expect(callOf(t1)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);
-    const held = await heldOnLatestRow();
-    expect(held[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([
-      { observed_state: { source: 'user_override' } },
-      { basis: 'olumi_estimate', observed_state: { source: 'cee_inference', extractionType: 'inferred', raw_value: 65000 } },
-    ]);
-    const approve = approveChipOf(t1)!;
-    const done = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
-    expect(done._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
-    expect(newFactors().find(n => n.label === 'Junior engineer salary')?.observed_state)
-      .toMatchObject({ source: 'cee_inference', extractionType: 'inferred', raw_value: 65000 });
   }, 120_000);
 
   it('(c) RED: the model moves before the approval → refused, nothing written; and the DOOR refuses a stale base with no row', async () => {
@@ -675,16 +736,14 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(bytes()).toBe(before);
   }, 120_000);
 
-  it('W14 a signed today quantity survives the real hold and approval without an invented frame', async () => {
+  it('W14 an absent signed today quantity in incomplete source stays unknown, with no proposal or write', async () => {
     graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
     const t1 = await propose([{ label: 'Net contribution', unit: 'GBP/year', today: { value: -120000 }, affects: 'Annual salary spend', direction: 'positive' }], 'Consider net contribution.');
-    expect(callOf(t1)).toMatchObject({ ok: true, mutated: false });
-    const approve = approveChipOf(t1)!;
-    const done = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
-    expect(done._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true }));
-    const os = graphNow().nodes.find(n => n.label === 'Net contribution')?.observed_state;
-    expect(os).toMatchObject({ value: -120000, unit: 'GBP/year', source: 'cee_inference' });
-    expect(os).not.toHaveProperty('cap');
+    expect(callOf(t1)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
   }, 120_000);
 
   it.each([
@@ -887,7 +946,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const before = bytes();
     let out: Record<string, unknown> = {};
     const again = await propose(factorArgs(), 'Add those figures.', o => { out = o; });
-    expect(callOf(again)).toMatchObject({ ok: false, mutated: false, refusal: 'today_not_set' });
+    expect(callOf(again)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     expect(JSON.stringify(out.today_not_set)).toContain('origin stays unknown');
     expect(bytes()).toBe(before);
   }, 120_000);
@@ -959,7 +1018,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     await sayRangeFirst();
     const before = bytes();
     const t1 = await propose(rangedArgs(over), saidTwentyFive ? HIRING_MSG : 'Use my range for it.');
-    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: saidTwentyFive ? 'today_not_set' : 'origin_unknown' }));
     expect(approveChipOf(t1)).toBeUndefined();
     expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);

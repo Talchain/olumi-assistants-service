@@ -121,6 +121,29 @@ describe('result-first on retry, lost response and failed explanation (live rout
   };
   const explainIds = (b: Body) => b.suggested_actions.filter((c) => isRunExplanationChip(c.id)).map((c) => c.id);
 
+  it('T1r (e): a lost live Run response replays the CURRENT result, pending narration and bound Explain', async () => {
+    const turn = randomUUID();
+    const first = (await runTurn(turn)).json() as Body;
+    expect(first.narration?.status).toBe('pending');
+    const same = (await runTurn(turn)).json() as Body;
+    expect(same.assistant_text).toBe(first.assistant_text);
+    expect(same.blocks).toEqual(first.blocks);
+    expect(same.narration).toEqual(first.narration);
+    expect(same.suggested_actions).toEqual(first.suggested_actions);
+    computedAt = RUN_B;
+    const current = (await runTurn(randomUUID())).json() as Body;
+    const savedRows = structuredClone(rows);
+    await app.close(); app = await freshApp();
+    const retry = (await runTurn(turn)).json() as Body;
+    expect(retry.blocks).toEqual(current.blocks);
+    expect(retry.narration).toEqual(current.narration);
+    expect(explainIds(retry)).toEqual(explainIds(current));
+    expect(retry.narration?.run_key === first.narration?.run_key).toBe(false);
+    expect(runs).toBe(2);
+    expect(modelCalls).toBe(0);
+    expect(rows).toEqual(savedRows);
+  });
+
   for (const [version, storedText] of [
     ['legacy', 'I can’t explain that result as current. Check the current results before asking again. Nothing in your model changed.'],
     ['current', 'I can’t explain that result as current. Check the current results before asking again.'],
