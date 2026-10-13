@@ -294,8 +294,10 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     expect((out.not_represented as string[]).some((s) => s.includes('nobody has stated which way they run'))).toBe(false);
   });
 
-  it('RED (OUTCOME): readiness is no longer blocked — may_run, and PLoT compares the two user options', async () => {
-    const { graph } = await build(servedCandidate());
+  it('RED (OUTCOME): with an explicitly held AI risk premise, may_run and PLoT compares the two user options', async () => {
+    const { graph: builtGraph } = await build(servedCandidate());
+    const graph = { ...builtGraph, nodes: builtGraph.nodes.map(n => n.id === DELAY
+      ? { ...n, observed_state: { value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred' } } : n) };
     expect(blockers(graph)).toEqual([]);
     expect(resolveRunAdmission(graph).willProceed).toBe(true);
     const { plotCalls, error } = await runAnalysis(graph);
@@ -303,6 +305,12 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     expect(plotCalls).toHaveLength(1);
     // The marked Phased £54 suggestion is not silently treated as the user's third option.
     expect(plotCalls[0]!.options.map((o) => o.option_id ?? o.id).sort()).toEqual(['keep_49_price', 'raise_to_59']);
+  });
+
+  it('T4f: the original served reconstruction still withholds its unknown risk root', async () => {
+    const { graph } = await build(servedCandidate());
+    expect(blockers(graph)).toEqual(['MISSING_FACTOR_LEVEL']);
+    expect(resolveRunAdmission(graph).willProceed).toBe(false);
   });
 
   it('RED (a): the loop is a construction issue for the ONE repair retry, naming the loop exactly', async () => {

@@ -1,16 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAnalysisReadyPayload } from '../../../../src/cee/transforms/analysis-ready.js';
 import type { GraphV3T, OptionV3T } from '../../../../src/schemas/cee-v3.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
   computeStructuralReadiness,
 } from '../../../../src/orchestrator/tools/analysis-ready-helper.js';
-import { projectGraphForPersistence } from '../../../../src/orchestrator-v5/persisted-graph-projection.js';
-import {
-  buildReadinessRecoveryChip,
-  projectReadinessRecovery,
-} from '../../../../src/orchestrator-v5/coaching/readiness-recovery.js';
 import { assessAnalysisReadiness } from '../../../../src/orchestrator-v5/tools/handlers/analysis-ready-core.js';
 
 function intervention(factorId: string, value: number) {

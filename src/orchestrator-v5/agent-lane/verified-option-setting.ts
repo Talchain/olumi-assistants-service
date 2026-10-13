@@ -705,53 +705,27 @@ export function verifiedGoalLevel(model: CandidateModel, brief: string | undefin
   }
 }
 
-/** Read the authenticated current figure independently of the draft's proposed value.
- * Uses the existing amount, quantity, unit, role and neighbour readers; never chip/history text.
- * More than one authenticated value is unresolved, not permission to choose one.
- */
-export function verifiedGoalLevelValue(model: CandidateModel, brief: string | undefined): number | null {
-  if (typeof brief !== 'string' || readUnitParts(model.goal.unit) === null) return null;
-  const sentences = assertions(brief);
-  const values = new Set<number>();
-  const others = [...model.factors, ...model.outcomes, ...model.risks].map(f => f.label)
-    .filter(label => label !== model.goal.metric);
-  for (const a of sentences) {
-    if (a.text.length > MAX_ASSERTION || !directContext(brief, a)) continue;
-    for (const amount of findLinkEffectAmounts(a.text)) {
-      const span = figureTheUserWroteForSpan(amount.magnitude, model.goal.unit, a.text,
-        { target: [model.goal.metric], others, strict: true, requireNamed: true, at: amount.index, writtenAmounts: [amount] });
-      if (span === null || !sameFrame(a.text, span, model.goal.unit, amount)
-        || insideQuotation(brief, a, span) || occurrenceRoleOf(a.text, span.start) !== 'current'
-        || !currentLevelRole(a.text, { span, unit: model.goal.unit })
-        || !safeNeighbours(brief, a, sentences, amount.matchedText, amount.magnitude, true, undefined, text => {
-          const target = model.goal.value;
-          if (typeof target !== 'number' || target === amount.magnitude) return false;
-          const bound = figureTheUserWroteForSpan(target, model.goal.unit, text,
-            { target: [model.goal.metric], others, strict: true, requireNamed: true });
-          return bound !== null && occurrenceRoleOf(text, bound.start) === 'aim'
-            && sameFrame(text, bound, model.goal.unit);
-        })) continue;
-      values.add(amount.magnitude);
-    }
-  }
-  if (values.size === 1) return [...values][0]!;
-  return null;
-}
-
-/** Same V2 factor attestation, with its located value exposed before admission chooses a baseline. */
+/** Replace only an unquoted Olumi estimate with a conflicting value authenticated by the existing factor verifier. */
 export function verifiedFactorLevelValue(model: CandidateModel, factor: Factor, brief: string | undefined): Factor | null {
-  if (typeof brief !== 'string') return null;
+  // A claimed human receipt that fails verification must remain unverified. Do not rewrite its
+  // number, sign or quote into a different claim which happens to pass.
+  if (typeof brief !== 'string' || factor.baseline_known
+    || !['ai_proposed', 'inferred'].includes(factor.provenance)
+    || factor.baseline_evidence != null) return null;
   const verified = new Map<number, Factor>();
   for (const a of assertions(brief)) {
     for (const amount of findLinkEffectAmounts(a.text)) {
       const value = signedCurrentFigure(factor, a.text, amount);
       if (value === null) continue;
-      const candidate = { ...factor, baseline_value: value, baseline_evidence: { ...factor.baseline_evidence, quote: a.text } };
+      const candidate = { ...factor, baseline_value: value, baseline_evidence: { quote: a.text } };
       const context = { ...model, factors: model.factors.map(f => f === factor ? candidate : f) };
       if (verifiedFactorLevel(context, candidate, brief)) verified.set(value, candidate);
     }
   }
-  return verified.size === 1 ? [...verified.values()][0]! : null;
+  // Replacing a conflicting number must not manufacture a new receipt for an unchanged claim.
+  // Keep all matches in the set above so a competing current figure still refuses substitution.
+  const replacement = verified.size === 1 ? [...verified.values()][0]! : null;
+  return replacement !== null && replacement.baseline_value !== factor.baseline_value ? replacement : null;
 }
 
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
+import { AnalysisNotReadyError, resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { assessCanonicalAnalysisReadiness, blockerIssue } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 
@@ -14,7 +14,6 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import minimalEngineResponse from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 import { valueClassOf } from '../../../cee/provenance/provenance-of.js';
-import { verifiedGoalLevelValue } from '../verified-option-setting.js';
 
 type Rec = Record<string, any>;
 let draft: Rec;
@@ -120,27 +119,7 @@ async function construct() {
   return r.json();
 }
 describe('T4 admission through the real route', () => {
-  it('T4b: the authenticated 90 replaces drafted 80 on registration, as user_stated', async () => {
-    const fx = JSON.parse(readFileSync(new URL('./fixtures/capacity-c85817f2-construction.json', import.meta.url), 'utf8'));
-    draft = JSON.parse(fx.raw_text);
-    brief = fx.brief.replace('Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.',
-      'Total weekly support capacity is 90 tickets per week today: the existing 80 tickets per week plus 10 tickets per week outsourced, plus the additional specialist capacity.');
-    expect(verifiedGoalLevelValue(draft as never, brief)).toBe(90);
-    await construct();
-    expect(node('Weekly support capacity').observed_state).toEqual({ value: 0.18, baseline: 0.18,
-      raw_value: 90, cap: 500, unit: 'tickets per week', source: 'brief_extraction', extractionType: 'explicit' });
-    expect(valueClassOf(node('Weekly support capacity').observed_state)).toBe('user_stated');
-    expect(JSON.stringify(saved)).not.toContain('"raw_value":80,"cap":500');
-  });
-  it('T4b: a figure only in an unauthenticated chip quote never becomes user_stated or an Olumi estimate', async () => {
-    draft.goal.baseline_value = 90; draft.goal.baseline_known = true; draft.goal.baseline_provenance = 'explicit';
-    draft.goal.baseline_evidence = { quote: 'Output is 90 tickets today.' };
-    rows.set('old-chip', { assistant_message: '', pending_actions: [{ label: 'Output is 90 tickets today.' }] });
-    expect(verifiedGoalLevelValue(draft as never, brief)).toBe(null);
-    await construct();
-    expect(node('Output').observed_state.raw_value).toBe(90);
-    expect(valueClassOf(node('Output').observed_state)).toBe('unattributed');
-  });
+
   it('T4b: an authenticated factor value replaces its drafted estimate before framing', async () => {
     draft.factors[0].label = 'Engineers'; draft.factors[0].unit = 'engineers';
     for (const o of draft.options) o.interventions[0].factor_label = 'Engineers';
@@ -150,22 +129,15 @@ describe('T4 admission through the real route', () => {
     expect(node('Engineers').observed_state).toEqual({ value: 0.6, raw_value: 6, cap: 10, declared_scale: 'unit_interval', unit: 'engineers', source: 'brief_extraction', extractionType: 'explicit' });
     expect(valueClassOf(node('Engineers').observed_state)).toBe('user_stated');
   });
-  it('A1: keeps a goal-level estimate as Olumi\'s, with its exact raw value and unit', async () => {
-    await construct();
-    expect(node('Output').observed_state).toMatchObject({ raw_value: 60, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred' });
-  });
-  it('A1 K1/K3: a finite target does not invent a missing physical unit for an estimate', async () => {
-    draft.goal.unit = null;
-    await construct();
-    expect(node('Output').observed_state).toBeUndefined();
-  });
-  it('A2: keeps an absolute-change starting estimate on the stated basis', async () => {
+
+
+  it('A2 deferred: staging withholds the absolute-change starting estimate', async () => {
     draft.goal.frame = 'change_abs'; draft.goal.value = 20;
     draft.goal.basis = { reference: 'today', denominator: 'current Output', period_months: 3, period_kind: 'at_end',
       effect_unit: 'tickets per person at month three', effects_at_period_end: true, also_required: [], open_question: null };
     brief = 'Explore current service and expanded service. Increase Output by at least 20 tickets within three months.';
     await construct();
-    expect(node('Output').observed_state).toMatchObject({ raw_value: 60, unit: 'tickets', source: 'cee_inference' });
+    expect(node('Output').observed_state).toBeUndefined();
     expect(node('Output').goal_threshold_frame).toBe('change_abs');
   });
   it('A3: a named-unit factor estimate derives a disclosed coordinate frame without losing its number', async () => {
@@ -239,6 +211,37 @@ describe('T4 real first-Run caller and kept K1 negatives', () => {
     expect(resolveRunAdmission(graph).willProceed).toBe(false);
     expect((await firstRun(graph)).called).toBe(0);
   });
+  it.each([
+    { label: 'Unlabelled continuation', is_baseline: true, value: 0 },
+    { label: 'Status quo', value: 1 },
+    { label: 'Carry on as now', value: 0 },
+  ])('T4f unknown root: $label setting $value does not supply today', async ({ label, value, ...flags }) => {
+    const graph = binaryRootGraph();
+    const option = graph.nodes.find((n: Rec) => n.id === 'a');
+    Object.assign(option, { label, ...flags }); option.interventions.u.value = value;
+    const before = structuredClone(graph);
+    expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map(i => [i.code, i.factor_id, i.message])).toEqual([
+      ['MISSING_FACTOR_LEVEL', 'u', 'What is "Release delivered" today, before any option changes it? Without a current level the analysis would treat it as zero.'],
+    ]);
+    expect((await firstRun(graph)).called).toBe(0);
+    await expect(runEngine(graph)).rejects.toBeInstanceOf(AnalysisNotReadyError);
+    expect(runs).toBe(0);
+    expect(graph).toEqual(before);
+  });
+  it.each([
+    { value: 0.25, raw_value: 0.25, source: 'brief_extraction', extractionType: 'explicit' },
+    { value: 0.4, raw_value: 0.4, source: 'cee_inference', extractionType: 'inferred' },
+  ])('T4f held state: a baseline setting preserves $source exactly', async (observed) => {
+    const graph = binaryRootGraph(observed);
+    const option = graph.nodes.find((n: Rec) => n.id === 'a');
+    option.is_baseline = true; option.interventions.u.value = 1;
+    const before = structuredClone(graph);
+    expect(resolveRunAdmission(graph).willProceed).toBe(true);
+    expect((resolveRunAdmission(graph).assessment.canonicalGraph as Rec)?.nodes.find((n: Rec) => n.id === 'u')?.observed_state).toEqual(observed);
+    expect((await firstRun(graph)).called).toBe(1);
+    expect(graph).toEqual(before);
+  });
   it('T4c: binary root with an explicit Olumi starting estimate runs and keeps its label', async () => {
     const observed = { value: 0, source: 'cee_inference', extractionType: 'inferred' };
     const graph = binaryRootGraph(observed);
@@ -272,10 +275,12 @@ describe('T4 real first-Run caller and kept K1 negatives', () => {
     expect(resolveRunAdmission(graph).willProceed).toBe(false);
     expect((await firstRun(graph)).called).toBe(0);
   });
-  it('K1: an unknown non-factor root also blocks rather than merely disclosing zero', async () => {
+  it('K1: an unknown risk withholds the numerical Run and offers its next step', async () => {
     const graph = readyGraph(); const root = graph.nodes.find((n: Rec) => n.id === 'u');
     root.kind = 'risk'; root.category = 'observable'; delete root.observed_state;
     storedGraph = graph; await construct(); expect(runs).toBe(0);
+    expect(assessCanonicalAnalysisReadiness(graph).analysisReady?.unvalued_roots).toBeUndefined();
+    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map(i => i.message)).toEqual(['How likely or how large is "Demand" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.']);
     expect(resolveRunAdmission(graph).willProceed).toBe(false);
     expect((await firstRun(graph)).called).toBe(0);
   });

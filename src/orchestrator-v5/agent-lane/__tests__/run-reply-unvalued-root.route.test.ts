@@ -1,13 +1,8 @@
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
- * ⭐ GATE 2 CONSUMER (DL 0df0e1, 5 Oct; Science #2571; Acceptance #87 5987804248, scenario 9b9a4b81): a native Run on a
- * model whose goal path has an unvalued non-factor root ("Demand shortfall", treated as zero) said "Your results are
- * ready…" and nothing else. The typed carrier (`analysis_ready.unvalued_roots`) was right; the reply omitted both the
- * treated-as-zero disclosure and the ask. Now the Run turn, and the replay of a lost Run response, say the post-write
- * ask's own sentence (`readiness-view.ts` `treatedAsZeroLine`), from the readback graph.
- *
- * Harness: `result-first-replay.route.test.ts` (live route, the model stubbed, a store double that reads answer rows back
- * as the real store does). The graph is the held-out-shaped replica of `unvalued-root-disclosure.test.ts`.
+ * The real Run/replay route carries the canonical unknown-risk withholding ask.
+ * Its result seam replays a historical Run; this does not license a new Run on
+ * the unsupported graph. Exact response/restart and stale-result checks remain.
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -20,7 +15,7 @@ import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 const RUN_INTERPRETATION = 'The model result is provisional.';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
-import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE } from '../root-line.js';
+import { survivesReplyEditors, treatedAsZeroReplyLine, missingRootUnnamedLine } from '../root-line.js';
 import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
@@ -31,7 +26,9 @@ const SCENARIO = '9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0002';
 const HASH = String(SERVED.block.computed_against_hash);
 const READY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
 const WITHHELD_FINDING = 'This run doesn’t yet show each option’s chance of meeting your goal.';
-const SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is "Demand shortfall" today?';
+const riskAsk = (label: string): string => `How likely or how large is "${label}" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.`;
+const SENTENCE = riskAsk('Demand shortfall');
+const MISSING_ROOT_UNNAMED_ONE = missingRootUnnamedLine(1);
 
 type Rec = Record<string, unknown>;
 const option = (id: string, label: string, interventions: Rec, is_baseline = false): Rec => ({
@@ -151,7 +148,7 @@ function expectWithheldContract(body: Body, rootLine?: string): void {
   expect(face.match(/\?/g) ?? []).toHaveLength(1);
 }
 
-describe('a native Run with an unvalued risk root says it is treated as zero, and asks for it (live route)', () => {
+describe('a native Run with an unvalued risk root carries the numerical withholding ask (live route)', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [
@@ -226,10 +223,12 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     const first = (await runTurn(turnId)).json() as Body;
     expect(first.assistant_text.startsWith(RUN_INTERPRETATION)).toBe(false); // the unbound headline, not "ready"
     expect(first.assistant_text).not.toContain('treats it as zero');
+    expect(first.assistant_text).not.toContain(SENTENCE);
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
       const replay = (await runTurn(turnId)).json() as Body;
       expect(replay.assistant_text, `restart=${restart}`).not.toContain('treats it as zero');
+      expect(replay.assistant_text, `restart=${restart}`).not.toContain(SENTENCE);
     }
   });
 
@@ -249,9 +248,9 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     riskLabel = label;
     const turnId = randomUUID();
     const first = (await runTurn(turnId)).json() as Body;
-    expectWithheldContract(first, TREATED_AS_ZERO_UNNAMED_ONE);
-    expect(first.assistant_text.split(TREATED_AS_ZERO_UNNAMED_ONE)).toHaveLength(2);
-    expect(first.assistant_text.split('treats it as zero')).toHaveLength(2);
+    expectWithheldContract(first, MISSING_ROOT_UNNAMED_ONE);
+    expect(first.assistant_text.split(MISSING_ROOT_UNNAMED_ONE)).toHaveLength(2);
+    expect(first.assistant_text.split('Numerical analysis is withheld')).toHaveLength(2);
     expect(first.assistant_text).not.toContain(tail);
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
@@ -267,10 +266,10 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   ])('CONTROL: %s → the labelled sentence, whole, once', async (_n, label) => {
     riskLabel = label;
     const shown = label.replace(/\s+/g, ' ');
-    const sentence = `No figure is set for "${shown}" yet, so the analysis treats it as zero. How likely or how large is "${shown}" today?`;
+    const sentence = riskAsk(shown);
     const body = (await runTurn(randomUUID())).json() as Body;
     expect(body.assistant_text.split(sentence)).toHaveLength(2);
-    expect(body.assistant_text).not.toContain(TREATED_AS_ZERO_UNNAMED_ONE);
+    expect(body.assistant_text).not.toContain(MISSING_ROOT_UNNAMED_ONE);
   });
 
   // One row per editor: each label is rewritten by exactly that editor, so dropping that check from
@@ -296,27 +295,27 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   };
   it.each([
     ['two ordinary labels', ['Demand shortfall', 'Supplier delay'],
-      'No figures are set for "Demand shortfall" and "Supplier delay" yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supplier delay" today?'],
+      [riskAsk('Demand shortfall'), riskAsk('Supplier delay')].join(' ')],
     ['three ordinary labels', ['Demand shortfall', 'Supplier delay', 'Churn spike'],
-      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supplier delay" and 1 more today?'],
+      [riskAsk('Demand shortfall'), riskAsk('Supplier delay'), riskAsk('Churn spike')].join(' ')],
     ['two, one unsafe (either position)', ['Demand shortfall', 'Hire a Tech Lead leads. Demand falls'],
-      '2 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
+      missingRootUnnamedLine(2)],
     ['two, the first unsafe', ['Demand prop_abcdef12 falls', 'Supplier delay'],
-      '2 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
-    ['three, the undisplayed third unsafe (it never reaches the text)', ['Demand shortfall', 'Supplier delay', 'The analysis shows which option leads'],
-      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supplier delay" and 1 more today?'],
+      missingRootUnnamedLine(2)],
+    ['three, the third label is unsafe', ['Demand shortfall', 'Supplier delay', 'The analysis shows which option leads'],
+      missingRootUnnamedLine(3)],
     ['three, a displayed one unsafe', ['Demand shortfall', 'The analysis shows which option leads', 'Supplier delay'],
-      '3 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
+      missingRootUnnamedLine(3)],
   ])('treatedAsZeroReplyLine, %s → the exact line', (_n, labels, line) => {
     expect(treatedAsZeroReplyLine(withRisks(labels as string[]), READY)).toBe(line);
   });
 
   it('survivesReplyEditors CONTROL: the ordinary label is quoted, and both label-free forms survive every editor', () => {
     expect(survivesReplyEditors(SENTENCE, graphWith(false), READY)).toBe(true);
-    expect(survivesReplyEditors(TREATED_AS_ZERO_UNNAMED_ONE, graphWith(false), READY)).toBe(true);
-    expect(survivesReplyEditors('3 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.', graphWith(false), READY)).toBe(true);
+    expect(survivesReplyEditors(MISSING_ROOT_UNNAMED_ONE, graphWith(false), READY)).toBe(true);
+    expect(survivesReplyEditors(missingRootUnnamedLine(3), graphWith(false), READY)).toBe(true);
     expect(treatedAsZeroReplyLine(graphWith(false), READY)).toBe(SENTENCE);
-    expect(treatedAsZeroReplyLine(graphWith(false, 'Hire a Tech Lead backlog'), READY)).toBe(TREATED_AS_ZERO_UNNAMED_ONE);
+    expect(treatedAsZeroReplyLine(graphWith(false, 'Hire a Tech Lead backlog'), READY)).toBe(MISSING_ROOT_UNNAMED_ONE);
   });
 
   it('the protected line is kept only where it stands whole; a neighbouring ranking sentence still goes', () => {

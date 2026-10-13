@@ -67,7 +67,7 @@ export interface MagnitudeNode {
   readonly quantity_frame?: unknown;
   /**
    * A GOAL's distance to its target in its own natural unit (£9,000 for "cut £45k by 20%"), when admission can read it.
-   * Only ever used to refuse an Olumi estimate sized FROM the target (`target_sized`, R3 #72 5899493499).
+   * Used to ask about an Olumi estimate equal to the target gap; equality does not invalidate its size.
    */
   readonly goal_gap?: number;
   /** The unit the drafter gave this quantity, for a node whose graph fields carry none. */

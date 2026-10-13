@@ -183,7 +183,7 @@ export interface CanonicalReadinessRepairProposal {
 }
 
 export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']> & {
-  /** Non-factor sampled roots disclosed as zero; never Run blockers. */
+  /** Legacy result carrier; new unknown sampled roots withhold numerical Runs. */
   readonly unvalued_roots?: Array<{
     node_id: string;
     label: string;
@@ -1321,10 +1321,12 @@ const statusQuoLevelAsk = (label: string): string =>
  * before any option changes it?": a share of the work done by the deadline has no level today, and the coach called that
  * sentence misleading three times. Every other root keeps the status-quo level ask, byte for byte.
  */
-const levelGapAsk = (gap: { id: string; label: string }, rawGraph: unknown): string => {
+const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph: unknown): string => {
   const eventTeam = draftedTeamPartOf(rawGraph)?.team;
   const eventAsk = eventTeam !== undefined && eventTeam.id === gap.id ? eventModelAsk(rawGraph) : null;
-  return eventAsk ?? statusQuoLevelAsk(gap.label);
+  if (eventAsk) return eventAsk;
+  if (gap.kind === 'risk') return `How likely or how large is "${gap.label}" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.`;
+  return statusQuoLevelAsk(gap.label);
 };
 
 function appendSemanticIssues(
@@ -1580,10 +1582,7 @@ export function assessCanonicalAnalysisReadiness(
     // option id) can answer it — excluding options does not give the remaining
     // arms a status-quo level.
     const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic, graph) : [];
-    // K1 covers every sampled root, including risks and outcomes: a label
-    // cannot make the engine's unknown-to-zero default a valid input.
-    const rootLevelGaps = levelGaps;
-    rootLevelGaps.forEach((gap, index) => {
+    levelGaps.forEach((gap, index) => {
       blockingIssues.push({
         issue_id: `level_${index + 1}`,
         code: 'MISSING_FACTOR_LEVEL',
@@ -1673,12 +1672,12 @@ export function assessCanonicalAnalysisReadiness(
             ...(blockingIssues.length === 0 && semantic.options.every((option) => option.status === 'ready')
               ? { status: 'ready', blocked_reason: undefined } : {}),
           } : {}),
-          ...(rootLevelGaps.length > 0
+          ...(levelGaps.length > 0
             ? {
                 status: 'needs_user_input',
                 blockers: [
                   ...activeSemanticBlockers,
-                  ...rootLevelGaps.map((gap) => ({
+                  ...levelGaps.map((gap) => ({
                     factor_id: gap.id,
                     factor_label: gap.label,
                     blocker_type: 'missing_value' as const,

@@ -37,18 +37,17 @@ const blockedGraph = JSON.parse(
 describe("Paul's blocked journey — the answer he should have received", () => {
   const readiness = buildCanonicalAnalysisReadyFromGraph(blockedGraph as never) as never;
 
-  it('the real graph still reproduces the single blocker', () => {
+  it('the real graph retains its mapping gap and now also requires the unknown risk level', () => {
     const r = readiness as { status?: string; readiness_issues?: readonly { code?: string }[] };
-    expect(r.status).toBe('needs_user_mapping');
-    expect(r.readiness_issues).toHaveLength(1);
-    expect(r.readiness_issues?.[0]?.code).toBe('OPTION_NEEDS_MAPPING');
+    expect(r.status).toBe('needs_user_input');
+    expect(r.readiness_issues?.map(i => i.code)).toEqual(['OPTION_NEEDS_MAPPING', 'MISSING_FACTOR_LEVEL']);
   });
 
-  it('names the ONE blocker, in the readiness authority’s own words', () => {
+  it('names both gaps, in the readiness authority’s own words', () => {
     const { assistant_text, offer_run_analysis } = buildUnblockAnalysisAnswer(readiness, {
       authorises_repair: true,
     });
-    expect(assistant_text).toContain("One thing in your model isn't settled yet");
+    expect(assistant_text).toContain("2 things in your model aren't settled yet");
     expect(assistant_text).toContain('Coordination Overhead Risk');
     expect(offer_run_analysis).toBe(false);
   });
@@ -74,7 +73,7 @@ describe("Paul's blocked journey — the answer he should have received", () => 
 
   it('CONTROL: with no repair authorisation it offers nothing extra', () => {
     const { assistant_text } = buildUnblockAnalysisAnswer(readiness, { authorises_repair: false });
-    expect(assistant_text).toContain("One thing in your model isn't settled yet");
+    expect(assistant_text).toContain("2 things in your model aren't settled yet");
     expect(assistant_text).not.toContain("I haven't changed anything");
   });
 });

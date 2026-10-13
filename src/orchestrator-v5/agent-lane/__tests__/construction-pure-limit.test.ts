@@ -32,9 +32,6 @@ const SPEND = 'annual_salary_spend';
 const GOAL = 'ship_the_new_platform';
 const DROPPED = `${SPEND}::${GOAL}`;
 const LIMIT = 'agent-lane:annual_salary_spend:<=';
-const SENTENCE = '"Annual salary spend" is kept as your limit, not as a cause of "ship the new platform": Olumi does not assume '
-  + 'it changes "ship the new platform" directly, so no link between them was drawn. If it does, say which way and the link can be added.';
-const E_PURE_LIMIT = [{ node_id: SPEND, label: 'Annual salary spend', dropped_edge_to: GOAL }];
 
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 const candidate = (edit: (c: Json) => void = () => {}): Json => {
