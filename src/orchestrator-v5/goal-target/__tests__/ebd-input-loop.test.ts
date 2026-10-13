@@ -120,7 +120,7 @@ describe('E3 — the door: the user\'s phrase is placed, and an unplaceable one 
     const { proposals, dispatch } = caps(), c = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { now: () => new Date('2026-10-12T08:52:27Z') });
     const typed = "If we don't increase our developer's output by 25%, in the next three months, we're unlikely to hit our launch deadline in six months time";
     const r = await c.proposeGoalDeadline!(ctx(typed) as never, { deadline_words: 'launch deadline in six months time', rationale: '' }) as Rec;
-    expect(r).toMatchObject({ ok: true, public_label: 'Is your deadline 12 April 2027 (6 months from 12 October 2026)?' });
+    expect(r).toMatchObject({ ok: true, public_label: 'Is your deadline 12 April 2027 (6 months from 12 October 2026)? Your words: “launch deadline in six months time”.' });
   });
   it('an unplaceable phrase: the Agent is told to ask the model\'s own deadline question, never "never offer a date"', async () => {
     const { proposals, dispatch } = caps(), c = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { now: () => new Date('2026-10-12T08:52:27Z') });

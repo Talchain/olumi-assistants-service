@@ -83,6 +83,30 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
     expect(priceLevelSent(sent)).toEqual(expect.objectContaining({ raw_value: 64, source: 'cee_hypothesis' }));
   });
 
+  it('A2h unknown-history option level stays unset even with an estimate label and basis', async () => {
+    const { caps, sent } = setup();
+    await caps.proposeNewOption({ ...ctxSaying(ADD_ALL), unverified_user_text: 'Raise Pro plan price to £64.' },
+      suggested({ value: 64, unit: '£', estimate: true, basis: 'a step above the £59 option' }) as never);
+    expect(priceLevelSent(sent)?.value).toBeNull();
+    expect(priceLevelSent(sent)).not.toHaveProperty('raw_value');
+  });
+
+  it('A2h unknown-history assumption revision cannot become Olumi authored', async () => {
+    const { caps, sent } = setup();
+    const out = await caps.proposeAssumptions({ ...ctxSaying('Use that price.'), unverified_user_text: 'Pro plan price is £64.' },
+      { assumptions: [{ factor_label: 'Pro plan price', value: 64, unit: 'GBP per month', basis: 'retained context', revise: true }] });
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(sent).toEqual([]);
+  });
+
+  it('A2h unknown-history intervention cannot become Olumi authored', async () => {
+    const { caps, sent } = setup();
+    const out = await caps.proposeOptionInterventions!({ ...ctxSaying('Use that price.'), unverified_user_text: 'Raise Pro plan price to £64.' },
+      { interventions: [{ option_label: 'Raise to £59 at Release', factor_label: 'Pro plan price', value: 64, unit: 'GBP per month', user_stated: false, basis: 'retained context' }] } as never);
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(sent).toEqual([]);
+  });
+
   it('⛔ the governing text permits what C2 adds, in every place it is stated (#1982 review B1)', () => {
     const route = HOST_TOOL_CONTRACT;
     const tools = readFileSync(new URL('../runtime/agent-tools.ts', import.meta.url), 'utf8');

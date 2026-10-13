@@ -129,7 +129,7 @@ describe('the deadline door on Paul\'s marketing turns', () => {
   it('RED (Paul\'s second turn): "Last Friday was the 9th of October." places his first turn\'s deadline — the card "Is your deadline 9 April 2027 (6 months from 9 October 2026)?"', async () => {
     const d = door();
     const r = await d.caps.proposeGoalDeadline!(saying(TURN_B, [TURN_A]), { deadline_words: A_WORDS, rationale: TURN_B }) as Rec;
-    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Basis supplied for this interpretation: ' + TURN_B }));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “6 months to launch our new features from last Friday”. Basis supplied for this interpretation: ' + TURN_B }));
     expect(d.proposals.get(String(r.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: TURN_B });
     expect(r.deadline.words).toBe(A_WORDS);
     expect(d.graph.nodes.find((n: Rec) => n.id === GOAL_ID).goal_horizon).toBeUndefined();
@@ -146,7 +146,7 @@ describe('the deadline door on Paul\'s marketing turns', () => {
     const d = door();
     const said = "Let's say six months from 9 October.";
     const r = await d.caps.proposeGoalDeadline!(saying(said, [TURN_A, TURN_B]), { deadline_words: SIX_FROM_9_OCT, rationale: said }) as Rec;
-    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Basis supplied for this interpretation: ' + said }));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “six months from 9 October”. Basis supplied for this interpretation: ' + said }));
     expect(d.proposals.get(String(r.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: said });
     expect(r.deadline.words).toBe(SIX_FROM_9_OCT);
     expect(d.graph.nodes.find((n: Rec) => n.id === GOAL_ID).goal_horizon).toBeUndefined();
@@ -176,7 +176,7 @@ describe('the deadline door on Paul\'s marketing turns', () => {
       deadline_words: A_WORDS, deadline_date: '2027-04-09', rationale: basis,
     }) as Rec;
     expect(r).toEqual(expect.objectContaining({ ok: true, mutated: false }));
-    expect(r.public_label).toBe('Is your deadline 9 April 2027 (about 5.9 months from 11 October 2026)? Olumi’s interpretation; check the date and reference before approving. Basis supplied for this interpretation: ' + basis);
+    expect(r.public_label).toBe('Is your deadline 9 April 2027 (about 5.9 months from 11 October 2026)? Your words: “6 months to launch our new features from last Friday”. Olumi’s interpretation; check the date and reference before approving. Basis supplied for this interpretation: ' + basis);
     const proposal = d.proposals.get(String(r.proposal_id))!;
     expect(proposal.provenance).toEqual({ authored_by: 'model_proposed', basis });
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: GOAL_ID,

@@ -389,6 +389,77 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       .toEqual(expect.arrayContaining([expect.objectContaining({ source: USER_SOURCE, raw_value: 120000 }), expect.objectContaining({ source: USER_SOURCE, raw_value: 65000 })]));
   }, 120_000);
 
+  it.each(['verified', 'unknown', 'model'])('A2h deadline phrase on real route (%s)', async origin => {
+    graphOf.set(SCENARIO, seedGraph());
+    const words = '30 April 2028';
+    if (origin !== 'model') await turn({ message: `Our deadline is ${words}.` });
+    let output: Record<string, any> = {};
+    script = [() => fnCall('propose_goal_deadline', { deadline_words: words, rationale: '' }),
+      body => { output = toolOutputIn(body); return say('Check the deadline card.'); }];
+    const result = await turn({ message: 'Prepare the deadline.', ...(origin === 'unknown' ? { agent_session_id: randomUUID() } : {}) });
+    const call = result._agent.tool_calls.find(c => c.name === 'propose_goal_deadline');
+    expect(call, JSON.stringify(output)).toMatchObject(origin === 'unknown' ? { ok: false, refusal: 'origin_unknown' } : { ok: true });
+    if (origin !== 'unknown') {
+      const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
+      const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
+      expect(proposal?.provenance.authored_by).toBe(origin === 'verified' ? 'user_stated' : 'model_proposed');
+      expect(proposal?.public_label).toContain(`${origin === 'verified' ? 'Your words' : 'Olumi’s wording'}: “${words}”.`);
+    }
+  });
+
+  it('A2h multiline verified figure retains its subject across a line break', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await turn({ message: 'Senior engineer salary\ncosts £120k a year each.' });
+    const result = await propose([factorArgs()[0]], 'Add that salary.');
+    expect(callOf(result)).toMatchObject({ ok: true });
+    const held = await heldOnLatestRow();
+    expect(held[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([
+      { basis: 'written_about', observed_state: { source: USER_SOURCE, raw_value: 120000 } },
+    ]);
+  });
+
+  it('A2h cold-session salaries keep unknown origin even though the AI sees the figures', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await turn({ message: FIG_MSG });
+    const before = bytes();
+    let saw = false, output: Record<string, unknown> = {};
+    script = [body => { saw = (body.input as { role?: string }[]).filter(i => i.role === 'user').some(i => JSON.stringify(i).includes(FIG_MSG)); return fnCall('propose_new_factor', { factors: factorArgs(), rationale: '' }); },
+      body => { output = toolOutputIn(body); return say('Please confirm the source.'); }];
+    const result = await turn({ message: 'Add those two to the model.', agent_session_id: randomUUID() });
+    expect(saw).toBe(true);
+    expect(callOf(result)).toMatchObject({ ok: false, refusal: 'today_not_set' });
+    expect(JSON.stringify(output)).toContain('origin stays unknown');
+    expect(await heldOnLatestRow()).toHaveLength(0);
+    expect(bytes()).toBe(before);
+  });
+
+  it.each([false, true])('A2h hiring times preserve source across the real route (cold=%s)', async cold => {
+    const { admitCandidateModel } = await import('../admit-model.js');
+    const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
+    const admitted = admitCandidateModel({ goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+      unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+    graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
+    const words = 'A Tech lead would take at least 3 months to get in the door.';
+    await turn({ message: words });
+    let saw = false, output: Record<string, unknown> = {};
+    script = [body => { saw = (body.input as { role?: string }[]).filter(i => i.role === 'user').some(i => JSON.stringify(i).includes(words)); return fnCall('propose_hiring_times', {
+      options: [{ option_id: 'event_option_1', starts: [{ quote: 'at least 3 months' }] }] }); },
+      body => { output = toolOutputIn(body); return say('Check the source.'); }];
+    const result = await turn({ message: 'Use those hiring times.', ...(cold ? { agent_session_id: randomUUID() } : {}) });
+    expect(saw).toBe(true);
+    const call = result._agent.tool_calls.find(c => c.name === 'propose_hiring_times');
+    expect(call, JSON.stringify(output)).toMatchObject(cold ? { ok: false, refusal: 'origin_unknown' } : { ok: true });
+    if (cold) expect(JSON.stringify(output)).toContain('origin stays unknown');
+    else {
+      expect(JSON.stringify(result)).toContain('at least 3 months');
+      expect(JSON.stringify(result)).toContain('you said');
+    }
+  });
+
   // ⛔ DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it ABOUT it. The
   // unscoped matcher asked only whether the figure is somewhere in the message, so a swap and the £400k limit passed.
   const CONJOINED = 'Seniors are £120k a year and juniors £65k a year, with a £400k salary budget.';

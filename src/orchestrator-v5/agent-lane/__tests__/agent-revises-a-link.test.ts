@@ -245,7 +245,7 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
 
   it('the route binds this turn\'s typed message as user_turn_text (a chip click binds nothing)', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route).toContain("user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };");
+    expect(route).toContain("user_turn_text: typedNow ?? '', user_text: userWordsOf(authorshipWords.verified, typedNow)");
   });
 
   it('RED (#1984 review B2): a denial anywhere earlier in the clause, or a question, names no band', () => {

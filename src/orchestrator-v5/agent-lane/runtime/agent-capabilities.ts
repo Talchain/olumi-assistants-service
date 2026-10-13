@@ -1,3 +1,5 @@
+import { plainWords } from '../../goal-target/hiring-times.js';
+import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
@@ -4105,7 +4107,7 @@ export function createAgentCapabilities(
             ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
         provenance: { authored_by: authoredBy, basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${question}${replaces}${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
+        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
       });
       proposals.put(proposal);
       return {
@@ -5363,14 +5365,18 @@ export function createAgentCapabilities(
       const phrase = plainOf(words).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const typed = typeof ctx.user_turn_text === 'string' ? plainOf(ctx.user_turn_text) : '';
       const writes = (text: string): boolean => text !== '' && new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').test(text);
-      // ⭐ Recovery Batch B (Paul's marketing test, 11 Oct): "We have 6 months to launch our new features from last Friday" in one
-      // message, "Last Friday was the 9th of October." in the next. An EARLIER message's phrase is the user's deadline only when
-      // THIS message dates its "last <weekday>" — never otherwise (an earlier duration never stands in for today's: Codex r1).
       const named = lastWeekdayNamedIn(words);
       const datedNow = named !== null && weekdayDatedIn(typed) === named;
-      const fromEarlier = !writes(typed) && datedNow && writes(typeof ctx.user_text === 'string' ? plainOf(ctx.user_text) : '');
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const heldHumanWords = proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id).some(held => {
+        const proposal = proposals.get(held.proposal_id);
+        return proposal?.provenance.authored_by === 'user_stated' && proposal.operations.some(op =>
+          op.op === 'set_goal_deadline' && writes(plainOf(String((op.value as { words?: unknown })?.words ?? ''))));
+      });
+      const origin = statementOrigin(writes(typed) || writes(plainOf(ctx.user_text ?? '')) || heldHumanWords,
+        writes(plainOf(ctx.unverified_user_text ?? '')) || writes(plainOf(g.brief_text ?? '')));
+      if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
       const typedAsOfDates = [...typed.matchAll(/(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu)].map(match => match[1]);
       const asOf = args.reference_date;
@@ -5381,7 +5387,7 @@ export function createAgentCapabilities(
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
-        writes(typed) || fromEarlier, true);
+        origin === 'human', true);
     },
 
     /**
@@ -5418,11 +5424,19 @@ export function createAgentCapabilities(
         const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
         const heldQuotes = heldStatementsOf(held);
         const starts = o.starts as readonly { months?: unknown }[];
+        const origins = quotes.map(quote => statementOrigin(
+          quoteStatedFor(texts, quote, label) === 'ok' || held.some(n => {
+            const statement = n.observed_state.extra_share_by_date.statement;
+            return heldQuotes.includes(quote) && statement?.quote === quote && statement.source !== 'model_proposed';
+          }),
+          quoteSpansIn(plainWords(ctx.unverified_user_text ?? ''), plainWords(quote)).length > 0
+          || quoteSpansIn(plainWords(g.brief_text ?? ''), plainWords(quote)).length > 0));
+        if (origins.includes('unknown')) return refuse('origin_unknown', UNKNOWN_ORIGIN_DETAIL);
         const plan = planStarts(quotes, estimate, held.length, quotes.map((quote, i) => {
           const prior = starts[i]?.months === undefined && heldQuotes.includes(quote)
             ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date
             : undefined;
-          return { months: starts[i]?.months, stated: quoteStatedFor(texts, quote, label) === 'ok',
+          return { months: starts[i]?.months, stated: origins[i] === 'human',
             ...(prior?.figures ? { held: { statement: prior.statement,
               lead_low: prior.figures.lead_low, lead_high: prior.figures.lead_high } } : {}) };
         }));
@@ -5749,6 +5763,11 @@ export function createAgentCapabilities(
         const quote = readable && !writtenAbout && soleFigure && typeof existing === 'number'
           && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, turnWords, { ...ownerScope, nearOnly: true })
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
+        if (statementOrigin(writtenAbout || quote !== null,
+          figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
+          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text)) === 'unknown') {
+          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        }
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
@@ -6233,6 +6252,10 @@ export function createAgentCapabilities(
         // A rejected range has no bearing on the ordinary level or its authorship.
         const userWrote = claimedByUser && (likelyRange !== undefined
           || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
+        if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
+          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text)) === 'unknown') {
+          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        }
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
@@ -8963,6 +8986,11 @@ export function createAgentCapabilities(
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
           const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          if (statementOrigin(wrote, figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
+            || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text)) === 'unknown') {
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: UNKNOWN_ORIGIN_DETAIL });
+            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
+          }
           const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
           // A part of the user's split in another period is refused with its own reason, even as Olumi's estimate.
           if (!wrote && split.kind === 'period_mismatch' && split.factor_ids.includes(f.id)) {
@@ -9077,6 +9105,8 @@ export function createAgentCapabilities(
           }
           const levelUnit = unit ?? today.unit;
           const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
+          if (statementOrigin(wrote, figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text)
+            || figureTheUserWrote(asked, levelUnit, g.brief_text)) === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
           const basis = lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' ? lv.basis.trim() : undefined;
           if (!wrote && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
           if (!wrote && contradictsItsName(asked, levelUnit, plan.label)) {
@@ -9624,7 +9654,7 @@ export function createAgentCapabilities(
       // The route's retained typed-word records exclude chips, assistant text and source-unknown restored rows.
       // Reusing a verified earlier figure does not change its author. Multiple figures still need pairing approval.
       const turnText = ctx.user_turn_text ?? '';
-      const sourceText = ctx.user_text ?? turnText;
+      const sourceMessages = ctx.verified_user_messages ?? [ctx.user_text ?? turnText];
       const confirmPairing = inCall.length >= 2 || figuresWrittenIn(turnText) >= 2;
       // Existing held quantity records retain their independently verified figure/range source across turns.
       const retained = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).flatMap(hold => {
@@ -9698,7 +9728,7 @@ export function createAgentCapabilities(
           continue;
         }
         // Read each verified message separately: a figure in a different message cannot lend its subject to this one.
-        const source = [turnText, ...sourceText.split('\n').reverse()].find(text =>
+        const source = [turnText, ...sourceMessages.slice().reverse()].find(text =>
           quoteOfFigure(t.value as number, todayUnit, text) !== null
           && (confirmPairing || figureTheUserWroteFor(t.value as number, todayUnit, text, newFactorScopeIn(g, label, todayUnit, inCall))));
         const prior = retained.find(r => norm(r.label) === norm(label)
@@ -9706,9 +9736,12 @@ export function createAgentCapabilities(
         const priorHuman = prior?.member !== undefined && prior.member.basis !== 'olumi_estimate'
           && provenanceOf({ value: prior.os }).origin === 'human';
         const quote = source === undefined ? (priorHuman ? prior!.member!.quote ?? null : null) : quoteOfFigure(t.value, todayUnit, source);
-        const ownsIt = source !== undefined || priorHuman;
-        if (!ownsIt && ((prior !== undefined && prior.member === undefined)
-          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null)) {
+        const origin = statementOrigin(source !== undefined || priorHuman,
+          (prior !== undefined && prior.member === undefined)
+          || quoteOfFigure(t.value, todayUnit, ctx.unverified_user_text ?? '') !== null
+          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null);
+        const ownsIt = origin === 'human';
+        if (origin === 'unknown') {
           todayNotSet.push({ factor: label, value: t.value,
             reason: `The retained source of ${shown} for "${label}" is not verified. Its origin stays unknown; nothing was prepared. Ask for its source rather than relabelling it as Olumi’s estimate.` });
           continue;
