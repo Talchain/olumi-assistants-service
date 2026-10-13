@@ -1283,79 +1283,12 @@ export function buildAnalysisReadyPayload(
     (o) => o.status === "needs_user_mapping"
   ).length;
 
-  // === Unreachable controllable factor check ===
-  // Check if any factor nodes in the graph have zero inbound option→factor edges
-  // AND zero factor→factor inbound edges from a factor that does have option edges.
-  // Only controllable factors (not external) trigger this blocker.
-  const optionEdgeTargets = new Set<string>();
-  for (const edge of graph.edges) {
-    if (nodeKindLookup.get(edge.from) === "option" && nodeKindLookup.get(edge.to) === "factor") {
-      optionEdgeTargets.add(edge.to);
-    }
-  }
-
-  // BFS through factor→factor edges to find transitively reachable factors
-  const factorForwardAdj = new Map<string, string[]>();
-  for (const edge of graph.edges) {
-    if (nodeKindLookup.get(edge.from) === "factor" && nodeKindLookup.get(edge.to) === "factor") {
-      const list = factorForwardAdj.get(edge.from) ?? [];
-      list.push(edge.to);
-      factorForwardAdj.set(edge.from, list);
-    }
-  }
-  const transitivelyReachableFactors = new Set<string>(optionEdgeTargets);
-  const bfsQueue = [...optionEdgeTargets];
-  while (bfsQueue.length > 0) {
-    const current = bfsQueue.shift()!;
-    for (const next of factorForwardAdj.get(current) ?? []) {
-      if (!transitivelyReachableFactors.has(next)) {
-        transitivelyReachableFactors.add(next);
-        bfsQueue.push(next);
-      }
-    }
-  }
-
-  // Build set of factors that already have interventions in the options
-  const factorsWithInterventions = new Set<string>();
-  for (const opt of analysisOptions) {
-    for (const factorId of Object.keys(opt.interventions ?? {})) {
-      factorsWithInterventions.add(factorId);
-    }
-  }
-
-  // Find unreachable controllable factors
-  const unreachableControllableBlockers: AnalysisBlockerT[] = [];
-  for (const node of graph.nodes) {
-    if (node.kind !== "factor") continue;
-    // Exclude constraint nodes by ID prefix (compound-goals creates constraint_* nodes with kind=constraint,
-    // but guard against any that might be mis-tagged as factor)
-    if (node.id.startsWith("constraint_")) continue;
-    if (transitivelyReachableFactors.has(node.id)) continue;
-    // Skip factors that already have mapped interventions (reachable via V3 option data)
-    if (factorsWithInterventions.has(node.id)) continue;
-    // Only controllable factors (or undefined category) trigger this blocker.
-    // External and observable factors are contextual — they influence outcomes but
-    // aren't intervention targets, so they're legitimate without option connections.
-    const category = node.category;
-    if (category === "external") continue;
-    if (category === "observable") continue;
-    // Only category === "controllable" or category === undefined triggers blocker
-    unreachableControllableBlockers.push({
-      factor_id: node.id,
-      factor_label: node.label ?? node.id,
-      blocker_type: "missing_value" as const,
-      message: `Factor "${node.label ?? node.id}" is not connected to any option`,
-      suggested_action: "add_value" as const,
-    });
-  }
-  // === End unreachable controllable factor check ===
+  // An unacted-on factor is context. Its missing current level is still checked by canonical Run readiness.
 
   // Determine payload status (priority: needs_user_input > needs_user_mapping > needs_encoding > ready)
   let payloadStatus: AnalysisReadyStatusT;
   if (dedupedBlockers.length > 0) {
     payloadStatus = "needs_user_input";
-  } else if (unreachableControllableBlockers.length > 0) {
-    payloadStatus = "needs_user_mapping";
   } else if (hasIncompleteOptions) {
     payloadStatus = "needs_user_mapping";
   } else if (hasEncodingNeeded) {
@@ -1386,27 +1319,12 @@ export function buildAnalysisReadyPayload(
   // Add user_questions when status is needs_user_mapping
   // (uniqueQuestions is guaranteed to be non-empty due to fallback above)
   if (payload.status === "needs_user_mapping") {
-    // Generate questions for unreachable factors if needed
-    if (unreachableControllableBlockers.length > 0 && uniqueQuestions.length === 0) {
-      const factorLabels = unreachableControllableBlockers
-        .map((b) => b.factor_label)
-        .slice(0, 3);
-      uniqueQuestions.push(
-        `Which options should affect: ${factorLabels.join(", ")}?`
-      );
-    }
     payload.user_questions = uniqueQuestions;
   }
 
   // Add blockers when status is needs_user_input (Task 2B, deduplicated per Task 7)
   if (dedupedBlockers.length > 0) {
     payload.blockers = dedupedBlockers;
-  }
-
-  // Add unreachable controllable factor blockers (informational, alongside existing blockers)
-  if (unreachableControllableBlockers.length > 0) {
-    if (!payload.blockers) payload.blockers = [];
-    payload.blockers.push(...unreachableControllableBlockers);
   }
 
   // Emit telemetry with option status breakdown for observability

@@ -367,17 +367,16 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(approveChipOf(t1), 'the approve chip is offered').toBeDefined();
   }, 120_000);
 
-  it('(k) RED (F4): figures the user typed in an EARLIER message are not this message\'s words → refused and said, nothing held, byte-identical', async () => {
+  it('W14 earlier figures are proposed as Olumi’s with no pre-approval graph write', async () => {
     graphOf.set(SCENARIO, seedGraph());
     await turn({ message: FIG_MSG });
     const before = bytes();
-    let out: Record<string, unknown> = {};
-    const t2 = await propose(factorArgs(), 'Add those two to the model.', (o) => { out = o; });
-    expect(callOf(t2), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
-    expect(String(JSON.stringify(out)), JSON.stringify(out)).toContain('in this message');
-    expect(approveChipOf(t2)).toBeUndefined();
+    const t2 = await propose(factorArgs(), 'Add those two to the model.');
+    expect(callOf(t2)).toMatchObject({ ok: true, mutated: false });
+    const held = await heldOnLatestRow();
+    expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis: string }[]).every(m => m.basis === 'olumi_estimate')).toBe(true);
+    expect(approveChipOf(t2)).toBeDefined();
     expect(bytes()).toBe(before);
-    expect(newFactors()).toEqual([]);
   }, 120_000);
 
   // ⛔ DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it ABOUT it. The
@@ -496,21 +495,26 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     nextScenario();
     graphOf.set(SCENARIO, journeyE());
     const t2 = await propose(one(120000, 'Junior engineer salary'), 'Senior engineers cost £120k a year each.');
-    expect(callOf(t2), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'today_not_set' }));
+    expect(callOf(t2)).toMatchObject({ ok: true, mutated: false });
+    expect((await heldOnLatestRow())[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([{ basis: 'olumi_estimate' }]);
   }, 120_000);
 
-  it('(b) RED: a figure the user did NOT write → refused and said; NOTHING held (all-or-nothing, the written one too); byte-identical', async () => {
+  it('W14 real path: an unquoted estimate remains Olumi’s after card approval and reload', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
-    let out: Record<string, unknown> = {};
-    const t1 = await propose(factorArgs(), 'Senior engineers cost £120k a year each.', (o) => { out = o; });
-    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
-    expect(JSON.stringify(out['today_not_set']), JSON.stringify(out)).toContain('Junior engineer salary');
-    expect(String(JSON.stringify(out)), JSON.stringify(out)).toContain('do not state 65000');
-    expect(approveChipOf(t1)).toBeUndefined();
-    expect(await heldOnLatestRow()).toEqual([]);
+    const t1 = await propose(factorArgs(), 'Senior engineers cost £120k a year each.');
+    expect(callOf(t1)).toMatchObject({ ok: true, mutated: false });
     expect(bytes()).toBe(before);
-    expect(newFactors()).toEqual([]);
+    const held = await heldOnLatestRow();
+    expect(held[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([
+      { observed_state: { source: 'user_override' } },
+      { basis: 'olumi_estimate', observed_state: { source: 'cee_inference', extractionType: 'inferred', raw_value: 65000 } },
+    ]);
+    const approve = approveChipOf(t1)!;
+    const done = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(done._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(newFactors().find(n => n.label === 'Junior engineer salary')?.observed_state)
+      .toMatchObject({ source: 'cee_inference', extractionType: 'inferred', raw_value: 65000 });
   }, 120_000);
 
   it('(c) RED: the model moves before the approval → refused, nothing written; and the DOOR refuses a stale base with no row', async () => {
@@ -590,8 +594,20 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(bytes()).toBe(before);
   }, 120_000);
 
+  it('W14 a signed today quantity survives the real hold and approval without an invented frame', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await propose([{ label: 'Net contribution', unit: 'GBP/year', today: { value: -120000 }, affects: 'Annual salary spend', direction: 'positive' }], 'Consider net contribution.');
+    expect(callOf(t1)).toMatchObject({ ok: true, mutated: false });
+    const approve = approveChipOf(t1)!;
+    const done = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(done._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true }));
+    const os = graphNow().nodes.find(n => n.label === 'Net contribution')?.observed_state;
+    expect(os).toMatchObject({ value: -120000, unit: 'GBP/year', source: 'cee_inference' });
+    expect(os).not.toHaveProperty('cap');
+  }, 120_000);
+
   it.each([
-    ['a negative figure', -120000],
+    ['a missing figure', null],
     ['a non-number', 'a lot'],
   ])('(f) RED: %s → refused, nothing held, byte-identical', async (_what, value) => {
     graphOf.set(SCENARIO, seedGraph());

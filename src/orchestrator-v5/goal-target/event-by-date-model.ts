@@ -315,8 +315,8 @@ export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof E
   if (!Array.isArray(candidate.options)) return EVENT_BY_DATE_REFUSALS[1];
   const options = candidate.options.filter(o => o.is_status_quo !== true);
   if (options.length === 0) return EVENT_BY_DATE_REFUSALS[2];
-  if (options.some(o => !validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
-  return options.some(o => o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
+  if (!options.some(o => validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
+  return options.some(o => validEventCapacity(o.added_capacity) && o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
 }
 
 export function admitEventByDate(candidate: CandidateModel, brief = ''): AdmittedModel {

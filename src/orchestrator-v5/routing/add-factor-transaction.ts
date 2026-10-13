@@ -192,8 +192,8 @@ export const USER_TODAY_SOURCE = USER_EDIT_SOURCE;
  * the change adds two factors or more, so Olumi's PAIRING was shown on the approval card with their own words (`quote`)
  * and their approval made it theirs. The hold is the durable record (the receipt schema is strict).
  */
-export type UserTodayBasis = 'written_about' | 'confirmed_by_approval';
-export const USER_TODAY_BASES: readonly UserTodayBasis[] = ['written_about', 'confirmed_by_approval'];
+export type UserTodayBasis = 'written_about' | 'confirmed_by_approval' | 'olumi_estimate';
+export const USER_TODAY_BASES: readonly UserTodayBasis[] = ['written_about', 'confirmed_by_approval', 'olumi_estimate'];
 /** The longest quote a hold carries (the card shows at most `FIGURE_QUOTE_MAX` plus its ellipses). */
 export const USER_TODAY_QUOTE_MAX = 400;
 
@@ -213,11 +213,18 @@ export interface UserTodayLevel {
 export function isUserTodayObservedState(os: unknown): boolean {
   if (os === null || typeof os !== 'object' || Array.isArray(os)) return false;
   const { range, ...o } = os as Record<string, unknown>;
-  if (o.source !== USER_TODAY_SOURCE) return false;
+  if (o.source !== USER_TODAY_SOURCE && o.source !== 'cee_inference') return false;
+  if (o.source === 'cee_inference' && o.extractionType !== 'inferred') return false;
+  if (o.source === USER_TODAY_SOURCE && o.extractionType !== undefined && o.extractionType !== 'explicit') return false;
   // Recovery Batch B (L6): a range rides only beside the user's own figure, and only as `isStatedLevelRange` admits it.
   if (range !== undefined && !isStatedLevelRange(range, o)) return false;
   // The shape rule is the stated-baseline one, verbatim: only the source differs.
-  return isStatedTodayObservedState({ ...o, source: 'brief_extraction' });
+  // Signed raw quantities are retained without inventing a zero-based frame. Readiness still owns convertibility.
+  const shape = { ...o, source: 'brief_extraction', extractionType: 'explicit' };
+  if (typeof o.value === 'number' && Number.isFinite(o.value) && o.value < 0 && o.cap === undefined) {
+    return isStatedTodayObservedState({ ...shape, value: 0 });
+  }
+  return isStatedTodayObservedState(shape);
 }
 
 /**
@@ -266,7 +273,7 @@ export function isUserStatedRange(range: unknown): boolean {
 export function levelRangePointBasis(os: Readonly<Record<string, unknown>>): 'stated_figure' | 'midpoint' | undefined {
   const parsed = StoredInterventionRange.safeParse(os.range);
   if (!parsed.success) return undefined;
-  if (isStatedLevelRange(os.range, os)) return 'stated_figure';
+  if (os.source !== 'cee_inference' && isStatedLevelRange(os.range, os)) return 'stated_figure';
   const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
   const olumis = os.source === 'cee_inference' && os.user_material_unverified !== true;
   return olumis && figure === rangePointEstimate({ min: parsed.data.low, max: parsed.data.high }) ? 'midpoint' : undefined;
@@ -306,6 +313,7 @@ export function readUserTodayMember(raw: unknown): readonly UserTodayLevel[] | u
     if (basis !== undefined && !(USER_TODAY_BASES as readonly unknown[]).includes(basis)) return undefined;
     if (quote !== undefined && (typeof quote !== 'string' || quote.trim() === '' || quote.length > USER_TODAY_QUOTE_MAX)) return undefined;
     if (basis === 'confirmed_by_approval' && quote === undefined) return undefined;
+    if (((os as Record<string, unknown>).source === 'cee_inference') !== (basis === 'olumi_estimate')) return undefined;
     out.push({
       factor_id: id,
       observed_state: { ...(os as Record<string, unknown>) },
@@ -330,7 +338,7 @@ export function stampNewUserTodayLevels<T extends PatchOperation>(
   if (new Set(levels.map((l) => l.factor_id)).size !== levels.length) return { ok: false };
   const out = [...operations];
   for (const l of levels) {
-    if (!isUserTodayObservedState(l.observed_state)) return { ok: false };
+    if (!isUserTodayObservedState(l.observed_state) || (l.observed_state.source === 'cee_inference') !== (l.basis === 'olumi_estimate')) return { ok: false };
     const at = out.flatMap((o, i) => (o.op === 'add_node' && o.path === l.factor_id ? [i] : []));
     if (at.length !== 1) return { ok: false };
     const value = out[at[0]!]!.value;

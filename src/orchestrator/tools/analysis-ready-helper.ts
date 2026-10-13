@@ -915,14 +915,8 @@ export function blockerIssue(
     ...(factorId ? { factor_id: factorId } : {}),
     ...(factorLabel ? { factor_label: factorLabel } : {}),
   };
-  if (status === 'needs_user_mapping' && !optionId && factorId) {
-    return {
-      ...common,
-      code: 'UNREACHABLE_CONTROLLABLE_FACTOR',
-      category: 'option_mapping',
-      message: `Choose which option changes${suffix} and by how much.`,
-    };
-  }
+  // R5: being controllable without an option is no longer a Run blocker.
+  if (status === 'needs_user_mapping' && !optionId && factorId) return null;
   // A carrier with no usable `blocker_type` at all is malformed, not
   // off-contract. Its handling is unchanged: inventing a blocker out of noise
   // would be a different defect from the one being fixed here.
