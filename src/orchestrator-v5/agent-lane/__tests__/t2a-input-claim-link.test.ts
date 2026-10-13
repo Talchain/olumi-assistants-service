@@ -7,7 +7,7 @@ import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/ut
 import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
 import type { SessionTurnWrite } from '../../session/store.js';
 import type { AgentToolContext } from '../runtime/agent-tools.js';
-import { linkBandTheUserStated } from '../../goal-target/input-claim-context.js';
+import { latestLinkBands, linkBandTheUserStated } from '../../goal-target/input-claim-context.js';
 
 beforeEach(() => __setUseAppendV6ForTest(false));
 const scenario = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -94,9 +94,12 @@ describe('T2-A retained input_claim on the exact link through proposal, approval
     'Price has a weak effect on MRR. Is that right?',
     // Superseded: the latest statement for the pair wins.
     'Price has a weak effect on MRR. Actually, Price has a strong effect on MRR.',
-    // T2A3 buddy review: two bands in one clause name no band; a framing clause covers the rest of its message.
-    'Price has a weak effect on MRR, and our evidence is strong.',
+    // T2A3 buddy review: a framing clause covers the rest of its message; quoted first person stays Olumi's.
     'Olumi supplied these estimates. Price has a weak effect on MRR.',
+    'Olumi says, "I think Price has a weak effect on MRR."',
+    // A disowning message credits nothing, for every link.
+    'None of these are my estimates. Price has a weak effect on MRR.',
+    'Price has a weak effect on MRR. Quality has a weak effect on MRR. I disagree with all these estimates.',
   ])('no credit from another pair, clause or band: %s', text => {
     expect(linkBandTheUserStated('weak', text, nodes, 'price', 'mrr')).toBe(false);
   });
@@ -263,5 +266,43 @@ describe('T2A3 (DL, PL 22:07Z): first-person claims after an attribution, and "<
     const result = await journey('Price', {}, verified, { user_turn_text: turn });
     expect(author(result)).toBe(want);
     expect(result.edge.provenance.source).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
+  });
+});
+
+describe('T2A3 buddy review 3 (Codex, read-only, 35aae691): the band belongs to the link\u2019s phrase; disowning reaches every link', () => {
+  it.each([
+    ['Price is £49 and MRR growth is strong.', 'strong', 'model_proposed'],
+    ['Price affects MRR, and our evidence is strong.', 'strong', 'model_proposed'],
+    ['Price has a weak effect on MRR, and our evidence is strong.', 'strong', 'model_proposed'],
+    // The user's own band in the same sentence is still theirs (never demoted by an unrelated band).
+    ['Price has a weak effect on MRR, and our evidence is strong.', 'weak', 'user_stated'],
+    ['Price has a weak effect on MRR, while Olumi says Quality is strong.', 'weak', 'user_stated'],
+    ['Olumi supplied these estimates. But my own estimate is that Price has a weak effect on MRR.', 'weak', 'user_stated'],
+    ['Price \u2192 MRR is strong.', 'strong', 'user_stated'],
+  ] as const)('"%s" proposing %s → %s', async (words, strength, want) => {
+    const result = await journey('Price', { strength }, words, { user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
+    expect(author(result)).toBe(want);
+    expect(result.edge.provenance.source).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
+  });
+  it.each([
+    'None of these are my estimates. Price has a weak effect on MRR. Quality has a weak effect on MRR.',
+    'Price has a weak effect on MRR. Quality has a weak effect on MRR. I disagree with all these estimates.',
+  ])('a disowning message credits NO link: %s', async words => {
+    for (const from of ['Price', 'Quality']) {
+      const result = await journey(from, {}, words, { user_turn_text: words });
+      expect(author(result), from).toBe('model_proposed');
+    }
+  });
+  it('withdrawing earlier estimates now stops history crediting EVERY link', async () => {
+    const verified_user_messages = ['Price has a weak effect on MRR. Quality has a weak effect on MRR.', 'I withdraw all my earlier estimates.'];
+    for (const from of ['Price', 'Quality']) {
+      const result = await journey(from, {}, verified_user_messages.join('\n'),
+        { verified_user_messages, user_turn_text: verified_user_messages[1] });
+      expect(author(result), from).toBe('model_proposed');
+    }
+  });
+  it('a selected reverse link cannot borrow an outgoing plural ("Price effects are strong." with MRR \u2192 Price selected)', () => {
+    expect(latestLinkBands('Price effects are strong.', nodes, 'mrr', 'price', { bound: [{ from: 'mrr', to: 'price' }] })).toBeNull();
+    expect(latestLinkBands('Price effects are strong.', nodes, 'price', 'mrr', { bound: [] }), 'control: the outgoing link').toEqual(['strong']);
   });
 });

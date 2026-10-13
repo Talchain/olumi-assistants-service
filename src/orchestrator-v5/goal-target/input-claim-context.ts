@@ -17,7 +17,31 @@ const OLUMI_SAID = new RegExp([
   String.raw`\baccording\s+to\s+(?:olumi|you|the\s+(?:ai|assistant|model))\b`,
   String.raw`\b(?:olumi['’]s|your|the\s+(?:ai|assistant|model)['’]s)\s+(?:estimate|suggestion|guess|view|reading|proposal|recommendation)s?\b`,
 ].join('|'), 'i');
-const FIRST_PERSON_CLAIM = /\b(?:I\s+(?:think|believe|reckon|estimate|expect|would\s+say)|in\s+my\s+view|my\s+(?:own\s+)?(?:estimate|view|reading|guess)\s+is)\b/i;
+const FIRST_PERSON_CLAIM = String.raw`(?:I\s+(?:think|believe|reckon|estimate|expect|would\s+say)|in\s+my\s+view|my\s+(?:own\s+)?(?:estimate|view|reading|guess)\s+is)\b`;
+/** The user's own claim after a CONTRAST ("…, but I think …"); a quoted "I think" inside Olumi's words is not one. */
+const CONTRAST_THEN_OWN = new RegExp(String.raw`\b(?:but|while|whereas|however|although|though|yet)\b[,\s]+${FIRST_PERSON_CLAIM}`, 'i');
+/** A clause that STARTS with the user's own claim ends an "Olumi supplied these:" frame. */
+const OWN_AT_START = new RegExp(String.raw`^(?:(?:but|however|still|actually)[,\s]+)?${FIRST_PERSON_CLAIM}`, 'i');
+/**
+ * ⛔ A message that disowns or withdraws estimates as a whole ("None of these are my estimates.", "I disagree with all these
+ * estimates.", "I withdraw all my earlier estimates.") credits NO link: the withhold reaches every target, and it supersedes
+ * every earlier statement.
+ */
+const DISOWNS = new RegExp([
+  String.raw`\b(?:withdraw|retract|take\s+back|scrap|disregard|ignore)\s+(?:all\s+(?:of\s+)?|every\s+one\s+of\s+)?(?:my|those|these|the)\s+(?:earlier\s+|previous\s+|other\s+)?(?:estimates|figures|numbers|bands|strengths)\b`,
+  String.raw`\b(?:none|neither)\s+of\s+(?:these|those|them|the\s+\w+)\s+(?:are|is|were|was)\s+(?:my|mine)\b`,
+  String.raw`\b(?:these|those|they)\s+(?:are|were)\s+not\s+my\s+(?:estimates|figures|numbers|bands|views?)\b`,
+  String.raw`\bI\s+(?:disagree|don['\u2019]?t\s+agree|do\s+not\s+agree)\s+with\s+(?:all|any|both|each)\b`,
+].join('|'), 'i');
+/** Where a phrase stops being about what it started on: a comma, a semicolon, or a joining word. */
+const CONJUNCTION = /[,;]|\b(?:and|but|while|whereas|or|although|though|yet)\b/i;
+const upToConjunction = (text: string): string => { const m = CONJUNCTION.exec(text); return m === null ? text : text.slice(0, m.index); };
+/**
+ * The bands written in a SLICE of the user's clause. The whole clause has already passed the question and denial reading;
+ * the slice is read behind a neutral subject, so its own first word ("has a weak effect…", "are weak") is never taken for
+ * a question-opening auxiliary (`AUXILIARY_FIRST`).
+ */
+const bandsIn = (text: string): readonly InfluenceBand[] => BANDS.filter(band => bandTheUserWrote(band, `It${text}`));
 /** A NEXT clause that names nothing and questions or disputes ("Is that right?", "I disagree") points back at this one. */
 const DISPUTES_WHAT_CAME_BEFORE = /^(?:(?:but|hmm|well|honestly)[,\s]+)?(?:(?:is|was)\s+(?:that|this|it)\s+(?:right|true|correct|so|accurate)\b|I\s+(?:disagree|don['’]?t\s+agree|do\s+not\s+agree)\b|I(?:['’]m|\s+am)\s+not\s+(?:sure|convinced)(?:\s+(?:about\s+)?(?:that|this|it)\b|\s*[.!]?$))/i;
 /** ⭐ T2A3 (DL, Paul's 64c5eccc): "set human capacity, delegable workload, … effects to strong" sizes every listed source's links. */
@@ -26,15 +50,18 @@ const LIST_GLUE = /^(?:and|or|the|its|their|our|s)$/i;
 
 /**
  * The bands of the user's LATEST statement about this directed link, or null when they made none. `messages` are the
- * user's verified messages in order (or one text). A clause states a band for the link when the user asserts it (no
- * question, denial, report of Olumi's claim, or dispute in the next clause), it holds ONE band word (two, as in
- * "… weak effect on MRR, and our evidence is strong", say no band: nothing is credited), and:
- *  (i) its two resolved ends are this link's from and to, in that order; or, in THIS message only (`current`):
- *  (ii) the selection binds exactly ONE directed link, this one, and the clause names ONE end of it and no other entity
- *       (both ends named is (i) only, so a selection never licenses the reversed reading); or
- *  (iii) "<sources> effects|links|impacts|influences" / "the effects of <sources>": the named entities form ONE list at
- *       the plural noun, none is named elsewhere in the clause, and this link LEAVES one of them.
- * Later statements supersede earlier ones ("weak", then "Actually … strong" is strong).
+ * user's verified messages in order (or one text). A clause (or the user's part of it, beside an attribution) states a
+ * band for the link when the user asserts it (no question, denial, report of Olumi's claim, or dispute in the next clause)
+ * and the band belongs to the link's own phrase:
+ *  (i) its two resolved ends are this link's from and to, in that order, and the band sits between them ("Price has a weak
+ *      effect on MRR") or right after the target with nothing joined in between ("Price → MRR is strong"); or, in THIS
+ *      message only (`current`):
+ *  (ii) the selection binds exactly ONE directed link, this one, and the clause names ONE end of it, no other entity and no
+ *      plural, with the band in the phrase after that end ("Monthly churn is strong."); or
+ *  (iii) "<sources> effects|links|impacts|influences … <band>" / "the effects of <sources> …": the named entities form ONE
+ *      list at the plural noun, none is named elsewhere in the clause, and this link LEAVES one of them.
+ * Two bands in that phrase say no band. A disowning message credits nothing and supersedes everything before it. Later
+ * statements supersede earlier ones ("weak", then "Actually … strong" is strong).
  */
 export function latestLinkBands(
   messages: string | readonly string[] | undefined, nodes: readonly Entity[], from: string, to: string,
@@ -44,31 +71,39 @@ export function latestLinkBands(
   const names = (node: Entity, words: string): boolean => factorTheUserNamed(node.label, words,
     { options: [], others: nodes.filter(other => other.id !== node.id).map(other => other.label) });
   const namedIn = (clause: string): readonly Entity[] => nodes.filter(node => names(node, clause));
-  const statesPair = (clause: string, ends: readonly Entity[]): boolean => {
-    if (ends.length !== 2 || !ends.some(node => node.id === from) || !ends.some(node => node.id === to)) return false;
-    // Resolve each end at its first mention using the existing entity matcher. Reversed statements do not
-    // license the proposed direction; ambiguous or passive readings can stay Olumi's estimate.
-    const firstMention = (node: Entity): number => {
-      for (const word of clause.matchAll(/[\p{L}\p{N}]+/gu)) {
-        const end = word.index! + word[0].length;
-        if (names(node, clause.slice(0, end))) return end;
-      }
-      return Infinity;
-    };
-    const sourceAt = firstMention(ends.find(node => node.id === from)!);
-    const targetAt = firstMention(ends.find(node => node.id === to)!);
-    if (sourceAt >= targetAt) return false;
+  // Resolve an entity at its first mention using the existing entity matcher: the index just past that word.
+  const firstMention = (clause: string, node: Entity): number => {
+    for (const word of clause.matchAll(/[\p{L}\p{N}]+/gu)) {
+      const end = word.index! + word[0].length;
+      if (names(node, clause.slice(0, end))) return end;
+    }
+    return Infinity;
+  };
+  /** (i) The bands the pair's own phrase holds, or null when the clause is not about this directed pair. */
+  const pairBands = (clause: string, ends: readonly Entity[]): readonly InfluenceBand[] | null => {
+    if (ends.length !== 2 || !ends.some(node => node.id === from) || !ends.some(node => node.id === to)) return null;
+    const sourceAt = firstMention(clause, ends.find(node => node.id === from)!);
+    const targetAt = firstMention(clause, ends.find(node => node.id === to)!);
+    // Reversed statements do not license the proposed direction; ambiguous or passive readings stay Olumi's estimate.
     // Mention order is not causal order in "Price is affected by MRR" or "Price gets its effect from MRR".
-    // Without an affirmative reading of this direction, keep the staging estimate fallback.
-    return !/\b(?:by|from|due\s+to|because\s+of)\b/i.test(clause.slice(sourceAt, targetAt));
+    if (sourceAt >= targetAt) return null;
+    const between = clause.slice(sourceAt, targetAt);
+    if (/\b(?:by|from|due\s+to|because\s+of)\b/i.test(between)) return null;
+    // ⛔ T2A3 buddy review: "Price is £49 and MRR growth is strong" names no link strength; a band after the target
+    // counts only when nothing joins another statement between the ends or before the band.
+    return [...new Set([...bandsIn(between), ...(CONJUNCTION.test(between) ? [] : bandsIn(upToConjunction(clause.slice(targetAt))))])];
   };
   // ⛔ T2A3 (#2993 check, blocking 1; PL 22:07Z): the selection must bind ONE directed link, and the words name an end of it.
   const bound = current?.bound ?? [];
-  const namesBoundLink = (ends: readonly Entity[]): boolean => bound.length === 1 && bound[0]!.from === from
-    && bound[0]!.to === to && ends.length === 1 && (ends[0]!.id === from || ends[0]!.id === to);
-  const listedSources = (clause: string, ends: readonly Entity[]): readonly Entity[] => {
+  const boundBands = (clause: string, ends: readonly Entity[]): readonly InfluenceBand[] | null => {
+    if (bound.length !== 1 || bound[0]!.from !== from || bound[0]!.to !== to || ends.length !== 1
+      || (ends[0]!.id !== from && ends[0]!.id !== to) || PLURAL_EFFECTS.test(clause)) return null;
+    return bandsIn(upToConjunction(clause.slice(firstMention(clause, ends[0]!))));
+  };
+  /** (iii) The phrase after the plural noun when the named entities are its listed sources and this link leaves one. */
+  const pluralBands = (clause: string, ends: readonly Entity[]): readonly InfluenceBand[] | null => {
     const noun = PLURAL_EFFECTS.exec(clause);
-    if (noun === null || ends.length === 0) return [];
+    if (noun === null || ends.length === 0 || !ends.some(node => node.id === from)) return null;
     const inList = (word: string): boolean => LIST_GLUE.test(word)
       || ends.some(node => wordsOf(node.label).some(w => sameWord(w, word.toLowerCase())));
     const wordsIn = (text: string) => [...text.matchAll(/[\p{L}\p{N}]+/gu)];
@@ -80,39 +115,44 @@ export function latestLinkBands(
     let start = before.length;
     const lead = wordsIn(before);
     for (let k = lead.length - 1; k >= 0 && inList(lead[k]![0]); k -= 1) start = lead[k]!.index!;
-    if (whole(before.slice(start), before.slice(0, start) + after)) return ends;
+    if (whole(before.slice(start), before.slice(0, start) + after)) return bandsIn(upToConjunction(after));
     // "the effects of X and Y …": the run that starts right after "of".
     const of = /^\s+of\b/i.exec(after);
     if (of !== null) {
       const rest = after.slice(of[0].length);
       let end = 0;
       for (const w of wordsIn(rest)) { if (!inList(w[0])) break; end = w.index! + w[0].length; }
-      if (whole(rest.slice(0, end), before + rest.slice(end))) return ends;
+      if (whole(rest.slice(0, end), before + rest.slice(end))) return bandsIn(upToConjunction(rest.slice(end)));
     }
-    return [];
+    return null;
   };
   let latest: readonly InfluenceBand[] | null = null;
   for (const text of typeof messages === 'string' ? [messages] : messages ?? []) {
     const clauses = clausesOf(text);
+    if (clauses.some(clause => DISOWNS.test(clause))) { latest = []; continue; }
     let framedAsOlumis = false;
     for (const [i, whole] of clauses.entries()) {
-      let clause = whole;
+      if (OWN_AT_START.test(whole)) framedAsOlumis = false;
+      if (framedAsOlumis) continue;
+      // The user's parts of the clause: all of it, or beside an attribution, the words before it and a contrasted own claim.
       const said = OLUMI_SAID.exec(whole);
+      let parts = [whole];
       if (said !== null) {
         const after = whole.slice(said.index + said[0].length);
-        const own = FIRST_PERSON_CLAIM.exec(after);
-        if (own === null) { framedAsOlumis ||= namedIn(whole).length === 0; continue; }
-        clause = after.slice(own.index);
+        const own = CONTRAST_THEN_OWN.exec(after);
+        if (own === null && namedIn(whole).length === 0) framedAsOlumis = true;
+        parts = [whole.slice(0, said.index), ...(own === null ? [] : [after.slice(own.index)])];
       }
       const next = clauses[i + 1];
-      if (framedAsOlumis || linkEffectQuoteContextMiss(clause, text) !== null
-        || (next !== undefined && DISPUTES_WHAT_CAME_BEFORE.test(next) && namedIn(next).length === 0)) continue;
-      const bands = BANDS.filter(band => bandTheUserWrote(band, clause));
-      if (bands.length === 0) continue;
-      const ends = namedIn(clause);
-      const aboutThisLink = statesPair(clause, ends) || (current !== undefined
-        && (namesBoundLink(ends) || listedSources(clause, ends).some(node => node.id === from)));
-      if (aboutThisLink) latest = bands.length === 1 ? bands : [];
+      if (next !== undefined && DISPUTES_WHAT_CAME_BEFORE.test(next) && namedIn(next).length === 0) continue;
+      for (const part of parts) {
+        if (part.trim() === '' || linkEffectQuoteContextMiss(part.trim(), text) !== null) continue;
+        const ends = namedIn(part);
+        const bands = pairBands(part, ends)
+          ?? (current === undefined ? null : boundBands(part, ends) ?? pluralBands(part, ends));
+        if (bands === null || bands.length === 0) continue;
+        latest = bands.length === 1 ? bands : [];
+      }
     }
   }
   return latest;
