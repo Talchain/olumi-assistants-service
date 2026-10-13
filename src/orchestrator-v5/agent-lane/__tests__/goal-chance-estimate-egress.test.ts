@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as screenLines from '../goal-chance-screen-lines.js';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
+import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 
 const line: GoalChanceScreenLine = {
@@ -234,4 +235,21 @@ it('K-a: an unbound bare chance is withheld without inventing an option alias or
   expect(withEstimateGoalPointsAtEgress({ assistant_text }, {
     analysisResult: result, graph, current: true, userAuthoredTexts: [unbound],
   }).assistant_text).toBe(assistant_text);
+});
+
+
+describe('B2j horizon prose and numerical licence', () => {
+  it('withholds a win share called a chance and an unlicensed percentage at an untested horizon', () => {
+    const held = { ...graph, nodes: graph.nodes.map(n => n.kind === 'goal' ? { ...n, goal_horizon_months: 6 } : n) };
+    for (const text of ['Raise to £59 has a 71% chance of meeting your goal.', 'Raise to £59 has a 46% chance.']) {
+      const run = { enrichment: { inference_warnings: [], win_share: { raise: 0.71 } } };
+      expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult: run, graph: held, current: true }).assistant_text).toBe('');
+    }
+  });
+  it('preserves a conditional on-track question while the horizon is untested', () => {
+    const text = 'If hiring starts earlier, could the option be on track by month six?';
+    const held = { ...graph, nodes: graph.nodes.map(n => n.kind === 'goal' ? { ...n, goal_horizon_months: 6 } : n) };
+    expect(goalHorizonVerdict(held, result.enrichment)).toBe('withhold');
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult: result, graph: held, current: true }).assistant_text).toBe(text);
+  });
 });

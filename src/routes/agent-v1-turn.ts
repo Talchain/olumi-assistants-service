@@ -763,17 +763,27 @@ export const MODEL_RELATIVE_NAMING_INSTRUCTION =
  * own licence (`analysis.goal_chance_licence`, CEE's ≥ 10-point rule, Science d5), never its own reading of the figures.
  * Words follow Wording c6 (6 Oct): "similar chances" below the rule. The egress guard is cut 6.
  */
+/**
+ * ⭐ G (AIE #94 6133027121, approved verbatim): said ONCE, here, where the Agent receives the selected Run's licence
+ * (`analysis.goal_chance_licence`, with its target, `chance_words`, `notes` and `period_end_assumption`). A canonical note beside
+ * a figure does not control free prose elsewhere; this does not repair licensing, source loss or approval.
+ */
+export const SELECTED_RUN_SCOPE_INSTRUCTION = 'Describe the selected Run using its licensed target wording and scope. If it scores only part of the user\'s '
+  + 'goal, name that target and retain the unscored conditions; never call its chance the chance of meeting the whole goal. Keep its '
+  + 'provisional or timing-assumption qualification in your own explanation.';
+
 export const GOAL_CHANCE_RANKING_INSTRUCTION =
-  'Comparing options by their chance of meeting the goal (any probability_of_goal you are given, including goal_certainty): only as '
+  'Comparing options by their goal chances (any probability_of_goal you are given, including goal_certainty): only as '
   + 'the GOAL_CHANCE_LICENSED record of the result you are reporting allows (CURRENT MODEL STATE analysis.goal_chance_licence, or that '
   + 'record among a run result\u2019s inference_warnings), never by your own reading of the figures; a licence from an earlier result never '
   + 'speaks for a newer one. '
   + 'If its form is highest or highest_all_likely_to_miss, you may say that the option whose option_id is its leader_option_id has the highest '
-  + 'chance of meeting the goal in this model, naming it by its display label. '
-  + 'If its form is similar, say the options in its similar_option_ids have similar chances of meeting the goal in this model; never say one is '
+  + 'chance in this model, naming it by its display label. '
+  + 'If its form is similar, say the options in its similar_option_ids have similar chances in this model; never say one is '
   + 'higher, ahead or more likely. '
   + 'For any other form, or with no such licence, give each option\u2019s chance in its recorded order and never rank, order or single '
-  + 'out options by it.';
+  + 'out options by it. '
+  + SELECTED_RUN_SCOPE_INSTRUCTION;
 
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
@@ -2274,8 +2284,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           else if (current.tippingTurn?.kind === 'found') {
             if (!settleTippingPointCoaching(current.tippingTurn, replayText).passed)
               replayText = 'I could not verify that threshold explanation against the current result.';
-          } else if (/\d|threshold|\b(?:rises?|falls?|cross(?:es)?|lead|ahead|most runs)\b/iu.test(replayText)) {
-            replayText = 'The current result does not support that threshold explanation.';
           }
         }
         boundControl.push(TALK_IT_THROUGH_CHIP);
@@ -2829,7 +2837,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.
-    const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    const authorshipWords = histories.authorshipWords(sessionId);
+    const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(authorshipWords.verified, typedNow), verified_user_messages: [...authorshipWords.verified, ...(typedNow === null ? [] : [typedNow])], unverified_user_text: authorshipWords.unknown.join("\n") };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
     // Publishing typed words to in-memory session history is not a durable save, but "Nothing was saved" can't cover it.
     if (typedNow !== null) recordUnsavableEffect();
@@ -4097,8 +4106,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // its input, and withhold an explanation that fails the existing factual check.
     if (tippingTurn?.kind === 'found' && !settleTippingPointCoaching(tippingTurn, text).passed) {
       text = 'I could not verify that threshold explanation against the current result.';
-    } else if (tippingTurn?.kind === 'no_signal' && /\d|threshold|\b(?:rises?|falls?|cross(?:es)?)\b/iu.test(text)) {
-      text = 'The current result does not support that threshold explanation.';
     } else if (tippingTurn?.kind === 'unavailable') {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
     }

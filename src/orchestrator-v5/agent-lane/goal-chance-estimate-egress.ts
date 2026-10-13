@@ -1,4 +1,3 @@
-import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
 import { agentLicenceRecordOf } from '../goal-target/goal-chance-licence.js';
 import { licensedGoalChanceLinesForAgent } from './goal-chance-screen-lines.js';
 import { foldQuotes } from './quote-normalisation.js';
@@ -32,7 +31,6 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const [goalId] = goalIds;
   const goal = goals.find(n => n?.id === goalId);
   const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
-  const horizonWithheld = goalHorizonVerdict(context.graph, enrichment) === 'withhold';
   const lines = licensedGoalChanceLinesForAgent(context.analysisResult, context.graph, true);
   // Zero links is not zero estimates: the licence also counts shared starting
   // values and this option's own settings. Never borrow another option's setting.
@@ -141,15 +139,6 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         cursor = sentenceEnd;
         const start = rowStart + at, end = start + sentence.length;
         const subject = plain(sentence);
-        // A present-day comparison cannot establish an unmodelled deadline.
-        // Exact human quotes are already opaque above; leave stated goals and limitations intact.
-        if (horizonWithheld && !/\b(?:not|cannot|can't|doesn't|unknown|unmodelled|untested)\b/u.test(subject)
-          && (/\bon track\b/u.test(subject)
-            || (/\b(?:option|analysis|results?|forecast)\b/u.test(subject)
-              && /\b(?:by month|in time|within \d+ months?)\b/u.test(subject)))) {
-          edits.push({ start, end, replacement: '' });
-          continue;
-        }
         // Percentages inside node labels are names, not narrated figures (e.g. 'Raise prices 10%').
         let figures = subject;
         for (const label of [...lines.map(l => l.label), ...(typeof goalLabel === 'string' ? [goalLabel] : [])]) {

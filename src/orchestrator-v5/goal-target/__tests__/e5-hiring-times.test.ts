@@ -121,6 +121,11 @@ describe('Paul\'s sentence → each start, with whose figure it is (AIE S8 rule 
   ] as const)('%s', (quote, form) => expect(readHiringStart(quote)).toEqual(form));
   it.each(['soon', 'at least 3 months, within 5 months', 'a while', '3 months then 5 months'])('unreadable: %s', q => expect(readHiringStart(q)).toBeNull());
 
+  it.each([NaN, Infinity, -Infinity, -1, 61])('W13 rejects non-finite or out-of-bounds typed months %s', months => {
+    expect(planStarts(['after onboarding'], { lead_low: 2, lead_high: 4, monthly_share: 12 }, 1,
+      [{ months, stated: false }])).toMatchObject({ refusal: 'hiring_timings_unusable' });
+  });
+
   const Y = (value: number, quote: string) => ({ value, role: 'stated', source: 'user_override', quote });
   const O = (value: number) => ({ value, role: 'olumi_estimate', source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } });
   const D = (value: number, quote: string) => ({ value, role: 'derived', source: 'user_assumption', reviewed_by_user: { intent: 'confirm' }, quote });
@@ -159,8 +164,8 @@ describe('Paul\'s sentence → each start, with whose figure it is (AIE S8 rule 
   });
   it('DL CUT: forms Olumi cannot model as quoted get ONE refusal; R16 and the two-start limit keep their own', () => {
     const est = { lead_low: 2, lead_high: 4, monthly_share: 20 };
-    expect(planStarts(['at least 5 months'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'at least 5 months' });
-    expect(planStarts(['within 1 month'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'within 1 month' });
+    expect(planStarts(['at least 5 months'], est, 1)).toMatchObject({ parts: [{ lead_low: Y(5, 'at least 5 months'), lead_high: O(5) }] });
+    expect(planStarts(['within 1 month'], est, 1)).toMatchObject({ parts: [{ lead_low: O(1), lead_high: Y(1, 'within 1 month') }] });
     expect(planStarts(['another a month later'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'another a month later' });
     expect(planStarts(['soon'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'soon' });
     expect(planStarts(['in 2 months'], est, 2)).toEqual({ refusal: 'fewer_starts_than_held' }); // AIE R6 keeps its own words

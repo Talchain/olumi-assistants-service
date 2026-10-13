@@ -192,7 +192,7 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     // A quote the model never held, and the user never typed, still binds nothing.
     expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: DEVS,
       starts: [{ quote: 'within 1 month' }, { quote: 'the second developer would join two months after the first' }] }] }), ctx(later) as never, w.caps))
-      .toMatchObject({ ok: false, refusal: 'hiring_time_not_stated' });
+      .toMatchObject({ ok: true, mutated: false, public_label: expect.stringContaining('Olumi proposed') });
   });
 
   it('"about N" is offered as Olumi\'s reading of the user\'s approximate time, never as an exact human figure', async () => {
@@ -211,28 +211,52 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     expect(w.registers).toHaveLength(0);
   });
 
-  it('⛔ attribution: his Tech-lead time is never offered for the developers', async () => {
+  it('W12 attribution: a time bound to another option is offered as Olumi’s', async () => {
     const w = world();
     const r = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: DEVS, starts: [{ quote: 'at least 3 months' }] }] }),
       ctx(PAUL) as never, w.caps) as Rec;
-    expect(r).toMatchObject({ ok: false, refusal: 'hiring_time_not_for_option' });
-    expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);
+    expect(r).toMatchObject({ ok: true, mutated: false, public_label: expect.stringContaining('Olumi proposed') });
+    expect(w.proposals.get(r.proposal_id)?.provenance.authored_by).toBe('model_proposed');
   });
 
-  it('a figure he did not type is refused (re-read, never retyped); "at least" past Olumi\'s latest gets the ONE cut refusal', async () => {
+  it('W12/W13 an unbound figure is labelled; "at least" past Olumi\'s latest is proposed with a valid bound', async () => {
     const w = world();
     expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: 'at least 4 months' }] }] }),
-      ctx(PAUL) as never, w.caps)).toMatchObject({ ok: false, refusal: 'hiring_time_not_stated' });
+      ctx(PAUL) as never, w.caps)).toMatchObject({ ok: true, mutated: false, public_label: expect.stringContaining('Olumi proposed') });
     const later = 'For the tech lead it would be at least 6 months.';
     expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: 'at least 6 months' }] }] }),
-      ctx(later) as never, w.caps)).toMatchObject({ ok: false, refusal: 'hiring_timings_unusable' });
+      ctx(later) as never, w.caps)).toMatchObject({ ok: true, public_label: expect.stringContaining('starts after 6 months') });
+  });
+
+  it('W13 typed months travel through dispatch, approval, storage and provenance readback', async () => {
+    const w = world();
+    const out = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
+      starts: [{ quote: 'after onboarding', months: 5 }] }] }), ctx('Consider onboarding time.') as never, w.caps) as Rec;
+    expect(out).toMatchObject({ ok: true, public_label: expect.stringContaining('Olumi proposed') });
+    expect(w.registers).toHaveLength(0);
+    expect(await press(w, out.proposal_id)).toMatchObject({ applied: true });
+    const c = w.graph().nodes.find((n: Rec) => n.id === 'event_capacity_1').observed_state.extra_share_by_date;
+    expect(c).toMatchObject({ lead_low: 5, lead_high: 5, statement: { source: 'model_proposed' },
+      figures: { lead_low: { role: 'olumi_estimate', source: 'user_assumption' }, lead_high: { role: 'olumi_estimate' } } });
+    expect(shareOptionEstimateWords(w.graph(), TECH)).not.toContain('your hiring time');
+    const follow = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
+      starts: [{ quote: 'after onboarding' }, { quote: 'another a month later' }] }] }), ctx('Add another start for the tech lead.') as never, w.caps) as Rec;
+    expect(follow).toMatchObject({ ok: true, public_label: expect.stringContaining('one person after 5 months and another after 6 months') });
+    expect(follow.public_label).toContain('Olumi proposed');
+
+  });
+  it.each([null, '5', -1, 61])('W13 invalid typed months %j never prepares or writes', async months => {
+    const w = world();
+    expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
+      starts: [{ quote: 'in 3 months', months }] }] }), ctx('For a tech lead in 3 months.') as never, w.caps))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'hiring_timings_unusable' });
+    expect(w.registers).toHaveLength(0);
   });
 
   // Paul's test (DL, 12 Oct): a refusal that is not a §7.4 blocking class names ONE next step and what the model keeps.
   it.each([
     ['too many starts', 'With two developers, one in 2 months, then in 3 months, then in 4 months.', DEVS, ['in 2 months', 'in 3 months', 'in 4 months'], 'too_many_starts'],
     ['a start tied to a ranged one', 'With two developers, one in 2-3 months and another a month later.', DEVS, ['in 2-3 months', 'another a month later'], 'relative_to_range'],
-    ['unusable timings (at least past Olumi\'s latest)', 'For the tech lead it would be at least 6 months.', TECH, ['at least 6 months'], 'hiring_timings_unusable'],
   ])('a refusal never ends the turn without a next step: %s → ONE ask, and Olumi\'s estimate stays, labelled', async (_n, said, option, quotes, refusal) => {
     const w = world();
     const r = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: option, starts: quotes.map(quote => ({ quote })) }] }),

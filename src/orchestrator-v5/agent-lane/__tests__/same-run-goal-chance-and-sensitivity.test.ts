@@ -217,7 +217,7 @@ describe('W3 controls: no scope promotion, no withheld/stale fact revival', () =
 
 describe('W3 instruction and discriminating mutants', () => {
   it('RED at base: headline uses licensed chance display, and both measurement scopes are explicit', () => {
-    expect(HOST_TOOL_CONTRACT).toContain('the per-option headline is its chance of meeting the goal, in this model, on current information');
+    expect(HOST_TOOL_CONTRACT).toContain('the per-option headline is its chance, in this model, on current information');
 
     expect(HOST_TOOL_CONTRACT).toContain("Use the current licensed goal chance with its target, scope, assumptions and limits. Never substitute an option's winning share or ranking credit for that chance. You may explain a supplied chance as the proportion of scored simulation draws meeting its licensed target when that is how the supplied result was computed.");
     expect(HOST_TOOL_CONTRACT).not.toContain('reaches the target in about N% of model runs');

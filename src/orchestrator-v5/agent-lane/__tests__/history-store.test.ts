@@ -122,3 +122,30 @@ describe('a stored history is VALID INPUT by construction', () => {
   });
 });
 
+
+
+describe('A2h authorship grounding keeps boundaries and source tiers', () => {
+  it('retains a verified multiline statement after more than forty typed messages', () => {
+    const store = new HistoryStore();
+    const first = 'Senior engineer salary\ncosts £120k per year.';
+    let messages: unknown[] = [];
+    for (let i = 0; i < 45; i++) {
+      const text = i === 0 ? first : `message ${i}`;
+      store.recordTyped('s', text);
+      messages = [...store.get('s'), { role: 'user', content: [{ type: 'input_text', text }] }];
+      store.set('s', messages);
+    }
+    expect(store.typedWords('s')).not.toContain(first);
+    expect(store.authorshipWords('s').verified).toContain(first);
+    expect(store.authorshipWords('s').unknown).toEqual([]);
+  });
+  it('keeps both windowed and older cold-seeded rows unknown', () => {
+    const store = new HistoryStore(10, 2);
+    store.seed('s', conversation(4), []);
+    expect(store.authorshipWords('s').verified).toEqual([]);
+    expect(store.authorshipWords('s').unknown).toEqual(['q0', 'q1', 'q2', 'q3']);
+    store.recordTyped('s', 'q1');
+    expect(store.authorshipWords('s').unknown).toContain('q1');
+    expect(store.authorshipWords('s').verified).toContain('q1');
+  });
+});

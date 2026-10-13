@@ -27,9 +27,8 @@
  *    The day is a calendar date (day and month, optionally the year) or "last <weekday>". A start day without a year is
  *    the reference year's: it is NEVER rolled into next year (a start day in the past is normal), so a count that then
  *    ends on or before today is not placed (`null`, the user is asked). "last <weekday>" is the user's own dating of it
- *    ("Last Friday was the 9th of October", `readStatedWeekdayDate`, accepted only when that date IS that weekday), else
- *    counted back from the reference day only when no reading is a guess: when this week's <weekday> is still ahead of
- *    it (or is it), last week's; otherwise `null`;
+ *    ("Last Friday was the 9th of October", `readStatedWeekdayDate`, accepted only when that date IS that weekday).
+ *    Otherwise `null`: the host must never select the date of a relative weekday (DL ruling A2g).
  *  · a date that is today or has passed is not a deadline: `null`.
  */
 
@@ -61,7 +60,7 @@ export type Weekday = (typeof WEEKDAYS)[number];
 export interface DeadlineReadOptions {
   /** The user's own dating of "last <weekday>" (`readStatedWeekdayDate` over their message): used instead of counting back. */
   readonly lastWeekday?: { readonly weekday: Weekday; readonly date: string };
-  /** `false`: no reference day to count "last <weekday>" back from, so it is never counted (the user is asked). Default true. */
+  /** Legacy caller option, retained for compatibility. The host never selects relative weekdays, regardless of this flag. */
   readonly relativeWeekdays?: boolean;
   /**
    * EBD E3: `true` keeps the closed lead-word list as the only words a phrase may open with (the brief's own date-span
@@ -182,18 +181,6 @@ function readCalendarDay(raw: string, today: string): string | null {
   return iso(y, parts.m0, parts.d);
 }
 
-/**
- * "last <weekday>" counted back from `today` (the reference day), only where no reading is a guess: when this week's
- * <weekday> is still ahead of `today`, last week's is the only one; on that weekday itself, a week ago. When this week's
- * has already passed ("last Friday" on a Sunday: two days ago, or nine?) it is `null` and the user is asked.
- */
-function lastWeekdayBefore(today: string, weekday: Weekday): string | null {
-  const r = weekdayIndexOf(today);
-  const w = WEEKDAYS.indexOf(weekday);
-  if (w < r) return null;
-  return addDays(today, -(r - w + 7));
-}
-
 /** The start day of a "from <day>" count; `null` when it cannot be read without guessing. */
 function readStartDay(raw: string, today: string, opts: DeadlineReadOptions): string | null {
   const t = raw.trim().replace(/,$/, '').replace(/^the[ \t]{1,2}/, '');
@@ -201,7 +188,9 @@ function readStartDay(raw: string, today: string, opts: DeadlineReadOptions): st
   if (last !== null) {
     const weekday = last[1] as Weekday;
     if (opts.lastWeekday !== undefined && opts.lastWeekday.weekday === weekday) return opts.lastWeekday.date;
-    return opts.relativeWeekdays === false ? null : lastWeekdayBefore(today, weekday);
+    // A reference day does not establish which occurrence the user meant. Only explicit dating
+    // can resolve it here; an AI-proposed deadline is handled separately by the approval door.
+    return null;
   }
   return readCalendarDay(t, today);
 }

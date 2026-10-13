@@ -199,13 +199,13 @@ describe('(c) the Run tool hands the route its #416 ask (`identity_ask_say`), re
   };
 
   it('RED: a #416 Run → identity_ask_say, the same words the route owes', async () => {
-    const r = await caps([W416]).runAnalysis(ctx, { reason: 'Run it.' }) as Rec;
+    const r = await caps([W416]).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Rec;
     expect(r.identity_ask_say).toBe(identityAskLineFor(blocks([W416])[0], T1B));
     expect(r.identity_ask_say).toContain('How many ‘Starter-tier subscribers’ would ‘Launch starter tier’ lead to?');
   });
 
   it('CONTROL: a #422 Run carries none', async () => {
-    expect(await caps([W422]).runAnalysis(ctx, { reason: 'Run it.' })).not.toHaveProperty('identity_ask_say');
+    expect(await caps([W422]).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null })).not.toHaveProperty('identity_ask_say');
   });
 });
 

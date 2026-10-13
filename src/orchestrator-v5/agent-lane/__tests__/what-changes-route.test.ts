@@ -89,10 +89,11 @@ const WITHHELD: Record<string, () => void> = {
 describe('the real route: "What would change the result?" → measured tipping points, 0 model calls', () => {
   let app: FastifyInstance;
   let modelCalls = 0;
+  let providerText = 'An improvised answer.';
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       modelCalls += 1;
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'An improvised answer.' }] }] }), { status: 200 });
+      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: providerText }] }] }), { status: 200 });
     }));
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
@@ -119,6 +120,7 @@ describe('the real route: "What would change the result?" → measured tipping p
   };
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
+    providerText = 'An improvised answer.';
     modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; dispatch.during = null; dispatch.run = null; dispatch.block = null; dispatch.gate = null;
     storeCtl.hideOnce = null; storeCtl.replayKey = null;
     served.state = D3.body.analysis_state; served.result = D3.body.analysis_result; served.ready = undefined; served.reads = 0; served.afterRead = null;
@@ -228,6 +230,18 @@ describe('the real route: "What would change the result?" → measured tipping p
     const body = await post(PRESS.id, PRESS.message);
     expect(dispatch.calls).toHaveLength(1);
     expect(body.assistant_text).toBe(await coaching());
+  });
+
+  it('B2j: a legitimate limitation with a digit survives live and replay without a measured threshold', async () => {
+    providerText = 'The model has 2 options; this analysis does not establish a threshold.';
+    await killSwitchOff(async () => {
+      const turn = randomUUID();
+      const live = await post(PRESS.id, PRESS.message, turn);
+      expect(live.assistant_text).toBe(providerText);
+      const replay = await post(PRESS.id, PRESS.message, turn);
+      expect(replay.assistant_text).toBe(providerText);
+      expect(modelCalls).toBe(1);
+    });
   });
 
   it('W8: a "no threshold" coaching answer (no_signal) is about ITS Run too: Run B landing before the final read is never answered', async () => {

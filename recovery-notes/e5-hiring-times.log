@@ -1,0 +1,18 @@
+
+ RUN  v4.1.10 /private/tmp/cx-A2e
+
+{"level":"info","time":1791855532679,"pid":37680,"hostname":"Mac.net","event":"cee.compute.sigma_floor","path":"edges.4.strength.std","kind":"sigma_non_positive","repaired_to":0.001,"request_id":"req-e5-load"}
+{"level":"info","time":1791855532680,"pid":37680,"hostname":"Mac.net","event":"cee.compute.sigma_floor","path":"edges.12.strength.std","kind":"sigma_non_positive","repaired_to":0.001,"request_id":"req-e5-load"}
+{"level":"info","time":1791855532685,"pid":37680,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855532689,"pid":37680,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855532702,"pid":37680,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-e5","scenario_id":"eeeeeeee-5555-4eee-8eee-eeeeeeeeeeee","node_ids":["event_capacity_1","event_capacity_2","event_capacity_2_start_2"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1791855532704,"pid":37680,"hostname":"Mac.net","event":"run_analysis.user_links_held_at_one","request_id":"req-e5","scenario_id":"eeeeeeee-5555-4eee-8eee-eeeeeeeeeeee","msg":"run_analysis held links at existence 1.0: a user range, a validated definition or route-once (wire copy only; ids only)"}
+{"level":"info","time":1791855532711,"pid":37680,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-e5","scenario_id":"eeeeeeee-5555-4eee-8eee-eeeeeeeeeeee","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"warn","time":1791855532728,"pid":37680,"hostname":"Mac.net","event":"v5.run_analysis.goal_certainty_not_recorded","request_id":"req-e5","scenario_id":"eeeeeeee-5555-4eee-8eee-eeeeeeeeeeee","reason":"no_option_comparison","msg":"run_analysis — goal certainty not recorded on the Run (absent = not recorded; the Run itself stands)"}
+{"level":"info","time":1791855532759,"pid":37680,"hostname":"Mac.net","event":"cee.leader_licence.shadow","request_id":"req-e5","scenario_id":"eeeeeeee-5555-4eee-8eee-eeeeeeeeeeee","run_id":"acf0a2390bece3ae081d5db26029543b3b381c9e8a1aa1fda8ace16af9e09416","verdict":"withheld","leader_option_id":null,"reason":"admission_exploratory","caveats":[],"admission_mode":"absent","claim_reason":null,"failed_closed":false,"disagreements":[{"site":"CV","live":true,"verdict":false},{"site":"LC","live":true,"verdict":false}],"msg":"A2 L1 leader-licence shadow verdict (no behaviour change)"}
+
+ Test Files  1 passed (1)
+      Tests  32 passed (32)
+   Start at  02:38:47
+   Duration  4.87s (transform 3.36s, setup 128ms, import 4.36s, tests 268ms, environment 0ms)
+

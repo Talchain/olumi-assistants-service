@@ -32,8 +32,11 @@ const withLicence = (licence: Json | null): Json => {
 describe('ruling C: the model sees the Run\'s goal-chance licence beside the chances, and a typed rule', () => {
   it('a licensed Run: analysis.goal_chance_licence carries the form and ids (no percentages), beside the per-option chances', async () => {
     const state = await canonicalState(withLicence(LICENCE));
+    // ⛔ CHANGED EXPECTATION (G, AIE #94 6133027121: "supply the actual target/notes/licence to the Agent"): the licensed target
+    // itself rides with the form and ids — still no chance percentage.
     expect(state.analysis.goal_chance_licence).toEqual({ form: 'similar', option_ids: LICENCE.option_ids,
-      similar_option_ids: ['keep_49_price', 'raise_to_54'] });
+      similar_option_ids: ['keep_49_price', 'raise_to_54'], target: LICENCE.target });
+    expect(JSON.stringify(state.analysis.goal_chance_licence)).not.toMatch(/pct|%/);
     expect((state.analysis.saved_run_options as Json[]).some((r) => typeof r.probability_of_goal === 'number')).toBe(true);
   });
 
@@ -74,7 +77,8 @@ describe('ruling C: the model sees the Run\'s goal-chance licence beside the cha
 
   it('the typed rule: the licence decides, "similar chances" below it, no ranking without it (c6 words)', () => {
     expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('never by your own reading of the figures');
-    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('have similar chances of meeting the goal in this model; never say one is higher, ahead or more likely');
+    // ⛔ CHANGED EXPECTATION (G, AIE #94 6133027121): "similar chances" in the licence's own target wording, never "of meeting the goal".
+    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('have similar chances in this model; never say one is higher, ahead or more likely');
     expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('or with no such licence, give each option’s chance in its recorded order and never rank, order or single out options by it');
     expect(GOAL_CHANCE_RANKING_INSTRUCTION).not.toMatch(/\bbest\b|\bwinner\b|recommend/i);
   });

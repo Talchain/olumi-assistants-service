@@ -1,0 +1,19 @@
+
+ RUN  v4.1.10 /private/tmp/cx-A2e
+
+{"level":"info","time":1791855557849,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855557868,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855557875,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855557889,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855557894,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855557905,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855557914,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855557929,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855557961,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791855558002,"pid":37948,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"event_goal","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+
+ Test Files  1 passed (1)
+      Tests  20 passed (20)
+   Start at  02:39:11
+   Duration  6.49s (transform 4.60s, setup 123ms, import 6.02s, tests 237ms, environment 0ms)
+

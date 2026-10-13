@@ -42,7 +42,7 @@ export interface Figure {
   /** The user's words this figure is read from (a stated or derived figure). */
   readonly quote?: string;
 }
-export interface Statement { readonly quote: string; readonly form: HiringForm['kind'] }
+export interface Statement { readonly quote: string; readonly form: HiringForm['kind']; readonly source?: 'model_proposed' }
 export interface PlannedPart { readonly statement: Statement; readonly lead_low: Figure; readonly lead_high: Figure; readonly monthly_share: Figure }
 export interface PlannedOption {
   readonly option_id: string;
@@ -157,7 +157,7 @@ const olumiFigure = (value: number, role: Exclude<FigureRole, 'stated'>, quote?:
 export type PlanRefusal = { readonly refusal: 'hiring_timings_unusable' | 'relative_to_range' | 'too_many_starts' | 'fewer_starts_than_held'; readonly quote?: string };
 
 /** The option's planned parts from the user's starts and Olumi's estimate; the pace split equally. */
-export function planStarts(quotes: readonly string[], estimate: PlannedOption['olumi_estimate'], heldParts: number):
+export function planStarts(quotes: readonly string[], estimate: PlannedOption['olumi_estimate'], heldParts: number, readings?: readonly { months?: unknown; stated: boolean; held?: Pick<PlannedPart, 'statement' | 'lead_low' | 'lead_high'> }[]):
   { readonly parts: PlannedPart[] } | PlanRefusal {
   if (quotes.length === 0 || quotes.length > MAX_STARTS_PER_OPTION) return { refusal: 'too_many_starts' };
   if (quotes.length < heldParts) return { refusal: 'fewer_starts_than_held' };
@@ -165,7 +165,22 @@ export function planStarts(quotes: readonly string[], estimate: PlannedOption['o
   const share = estimate.monthly_share / quotes.length;
   const parts: PlannedPart[] = [];
   for (const [i, quote] of quotes.entries()) {
-    const form = readHiringStart(quote);
+    if (quote.trim() === '') return { refusal: 'hiring_timings_unusable', quote };
+    const reading = readings?.[i];
+    const typed = reading?.months;
+    if (typed === undefined && reading?.held !== undefined) {
+      const held = reading.held;
+      if (![held.lead_low.value, held.lead_high.value].every(v => Number.isFinite(v) && v >= 0 && v <= 60)
+        || held.lead_low.value > held.lead_high.value) return { refusal: 'hiring_timings_unusable', quote };
+      parts.push({ ...held, monthly_share: pace(share) });
+      continue;
+    }
+    if (typed !== undefined && (typeof typed !== 'number' || !Number.isFinite(typed) || typed < 0 || typed > 60)) return { refusal: 'hiring_timings_unusable', quote };
+    const parsed = readHiringStart(quote);
+    const matches = typed === undefined || (parsed !== null && 'months' in parsed && parsed.months === typed);
+    const form: HiringForm | null = typed === undefined || matches ? parsed : { kind: 'about', months: typed as number };
+    const own = reading?.stated !== false && matches;
+
     if (form === null) return { refusal: 'hiring_timings_unusable', quote };
     let low: Figure, high: Figure;
     if (form.kind === 'after_previous') {
@@ -177,11 +192,9 @@ export function planStarts(quotes: readonly string[], estimate: PlannedOption['o
       low = olumiFigure(prev.lead_low.value + form.months, 'derived', quote);
       high = olumiFigure(prev.lead_high.value + form.months, 'derived', quote);
     } else if (form.kind === 'at_least') {
-      if (estimate.lead_high < form.months) return { refusal: 'hiring_timings_unusable', quote };
-      low = stated(form.months, quote); high = olumiFigure(estimate.lead_high, 'olumi_estimate');
+      low = stated(form.months, quote); high = olumiFigure(Math.max(estimate.lead_high, form.months), 'olumi_estimate');
     } else if (form.kind === 'within') {
-      if (estimate.lead_low > form.months) return { refusal: 'hiring_timings_unusable', quote };
-      low = olumiFigure(estimate.lead_low, 'olumi_estimate'); high = stated(form.months, quote);
+      low = olumiFigure(Math.min(estimate.lead_low, form.months), 'olumi_estimate'); high = stated(form.months, quote);
     } else if (form.kind === 'about' && APPROXIMATE.test(plainWords(quote))) {
       // AIE 6122738619: the exact figure modelled from "about N" is Olumi's disclosed choice, never a human-stated endpoint.
       low = olumiFigure(form.months, 'derived', quote); high = olumiFigure(form.months, 'derived', quote);
@@ -190,7 +203,11 @@ export function planStarts(quotes: readonly string[], estimate: PlannedOption['o
     } else {
       low = stated(form.low, quote); high = stated(form.high, quote);
     }
-    parts.push({ statement: { quote, form: form.kind }, lead_low: low, lead_high: high, monthly_share: pace(share) });
+    if (!own) {
+      low = olumiFigure(low.value, 'olumi_estimate');
+      high = olumiFigure(high.value, 'olumi_estimate');
+    }
+    parts.push({ statement: { quote, form: form.kind, ...(!own ? { source: 'model_proposed' as const } : {}) }, lead_low: low, lead_high: high, monthly_share: pace(share) });
   }
   return { parts };
 }
@@ -373,7 +390,7 @@ const viewOfPlanned = (p: PlannedPart): StartView => ({ statement: p.statement,
 /** The ONE card covering all proposed hiring timings (r2; DL/AIE ACK of SYS1-E5-STRINGS r2 pending). */
 export function hiringTimesCard(a: ApprovedHiringTimes, deliverable: string): string {
   const lines = a.options.map((o) => {
-    const views = o.parts.map(viewOfPlanned), said = `you said “${o.quotes.join('”, then “')}”`;
+    const views = o.parts.map(viewOfPlanned), said = o.parts.every(p => p.statement.source !== 'model_proposed') ? `you said “${o.quotes.join('”, then “')}”` : o.parts.map(p => `${p.statement.source === 'model_proposed' ? 'Olumi proposed' : 'you said'} “${p.statement.quote}”`).join(', then ');
     const timing = views.length === 1 ? `starts after ${spanOf(views[0]!.low.value, views[0]!.high.value)} months`
       : `one person after ${spanOf(views[0]!.low.value, views[0]!.high.value)} months and another after ${spanOf(views[1]!.low.value, views[1]!.high.value)} months`;
     return `‘${o.label}’: ${said}. Modelled timing: ${timing}, with ${listed(assumptionsOf(views, deliverable))}.`;
@@ -396,7 +413,7 @@ export function hiringTimesLabel(nodes: readonly unknown[], deliverable: string)
   const quotes = views.flatMap(v => v.statement === undefined ? [] : [v.statement.quote]);
   if (quotes.length === 0) return '';
   const spans = views.map(v => spanOf(v.low.value, v.high.value)).join(' and ');
-  return `your hiring time${quotes.length === 1 ? '' : 's'} (“${quotes.join('”, then “')}”) as modelled: ${spans} months, with ${listed(assumptionsOf(views, deliverable))}`;
+  return `${views.some(v => v.statement?.source === 'model_proposed') ? 'proposed' : 'your'} hiring time${quotes.length === 1 ? '' : 's'} (“${quotes.join('”, then “')}”) as modelled: ${spans} months, with ${listed(assumptionsOf(views, deliverable))}`;
 }
 
 /** How the model summary says whose each figure is (r2; DL/AIE ACK pending). */
@@ -410,7 +427,7 @@ export function hiringTimesSummaryOf(graph: unknown, goalId: string): Record<str
     if (parts.length === 0) return [];
     return [{ option_id: o.id, option: o.label, starts: parts.map((p) => {
       const st = p.observed_state.extra_share_by_date.statement;
-      return { ...(rec(st) ? { statement: { quote: st.quote, form: st.form } } : {}),
+      return { ...(rec(st) ? { statement: { quote: st.quote, form: st.form, ...(st.source === 'model_proposed' ? { source: st.source } : {}) } } : {}),
         soonest_months: heldFigureOf(p, 'lead_low'), latest_months: heldFigureOf(p, 'lead_high'),
         pace_percent_per_month: heldFigureOf(p, 'monthly_share') };
     }) }];
