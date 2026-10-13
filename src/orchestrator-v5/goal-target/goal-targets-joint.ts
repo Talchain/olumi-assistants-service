@@ -67,6 +67,12 @@ export interface GoalTargetsBlock {
   readonly conditions: readonly GoalCondition[];
   /** Disclosures copied to the existing licence notes; no figure is licensed by a note. */
   readonly notes?: readonly string[];
+  /** Display joins from this Run's recorded causes. Original condition notes remain available to the AI. */
+  readonly note_groups?: readonly {
+    readonly source_notes: readonly string[];
+    readonly line: string;
+    readonly joint_line?: string;
+  }[];
   /**
    * AIE C clause 3 (12 Oct): the labels of the goal's targets this analysis cannot yet combine (a target stated as a
    * change, including the goal's own). They are kept and named; the joint is withheld with `target_not_supported`.
@@ -113,7 +119,7 @@ export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupp
   if (reason === 'condition_withheld') return `The chance of meeting ${all} together isn’t shown: one or more condition chances are withheld. The condition notes explain why.`;
   if (reason === 'condition_unscored') return `The chance of meeting ${all} together isn’t shown: one or more conditions could not be evaluated. The condition notes explain why.`;
   if (reason === 'condition_not_named') return `The chance of meeting ${all} together isn’t shown: one of its conditions can’t be said in your units.`;
-  if (reason === 'olumi_base') return `The chance of meeting ${all} together isn’t shown yet: it rests on Olumi’s own assumed starting value for a target, which you haven’t given.`;
+  if (reason === 'olumi_base') return `The chance of meeting ${all} together isn’t shown: this Run withholds the chance for a target that starts from an Olumi estimate.`;
   // Independent check r1 item 7: a joint figure that came back WITHOUT its precision was calculated; say what is missing.
   if (reason === 'precision_missing') return `The chance of meeting ${all} together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.`;
   return `The chance of meeting ${all} together isn’t calculated yet. Run the analysis again to get it.`;
@@ -245,6 +251,15 @@ export function goalTargetsBlockOf(args: {
   const upstream = isRec(args.envelope) ? goalFiguresWithheldWarnings(args.envelope) : [];
   const notes: string[] = [];
   const limitNotes = new Set<string>();
+  const causes = new Map<string, { reason: string; clauses: Set<string>; notes: Set<string>; options?: readonly string[] }>();
+  const recordCause = (c: GoalCondition, note: string, code: unknown, reason: string, options?: readonly string[]) => {
+    // Scope is a recorded binding, never inferred from the reason's prose or a warning's node_ids.
+    const key = JSON.stringify([code, reason, options === undefined ? null : [...options].sort()]);
+    const cause = causes.get(key) ?? { reason, clauses: new Set<string>(), notes: new Set<string>(), options };
+    cause.clauses.add(c.clause);
+    cause.notes.add(note);
+    causes.set(key, cause);
+  };
   const retainedIds = new Set(unresolvedRetainedLimits(args.graph).map((r) => r.constraint_id));
   const targetWarnings = (t: GoalCondition) => upstream.filter((w) =>
     !Array.isArray(w.constraint_ids) || w.constraint_ids.length === 0 || w.constraint_ids.includes(t.constraint_id));
@@ -254,15 +269,21 @@ export function goalTargetsBlockOf(args: {
     const verdict = args.perLimit?.find((v) => v.constraint_id === c.constraint_id);
     if (verdict?.state === 'unscored') {
       const reason = retainedIds.has(c.constraint_id) ? retainedLimitWithheldLine(args.graph) : verdict.reason === 'parts_links_placeholder'
-        ? 'The contributing quantities have links whose sizes are not yet specified. Define those contributions or supply a forecast for this quantity.'
+        ? 'The contributing quantities have links whose sizes are not yet specified. This calculation needs supported contributions in this quantity’s units, or a supported forecast for the quantity.'
         : verdict.reason === 'limit_rests_on_olumi_guess'
           ? 'The calculation still rests on Olumi’s estimated quantities. Review their basis and uncertainty; the limit or target itself is not a forecast.'
           : 'This Run did not return a usable evaluation for this condition; the reason needs to be checked.';
       const note = `${c.clause}: ${reason}`;
       notes.push(note);
       limitNotes.add(note);
+      recordCause(c, note, verdict.reason, reason);
     }
-    if (c.role === 'target' && olumiBase.has(c.constraint_id)) notes.push(`${c.clause}: ${jointWithheldLine(Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2), 'olumi_base')}`);
+    if (c.role === 'target' && olumiBase.has(c.constraint_id)) {
+      const reason = jointWithheldLine(Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2), 'olumi_base');
+      const note = `${c.clause}: ${reason}`;
+      notes.push(note);
+      recordCause(c, note, 'olumi_base', reason);
+    }
     if (c.role === 'target' && (refusedTargets.has(c.constraint_id) || targetWarnings(c).length > 0)) {
       const messages = targetWarnings(c).flatMap((w) => typeof w.message === 'string' ? [w.message] : []);
       const fallback = !sent.some((r) => r.constraint_id === c.constraint_id)
@@ -270,7 +291,15 @@ export function goalTargetsBlockOf(args: {
         : c.node_id === args.primaryGoalId && records.some((r) => unit01(r.probability_of_goal))
           ? 'This Run scored this target, but its chance is withheld.'
           : 'This Run returned no licensed chance for this target.';
-      notes.push(`${c.clause}: ${messages.length > 0 ? [...new Set(messages)].join(' ') : fallback}`);
+      const note = `${c.clause}: ${messages.length > 0 ? [...new Set(messages)].join(' ') : fallback}`;
+      notes.push(note);
+      // Leave the complete note unjoined if any cause has a malformed binding.
+      const warnings = targetWarnings(c);
+      if (warnings.some((w) => Array.isArray(w.option_ids) && !w.option_ids.every((id) => typeof id === 'string'))) continue;
+      for (const w of warnings) {
+        if (typeof w.message !== 'string') continue;
+        recordCause(c, note, w.code, w.message, Array.isArray(w.option_ids) ? w.option_ids as string[] : undefined);
+      }
     }
   }
 
@@ -339,7 +368,11 @@ export function goalTargetsBlockOf(args: {
       rounding[id] = step;
     }
     if (compared.length === 0) joint = withheld('no_option');
-    else if (Object.keys(pct).length === 0) joint = withheld(notes.length > 0 ? args.perLimit?.some((v) => v.state === 'unscored') ? 'condition_unscored' : 'condition_withheld' : anyFigure && anyPrecisionMissing ? 'precision_missing' : 'not_returned');
+    else if (Object.keys(pct).length === 0) joint = withheld(limitNotes.size > 0
+      ? 'condition_unscored' : upstream.some((w) => (!Array.isArray(w.constraint_ids) || w.constraint_ids.length === 0
+        || ordered.some((c) => (w.constraint_ids as unknown[]).includes(c.constraint_id)))
+        && compared.some((id) => !Array.isArray(w.option_ids) || w.option_ids.includes(id)))
+        ? 'condition_withheld' : anyFigure && anyPrecisionMissing ? 'precision_missing' : 'not_returned');
     else {
       // Amendment 5 / ruling 22: the targets share the stated period; a limit keeps its own (annual budget) and is said after
       // "while", so the period is never read as the limit's.
@@ -354,12 +387,31 @@ export function goalTargetsBlockOf(args: {
   // A missing marginal or legacy per-limit certificate does not revoke a joint the existing gates licensed.
   // Phase a explains withheld results; full event testability is the separately scoped positive-path work.
   const shownNotes = joint.status === 'withheld' ? notes : notes.filter((note) => !limitNotes.has(note));
-  return { conditions: ordered, ...(shownNotes.length > 0 ? { notes: shownNotes } : {}), per_target: perTarget, joint, ...(unsupported.length > 0 ? { unsupported_targets: unsupported } : {}) };
+  const shownCauses = [...causes.values()].filter((cause) => [...cause.notes].every((note) => shownNotes.includes(note)));
+  // Join in the existing producer, before prose loses its condition/cause/option bindings. No note is removed from the licence.
+  const noteGroups = shownCauses.some((cause) => cause.clauses.size > 1 || (joint.status === 'withheld' && cause.reason === joint.line))
+    ? shownCauses.map((cause) => ({ source_notes: [...cause.notes],
+      line: `${listWords([...cause.clauses])}${cause.options === undefined ? '' : ` (for ${listWords(cause.options.map((id) => `‘${labelOf(id) ?? id}’`))})`}: ${cause.reason}`,
+      ...(joint.status === 'withheld' && cause.reason === joint.line ? { joint_line: joint.line } : {}),
+    })) : [];
+  return { conditions: ordered, ...(shownNotes.length > 0 ? { notes: shownNotes } : {}),
+    ...(noteGroups.length > 0 ? { note_groups: noteGroups } : {}), per_target: perTarget, joint, ...(unsupported.length > 0 ? { unsupported_targets: unsupported } : {}) };
 }
 
 /** The stored block as a reader may use it, or `undefined` when it is malformed (a record at odds with itself speaks for nothing). */
 export function readGoalTargetsBlock(v: unknown, optionIds: readonly string[]): GoalTargetsBlock | undefined {
-  return isGoalTargetsBlock(v, optionIds) ? v : undefined;
+  if (!isGoalTargetsBlock(v, optionIds)) return undefined;
+  // Optional display joins cannot change a numerical licence. An invalid/old join falls back to the original notes.
+  const groups: unknown = v.note_groups;
+  const joint = v.joint;
+  if (groups !== undefined && (!Array.isArray(groups) || !groups.every((g) => isRec(g)
+    && Array.isArray(g.source_notes) && g.source_notes.length > 0
+    && g.source_notes.every((note) => typeof note === 'string' && v.notes?.includes(note))
+    && typeof g.line === 'string' && g.line.trim() !== '' && !/[\r\n]/.test(g.line)
+    && (g.joint_line === undefined || (joint.status === 'withheld' && g.joint_line === joint.line))))) {
+    return { ...v, note_groups: undefined };
+  }
+  return v;
 }
 
 /** Every member a reader relies on, checked; a type guard, so the stored record is never cast to the block. */
