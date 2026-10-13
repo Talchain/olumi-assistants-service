@@ -41,7 +41,7 @@ describe('T2-A node introduction verdict, read-only', () => {
     });
     const ctx = { scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', authenticated_user_id: null,
       request_id: 't2a-node', user_text: 'Add Pilot to the comparison.', user_turn_text: 'Add Pilot to the comparison.' };
-    const proposed = await caps.proposeNewOption!(ctx, { label: 'Pilot' });
+    const proposed = await caps.proposeNewOption!(ctx, { label: 'Pilot', rationale: 'Add the proposed option to the comparison.' });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(commits).toBe(0);
     expect(nodeIntroductionOf(read().nodes[1])).toEqual({ origin: 'olumi_added', adopted: false });

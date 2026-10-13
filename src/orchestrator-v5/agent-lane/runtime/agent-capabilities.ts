@@ -4874,8 +4874,19 @@ export function createAgentCapabilities(
           heldFigures.push(userFigureHeldRefusalText(heldFigure, linkBandWord(band)));
           continue;
         }
+        // Retained words must name both ends. Shorthand can use only this request's bound link
+        // and the CURRENT user's band; history must never supply an omitted end.
+        const drawn = ctx.drawn_link;
+        const drawnPress = parseDrawnLinkPress(drawn?.press_id);
+        const drawnHere = drawn !== undefined && drawnPress !== null
+          && drawnPress.from === drawn.from && drawnPress.to === drawn.to
+          && drawn.from === from.id && drawn.to === to.id;
+        // Selecting two nodes does not identify a directed link. Use the host-resolved link carrier.
+        const selectedHere = ctx.grounded_selection?.unresolved === 'none'
+          && (ctx.grounded_links ?? []).some(link => link.from === from.id && link.to === to.id);
+        const currentBoundBand = bandTheUserWrote(band, ctx.user_turn_text) && (selectedHere || drawnHere);
         // Verified human evidence outranks model-authored from_words / user_stated declarations.
-        if (linkBandTheUserStated(band, ctx.user_text, g.nodes, from.id, to.id)) {
+        if (linkBandTheUserStated(band, ctx.user_text, g.nodes, from.id, to.id) || currentBoundBand) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)
           // and never credits. Only a band that MOVES the link is theirs, and a placeholder has no band to sit in (D1).

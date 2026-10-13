@@ -1,3 +1,4 @@
+import type { AgentToolContext } from '../../../src/orchestrator-v5/agent-lane/runtime/agent-tools.js';
 /**
  * ⭐ A SET OF LINK STRENGTHS IS ONE APPROVAL AND ONE COMMIT, END TO END (DL #72 5871594233; seam Canonical 5871633483,
  * DL 5871661097; rows Canonical's five).
@@ -123,13 +124,13 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   });
 
   let doorCalls = 0;
-  const agent = (userTurnText: string, store = new ProposalStore()) => {
+  const agent = (userTurnText: string, store = new ProposalStore(), interaction: Partial<AgentToolContext> = {}) => {
     const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash() } });
     doorCalls = 0;
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => { doorCalls += 1; return commitOptionLevelsInProcess(input, 'req-agent'); },
     });
-    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText } };
+    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText, ...interaction } };
   };
 
   it('RED (Paul\'s delegated set: "I\'m aligned with these. Please make these updates."): ONE proposal, ONE commit, every placeholder sized as Olumi\'s accepted estimate (D1)', async () => {
@@ -259,6 +260,11 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     e.effect_direction = 'positive';
     return JSON.parse(JSON.stringify(e)) as Record<string, unknown>;
   };
+  // The inspector/review card grounds this shorthand; model argument labels do not.
+  const workloadReview = () => ({
+    grounded_selection: { element_ids: [], unresolved: 'none' as const },
+    grounded_links: [{ from: edge('workloadHours').from, to: edge('workloadHours').to }],
+  });
   const NAMED = 'Keep Delegable routine workload strong';
   const named = [{ from_label: L.workloadHours[0], to_label: L.workloadHours[1], strength: 'strong', from_words: NAMED }];
   const expectHeldByteEqual = (before: Record<string, unknown>, hashBefore: string) => {
@@ -276,7 +282,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   it('RED (#2473 P1, chat words): the user NAMES the band a sized estimate already sits in — approval holds it byte-equal', async () => {
     const before = sizedEstimate();
     const hashBefore = currentHash();
-    const { caps, ctx } = agent(NAMED);
+    const { caps, ctx } = agent(NAMED, undefined, workloadReview());
     const p = await caps.proposeLinkStrengths!(ctx, { links: named as never, rationale: 'the user named the band it already sits in' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     // M1 Accept receipt (Codex pre-review P2): naming the band is review, so the kept figure stays Olumi's — never "yours".
@@ -296,7 +302,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { proposalPendingAction, rehydrateProposals } = await import('../../../src/orchestrator-v5/agent-lane/durable-proposal.js');
     const before = sizedEstimate();
     const hashBefore = currentHash();
-    const first = agent(NAMED);
+    const first = agent(NAMED, undefined, workloadReview());
     const p = await first.caps.proposeLinkStrengths!(first.ctx, { links: named as never, rationale: 'x' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const offered = first.store.get(String(p.proposal_id))!;
@@ -345,7 +351,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   it('CONTROL (#2473): a named band that MOVES the link still writes it — the user\'s band, its spread', async () => {
     sizedEstimate();
     const words = 'Make Delegable routine workload very strong';
-    const { caps, ctx } = agent(words);
+    const { caps, ctx } = agent(words, undefined, workloadReview());
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ ...named[0], strength: 'very strong', from_words: words }] as never, rationale: 'x' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
@@ -430,7 +436,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     .censusConfidenceParameters(persisted).material_parameters_user_stated;
   const PAUL_STRONG = 'human capacity, delegable workload, delegation quality, and delegated hours effects to strong';
 
-  it('RED (B1 × D1, Paul\'s own words "…to strong; all other listed effects to moderate."): the band he names for a placeholder is HIS (D1: no current band to keep); a sized link stays a review; "all other" names no link', async () => {
+  it('RED (B1 × D1, Paul\'s own words "…to strong; all other listed effects to moderate."): UNBOUND list supplies no exact link; placeholders remain Olumi estimates and a sized link stays a review', async () => {
     placeholderBase();
     const census0 = await userStated();
     expect(census0, 'the gate starts shut').toBe(0);
@@ -443,34 +449,35 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
       ...MODERATE.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'moderate', from_words: 'all other listed effects to moderate' })),
     ];
     // His own link, put back unmarked (`placeholderBase`), is not a placeholder: naming its band stays a REVIEW (#2257).
-    // The other three are 0.5 placeholders: D1 (DL 12 Oct, Batch D) — a placeholder has no current band, so the band he
-    // named SIZES each as his estimate (was Batch A ruling 1: "kept as it is", a review, and they stayed unsized).
+    // T2A2: no review card or per-link pair binds this list. The three 0.5 placeholders
+    // still get sized under D1, but the model's proposed pairs remain Olumi's estimates.
     const NAMED_PLACEHOLDERS = ['workloadHours', 'qualityHours', 'hoursFocus'] as const;
     for (const k of NAMED_PLACEHOLDERS) expect(linkSizing(edge(k)), `${k}: precondition`).toBe('placeholder');
     expect(linkSizing(edge('capacityQuality')), 'precondition: not a placeholder').not.toBe('placeholder');
     const reviewedBefore = { mean: edge('capacityQuality').strength.mean, source: edge('capacityQuality').provenance?.source, defaulted: edge('capacityQuality').defaulted };
     const p = await caps.proposeLinkStrengths!(ctx, { links: links as never, rationale: 'the user named the bands' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
-    for (const k of NAMED_PLACEHOLDERS) expect(String(p.public_label), k).toContain(`"${L[k][0]}" \u2192 "${L[k][1]}" as strong, your estimate`);
+    for (const k of NAMED_PLACEHOLDERS) expect(String(p.public_label), k).toContain(`"${L[k][0]}" \u2192 "${L[k][1]}" as strong, an estimate from Olumi that has not yet been applied`);
     expect(String(p.public_label)).not.toContain('kept as it is');
     expect(String(p.public_label), 'band words only (AIQ 5923931082)').not.toMatch(/\d\.\d|0–1|scale/);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     // The in-band pick on a link that is not a placeholder is REVIEW (#2257): figure, source and default flag unchanged.
     expect({ mean: edge('capacityQuality').strength.mean, source: edge('capacityQuality').provenance?.source, defaulted: edge('capacityQuality').defaulted }).toEqual(reviewedBefore);
-    expect((edge('capacityQuality').provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'strong' });
+    expect((edge('capacityQuality').provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm' });
+    expect((edge('capacityQuality').provenance as { reviewed_by_user: { band?: unknown } }).reviewed_by_user.band).toBeUndefined();
     for (const k of NAMED_PLACEHOLDERS) {
       expect(edge(k).strength.mean, k).toBe(0.55);
-      expect(linkSizing(edge(k)), k).toBe('user');
+      expect(linkSizing(edge(k)), k).toBe('olumi_accepted');
     }
     for (const k of MODERATE) {
       expect(Math.abs(edge(k).strength.mean), k).toBe(0.3);
       expect(edge(k).provenance?.source, k).toBe('cee_hypothesis');
       expect(edge(k).defaulted, k).toBe(true);
     }
-    // Credited by identity: exactly his three named placeholders (no confirm, no unnamed band); two of them are material.
-    expect(confidenceUserStated(), 'only the three placeholders he named are his').toBe(confidence0 + NAMED_PLACEHOLDERS.length);
-    expect(await userStated(), 'the leader gate opens on his own words alone').toBeGreaterThan(0);
+    // Approval adopts estimates; the unbound list earns no authorship credit.
+    expect(confidenceUserStated(), 'no exact link was bound by the user').toBe(confidence0);
+    expect(await userStated(), 'the leader gate stays shut').toBe(0);
   });
 
   it('CONTROL: a band the user names for a link, in words naming it, that MOVES it is theirs — and is credited', async () => {
@@ -504,7 +511,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const before = projectedPriceRevenue();
     const hashBefore = currentHash();
     const words = 'Price is strong.';
-    const { caps, ctx, store } = agent(words);
+    const drawn = edge('capacityQuality');
+    const { caps, ctx, store } = agent(words, undefined, { drawn_link: {
+      press_id: `agent-drawn-link:${drawn.from}>${drawn.to}`, from: drawn.from, to: drawn.to,
+    } });
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue',
       strength: 'strong', from_words: words }], rationale: words });
     expect(p.ok, JSON.stringify(p)).toBe(true);
@@ -528,6 +538,25 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(earnsAuthorshipCredit(edgeStrengthProvenance(after))).toBe(true);
     expect(currentHash(), 'a size moves the analysis identity').not.toBe(hashBefore);
     expect(String(out.follow_up)).toContain('as strong, your estimate');
+  });
+
+  it('T2A2: Price is strong. without a current drawn/reviewed link cannot borrow the stored drawing provenance', async () => {
+    projectedPriceRevenue();
+    const before = JSON.stringify(edge('capacityQuality'));
+    const words = 'Price is strong.';
+    const { caps, ctx, store } = agent(words);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue',
+      strength: 'strong', from_words: words }], rationale: words });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(store.get(String(p.proposal_id))!.operations).toEqual([expect.objectContaining({
+      value: expect.objectContaining({ author: 'model_proposed', intent: 'confirm_current', magnitude: 0.5 }),
+    })]);
+    expect(p.public_label).toBe('Record 1 review: "Price" → "Revenue", whose strength nobody has set yet (kept as it is)');
+    expect(JSON.stringify(edge('capacityQuality'))).toBe(before);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(linkSizing(edge('capacityQuality'))).toBe('placeholder');
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edge('capacityQuality')))).toBe(false);
   });
 
   it('RED (R7 class reader): the adopted-strength door does not refuse projected Price → Revenue as the user’s own; genuine user-sized control refuses', async () => {
