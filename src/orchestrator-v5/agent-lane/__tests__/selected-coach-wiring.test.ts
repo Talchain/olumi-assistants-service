@@ -26,8 +26,9 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // your goal”), and #35's headline is “its chance, in this model”, so a part-goal Run is never called the whole goal's chance:
 // 23,075 → 23,185 bytes (+110). Reversing exactly those three edits on the module's string reproduces a9c847ef… and 23,075.
 // PROMPT 28 (13 Oct, AIE one-pass packet 94ad9c8f…): #9, #14, #19, #34 (the AIE's whole replaced entry), #35, #36 and #41
-// carry the packet's words; 20,248 bytes. Derived with the route's SENT body (below), never by hand.
-const HOST_SHA = '249a074624e00b874c897d354082d9f8b5ee57ffb5ebb8528b31e9feead56d78';
+// carry the packet's words, beside their kept non-deferring sentences (old #34's measured `provisional: true` rule is its own
+// entry after the AIE's whole #34); 21,010 bytes. Derived with the route's SENT body (below), never by hand.
+const HOST_SHA = '3fc64bfeaaaca795ba49739321bbdaa702a884cbbd7a211d72b88c93d43de546';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -60,10 +61,10 @@ const HOST_SHA = '249a074624e00b874c897d354082d9f8b5ee57ffb5ebb8528b31e9feead56d
 //   Derived from the SENT body; reversing exactly those edits on the SENT body reproduces a8a9845b… and 35,418 bytes.
 // + PROMPT 28 (13 Oct, AIE one-pass packet 94ad9c8f…): the host contract above, MUTATION_INSTRUCTION's propose_new_limit
 //   clause (P9), REPLY_LENGTH_INSTRUCTION (P10/P11), REPLY_SHAPE_INSTRUCTION (P12), and MODEL_RELATIVE_NAMING_INSTRUCTION
-//   leaving the join (its P13 words sit once inside #34): 35,782 → 31,245 bytes. Derived from the SENT body; replacing
+//   leaving the join (its P13 words sit once inside #34): 35,782 → 32,007 bytes. Derived from the SENT body; replacing
 //   exactly those five pieces with staging's on the SENT body reproduces 96cd8417… and 35,782 bytes.
-const RENDERED_SHA = 'a56075bbf1ea1e55f313e36db524c8ec182689e2c6c5fac9d8cf7522029cba10';
-const RENDERED_BYTES = 31_245;
+const RENDERED_SHA = '1a6ad616880e2ad7f68e5c5ecc4f3eb328af205c2bcf808e9615371f78938b22';
+const RENDERED_BYTES = 32_007;
 /** ⛔ CHANGED EXPECTATION (prompt P13): the result-reply rule that replaced "N% of runs supported X", matched as SENT bytes. */
 const NAMING_RULE_FORM = 'Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present.';
 /** G (AIE #94 6133027121): the approved selected-Run scope line, verbatim; SENT once on every coaching path. */

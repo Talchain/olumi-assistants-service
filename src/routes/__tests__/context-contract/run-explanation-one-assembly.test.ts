@@ -187,7 +187,9 @@ describe('Explain scoped assembly safety', () => {
     expect(createHash('sha256').update(String(w.calls[0].body.instructions)).digest('hex'))
       // G (12 Oct, AIE #94 6133027121): the selected-Run scope line and its range/headline/ranking edits: 39,550 → 39,914 bytes
       // (+364, the selected-coach delta). Reversing exactly those edits on the SENT instructions reproduces fb8392d6….
-      .toBe('a792187f43143d7167124826b051330589ab397b5599812299c1176a7400a37f');
+      // PROMPT 28 (AIE one-pass packet 94ad9c8f…): the coach prompt's packet edits plus P16 (rerun) and P17 (Interpreter v0.2):
+      // 39,914 → 36,786 bytes. Captured from the SENT body against staging's; only `instructions` differs, by those sentences.
+      .toBe('111192bca84ab3dc6e8c092c7cf153569dc093d5af4c4bdd8e284a7154453b15');
   },60000);
 });
 

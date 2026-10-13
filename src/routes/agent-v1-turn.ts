@@ -1153,8 +1153,9 @@ function explainRobustnessSentence(analysisResult: unknown, graph: unknown): str
  * 344896ef92177b7308c1d632699bd98bae10c6b7 (programme-docs main 4961b2d1), with ONE clause changed by S2i (DL P6, 7 Oct):
  * "say investigation priority is not established" → "make no claim about investigation priority beyond the screen's own
  * driver lines; if the screen shows no driver and no range, say it is not established yet" (served B1: "…so investigation
- * priority is not established." beside a range line). sha256 of this string begins d13dd401219ddcb7 (pinned by test;
- * 3d979e8406693be4 with the clause restored). Code only: no prompt store holds this text. APPENDED to the Agent instructions on
+ * priority is not established." beside a range line). PROMPT 28 (AIE packet P17) then replaced that clause's screen-lines
+ * deferral with the packet's driver sentence, keeping "make no claim about investigation priority": sha256 begins 272fbbd1fcbe6b2c
+ * (pinned by test; d13dd401219ddcb7 with the S2i clause restored, 3d979e8406693be4 with the banked clause). Code only: no prompt store holds this text. APPENDED to the Agent instructions on
  * fast path 3's single interpreting call, as the profile specifies ("appended only for the
  * existing Agent final-response path when explaining canonical analysis. No extra model
  * call."). Prompt text is owned by Paul + ChatGPT; this file only carries it. When CEE #1787
