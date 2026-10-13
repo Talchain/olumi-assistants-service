@@ -28,8 +28,8 @@ const setup = () => {
   const store = new ProposalStore();
   return { caps: createAgentCapabilities(d, store), store };
 };
-const CHURN = { factor_label: 'Monthly churn', value: 3.7, unit: 'percent per month', basis: 'the figure the user gave', revise: true };
-const SUBS = { factor_label: 'Pro subscribers', value: 300, unit: 'subscribers', basis: 'a round starting estimate', revise: true };
+const CHURN = { user_stated: true, factor_label: 'Monthly churn', value: 3.7, unit: 'percent per month', basis: 'the figure the user gave', revise: true };
+const SUBS = { user_stated: false, factor_label: 'Pro subscribers', value: 300, unit: 'subscribers', basis: 'a round starting estimate', revise: true };
 type R = ToolResult & { proposal_id: string; note: string; assumptions: { factor: string; your_figure?: boolean }[] };
 const ASSUMPTION_WORDS = /assumptions? to adopt or correct|NOT measurements?/i;
 const authorOf = (store: ProposalStore, id: string, path: string) =>
@@ -48,7 +48,7 @@ describe('propose_assumptions says a figure the user gave as theirs — the word
 
   it('CONTRAST: the same revision when the user did NOT write the figure → Olumi\'s, and it is still said as an assumption', async () => {
     const { caps, store } = setup();
-    const r = await caps.proposeAssumptions(ctxSaying('Please update churn to what you think is right.'), { assumptions: [CHURN] }) as R;
+    const r = await caps.proposeAssumptions(ctxSaying('Please update churn to what you think is right.'), { assumptions: [{ ...CHURN, user_stated: false, basis: 'a proposed churn estimate' }] }) as R;
     expect(authorOf(store, r.proposal_id, 'monthly_churn')).toBe('model_proposed');
     expect(r.assumptions[0]).not.toHaveProperty('your_figure');
     expect(r.note).toMatch(ASSUMPTION_WORDS);
@@ -87,7 +87,7 @@ describe('propose_starting_point says a level the user gave as theirs — the re
     };
     return createAgentCapabilitiesWithLevelsPort(d, new ProposalStore());
   };
-  const ASSUMPTIONS = [{ factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
+  const ASSUMPTIONS = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
   const levels = (userSaid: boolean) => [
     { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires', ...(userSaid ? { user_stated: true } : {}) },
     { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire' },
@@ -130,7 +130,7 @@ describe('a confirmed-as-is Olumi value is never said as the user\'s figure (AIQ
     const store = new ProposalStore();
     const caps = createAgentCapabilities(d, store);
     const r = await caps.proposeAssumptions(ctxSaying('I checked Olumi\'s churn estimate and it looks right, but nudge it up a little.'),
-      { assumptions: [{ ...CHURN, basis: 'Olumi\'s estimate, nudged up as asked' }] }) as R;
+      { assumptions: [{ ...CHURN, user_stated: false, basis: 'Olumi\'s estimate, nudged up as asked' }] }) as R;
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(authorOf(store, r.proposal_id, 'monthly_churn')).toBe('model_proposed');
     expect(r.assumptions[0]).not.toHaveProperty('your_figure');
@@ -156,8 +156,8 @@ describe('a FIRST value the user typed for a factor with no value yet is theirs,
     const store = new ProposalStore();
     return { caps: createAgentCapabilities(d, store), store };
   };
-  const FIRST_CHURN = { factor_label: 'Monthly churn', value: 3.7, unit: 'percent per month', basis: 'the figure the user gave' };
-  const FIRST_SUBS = { factor_label: 'Pro subscribers', value: 300, unit: 'subscribers', basis: 'a round starting estimate' };
+  const FIRST_CHURN = { user_stated: true, factor_label: 'Monthly churn', value: 3.7, unit: 'percent per month', basis: 'the figure the user gave' };
+  const FIRST_SUBS = { user_stated: false, factor_label: 'Pro subscribers', value: 300, unit: 'subscribers', basis: 'a round starting estimate' };
 
   it('RED: the user wrote 3.7% for unvalued churn → user_stated, your_figure, the card RECORDS their figure, never "starting assumption"', async () => {
     const { caps, store } = unvalued('monthly_churn');
@@ -174,7 +174,7 @@ describe('a FIRST value the user typed for a factor with no value yet is theirs,
 
   it('CONTRAST: the user did NOT write the figure → Olumi\'s first estimate, offered as a starting assumption (unchanged)', async () => {
     const { caps, store } = unvalued('monthly_churn');
-    const r = await caps.proposeAssumptions(ctxSaying('Please estimate churn for me.'), { assumptions: [FIRST_CHURN] }) as P;
+    const r = await caps.proposeAssumptions(ctxSaying('Please estimate churn for me.'), { assumptions: [{ ...FIRST_CHURN, user_stated: false, basis: 'a proposed churn estimate' }] }) as P;
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(authorOf(store, r.proposal_id, 'monthly_churn')).toBe('model_proposed');
     expect(store.get(r.proposal_id)?.provenance.authored_by).toBe('model_proposed');

@@ -37,8 +37,8 @@ describe('a starting value is only proposed for a node the value writer accepts'
   it('RED: a value named for a RISK is not proposed; the factor beside it still is, and the risk is reported back', async () => {
     const { c, store } = caps();
     const r = await c.proposeAssumptions(ctx, { assumptions: [
-      { factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },
-      { factor_label: 'Onboarding load', value: 0.4, unit: '', basis: 'typical' },
+      { user_stated: false, factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },
+      { user_stated: false, factor_label: 'Onboarding load', value: 0.4, unit: '', basis: 'typical' },
     ] });
     expect(r.ok).toBe(true);
     const ops = store.get(String(r.proposal_id))!.operations;
@@ -50,7 +50,7 @@ describe('a starting value is only proposed for a node the value writer accepts'
 
   it('only a non-factor named → nothing to adopt, with the reason stated (never a proposal that cannot land)', async () => {
     const { c } = caps();
-    const r = await c.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' }] });
+    const r = await c.proposeAssumptions(ctx, { assumptions: [{ user_stated: false, factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' }] });
     expect(r).toMatchObject({ ok: false, refusal: 'nothing_to_adopt', not_a_factor: [{ label: 'Hiring ramp-up delay', kind: 'risk' }] });
   });
 
@@ -63,8 +63,8 @@ describe('a starting value is only proposed for a node the value writer accepts'
   it('RED (joined): risk value + factor value + a valid level → the compound holds only the factor and the level, and the left-out risk is disclosed before consent', async () => {
     const { c, store } = caps();
     const r = await c.proposeStartingPoint(ctx, { assumptions: [
-      { factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },
-      { factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' },
+      { user_stated: false, factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },
+      { user_stated: false, factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' },
     ], option_levels: [LEVEL] } as never);
     expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(true);
     const ops = store.get(String(r.proposal_id))!.operations;
@@ -77,7 +77,7 @@ describe('a starting value is only proposed for a node the value writer accepts'
 
   it('CONTRAST: an all-factor complete starting point discloses no omission', async () => {
     const { c } = caps();
-    const r = await c.proposeStartingPoint(ctx, { assumptions: [{ factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' }], option_levels: [LEVEL] } as never);
+    const r = await c.proposeStartingPoint(ctx, { assumptions: [{ user_stated: false, factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' }], option_levels: [LEVEL] } as never);
     expect(r.ok).toBe(true);
     expect(r).not.toHaveProperty('not_a_factor');
     expect(String(r.public_label)).not.toMatch(/left out/);
@@ -85,7 +85,7 @@ describe('a starting value is only proposed for a node the value writer accepts'
 
   it('CONTRAST: an all-risk input with no levels → nothing approvable, and the reason travels with the refusal', async () => {
     const { c } = caps();
-    const r = await c.proposeStartingPoint(ctx, { assumptions: [{ factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' }], option_levels: [] } as never);
+    const r = await c.proposeStartingPoint(ctx, { assumptions: [{ user_stated: false, factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' }], option_levels: [] } as never);
     expect(r.ok).toBe(false);
     expect(JSON.stringify(r)).toContain('"not_a_factor":[{"label":"Hiring ramp-up delay","kind":"risk"}]');
   });
@@ -94,8 +94,8 @@ describe('a starting value is only proposed for a node the value writer accepts'
     const { c, store } = caps();
     // Team size's description is literally "Hiring ramp-up delay" — the risk's label.
     const r = await c.proposeAssumptions(ctx, { assumptions: [
-      { factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },
-      { factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' },
+      { user_stated: false, factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },
+      { user_stated: false, factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' },
     ] });
     const ops = store.get(String(r.proposal_id))!.operations;
     expect(ops.map((o) => o.path), 'team_size must not receive the risk\'s value').toEqual(['onboarding_load']);
@@ -115,8 +115,8 @@ describe('an INCOMPLETE starting point (both halves proposed) still reports what
     const rd: InternalDispatch = async () => ({ status: 200, json: { graph: { nodes: NODES, edges }, graph_hash: 'h0' } });
     const c = createAgentCapabilities(rd, new ProposalStore(), undefined, 'full');
     const r = await c.proposeStartingPoint(ctx, { assumptions: [
-      { factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },
-      { factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' },
+      { user_stated: false, factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },
+      { user_stated: false, factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' },
     ], option_levels: [LEVEL] } as never);
     expect(r.ok).toBe(false);
     expect(String(r.refusal)).toBe('incomplete_starting_point');

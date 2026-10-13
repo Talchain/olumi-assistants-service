@@ -65,8 +65,8 @@ function fakeProduct(opts: { rescale?: Record<string, number>; failOn?: string[]
 
 const ASK = {
   assumptions: [
-    { factor_label: 'Monthly churn rate', value: 3.5, unit: '%', basis: 'typical B2B SaaS baseline' },
-    { factor_label: 'Pro subscribers', value: 400, unit: 'subscribers', basis: 'implied by a £20k MRR target at £49' },
+    { user_stated: false, factor_label: 'Monthly churn rate', value: 3.5, unit: '%', basis: 'typical B2B SaaS baseline' },
+    { user_stated: false, factor_label: 'Pro subscribers', value: 400, unit: 'subscribers', basis: 'implied by a £20k MRR target at £49' },
   ],
 };
 
@@ -90,8 +90,8 @@ describe('propose_assumptions', () => {
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeAssumptions(ctx, {
       assumptions: [
-        { factor_label: 'Pro plan monthly price', value: 59, unit: '£', basis: 'the proposed increase' },
-        { factor_label: 'Pro subscribers', value: 400, unit: 'subscribers', basis: 'implied' },
+        { user_stated: false, factor_label: 'Pro plan monthly price', value: 59, unit: '£', basis: 'the proposed increase' },
+        { user_stated: false, factor_label: 'Pro subscribers', value: 400, unit: 'subscribers', basis: 'implied' },
       ],
     });
     expect(r.left_alone_already_valued).toEqual([{ label: 'Pro plan monthly price', current_value: 49 }]);
@@ -102,7 +102,7 @@ describe('propose_assumptions', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ factor_label: 'Customer acquisition cost', value: 90, unit: '£', basis: 'guess' }],
+      assumptions: [{ user_stated: false, factor_label: 'Customer acquisition cost', value: 90, unit: '£', basis: 'guess' }],
     });
     expect(r.ok).toBe(false);
     expect(r.refusal).toBe('nothing_to_adopt');
@@ -284,7 +284,7 @@ describe('a value adopted onto an unframed factor gets a range, or the analysis 
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ factor_label: 'Monthly churn rate', value: 0.035, unit: 'proportion', basis: 'already a proportion' }],
+      assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 0.035, unit: 'proportion', basis: 'already a proportion' }],
     });
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
     // The contrast control: no range, no second write, no disclosure noise.

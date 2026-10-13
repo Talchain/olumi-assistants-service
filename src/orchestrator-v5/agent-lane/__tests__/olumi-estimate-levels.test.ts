@@ -94,7 +94,7 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
   it('A2h unknown-history assumption revision cannot become Olumi authored', async () => {
     const { caps, sent } = setup();
     const out = await caps.proposeAssumptions({ ...ctxSaying('Use that price.'), unverified_user_text: 'Pro plan price is £64.' },
-      { assumptions: [{ factor_label: 'Pro plan price', value: 64, unit: 'GBP per month', basis: 'retained context', revise: true }] });
+      { assumptions: [{ user_stated: true, factor_label: 'Pro plan price', value: 64, unit: 'GBP per month', basis: 'retained context', revise: true }] });
     expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     expect(sent).toEqual([]);
   });
