@@ -261,10 +261,10 @@ describe('selected Sol-high coach on the actual Agent route', () => {
   });
 
   it('uses selected coach bytes as the prefix of the typed Run interpretation', async () => {
-    const response = await sendTurn('Run analysis.', [say('The Run is provisional.'), say('The Run is provisional.')],
+    const response = await sendTurn('Run analysis.', [say('The Run is provisional.')],
       { id: 'agent-run-analysis', action_type: 'run_analysis' });
-    expect(response._diagnostic_trace?.fast_path).toBeUndefined();
-    expect(sent).toHaveLength(2);
+    expect(response._diagnostic_trace?.fast_path).toBe('run');
+    expect(sent).toHaveLength(1);
     for (const body of sent) {
       expect(body.model).toBe('gpt-6.1-sol');
       expect(sha256(body.instructions)).toBe(RENDERED_SHA);

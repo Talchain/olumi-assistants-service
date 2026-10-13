@@ -144,15 +144,13 @@ function fixture(three = true): void {
 describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
   let app: FastifyInstance;
   let info: ReturnType<typeof vi.spyOn>;
-  let awaitingRunReply = false;
   const say = { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Here is the reading for your approval.' }] }] };
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       const body = String(init?.body ?? '');
       modelBodies.push(body);
       const runCall = runPressToolResponse(JSON.parse(body));
-      if (runCall) { awaitingRunReply = true; return runCall; }
-      if (awaitingRunReply) { awaitingRunReply = false; return new Response(JSON.stringify(say), { status: 200 }); }
+      if (runCall) return runCall;
       return new Response(JSON.stringify(body.includes('"propose_link_effect"') ? (scripts.shift() ?? say) : say), { status: 200 });
     }));
     vi.resetModules();

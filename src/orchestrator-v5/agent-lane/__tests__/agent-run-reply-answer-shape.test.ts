@@ -186,9 +186,9 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   let turnSeq = 0;
   const nextTurnId = () => { turnSeq += 1; return `5d4c3b2a-1f0e-4d9c-8b7a-${String(turnSeq).padStart(12, '0')}`; };
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
-  /** The UI's Run control (fast path 3): the analysis runs, then ONE interpreting call answers — scripted here. */
+  /** The Run returns first; the existing bound Explain control makes the ONE narration call scripted here. */
   const typedRun = async (text: string, scenario = SCENARIO) => {
-    callModelOutputs = [say('The calculation is available for discussion.'), say(text)];
+    callModelOutputs = [say(text)];
     const turnId = nextTurnId();
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: scenario, message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId,
@@ -297,17 +297,17 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     ] } };
   };
 
-  it('B15 / R1: the loop Run keeps licensed findings and disclosure beside its interpretation', async () => {
+  it('B15 / T1r: result-first Run keeps licensed findings and the host disclosure', async () => {
     hostRunFixture();
     const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
     expect(screen, 'positive control: two typed screen findings').toHaveLength(2);
     const { b, turnId } = await runOnly();
-    expect(b._diagnostic_trace.fast_path).toBeUndefined();
+    expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(carriesResult(b)).toBe(true);
-    expect(fetch, 'Run makes the model tool call and interpretation').toHaveBeenCalledTimes(2);
+    expect(fetch, 'Run makes only the pre-tool interpretation call').toHaveBeenCalledTimes(1);
     expect(b._answer_shape, 'base keeps host_composed whole').toBeDefined();
     expect(b._answer_shape!.headline).toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
-    expect(b._answer_shape!.detail).toContain('Done.');
+    expect(b._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
     const horizon = untestedHorizonLine(readbackGraph, { besideChance: true, plural: true });
     expect(horizon, 'a horizon always accompanies these two non-event goal chances').not.toBeNull();
     expect([b._answer_shape!.headline, ...b._answer_shape!.bullets].slice(0, 3), 'chance findings and their own notes precede the mandatory horizon marker').toEqual([
@@ -322,7 +322,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
       expect(faceOf(b._answer_shape!)).toContain(line.chance);
       expect(b.assistant_text.split(line.chance)).toHaveLength(2);
     }
-    for (const part of ['Done.', RUN_DISCLOSURE]) for (const sentence of sentencesOf(part)) {
+    for (const part of [RUN_RESULT_READY_TEXT, RUN_DISCLOSURE]) for (const sentence of sentencesOf(part)) {
       expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence), 'each host sentence exactly once').toHaveLength(1);
     }
     const deliveredSentences = sentenceMultiset(b.assistant_text);
@@ -446,17 +446,17 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(first._answer_shape!.headline, 'B15: the live Run leads with its first chance finding').toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
     expect(rows.get(turnId)?.assistant_message).toBe(deriveAnswerTextFromShape(first._answer_shape!));
     expect(rows.get(turnId)?.assistant_message!.startsWith(first._answer_shape!.headline)).toBe(true);
-    expect(first._answer_shape!.detail).toContain('Done.');
+    expect(first._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
     const { b: replay } = await runOnly(turnId);
     expect(replay._agent.replayed).toBe(true);
     expect(runRequests, 'the replay did not run again').toBe(1);
     expect(replay.narration).toEqual(first.narration);
-    expect(first.narration!.status).toBe('ready');
+    expect(first.narration!.status).toBe('pending');
     expect(carriesResult(replay)).toBe(true);
     // DL (reload = same): the replay re-applies the same composer to the same typed parts — same bytes, same shape.
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(replay._answer_shape).toEqual(first._answer_shape);
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('2b-0 REPLAY PARITY GUARD: stored words the rebuild does not reproduce → legacy host words the rebuild does not reproduce ship whole, no shape', async () => {

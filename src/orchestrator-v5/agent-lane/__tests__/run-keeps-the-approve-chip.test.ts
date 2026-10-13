@@ -36,7 +36,6 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 let hash: string | undefined = 'h1';
 let modelCalls = 0;
 let agentCalls = 0;
-let awaitingRunReply = false;
 
 describe('a Run turn keeps the approve chip for the proposal still awaiting a yes', () => {
   let app: FastifyInstance;
@@ -45,9 +44,8 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelCalls += 1;
       const runCall = runPressToolResponse(body);
-      if (runCall) { awaitingRunReply = true; return runCall; }
-      if (awaitingRunReply || body['tool_choice'] === 'none') {
-        awaitingRunReply = false;
+      if (runCall) return runCall;
+      if (body['tool_choice'] === 'none') {
         return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'On this provisional run, Team size matters most.' }] }] }), { status: 200 });
       }
       agentCalls += 1;
@@ -91,7 +89,7 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
     const r = await run();
     expect(r.statusCode).toBe(200);
     const b = r.json() as Body;
-    expect(b._diagnostic_trace.fast_path, 'the control: Run uses the loop').toBeUndefined();
+    expect(b._diagnostic_trace.fast_path, 'the control: Run returns first').toBe('run');
     // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
     expect(b.suggested_actions.map((a) => [a.id, a.label])).toEqual([
       [`agent-approve-proposal:${proposalId}`, 'Make this change'],
@@ -103,7 +101,7 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
   it('CONTRAST: the model changed since it was proposed → the Run turn offers no stale approve chip', async () => {
     hash = 'h2';
     const b = (await run()).json() as Body;
-    expect(b._diagnostic_trace.fast_path).toBeUndefined();
+    expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(b.suggested_actions.some((a) => a.id.startsWith('agent-approve-proposal:'))).toBe(false);
   });
 

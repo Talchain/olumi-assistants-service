@@ -445,7 +445,7 @@ describe('the Agent route runs the first analysis itself, once', () => {
     await buildTurn(app);
     expect(st(SID).inProcessRuns).toHaveLength(1);
     const b = await turn(app, { message: 'Run analysis.', source: 'chip', chip: { id: RUN_CHIP_ID, action_type: 'run_analysis' } });
-    expect(b._diagnostic_trace.fast_path).toBeUndefined();
+    expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(st(SID).injectRuns, 'the explicit Run ran').toBe(1);
     expect(st(SID).inProcessRuns, 'and it was not the automatic path').toHaveLength(1);
     expect(b._diagnostic_trace.first_analysis).toBeUndefined();

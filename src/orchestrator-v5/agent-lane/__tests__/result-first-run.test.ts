@@ -25,6 +25,7 @@ const store = {
   readCommittedTurn: vi.fn(async (_scenario: string, id: string) => rows.find((r) => r.turn_id === id) ?? null),
   append: vi.fn(async (row: Record<string, unknown>) => { rows.push({ ...row, id: row.turn_id }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => [{ id: 'run-row', turn_class: 'decide', created_at: '2026-10-01T12:00:00.000Z' }, ...rows].reverse()),
+  readMostRecentPendingActions: vi.fn(async () => []),
   readFactsFor: vi.fn(async () => fact === null ? [] : [...editFacts, fact]),
   readFactsWithTurnFor: vi.fn(async () => fact === null ? [] : [
     ...editFacts.map((edit, i) => ({ fact: edit, fact_row_id: `edit-${i}`, turn_id: `edit-turn-${i}`, fact_created_at: '2026-10-01T12:00:02.000Z' })),
@@ -44,6 +45,8 @@ describe('two-request Run through the real handler and canonical analysis reader
   let runModelBodies: Record<string, unknown>[] = [];
   let runs = 0;
   let graphReads = 0;
+  let savedReadback: Record<string, unknown>;
+  let modelCallRunCounts: number[] = [];
   let mutateDuringExplanation: (() => void) | undefined;
   let providerMode: 'ok' | 'empty' | 'failed' | 'timeout' = 'ok';
   let hashOf: (g: unknown) => string | null;
@@ -53,6 +56,7 @@ describe('two-request Run through the real handler and canonical analysis reader
       const body = JSON.parse(String(init?.body ?? '{}'));
       if (body.tool_choice !== 'none') {
         runModelBodies.push(body);
+        modelCallRunCounts.push(runs);
         return runPressToolResponse(body) ?? new Response(JSON.stringify({ output: [
           { type: 'message', content: [{ type: 'output_text', text: 'The result depends on the assumptions in your model.' }] },
         ] }), { status: 200 });
@@ -90,6 +94,7 @@ describe('two-request Run through the real handler and canonical analysis reader
       if (readFails) return reply.code(500).send({ error: 'unavailable' });
       if (scenarioOwner !== null) return reply.code(403).send({ error: 'forbidden' });
       const read = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'test' });
+      savedReadback = JSON.parse(JSON.stringify(read));
       return { graph, brief_text: briefText, graph_hash: hashOf(graph), ...read };
     });
     await app.register(agentV1TurnRoute);
@@ -100,7 +105,7 @@ describe('two-request Run through the real handler and canonical analysis reader
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
   beforeEach(() => { graph = GRAPH; briefText = 'The strategic brief'; fact = null; readFails = false; rows.length = 0; runs = 0; graphReads = 0; scenarioOwner = null; restored = null; editFacts = [];
-    modelBodies = []; runModelBodies = []; providerMode = 'ok'; mutateDuringExplanation = undefined; store.readRunCurrentness = undefined; });
+    modelBodies = []; runModelBodies = []; modelCallRunCounts = []; providerMode = 'ok'; mutateDuringExplanation = undefined; store.readRunCurrentness = undefined; });
   const run = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     turn_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
   } });
@@ -112,13 +117,38 @@ describe('two-request Run through the real handler and canonical analysis reader
       agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id }, ...extra } });
   };
 
+  it('T1r (a): returns the saved result after one interpretation call, with pending same-Run Explain', async () => {
+    const first = (await run()).json();
+    expect(runs).toBe(1);
+    expect(runModelBodies).toHaveLength(1);
+    expect(modelBodies).toHaveLength(0);
+    expect(first._diagnostic_trace.timing.provider_calls).toBe(1);
+    expect(modelCallRunCounts).toEqual([0]);
+    expect(first.blocks.filter((b: { type: string }) => b.type === 'analysis_result')).toEqual([savedReadback.analysis_result]);
+    const chip = first.suggested_actions.find((c: { id: string }) => isRunExplanationChip(c.id));
+    expect(first.narration).toEqual({ status: 'pending', run_key: chip.id.slice('agent-explain-run:'.length) });
+    expect(rows.at(-1)?.assistantMessage).toBe(first.assistant_text);
+  });
+
+  it('T1r (b): the same Explain key is stale after a graph edit, with zero narration calls', async () => {
+    const first = (await run()).json();
+    const saved = structuredClone(fact);
+    graph = { ...GRAPH, nodes: [...GRAPH.nodes, { id: 'f2', kind: 'factor', label: 'Churn' }] };
+    const stale = (await explanation(first)).json();
+    expect(stale.narration).toEqual({ status: 'stale', run_key: first.narration.run_key });
+    expect(modelBodies).toHaveLength(0);
+    expect(runModelBodies).toHaveLength(1);
+    expect(runs).toBe(1);
+    expect(fact).toEqual(saved);
+  });
+
   it('Run and Re-run each read context before the loop and once after the Run', async () => {
     expect((await run()).statusCode).toBe(200);
     expect(graphReads, 'Run: canonical context and one post-run read').toBe(2);
     const beforeRerun = graphReads;
     expect((await run()).statusCode).toBe(200);
     expect(graphReads - beforeRerun, 'Re-run: canonical context and one post-run read').toBe(2);
-    expect(runModelBodies).toHaveLength(4);
+    expect(runModelBodies).toHaveLength(2);
     expect(runs).toBe(2);
     expect(modelBodies).toHaveLength(0);
   });
@@ -204,16 +234,16 @@ describe('two-request Run through the real handler and canonical analysis reader
     expect(runs).toBe(1);
   });
 
-  it('Run interprets the current result in its loop; the retained follow-up only explains that Run', async () => {
+  it('T1r (b): Run returns first; one optional narration explains the same Run', async () => {
     const response = await run();
     expect(response.statusCode).toBe(200);
     const first = response.json();
     expect(runs).toBe(1); expect(modelBodies).toHaveLength(0);
     expect(first.blocks.some((b: { type: string }) => b.type === 'analysis_result')).toBe(true);
     expect(first.analysis_state.run_state.kind).toBe('complete_current');
-    expect(first._diagnostic_trace.timing.provider_calls).toBe(2);
-    expect(runModelBodies).toHaveLength(2);
-    expect(first.narration).toEqual({ status: 'ready', run_key: expect.stringMatching(/^[0-9a-f]{16}$/) });
+    expect(first._diagnostic_trace.timing.provider_calls).toBe(1);
+    expect(runModelBodies).toHaveLength(1);
+    expect(first.narration).toEqual({ status: 'pending', run_key: expect.stringMatching(/^[0-9a-f]{16}$/) });
     const second = await explanation(first);
     expect(second.statusCode).toBe(200);
     expect(runs).toBe(1); expect(modelBodies).toHaveLength(1);
@@ -229,15 +259,16 @@ describe('two-request Run through the real handler and canonical analysis reader
     // Both answers use the existing transcript persistence; no separate interpretation store.
     const answers = rows.filter((r) => typeof r.assistantMessage === 'string');
     expect(answers).toHaveLength(2);
-    expect(answers[0].assistantMessage).toContain('depends on the assumptions');
+    expect(answers[0].assistantMessage).toBe(first.assistant_text);
+    expect(answers[0].assistantMessage).not.toContain('depends on the assumptions');
     expect(answers[1].assistantMessage).toContain('depends on the assumptions');
     const { historyFromDurableTurns } = await import('../history-store.js');
     const stored = [...rows].reverse().map((r) => ({ request_hash: r.request_hash as string,
       user_message: r.userMessage as string, assistant_message: r.assistantMessage as string }));
     const cold = historyFromDurableTurns(stored);
     expect(historyFromDurableTurns(stored)).toEqual(cold);
-    expect(JSON.stringify(cold).match(/depends on the assumptions/g)).toHaveLength(2);
-    expect(JSON.stringify(cold)).not.toContain('results are ready');
+    expect(JSON.stringify(cold).match(/depends on the assumptions/g)).toHaveLength(1);
+    expect(JSON.stringify(cold)).toContain('results are ready');
   });
 
   for (const change of ['graph', 'new-run', 'missing-result', 'unavailable', 'substitution', 'run-substitution', 'foreign-key'] as const) {
@@ -284,13 +315,17 @@ describe('two-request Run through the real handler and canonical analysis reader
   });
 
   for (const mode of ['empty', 'failed', 'timeout'] as const) {
-    it(`keeps the calculated result after ${mode} narration, without falling through to the Agent`, async () => {
+    it(`T1r (c): keeps the calculated result after ${mode} narration, without falling through to the Agent`, async () => {
       const first = (await run()).json(); providerMode = mode;
+      const saved = structuredClone(fact);
+      const savedAnswer = structuredClone(rows.at(-1));
       timeoutController = new AbortController();
       const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
       const second = await explanation(first);
       expect(second.statusCode).toBe(200); expect(runs).toBe(1); expect(modelBodies).toHaveLength(1);
-      expect(second.json().blocks.some((b: { type: string }) => b.type === 'analysis_result')).toBe(true);
+      expect(second.json().blocks).toEqual(first.blocks);
+      expect(fact).toEqual(saved);
+      expect(rows.find(row => row.turn_id === savedAnswer?.turn_id)).toEqual(savedAnswer);
       expect(second.json()._agent.tool_calls).toEqual([]);
       expect(second.json().assistant_text).toContain('couldn’t explain it this time');
       expect(second.json().narration.status).toBe('unavailable');

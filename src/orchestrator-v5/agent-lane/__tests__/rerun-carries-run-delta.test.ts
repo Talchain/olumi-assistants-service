@@ -122,7 +122,7 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
     const r = await pressRun();
     expect(r.statusCode).toBe(200);
     const b = r.json() as Body;
-    expect(b._diagnostic_trace?.fast_path).toBeUndefined();
+    expect(b._diagnostic_trace?.fast_path).toBe('run');
     expect(b.run_delta).toEqual(DELTA);
     // The run turn gave no refusal reason, so none is carried (Canonical #2039 N1: never invent one).
     expect(b.analysis_ready?.run_delta_absence_reason).toBeUndefined();

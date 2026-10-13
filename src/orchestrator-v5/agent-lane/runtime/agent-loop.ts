@@ -137,6 +137,8 @@ export interface AgentTurnInput {
    * exactly one call and it is the turn's first; a composed reply ends the turn with no further model call.
    */
   readonly composeReply?: (tool: string, args: unknown, result: ToolResult) => string | null;
+  /** A Run press returns its saved result before optional narration. Other turns keep the ordinary loop. */
+  readonly stopAfterSuccessfulRun?: () => string;
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
   /**
@@ -737,6 +739,18 @@ export async function runAgentTurn(
       });
     }
     const hopResults = toolResults.slice(hopResultsFrom);
+    // Finish every call's bookkeeping before returning, so history retains a paired output for each call.
+    // The route still checks the final canonical read before shipping the result and its bound Explain control.
+    if (input.stopAfterSuccessfulRun !== undefined && calls.some((call, index) =>
+      call.name === 'run_analysis' && hopResults[index]?.ok === true && hopResults[index]?.ran === true)) {
+      const text = input.stopAfterSuccessfulRun();
+      items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+      return {
+        assistant_text: text, items: handedOn(), tool_calls: toolCalls, tool_results: toolResults,
+        mutated, hops: hop + 1, stopped_reason: 'answered',
+        timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
+      };
+    }
     // ⛔ P44 S2 — align each call with its own result; refused and replayed builds cannot announce writing.
     previousHopBuilt = calls.some((call, index) => {
       const result = hopResults[index];

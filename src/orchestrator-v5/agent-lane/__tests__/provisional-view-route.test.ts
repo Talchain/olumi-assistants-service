@@ -79,17 +79,12 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
   let noLeaderSentence: string;
   let because: string;
   let heading: string;
-  let awaitingRunReply = false;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
       const req = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelRequests.push(req);
       const runCall = runPressToolResponse(req);
-      if (runCall) { awaitingRunReply = true; return runCall; }
-      if (awaitingRunReply) {
-        awaitingRunReply = false;
-        return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The model result is available.' }] }] }), { status: 200 });
-      }
+      if (runCall) return runCall;
       // The Run turn's forced provisional-view call runs IN PARALLEL with the interpreter: answer it by content, not order.
       if ((req['tool_choice'] as { name?: unknown } | undefined)?.name === 'give_provisional_view') {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'give_provisional_view', arguments: JSON.stringify(VIEW), call_id: 'forced' }] }), { status: 200 });
@@ -234,7 +229,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     const before = modelRequests.length;
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
       stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
-    expect(modelRequests.length - before).toBe(2);
+    expect(modelRequests.length - before).toBe(1);
     modelRequests.length = 0;
     return explainRun(app, SCENARIO, first);
   };
