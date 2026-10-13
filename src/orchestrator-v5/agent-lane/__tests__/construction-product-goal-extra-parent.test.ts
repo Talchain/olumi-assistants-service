@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
 import type { CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
-import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { projectEntity, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
 import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from '../product-goal-extra-parent.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
@@ -270,6 +270,16 @@ describe('a goal read as price × subscribers gets no third direct parent', () =
     const guarded = guardAnalysisParticipation(graph, { goalNodeId: graph.nodes.find(n => n.kind === 'goal')!.id });
     expect(guarded.excludedNodeIds).toEqual([risk.id]);
     expect(buildAnalysisParticipationDisclosure(guarded)).toMatch(/kept out of the calculation/);
+  });
+  it('add. 7, the Agent\'s view (T4i): the kept-out risk reaches the Agent with its exclusion mark; an included node carries none', async () => {
+    const { graph } = await build(churnLimitRisk());
+    const risk = graph.nodes.find(n => n.label === 'Pro churn exceeds 4%')!;
+    const churn = graph.nodes.find(n => n.label === 'Monthly churn')!;
+    expect(risk.analysis_participation, 'precondition: the producer kept it out').toBe('retained_excluded');
+    expect(projectEntity(risk as never)).toMatchObject({ id: risk.id, kind: 'risk', analysis_participation: 'retained_excluded' });
+    expect(projectEntity(risk as never)).not.toHaveProperty('proposed_by');
+    expect(churn.analysis_participation, 'contrast: an included factor').toBeUndefined();
+    expect(projectEntity(churn as never)).not.toHaveProperty('analysis_participation');
   });
   it('add. 7, no stated limit: kept out, said WITHOUT the limit clause', () => {
     const { found } = rerouteExtraParentsOfProductGoal(churnLimitRisk(c => { c.constraints = []; }), BRIEF);

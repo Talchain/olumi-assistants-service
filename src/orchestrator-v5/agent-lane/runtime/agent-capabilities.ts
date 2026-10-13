@@ -1373,8 +1373,10 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
                 ...(point === 'stated_figure' ? { point: 'user_figure' } : point === 'midpoint' ? { point: 'olumi_midpoint' } : {}) } };
             })(),
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
-            ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
-            ...(n.kind === 'option' && (n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded')
+            // Any kind (T4i, DL 14 Oct): an excluded factor, risk or outcome reaches the Agent with its exclusion mark, as an
+            // option does, so it is never described as part of the Run.
+            ...(n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
+            ...(n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded'
               ? { analysis_participation: n.analysis_participation } : {}),
             // MG F1 T6: the user's own word for the option (absent = feasible): "removed" / "infeasible" is out of the comparison.
             ...(n.kind === 'option' && (n.option_status === 'removed' || n.option_status === 'infeasible') ? { option_status: n.option_status } : {}),
