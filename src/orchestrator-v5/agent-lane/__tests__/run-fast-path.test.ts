@@ -47,7 +47,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
       const output = [...(body['input'] as Record<string, unknown>[] ?? [])].reverse().find((i) => i.type === 'function_call_output');
       const result = output ? JSON.parse(String(output.output)) : undefined;
       const text = body['tool_choice'] !== 'none' && result?.refusal === 'run_failed'
-        ? 'I couldn’t run the analysis: something went wrong on Olumi’s side while starting it. Nothing in your model changed, so please try again in a moment.'
+        ? 'The analysis could not run because your saved graph has changed.'
         : body['tool_choice'] !== 'none' && result?.ran === false ? `The analysis didn’t run. ${result.what_is_missing}`
         : 'In the current model, the result turns on Capacity.';
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] }), { status: 200 });
@@ -318,12 +318,14 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
       kind: 'message', scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
     expect(r.statusCode).toBe(200);
-    const b = r.json() as { assistant_text: string; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] } };
+    const b = r.json() as { assistant_text: string; suggested_actions: { action_type?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] } };
     expect(modelBodies, 'the model reads the failed Run outcome').toHaveLength(2);
     expect(b.assistant_text, b.assistant_text).toMatch(/couldn\u2019t run the analysis/);
     expect(b.assistant_text).toMatch(/Nothing in your model changed/);
     expect(b.assistant_text, 'no invented cause').not.toMatch(/graph has changed|historical|stale/i);
+    expect(b.assistant_text).toBe((await import('../../../routes/agent-v1-turn.js')).RUN_FAILED_TEXT);
     expect(b._agent.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis', ok: false, refusal: 'run_failed' })]);
+    expect(b.suggested_actions).toContainEqual(expect.objectContaining({ action_type: 'run_analysis' }));
   });
 
   it('the Agent\'s own run_analysis call that fails is told plainly what to say — and not to give a reason', async () => {

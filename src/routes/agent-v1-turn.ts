@@ -2465,6 +2465,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length);
       const replayLoopRunCurrent = approvedProposal === undefined && typedRunOf(body)
         && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;
+      // A recovered explanation keeps the same bound retry control and status on resend.
+      if (replayLoopRunCurrent && replayText.includes(interpretationUnavailableText({ ran: true }))) {
+        replayNarration = { status: 'unavailable', run_key: replayLoopRunKey! };
+        boundControl.push(replayChip!);
+      }
       const resultFirstReplay = replayNarration !== undefined || replayLoopRunCurrent;
       // The durable carrier: this exact row's persisted Run offer, still within its lifetime.
       const durableRun = (prior.pending_actions ?? []).some((pa) =>
@@ -3023,6 +3028,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The existing K2-bound press authorises one calculation on this turn, not model writes.
     const runPress = approvedProposal === undefined && typedRunOf(body);
     let runPressConsumed = false;
+    let runPressResult: Awaited<ReturnType<typeof capabilities.runAnalysis>> | undefined;
+    let runPressToolMs = 0;
     const loopCapabilities = !runPress ? capabilities : {
       ...capabilities,
       runAnalysis: async (ctx: AgentToolContext, args: Parameters<typeof capabilities.runAnalysis>[1]) => {
@@ -3030,7 +3037,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           detail: 'This Run press has already been used. No second analysis ran.' };
         runPressConsumed = true;
         // N1: only this agent call supplies timing. Never merge request or chip parameters here.
-        return capabilities.runAnalysis(ctx, { reason: args.reason, effects_timing: args.effects_timing });
+        const started = Date.now();
+        try {
+          runPressResult = await capabilities.runAnalysis(ctx, { reason: args.reason, effects_timing: args.effects_timing });
+          return runPressResult;
+        } finally {
+          runPressToolMs += Date.now() - started;
+        }
       },
     };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
@@ -3789,6 +3802,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** RT-1: set only on the path that runs the Agent with the selection; absent ⇒ no `_grounded_selection`. */
     let selectionContext: AgentSelectionContext | null | undefined;
     await readTurnGuidanceHistory();
+    const loopStartedAt = Date.now();
+    let runPressProviderMs = 0;
+    let runPressProviderCalls = 0;
     if (result === undefined) try {
       /**
        * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
@@ -3958,40 +3974,60 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                     detail: `These suggestions did not pass Olumi’s checks (${widenGateResult.failed.join(', ')}). Nothing was changed.` };
             },
           },
-          callModelFor(budget),
+          !runPress ? callModelFor(budget) : async (request) => {
+            const started = Date.now();
+            runPressProviderCalls += 1;
+            try { return await callModelFor(budget)(request); }
+            finally { runPressProviderMs += Date.now() - started; }
+          },
         );
       }
     } catch (err) {
       log.error({ err: String(err), scenario_id: scenarioId }, 'agent-lane turn failed');
-      // No possible writes remain: release the claim, so a retry of the SAME
-      // turn_id can run. Earlier writes or unknown outcomes keep the claim.
-      const released = await releaseUnwrittenTurnClaim();
-      if (err instanceof ModelReadFailedError) {
-        const refusal = { error: toErrorV1(err, req) };
-        return reply.code(503).send(refusal.error);
-      }
-      if (isRevisionConflict(err)) {
-        const refusal = { error: {
-          ...toErrorV1(err, req),
+      // A completed Run survives a failed explanation. Keep its identity and commit the ordinary
+      // result-first reply, so resending this press replays it instead of leaving an unknown outcome.
+      if (runPress && runPressResult?.ran === true
+        && !(err instanceof ModelReadFailedError) && !isRevisionConflict(err)) {
+        const ms = Date.now() - loopStartedAt;
+        result = { assistant_text: '', items: [],
+          tool_calls: [{ name: 'run_analysis', ok: runPressResult.ok === true, mutated: false }],
+          tool_results: [runPressResult], mutated: false, hops: 1, stopped_reason: 'incomplete',
+          timing: { total_ms: ms, provider_ms: runPressProviderMs, tool_ms: runPressToolMs,
+            overhead_ms: Math.max(0, ms - runPressProviderMs - runPressToolMs), tool_provider_ms: 0,
+            provider_calls: runPressProviderCalls, tool_calls: 1, hops: 1 } };
+      } else {
+        // No possible writes remain: release the claim, so a retry of the SAME
+        // turn_id can run. Earlier writes or unknown outcomes keep the claim.
+        const released = await releaseUnwrittenTurnClaim();
+        if (err instanceof ModelReadFailedError) {
+          const refusal = { error: toErrorV1(err, req) };
+          return reply.code(503).send(refusal.error);
+        }
+        if (isRevisionConflict(err)) {
+          const refusal = { error: {
+            ...toErrorV1(err, req),
+            ...(turnId !== undefined ? { retry_safe: released } : {}),
+          } };
+          return reply.code(409).send(refusal.error);
+        }
+        return reply.code(502).send({
+          error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
+          _provider_calls: recordedProviderCalls(),
+          ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
           ...(turnId !== undefined ? { retry_safe: released } : {}),
-        } };
-        return reply.code(409).send(refusal.error);
+        });
       }
-      return reply.code(502).send({
-        error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
-        _provider_calls: recordedProviderCalls(),
-        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
-        ...(turnId !== undefined ? { retry_safe: released } : {}),
-      });
     } finally {
       briefReadingOpen = false;
     }
 
-    // Preserve the existing typed engine refusal on a Run press, even if the model invents another cause.
+    const runPressFailed = runPress && runPressResult?.refusal === 'run_failed';
+    // Preserve the existing typed engine refusal/failure on a Run press, even if the model invents another cause.
     if (runPress && !result.tool_results.some(r => r.ran === true)) {
       const outcome = result.tool_results.map(r => (r as { run_outcome?: RunOutcome }).run_outcome)
         .find((value): value is RunOutcome => value !== undefined);
       if (outcome !== undefined) { runOutcomeText = outcome.text; runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
+      else if (runPressFailed) { runOutcomeText = interpretationUnavailableText(runPressResult!); runOutcomeSaid = true; }
     }
     // A hop limit is never returned as an empty answer.
     const runPressSkipped = runPress && !runPressConsumed;
@@ -4356,7 +4392,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (by the Agent's run, or by the first analysis), and only when the canonical readiness in
     // THIS response admits a run. A first analysis stopped only by the turn's time was admitted on
     // this same revision, so the same readiness offers Run beside Olumi's sentence.
-    const offerRun = (runPress && !runPressConsumed) || (result.mutated
+    const offerRun = (runPress && !runPressConsumed) || runPressFailed || (result.mutated
       // A Run the server refused because this request's approval applied a change analysed nothing:
       // it must not suppress the Run the refusal tells the user to press.
       && !result.tool_calls.some((c) => c.name === 'run_analysis' && c.refusal !== 'run_not_requested')

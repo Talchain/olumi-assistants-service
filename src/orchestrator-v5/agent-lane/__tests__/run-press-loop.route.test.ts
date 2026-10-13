@@ -25,6 +25,7 @@ let runs: Rec[] = [];
 let writes: Rec[] = [];
 let timing: unknown = 'in_place_by_period';
 let behavior: 'run' | 'skip' | 'attack' = 'run';
+let interpretationFailure: 'throw' | 'http500' | undefined;
 let turnToolResult: Rec | undefined;
 let licensedRecord: Rec | undefined;
 let modelWords = '';
@@ -59,6 +60,8 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
           ...(behavior === 'attack' ? [call('run_analysis', { reason: 'Again', effects_timing: 'in_place_by_period' }, 'run-two')] : []),
         ];
       } else {
+        if (interpretationFailure === 'throw') throw new TypeError('fetch failed');
+        if (interpretationFailure === 'http500') return new Response(JSON.stringify({ error: { message: 'interpretation unavailable' } }), { status: 500 });
         const toolOutput = [...body.input].reverse().find((i: Rec) => i.type === 'function_call_output' && i.call_id === 'run-one');
         turnToolResult = toolOutput ? JSON.parse(toolOutput.output) : undefined;
         // The scripted model only quotes the SAME tool result's licensed cells; no copied fixture percentage.
@@ -103,7 +106,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; writes = []; rows.length = 0;
     STATE.run_state.computed_at = AT;
-    behavior = 'run'; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
+    behavior = 'run'; interpretationFailure = undefined; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
   const press = (extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, ...extra,
@@ -195,6 +198,35 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(runs).toHaveLength(1); expect(bodies).toHaveLength(callCount);
     expect(replay.json().assistant_text).toBe(first.json().assistant_text);
     expect(replay.json().blocks).toEqual(first.json().blocks);
+  });
+
+  it.each(['throw', 'http500'] as const)('completed Run survives interpretation %s and resends identically without calls', async (failure) => {
+    interpretationFailure = failure;
+    const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
+    const first = await press(request);
+    expect(first.statusCode, first.body).toBe(200);
+    const live = first.json();
+    // The existing transport policy retries fetch failures once; it never repeats the Run.
+    const callCount = failure === 'throw' ? 3 : 2;
+    expect(bodies).toHaveLength(callCount);
+    expect(runs).toHaveLength(1);
+    expect(writes).toEqual([]);
+    expect(live.assistant_text).toContain('The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.');
+    expect(live.blocks).toContainEqual(expect.objectContaining({ type: 'analysis_result' }));
+    expect(live.suggested_actions).toContainEqual(expect.objectContaining({ id: expect.stringMatching(/^agent-explain-run:/) }));
+    expect(live.narration.status).toBe('unavailable');
+    expect(live._agent.tool_calls).toEqual([{ name: 'run_analysis', ok: true, mutated: false }]);
+    expect(rows.at(-1)?.assistant_message).toBe(live.assistant_text);
+
+    const replay = await press(request);
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(replay.json().assistant_text).toBe(live.assistant_text);
+    expect(replay.json().blocks).toEqual(live.blocks);
+    expect(replay.json().suggested_actions).toEqual(live.suggested_actions);
+    expect(replay.json().narration).toEqual(live.narration);
+    expect(runs).toHaveLength(1);
+    expect(bodies).toHaveLength(callCount);
   });
 
   it('replay never attaches a newer Run result to the saved interpretation', async () => {
