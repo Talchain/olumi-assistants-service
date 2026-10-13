@@ -21,6 +21,7 @@
  * `store_draft_graph`, `create_model_version*`, `restore_*`, `append_turn_atomic` v1–v4) do not set the mutation id and
  * are not proven uncalled; G1's stamps are the backstop for a human edit through any of them.
  */
+import { RETAINED_LIMIT_QUESTION } from '../../../graph/retained-limit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { constructionOperationId } from './build-model.js';
 import { edgeReviewedByUser, edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
@@ -181,7 +182,8 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
       continue;
     }
     dropped.push(row);
-    const proposed = theirs.filter(sameFigure).map(rowOf);
+    const proposedRows = theirs.filter(sameFigure);
+    const proposed = proposedRows.map(rowOf);
     if (proposed.length > 0) uncertain.push({ previous: row, proposed });
     else carried.push(row);
     const node = recs(rec(base)?.nodes).find((n) => n.id === c.node_id);
@@ -192,7 +194,22 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
       continue;
     }
     if (existing === undefined) nodes.push(structuredClone(node));
-    rows.push(structuredClone(c));
+    const marker = { state: 'unscored', reason: 'retained_limit_equivalence_unresolved',
+      previous_constraint_id: c.constraint_id, proposed_constraint_ids: proposedRows.map((r) => r.constraint_id),
+      question: RETAINED_LIMIT_QUESTION };
+    rows.push({ ...structuredClone(c), ...(proposedRows.length > 0
+      ? { retained_unresolved_limit: { ...marker, role: 'original' } } : {}) });
+    // An isolated proposed interpretation is retained for this SAME unanswered question, not made a causal factor.
+    // Connected proposed quantities remain independently modelled; only the isolated question carrier is unscored.
+    for (const proposedRow of proposedRows) {
+      const linked = recs(rec(candidate)?.edges).some((e) => e.from === proposedRow.node_id || e.to === proposedRow.node_id);
+      const set = [...nodes, ...recs(rec(candidate)?.options)].some((n) =>
+        Object.prototype.hasOwnProperty.call(rec(n.interventions) ?? {}, String(proposedRow.node_id)));
+      if (!linked && !set) {
+        const index = rows.indexOf(proposedRow);
+        rows[index] = { ...proposedRow, retained_unresolved_limit: { ...marker, role: 'proposed' } };
+      }
+    }
   }
   return { kept, dropped, carried, uncertain, conflict, limits: [...theirs.map(rowOf), ...dropped],
     replacement: { ...rec(candidate), nodes, goal_constraints: rows } };
