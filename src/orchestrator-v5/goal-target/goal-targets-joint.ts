@@ -21,6 +21,7 @@ import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { comparatorWords, periodWords, type GoalTargetBasis } from './goal-target-basis.js';
 import { readGoalRecord } from './goal-record.js';
+import { AIE_TEXT_PENDING_OPTIONS_ASK, AIE_TEXT_PENDING_STARTING_VALUE_ASK, type PressBlocker } from '../agent-lane/press-next-step.js';
 import { displayedPctAt, displayRoundingFor, wilsonHalfWidthPoints, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
 import { isOlumiEstimateValue } from '../../cee/provenance/provenance-of.js';
 
@@ -111,6 +112,34 @@ export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupp
   // Independent check r1 item 7: a joint figure that came back WITHOUT its precision was calculated; say what is missing.
   if (reason === 'precision_missing') return `The chance of meeting ${all} together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.`;
   return `The chance of meeting ${all} together isn’t calculated yet. Run the analysis again to get it.`;
+}
+
+/**
+ * ⭐ COACH (DL coaching-on-press): the ONE next step for a withheld joint chance, typed by the same reason
+ * `jointWithheldLine` says. A change target that can't be combined, a stated comparison or figure the analysis did not
+ * keep, or a condition that can't be said in the user's units is a CAPABILITY gap: said as such, never asked. Olumi's own
+ * assumed starting value needs the user's; with no option there is nothing to compare. A missing precision or result is
+ * the line's own "Run the analysis again".
+ */
+export function jointBlockerOf(n: number, reason: JointWithholdReason, unsupported: readonly string[] = []): PressBlocker {
+  const all = n === 2 ? 'both targets' : 'all of the targets';
+  switch (reason) {
+    case 'target_not_supported':
+      return { kind: 'missing_implementation', what: unsupported.length > 0
+        ? `the chance of meeting ${all} together while ${listWords(unsupported.map((x) => `‘${x}’`))} ${unsupported.length === 1 ? 'is' : 'are'} stated as a change`
+        : `the chance of meeting ${all} together` };
+    case 'strict_not_preserved':
+    case 'figure_not_preserved':
+    case 'condition_not_named':
+      return { kind: 'missing_implementation', what: `the chance of meeting ${all} together exactly as you stated them` };
+    case 'olumi_base':
+      return { kind: 'missing_input', ask: AIE_TEXT_PENDING_STARTING_VALUE_ASK };
+    case 'no_option':
+      return { kind: 'missing_input', ask: AIE_TEXT_PENDING_OPTIONS_ASK };
+    case 'precision_missing':
+    case 'not_returned':
+      return { kind: 'run_again', why: reason };
+  }
 }
 
 /** Amendment 6: true whatever the targets' dependence; never a product of the marginals. */

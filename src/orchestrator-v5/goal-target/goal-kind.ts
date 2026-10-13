@@ -25,6 +25,7 @@ import { timeBetween } from './deadline-date.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { extraShareLinkMoments, hirePaceIsOlumisOwn, momentsOfTeam, type TeamShare } from './event-by-date-share.js';
 import { COMPUTE_SIGMA_FLOOR } from '../../cee/constants.js';
+import type { PressBlocker } from '../agent-lane/press-next-step.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -256,4 +257,16 @@ export const DEADLINE_ASK_ENDING = "I'll propose it as your deadline.";
 /** The one question for a chance goal with no date (ruling §4: the date first). */
 export function chanceGoalDeadlineAsk(goalLabel: string): string {
   return `What is the deadline for "${goalLabel}"? A date or a time from now is fine, for example "6 months"; ${DEADLINE_ASK_ENDING}`;
+}
+
+/**
+ * ⭐ COACH (DL coaching-on-press): the ONE next step for a goal measured as a chance. With no date, the date is the user's
+ * to give and a writer takes it (the ask above). With the date held, the model still can't say what must be done by then,
+ * and no tool records that answer, so asking would promise what an answer cannot unlock: a CAPABILITY gap, never asked
+ * (as `decisionInputLines` already asks nothing more once the date is held).
+ */
+export function chanceGoalBlockerOf(goalLabel: string, deadlineSaid: string | undefined): PressBlocker {
+  return deadlineSaid === undefined
+    ? { kind: 'missing_input', ask: chanceGoalDeadlineAsk(goalLabel) }
+    : { kind: 'missing_implementation', what: `a chance for ‘${goalLabel}’ by ${deadlineSaid} until the model says what must be done by then` };
 }

@@ -32,6 +32,7 @@ import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { levelOf as accumulationInputLevelOf } from '../agent-lane/accumulation-identity.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
+import type { PressBlocker } from '../agent-lane/press-next-step.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -545,6 +546,19 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
       // ⛔ Codex r2 #2659 P1: the writer also takes an end's ADOPTED unit (the link's own stored size), so read it here too.
       : ((ends) => ends?.target.own[0] ?? ends?.target.adopted ?? null)(linkEffectEndUnits(graph, upstream.from, upstream.to)),
   };
+}
+
+/**
+ * ⭐ COACH (DL coaching-on-press): the ONE next step these parts support, typed by the failing cases themselves.
+ * A question the user can answer is the step (case a/c/d); a comparator the model cannot test (case b) is a CAPABILITY gap,
+ * said as such and never asked, and when both stand the ask keeps the gap beside it so an answer is never promised to unlock
+ * it. A case (c) whose link is a pending identity has no question because its card owns the step. Otherwise: no step.
+ */
+export function targetBlockerOf(parts: UntestableTargetParts, identityCardOffered = false): PressBlocker | null {
+  const unbuilt = parts.untestableComparator === null ? undefined : `a chance for a ${parts.untestableComparator} target on ‘${parts.name}’`;
+  if (parts.question !== null) return { kind: 'missing_input', ask: parts.question, ...(unbuilt === undefined ? {} : { also_unbuilt: unbuilt }) };
+  if (unbuilt !== undefined) return { kind: 'missing_implementation', what: unbuilt };
+  return identityCardOffered ? { kind: 'confirm', by: 'identity_card' } : null;
 }
 
 /**

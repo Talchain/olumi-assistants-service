@@ -5047,6 +5047,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       owed.push(...goalLines);
       wireBody = { ...wireBody, assistant_text: withDisclosures(wireBody.assistant_text, goalLines) };
     }
+    // ⭐ COACH HOOK (branch claude/coach-press; wired only after T4's reply block merges): the ONE blocker-aimed step,
+    // `oneNextStep([...])` over the producers' typed blockers (`agent-lane/press-next-step.ts`), enters the reply HERE, as the
+    // goal-chance line above does (composeReplyShape drops an obligation whose text is not in the reply), then joins
+    // `obligations` as `{ role, text, lead: true, ownsNextStep: true }` unless a typed control or `guidedRunFinding` already
+    // owns the step; its press joins `offeredSpecific`. 409/403 return before this point (their own dependency).
     /**
      * ⭐ AX1 — WHEN THE ANALYSIS CANNOT RANK A PRICE × VOLUME GOAL, THE ARITHMETIC STILL ANSWERS (DL #70 5850280205;
      * `break-even.ts`). Served (DL's joined run F8): every Run led with "No option can be put forward…" and gave the user

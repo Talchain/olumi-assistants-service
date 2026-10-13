@@ -20,6 +20,7 @@ import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js
 import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
 import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
+import type { PressBlocker } from './press-next-step.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -107,6 +108,16 @@ export function unreadGoalProduct(graph: unknown): UnreadGoalProduct | null {
     }
   }
   return found;
+}
+
+/**
+ * ⭐ COACH (DL coaching-on-press): the ONE next step for a goal Olumi has not read as rate × count. When the reading can be
+ * confirmed (the action bar's `confirm_reading`: a reading is on offer and no other change waits for its yes), that press
+ * owns the step: the user checks the reading and the chance can follow. Otherwise it is a CAPABILITY gap, never asked.
+ */
+export function unreadGoalProductBlockerOf(p: UnreadGoalProduct, confirmable: boolean): PressBlocker {
+  return confirmable ? { kind: 'confirm', by: 'confirm_reading' }
+    : { kind: 'missing_implementation', what: `how likely any option is to reach ‘${p.goal.label}’ read as ‘${p.rate.label}’ × ‘${p.count.label}’` };
 }
 
 /**

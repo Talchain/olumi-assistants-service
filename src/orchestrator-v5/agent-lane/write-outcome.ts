@@ -30,6 +30,7 @@ import type { ToolResult } from './runtime/agent-tools.js';
 import { eventByDateRefusalDetail } from '../goal-target/event-by-date-model.js';
 import { NOT_ON_NARRATION, proposalsAwaitingApproval } from './approval-chips.js';
 import { sayFigureExactly, sayFigureRead } from './say-figure.js';
+import type { PressBlocker } from './press-next-step.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
@@ -655,4 +656,11 @@ export function staleResultLine(analysisState: unknown, analysisReady: unknown):
   return mayRun
     ? 'The analysis on screen was computed before this change; run it again to see the comparison with this change.'
     : 'The analysis on screen was computed before this change.';
+}
+
+/** ⭐ COACH (DL coaching-on-press): a stale result's ONE next step is this same line (its "run it again" follows the Run
+ * control's own verdict). Typed only from `run_state`, never from a Run whose current result merely could not be bound. */
+export function staleBlockerOf(analysisState: unknown, analysisReady: unknown): PressBlocker | null {
+  const say = staleResultLine(analysisState, analysisReady);
+  return say === null ? null : { kind: 'stale', say };
 }
