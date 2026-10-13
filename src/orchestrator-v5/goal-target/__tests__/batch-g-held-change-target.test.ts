@@ -38,7 +38,7 @@ const ASKED = read('served-hiring-read-19-after-reopen-20261013T131858Z.json');
 const CLARIFIED = "I mean 10% relative to today's productivity, not percentage points.";
 const GOAL = 'productivity';
 /** The card's words and the receipt, exactly (AIE_TEXT_PENDING templates, filled from the stored reading and its question). */
-const READING = '‘productivity’ being at least 10% higher than today at three months, measured against today\'s development productivity';
+const READING = '‘productivity’ up at least 10% from today at three months, measured against today\'s development productivity';
 const CARD = `Read your target as ${READING}. This answers: Does “increase productivity by at least 10%” mean 10% relative to today's productivity, or 10 percentage points on a productivity score?`;
 const RECEIPT = `Recorded your answer: your target is read as ${READING}. Run the analysis again.`;
 
@@ -73,7 +73,7 @@ describe('G14: restating the saved change target is "already saved", never a ref
     const { p, w, store } = await propose(SAVED, AT_LEAST_10);
     expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, already_saved: true });
     expect(p.saved_goal).toEqual({
-      label: 'Productivity', quantity_frame: 'change', target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=',
+      label: 'Productivity', target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=',
       reference: 'today', denominator: 'today’s productivity', effect_unit: '% of today’s productivity', period_months: 3, period_kind: 'at_end',
       also_required: ['maintaining code quality'],
     });

@@ -3746,7 +3746,7 @@ export function createAgentCapabilities(
       || !isDeepStrictEqual(goal.goal_target_basis, answeredBasisOf(expected))) return notConfirmed;
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(pid, receipts);
-    const reading = goalReadingWords(check.raw, goal, basis) ?? `the target for ‘${String(goal.label)}’ as the model states it`;
+    const reading = goalReadingWords(check.raw, op.path, basis) ?? `the target for ‘${String(goal.label)}’ as the model states it`;
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
       follow_up: GOAL_READING_RECORDED_TEMPLATE.replace('{reading}', reading) };
   };
@@ -5237,9 +5237,9 @@ export function createAgentCapabilities(
       if (isChangeFrame((goal as { goal_threshold_frame?: unknown }).goal_threshold_frame)) {
         // G14 + G: the goal's own held change target restated (already saved) or its open question answered (one card).
         const held = heldChangeTargetAnswer({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, user_text: ctx.user_text,
-          graph: g, goal: goal as Record<string, unknown>, requested: { operator: TARGET_OPERATOR[type], value, unit }, rationale: args.rationale, proposals });
+          graph: g, goal_id: goal.id, requested: { operator: TARGET_OPERATOR[type], value, unit }, rationale: args.rationale, proposals });
         if (held !== undefined) return held;
-        return { ok: false, mutated: false, refusal: 'goal_is_a_change', saved_goal: savedGoalMeaningOf(g.raw, goal as Record<string, unknown>),
+        return { ok: false, mutated: false, refusal: 'goal_is_a_change', saved_goal: savedGoalMeaningOf(g.raw, goal.id),
           detail: `The goal "${goal.label}" is stated as a change from today, and this path cannot yet change a target stated that way, so nothing was prepared. `
             + 'Tell the user plainly, and never offer a level target in its place.' };
       }

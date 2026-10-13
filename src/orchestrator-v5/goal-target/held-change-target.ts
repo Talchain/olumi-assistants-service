@@ -8,8 +8,8 @@
  * 13:18Z: the same reading held its open question ("relative, or percentage points?"), and the answer had no route at all.
  *
  * The one comparison of a requested target with the goal's HELD change target: the same frame (`change_abs`), the same figure,
- * a unit of the same family that is not points for a change measured as a % of today (or is points for a % level), the held
- * comparator exactly, and the figure written about this goal. On a match:
+ * a unit of the same family that names points exactly when the held unit does, the held comparator exactly, and the figure
+ * written about this goal — all read through the ONE goal record (S5). On a match:
  *   · the reading holds an open question (not admission's conditions refusal) → ONE card that answers it
  *     (`confirm_goal_reading`, written by `goal-reading-write.ts` only);
  *   · otherwise → `already_saved`, nothing prepared, with the saved meaning.
@@ -18,9 +18,9 @@
  */
 import { createProposal, type StructuredProposal } from '../agent-lane/proposal.js';
 import { figureTheUserWroteFor } from '../agent-lane/stated-by-user.js';
-import { unitPhraseFamily, unitsConflict } from '../agent-lane/unit-conflict.js';
-import { readHeldGoalComparator } from './goal-direction.js';
+import { unitsConflict } from '../agent-lane/unit-conflict.js';
 import { CONDITIONS_NOT_KEPT, goalTargetBasisOf } from './goal-target-basis.js';
+import { readGoalRecord } from './goal-record.js';
 import { goalReadingWords } from './goal-reading-write.js';
 
 type Rec = Record<string, unknown>;
@@ -31,8 +31,7 @@ export const CONFIRM_GOAL_READING_OP = 'confirm_goal_reading';
 /** The goal's saved target meaning, as structured fields (G14): what the Agent compares a restatement with. */
 export interface SavedGoalMeaning {
   readonly label: string;
-  readonly quantity_frame: 'level' | 'change';
-  readonly target_frame: 'level' | 'change_abs' | 'change_rel';
+  readonly target_frame: 'change_abs' | 'change_rel';
   readonly target_raw: number;
   readonly unit: string | null;
   readonly comparator: string | null;
@@ -45,24 +44,17 @@ export interface SavedGoalMeaning {
   readonly open_question?: string;
 }
 
-const heldComparatorOf = (raw: unknown, goal: Rec): string | null => {
-  const held = readHeldGoalComparator(raw, goal.id) ?? goal.goal_direction;
-  return typeof held === 'string' ? held : null;
-};
+const goalNodeOf = (raw: unknown, goalId: string): Rec | undefined => (isRec(raw) && Array.isArray(raw.nodes)
+  ? raw.nodes.find((n): n is Rec => isRec(n) && n.kind === 'goal' && n.id === goalId) : undefined);
 
-/** `undefined` for a goal with no change target (a level is the caller's own path). */
-export function savedGoalMeaningOf(raw: unknown, goal: Rec): SavedGoalMeaning | undefined {
-  const frame = goal.goal_threshold_frame;
-  const value = goal.goal_threshold_raw;
-  if ((frame !== 'change_abs' && frame !== 'change_rel') || typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  const basis = goalTargetBasisOf(goal);
+/** Through the ONE goal record (S5) and the validated reading; `undefined` for a goal with no change target. */
+export function savedGoalMeaningOf(raw: unknown, goalId: string): SavedGoalMeaning | undefined {
+  const record = readGoalRecord(raw, goalId);
+  const target = record?.target;
+  if (record == null || target == null || (target.frame !== 'change_abs' && target.frame !== 'change_rel') || target.raw === undefined) return undefined;
+  const basis = goalTargetBasisOf(goalNodeOf(raw, goalId));
   return {
-    label: typeof goal.label === 'string' ? goal.label : String(goal.id),
-    quantity_frame: goal.quantity_frame === 'change' ? 'change' : 'level',
-    target_frame: frame,
-    target_raw: value,
-    unit: typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : null,
-    comparator: heldComparatorOf(raw, goal),
+    label: record.label, target_frame: target.frame, target_raw: target.raw, unit: target.unit ?? null, comparator: target.comparator ?? null,
     ...(basis === undefined ? {} : {
       reference: basis.reference,
       ...(basis.denominator !== undefined ? { denominator: basis.denominator } : {}),
@@ -78,18 +70,19 @@ const namesPoints = (unit: string): boolean => /\bpoints?\b|\bpp\b/i.test(unit);
 /** The one equality: the requested target IS the goal's held change target (see the module note). */
 export function restatesHeldChangeTarget(
   graph: { readonly raw: unknown; readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] },
-  goal: Rec,
+  goalId: string,
   requested: { readonly operator: string; readonly value: number; readonly unit: string },
   userText: string | null | undefined,
 ): boolean {
-  if (goal.goal_threshold_frame !== 'change_abs' || goal.goal_threshold_raw !== requested.value) return false;
-  const heldUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : '';
+  const record = readGoalRecord(graph.raw, goalId);
+  const target = record?.target;
+  if (record == null || target == null || target.frame !== 'change_abs' || target.raw !== requested.value) return false;
+  const heldUnit = target.unit ?? '';
   if (heldUnit === '' || unitsConflict(requested.unit, heldUnit) !== null) return false;
-  // A % change of a quantity measured AS a change is a % of today; of a percentage LEVEL it moves in points (ruling 20).
-  const heldInPoints = namesPoints(heldUnit) || (goal.quantity_frame !== 'change' && unitPhraseFamily(heldUnit) === 'percent');
-  if (namesPoints(requested.unit) !== heldInPoints) return false;
-  if (heldComparatorOf(graph.raw, goal) !== requested.operator) return false;
-  const label = typeof goal.label === 'string' ? goal.label : '';
+  // Points are never a % of today, nor a % of today points (ruling 20): the held unit's own words decide.
+  if (namesPoints(requested.unit) !== namesPoints(heldUnit)) return false;
+  if (target.comparator !== requested.operator) return false;
+  const label = record.label;
   const others = graph.nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision')
     .map((n) => (typeof n.label === 'string' ? n.label : '')).filter((l) => l !== '' && l !== label);
   return label !== '' && figureTheUserWroteFor(requested.value, requested.unit, userText, { target: [label], others });
@@ -111,26 +104,26 @@ export function heldChangeTargetAnswer(args: {
   readonly user_id: string | null;
   readonly user_text: string | null | undefined;
   readonly graph: { readonly graph_hash: string; readonly raw: unknown; readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] };
-  readonly goal: Rec;
+  readonly goal_id: string;
   readonly requested: { readonly operator: string; readonly value: number; readonly unit: string };
   readonly rationale?: unknown;
   readonly proposals: { put(p: StructuredProposal): void };
 }): { readonly ok: boolean; readonly mutated: boolean; readonly [k: string]: unknown } | undefined {
-  const { goal, graph } = args;
-  if (!restatesHeldChangeTarget(graph, goal, args.requested, args.user_text)) return undefined;
-  const saved = savedGoalMeaningOf(graph.raw, goal)!;
+  const { goal_id: goalId, graph } = args;
+  if (!restatesHeldChangeTarget(graph, goalId, args.requested, args.user_text)) return undefined;
+  const saved = savedGoalMeaningOf(graph.raw, goalId)!;
+  const goal = goalNodeOf(graph.raw, goalId);
   const basis = goalTargetBasisOf(goal);
-  const stored = goal.goal_target_basis;
-  const reading = basis === undefined ? undefined : goalReadingWords(graph.raw, goal, basis);
-  if (basis?.open_question === undefined || basis.open_question === CONDITIONS_NOT_KEPT
-    || !isRec(stored) || reading === undefined) {
+  const stored = goal?.goal_target_basis;
+  const reading = basis === undefined ? undefined : goalReadingWords(graph.raw, goalId, basis);
+  if (basis?.open_question === undefined || basis.open_question === CONDITIONS_NOT_KEPT || !isRec(stored) || reading === undefined) {
     return { ok: true, mutated: false, already_saved: true, saved_goal: saved };
   }
   const proposal = createProposal({
     scenario_id: args.scenario_id,
     user_id: args.user_id,
     base_graph_identity_hash: graph.graph_hash,
-    operations: [{ op: CONFIRM_GOAL_READING_OP, path: String(goal.id), value: { expected_basis: stored, open_question: basis.open_question } }],
+    operations: [{ op: CONFIRM_GOAL_READING_OP, path: goalId, value: { expected_basis: stored, open_question: basis.open_question } }],
     provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: CONFIRM_GOAL_READING_LABEL_TEMPLATE.replace('{reading}', reading).replace('{question}', basis.open_question),

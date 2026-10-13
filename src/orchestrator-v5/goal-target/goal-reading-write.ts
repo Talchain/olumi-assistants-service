@@ -25,8 +25,10 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { CONDITIONS_NOT_KEPT, goalTargetBasisOf, targetChanceWords, type GoalTargetBasis } from './goal-target-basis.js';
-import { readHeldGoalComparator } from './goal-direction.js';
+import { CONDITIONS_NOT_KEPT, goalTargetBasisOf, periodWords, type GoalTargetBasis } from './goal-target-basis.js';
+import { readGoalRecord } from './goal-record.js';
+import { sayGoalChange } from '../agent-lane/limit-frame.js';
+import { sayFigure } from '../agent-lane/say-figure.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -55,17 +57,19 @@ export function answeredBasisOf(expected: Readonly<Rec>): Rec {
 }
 
 /**
- * The goal's target in words, as its reading states it ("‘productivity’ being at least 10% higher than today at three
- * months"), with what 100% is for a change: the card's and the receipt's one description. `undefined` when not sayable.
+ * The goal's target in words, read through the ONE goal record (S5) and said as the readiness words and E's sentence say a
+ * change (`sayGoalChange`: "up at least 10% from today"), at the reading's period, with what 100% is: "‘productivity’ up at
+ * least 10% from today at three months, measured against today's development productivity". The card's and the receipt's
+ * one description; `undefined` when it cannot be said exactly.
  */
-export function goalReadingWords(graph: unknown, goal: Rec, basis: GoalTargetBasis): string | undefined {
-  const label = typeof goal.label === 'string' ? goal.label : '';
-  const comparator = readHeldGoalComparator(graph, goal.id) ?? goal.goal_direction;
-  const unit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : '';
-  const words = targetChanceWords({ label, frame: basis.target_frame, comparator: String(comparator ?? ''), value: basis.target_raw,
-    unit, basis, quantityFrame: basis.quantity_frame });
-  if (words === undefined) return undefined;
-  return basis.target_frame !== 'level' && basis.denominator !== undefined ? `${words}, measured against ${basis.denominator}` : words;
+export function goalReadingWords(graph: unknown, goalId: string, basis: GoalTargetBasis): string | undefined {
+  const record = readGoalRecord(graph, goalId);
+  const target = record?.target;
+  const label = record?.label.trim() ?? '';
+  if (target == null || target.raw === undefined || label === '' || /[\r\n]/.test(label)) return undefined;
+  const change = sayGoalChange(target.frame, target.raw, target.unit, (v, u) => sayFigure(v, u ?? ''), target.comparator);
+  if (change === undefined) return undefined;
+  return `‘${label}’ ${change} ${periodWords(basis)}${basis.denominator !== undefined ? `, measured against ${basis.denominator}` : ''}`;
 }
 
 /** AIE_TEXT_PENDING: the receipt after the approved answer. Facts only; no promise of a chance. */
@@ -117,7 +121,7 @@ export function applyGoalReadingEdit(persistedGraph: unknown, approved: Approved
       rerun_recommended: true,
     },
   });
-  const reading = goalReadingWords(graph, goal, basis) ?? `the target for ‘${label}’ as the model states it`;
+  const reading = goalReadingWords(graph, approved.goal_id, basis) ?? `the target for ‘${label}’ as the model states it`;
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
     confirmation: GOAL_READING_RECORDED_TEMPLATE.replace('{reading}', reading) };
 }
