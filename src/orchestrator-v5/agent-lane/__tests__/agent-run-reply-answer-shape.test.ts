@@ -569,25 +569,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     for (const para of text.split('\n\n')) for (const s of para.split(/(?<=[.!?])\s+(?=[A-Z])/)) expect(b.assistant_text).toContain(s.trim());
   });
 
-  it('4. ordinary converse: with or without an analysis_result, the narrator points still fill the staging face pool', async () => {
-    readbackCarriesResult = false;
-    const without = await askedTurn(CLEAN_BULLETS.text);
-    expect(carriesResult(without), 'the control: no result block on this response').toBe(false);
-    expect(without._answer_shape, 'base shipped this whole (Run replies only)').toBeDefined();
-    expect(deriveAnswerTextFromShape(without._answer_shape!)).toBe(without.assistant_text);
-    expect(without._answer_shape!.headline).toBe('The comparison cannot yet answer whether to raise Pro to £59, because neither of your decision constraints was successfully checked.');
-    // No build mutation, Run/Explain fast path, screen chances or withheld chance: ordinary coaching keeps its pool.
-    // The narrator's points, in order, until the 80-word face budget (AIE §5); the rest sits in detail, verbatim.
-    const points = without._answer_shape!.bullets;
-    expect(points.length).toBeGreaterThan(0);
-    expect(CLEAN_BULLETS.text).toContain(`- ${points[0]!}`);
-    expect(without._answer_shape!.detail).toContain('The next reasoning step is to define the churn limit on a measurable model quantity and supply the current MRR baseline.');
-
-    readbackCarriesResult = true;
-    const withBlock = await askedTurn(CLEAN_BULLETS.text);
-    expect(carriesResult(withBlock)).toBe(true);
-    expect(withBlock._answer_shape, 'the control: with the block, the same shape').toEqual(without._answer_shape);
-  });
+  // AI-first Lane 2 N1: row 4 pinned the removed ordinary-turn face pool; it went with the fold (one-reply-build-contract's N1 row).
 
   it('5. RUN: a reply LONGER than the old collapse floor with no bullets → shaped; its supporting sentences remain in detail', async () => {
     const synth = synthesiseAnswerShapeFromText(LONG_NO_BULLETS);
@@ -748,8 +730,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(carriesResult(b), 'the control: over a current result').toBe(true);
     expect(b.assistant_text.split('Nothing was saved this turn.'), 'the host removed the claim and said so, once').toHaveLength(2);
     expect(b.assistant_text).not.toContain('Saved the change.');
-    expect(b._answer_shape, 'shaped').toBeDefined();
-    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
+    // AI-first N1: an ordinary turn ships whole (this row pinned the removed fold); the write-truth negatives above stay.
+    expect(b._answer_shape, 'no fold on an ordinary turn').toBeUndefined();
   });
 
   it('11. CONTROL: the SAME Agent Run on the graph WITH its target → no host ask is owed → the reply is still shaped', async () => {

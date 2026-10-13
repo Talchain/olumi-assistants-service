@@ -143,8 +143,10 @@ export type ReplyProfile = 'coaching' | 'method_step' | 'proposal';
 /**
  * Why a reply ships whole by the turn's identity: its profile is not `coaching`, the egress replaced the body, or no model
  * wrote words this turn (a card press, an uninterpreted Explain: `host_composed`). Uninterpreted Run uses coaching.
+ * `ai_answer` (AI-first Lane 2, N1): an ordinary coaching turn the model wrote, neither a Draft build nor a Run/Explain.
+ * The AI's answer is the reply: no face cut, no "More detail" fold, no host face lines; only the recorded copies go.
  */
-export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed';
+export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed' | 'ai_answer';
 
 export interface ReplyComposeInput {
   readonly eligibleIntervention?: EligibleIntervention;
@@ -805,6 +807,7 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   // Turn identity prohibits reshaping AND the copy rule: a whole reply ships byte-identical (DL rulings R2/R3: a
   // proposal's disclosure and a method worksheet are verbatim; keepWhole turns are host-composed), never deduplicated.
   const whole = { ...initialMeasure, said_once_dropped: [] };
+  if (input.keepWhole === 'ai_answer') return { text, shape: null, outcome: 'kept_whole', reason: 'ai_answer', measure: initialMeasure };
   if (input.keepWhole !== undefined) return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.keepWhole, measure: whole };
   if (input.profile === 'method_step' || input.profile === 'proposal') return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.profile, measure: whole };
   if (owed.some((o) => o.text.length === 0 || o.text.includes('\n'))) {

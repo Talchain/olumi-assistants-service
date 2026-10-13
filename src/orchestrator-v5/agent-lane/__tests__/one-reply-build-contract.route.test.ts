@@ -696,4 +696,27 @@ describe('ONE reply contract through the build route', () => {
     expect(body.assistant_text).not.toMatch(/^Not shown/);
     expect(body._answer_shape?.headline ?? body.assistant_text.split('\n')[0]).toContain(narrator);
   });
+
+  // AI-first Lane 2 N1 (PLAN-AI-FIRST-SUBTRACT): the AI's answer IS the reply on an ordinary turn. A long answer was cut to
+  // an 80-word face with the rest under "More detail". CONTRAST: `buildTurn` asserts the build keeps its Draft face.
+  it('AI-first N1: a long ordinary answer beside the withheld Run ships whole, in its own order, with no fold', async () => {
+    withUserRatifiedSubscribers();
+    await buildTurn();
+    const paragraphs = [
+      'Start with how many subscribers a price change would cost you, because that figure carries most of the uncertainty in this model.',
+      '- Ask your support team how many customers mentioned price when they cancelled last quarter.\n- Compare that with the cancellations that gave no reason.\n- Check whether annual-plan customers behave differently from monthly ones.',
+      'Once you have even a rough range, enter it on the link from price to subscribers and run the comparison again, so the model reflects your evidence rather than its placeholder.',
+      'If the range turns out to be wide, that is useful too: it tells you the decision depends on learning more before committing.',
+    ];
+    narrator = paragraphs.join('\n\n');
+    expect(words(narrator), 'the control: longer than the old 80-word face').toBeGreaterThan(80);
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'What should I look at first?' } });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    const body = response.json() as Body;
+    expect(body._agent.tool_calls.some(c => c.name === 'run_analysis' || c.name === 'build_model_from_brief')).toBe(false);
+    expect(body._answer_shape, 'no face/detail sidecar on an ordinary turn').toBeUndefined();
+    expect(body.assistant_text.startsWith(narrator), body.assistant_text.slice(0, 300)).toBe(true);
+    expect(body.assistant_text).not.toContain("Olumi's estimates: ");
+  });
 });
