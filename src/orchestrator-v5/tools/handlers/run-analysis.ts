@@ -2022,10 +2022,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
       const priorJoint = env.joint_withheld as { constraint_ids?: string[] } | undefined;
       env.joint_withheld = { reason: 'limit_unscored', constraint_ids: [...new Set([...(priorJoint?.constraint_ids ?? []), ...ids])] };
-      env.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), {
+      response = appendInferenceWarning(response, {
         code: 'CONSTRAINT_TARGET_UNRELIABLE', severity: 'warning', source: 'cee', constraint_ids: ids,
         reason: 'retained_limit_equivalence_unresolved', message: RETAINED_LIMIT_WITHHELD,
-      }];
+      });
     }
     const identicalArms = detectIdenticalArms(response, finalWireOptions);
 

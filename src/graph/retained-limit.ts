@@ -3,6 +3,8 @@ import { GoalConstraintSchema } from '../schemas/assist.js';
 type Rec = Record<string, unknown>;
 const records = (v: unknown): Rec[] => Array.isArray(v) ? v.filter((x): x is Rec => x !== null && typeof x === 'object' && !Array.isArray(x)) : [];
 const record = (v: unknown): Rec => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : {};
+// Lossless limit rows: the S5 scalar goal record does not expose these or their pending-question metadata.
+const limitRows = (graph: unknown): Rec[] => records(record(graph).goal_constraints);
 
 export const RETAINED_LIMIT_QUESTION = 'Do these describe the same limit?';
 export const RETAINED_LIMIT_WITHHELD = 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded.';
@@ -10,8 +12,7 @@ export const RETAINED_LIMIT_WITHHOLD_CODE = 'GOAL_FIGURES_RETAINED_LIMIT_UNRESOL
 
 /** Only the carry-forward's bound, still-pending question licenses this state. A dangling marker licenses nothing. */
 export function unresolvedRetainedLimits(graph: unknown) {
-  const g = record(graph);
-  const rows = records(g.goal_constraints);
+  const rows = limitRows(graph);
   return rows.flatMap((row) => {
     const parsed = GoalConstraintSchema.safeParse(row);
     if (!parsed.success || parsed.data.role === 'goal_target') return [];
@@ -34,7 +35,7 @@ export function unresolvedRetainedLimits(graph: unknown) {
 /** Exempt connectivity only: no incident link, setting, target or other role may hide behind the question. */
 export function retainedLimitOnlyNodeIds(graph: unknown): ReadonlySet<string> {
   const g = record(graph);
-  const rows = records(g.goal_constraints);
+  const rows = limitRows(g);
   const held = unresolvedRetainedLimits(g);
   const nodes = records(g.nodes);
   const options = [...nodes.filter((n) => n.kind === 'option'), ...records(g.options)];

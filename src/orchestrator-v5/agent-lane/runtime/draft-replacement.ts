@@ -22,6 +22,7 @@
  * are not proven uncalled; G1's stamps are the backstop for a human edit through any of them.
  */
 import { RETAINED_LIMIT_QUESTION } from '../../../graph/retained-limit.js';
+import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { constructionOperationId } from './build-model.js';
 import { edgeReviewedByUser, edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
@@ -142,6 +143,12 @@ export function revisedDraftBrief(storedBrief: string, typedGoal: string): strin
 
 export interface HeldRow { readonly node_id: string; readonly operator: string; readonly value: number; readonly unit: string }
 const rowsOf = (raw: unknown): Rec[] => recs(rec(raw)?.goal_constraints);
+const goalIdsOf = (raw: unknown): Set<string> => new Set(recs(rec(raw)?.nodes)
+  .filter((n) => n.kind === 'goal' && typeof n.id === 'string')
+  .flatMap((n) => {
+    const goal = readGoalRecord(raw, n.id as string);
+    return goal === null ? [] : [goal.goal_id];
+  }));
 /** The quantity a row (or a target) is ON, by the lane's canonical label of its node (or the row's own label). */
 const quantityOf = (raw: unknown, c: Rec): string | null => {
   const n = recs(rec(raw)?.nodes).find((x) => x.id === c.node_id);
@@ -158,8 +165,7 @@ const unitOf = (c: Rec): string => (typeof c.unit === 'string' ? c.unit.trim() :
  * A conflicting node/row identity cannot safely carry an unchanged row and is reported, never overwritten.
  */
 export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value: number, unit: string) => `${value} ${unit}`) {
-  const goalIds = (raw: unknown) => new Set(recs(rec(raw)?.nodes).filter((n) => n.kind === 'goal').map((n) => n.id));
-  const limitsOf = (raw: unknown) => rowsOf(raw).filter((c) => c.role !== 'goal_target' && !goalIds(raw).has(c.node_id)
+  const limitsOf = (raw: unknown) => rowsOf(raw).filter((c) => c.role !== 'goal_target' && !goalIdsOf(raw).has(String(c.node_id))
     && numeric(c) && ['<=', '>=', '<', '>'].includes(String(c.operator)) && c.deadline_metadata == null);
   const rowOf = (c: Rec): HeldRow => ({ node_id: String(c.node_id), operator: String(c.operator_as_stated ?? c.operator),
     value: c.value as number, unit: unitOf(c) });
@@ -217,9 +223,9 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
 
 /** The candidate's targets for the goal: each `goal_target` row and the goal's own row, with the comparator as stated. */
 export function targetsHeldBy(candidate: unknown): { node_id: string; quantity: string | null; comparator: string; value: number; unit: string }[] {
-  const goals = new Set(recs(rec(candidate)?.nodes).filter((n) => n.kind === 'goal').map((n) => n.id));
+  const goals = goalIdsOf(candidate);
   return rowsOf(candidate)
-    .filter((c) => numeric(c) && (c.role === 'goal_target' || goals.has(c.node_id)) && c.deadline_metadata == null
+    .filter((c) => numeric(c) && (c.role === 'goal_target' || goals.has(String(c.node_id))) && c.deadline_metadata == null
       && (c.value_frame === undefined || c.value_frame === 'level'))
     .map((c) => ({ node_id: String(c.node_id), quantity: quantityOf(candidate, c), comparator: String(c.operator_as_stated ?? c.operator), value: c.value as number, unit: unitOf(c) }));
 }
