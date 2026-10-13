@@ -2,10 +2,14 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 /** Host-verified origin bound to one approved link write, never supplied on the event wire. */
 export interface LinkInputClaim {
-  origin: 'human' | 'ai';
+  origin: 'human' | 'ai' | 'unknown';
   basis: string;
   source_quote: string;
   subject: { from: string; to: string };
+}
+/** Structural source stays schema-valid; an unknown size carries no magnitude authorship stamp. */
+export function sourceForLinkInput(claim: LinkInputClaim): 'user_specified' | 'cee_hypothesis' {
+  return claim.origin === 'human' ? 'user_specified' : 'cee_hypothesis';
 }
 interface ApprovedLinkInput {
   scenario: string; turn: string; from: string; to: string;

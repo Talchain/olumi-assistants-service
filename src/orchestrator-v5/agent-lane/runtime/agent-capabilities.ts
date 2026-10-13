@@ -1,4 +1,4 @@
-import { withApprovedLinkInput, type LinkInputClaim } from '../../../cee/provenance/approved-link-input.js';
+import { sourceForLinkInput, withApprovedLinkInput, type LinkInputClaim } from '../../../cee/provenance/approved-link-input.js';
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
@@ -250,7 +250,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, clausesOf, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -4225,30 +4225,8 @@ export function createAgentCapabilities(
             + 'ask the user which, in the canvas\u2019s words: slight, moderate, strong or very strong.' };
       }
       const band = args.strength;
-      // ⛔ Recorded as the user's only when the user named the band, or approves Olumi's reading of their own words
-      // (`bandGrounding`); the writer stamps it as theirs.
-      const verifiedWords = ctx.user_text ?? ctx.user_turn_text;
-      const grounding = args.from_words !== undefined && !wordsTheUserWrote(args.from_words, verifiedWords)
-        ? null : bandGrounding(band, args.from_words, verifiedWords);
-      const basis = typeof args.basis === 'string' ? args.basis.trim() : '';
-      const unknownWords = ctx.unverified_user_text ?? '';
-      const origin = statementOrigin(grounding !== null,
-        bandGrounding(band, args.from_words, unknownWords) !== null
-          || (args.from_words !== undefined && !wordsTheUserWrote(args.from_words, verifiedWords)),
-        ctx.user_text_complete, args.user_stated === false && basis !== '');
-      if (origin === 'unknown') {
-        return { ok: false, mutated: false, refusal: 'strength_not_stated', detail: UNKNOWN_ORIGIN_DETAIL };
-      }
-      const inputClaim: LinkInputClaim = { origin, basis,
-        source_quote: origin === 'human' ? args.from_words ?? verifiedWords ?? '' : '',
-        subject: { from: args.from_label, to: args.to_label } };
-      const interpretation = grounding?.kind === 'reading' ? grounding.interpretation : undefined;
-      const yourWords = interpretation === undefined ? '' : `, Olumi\u2019s reading of your "${interpretation.from_words}"`;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      if (origin === 'ai' && bandGrounding(band, args.from_words, g.brief_text ?? '') !== null) {
-        return { ok: false, mutated: false, refusal: 'strength_not_stated', detail: UNKNOWN_ORIGIN_DETAIL };
-      }
       const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
       const toRes = resolveNamed(g, String(args.to_label ?? ''), () => true);
       const ambiguousEnds = [
@@ -4265,6 +4243,38 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'unresolved_entity',
           detail: `No entity is labelled "${from === undefined ? args.from_label : args.to_label}". Read the state again and use a label exactly as it appears.` };
       }
+      // Retained authorship binds the band and BOTH resolved ends in the same source clause.
+      // Current-turn shorthand may still answer the selected link, but cannot borrow another named subject.
+      const verifiedWords = ctx.user_text ?? ctx.user_turn_text;
+      const labels = g.nodes.map(n => n.label);
+      const names = (text: string, label: string): boolean => factorTheUserNamed(label, text,
+        { options: [], others: labels.filter(other => other !== label) });
+      const boundClause = clausesOf(verifiedWords ?? '').find(clause =>
+        names(clause, from.label) && names(clause, to.label)
+        && bandGrounding(band, args.from_words, clause) !== null);
+      const turnWords = ctx.user_turn_text;
+      const shorthand = turnWords !== undefined && !labels.some(label => label !== from.label && label !== to.label && names(turnWords, label))
+        ? bandGrounding(band, args.from_words, turnWords) : null;
+      const sourceWords = boundClause ?? (shorthand !== null ? turnWords : undefined);
+      const grounding = sourceWords === undefined || (args.from_words !== undefined && !wordsTheUserWrote(args.from_words, sourceWords))
+        ? null : bandGrounding(band, args.from_words, sourceWords);
+      const basis = typeof args.basis === 'string' ? args.basis.trim() : '';
+      const unknownMaterial = bandGrounding(band, args.from_words, ctx.unverified_user_text ?? '') !== null
+        || bandGrounding(band, args.from_words, g.brief_text ?? '') !== null
+        || (args.from_words !== undefined && !wordsTheUserWrote(args.from_words, verifiedWords));
+      const origin = statementOrigin(grounding !== null, unknownMaterial, ctx.user_text_complete,
+        args.user_stated === false && basis !== '');
+      // An unmatched retained statement may be reviewed as unknown, never as this link's human source.
+      const unmatchedRetainedBand = bandGrounding(band, args.from_words, verifiedWords) !== null;
+      if (origin === 'unknown' && (args.user_stated === true || unknownMaterial || !unmatchedRetainedBand)) {
+        return { ok: false, mutated: false, refusal: 'strength_not_stated', detail: UNKNOWN_ORIGIN_DETAIL
+          + ' Ask them how strong they think it is — slight, moderate, strong or very strong — and never offer a band as theirs.' };
+      }
+      const inputClaim: LinkInputClaim = { origin, basis,
+        source_quote: origin === 'human' ? sourceWords ?? '' : '',
+        subject: { from: from.label, to: to.label } };
+      const interpretation = grounding?.kind === 'reading' ? grounding.interpretation : undefined;
+      const yourWords = interpretation === undefined ? '' : `, Olumi’s reading of your "${interpretation.from_words}"`;
       const edge = g.edges.find((e) => e.from === from.id && e.to === to.id);
       if (edge === undefined) {
         return { ok: false, mutated: false, refusal: 'no_such_link',
@@ -4379,7 +4389,9 @@ export function createAgentCapabilities(
         operations: [{ op: 'update_edge', path: `${from.id}::${to.id}`, value }],
         provenance: { authored_by: origin === 'human' ? 'user_stated' : 'model_proposed', basis: basis || String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: origin === 'ai' && !confirm
+        public_label: origin === 'unknown' && !confirm
+          ? `Propose "${from.label}" → "${to.label}" as ${linkBandWord(band)} (${magnitude}). Origin unknown; this is neither your stated strength nor Olumi's estimate.`
+          : origin === 'ai' && !confirm
           ? `Propose "${from.label}" → "${to.label}" as ${linkBandWord(band)} (${magnitude}), as Olumi's estimate. Basis: ${basis}`
           : replacesFigure && heldFigure !== null
           ? `Replace your figure (\u2018${heldFigure.quote}\u2019) on "${from.label}" \u2192 "${to.label}" with ${linkBandWord(band)}, as your own estimate`
@@ -4397,7 +4409,7 @@ export function createAgentCapabilities(
         link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: edgeStrengthWords(edge) }), direction: current },
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
-        note: origin === 'ai' ? `Nothing has changed yet. This is Olumi's estimate, with basis: ${basis}. Approval does not make it the user's figure.` : (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
+        note: origin === 'unknown' ? 'Nothing has changed yet. The proposed strength has unknown origin; approval does not establish its author.' : origin === 'ai' ? `Nothing has changed yet. This is Olumi's estimate, with basis: ${basis}. Approval does not make it the user's figure.` : (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
           ? (keptIsTheirs
             ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
             : `Nothing has changed yet. ${linkSizing(edge) === 'placeholder' ? 'Its numbers are kept exactly as they are' : 'The link already sits in that band, so its strength is kept exactly as it is'} and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
@@ -5826,8 +5838,8 @@ export function createAgentCapabilities(
           && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, turnWords, { ...ownerScope, nearOnly: true })
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
         if (statementOrigin(writtenAbout || quote !== null,
-          figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
-          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, a.user_stated === false && typeof a.basis === 'string' && a.basis.trim() !== '') === 'unknown') {
+          figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text, ownerScope)
+          || figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, g.brief_text, ownerScope), ctx.user_text_complete, a.user_stated === false && typeof a.basis === 'string' && a.basis.trim() !== '') === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         adopted.push({
@@ -6320,12 +6332,12 @@ export function createAgentCapabilities(
         // A rejected range has no bearing on the ordinary level or its authorship.
         const userWrote = (likelyRange !== undefined
           || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
-        if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
-          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false && typeof i.basis === 'string' && i.basis.trim() !== '') === 'unknown') {
+        if (statementOrigin(userWrote, figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text, scopeIn(g, factor.label, option.label))
+          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), g.brief_text, scopeIn(g, factor.label, option.label)), ctx.user_text_complete, i.user_stated === false && typeof i.basis === 'string' && i.basis.trim() !== '') === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
-        if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
+        if (held.has(`${option.id}::${factor.id}`) && (!claimedByUser || !userWrote)) {
           notAccepted.push({
             option: option.label, factor: factor.label, value: i?.value,
             reason: claimedByUser
@@ -6783,7 +6795,8 @@ export function createAgentCapabilities(
           const p = x?.provenance !== null && typeof x?.provenance === 'object' ? x.provenance as { source?: unknown; reviewed_by_user?: unknown } : undefined;
           const review = p?.reviewed_by_user !== null && typeof p?.reviewed_by_user === 'object' ? p.reviewed_by_user as { intent?: unknown } : undefined;
           const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : v.input_claim?.origin === 'ai'
-            ? provenanceOf({ link: x }).origin === 'ai' && p?.source === 'cee_hypothesis' : linkSizing(x) === 'user';
+            ? provenanceOf({ link: x }).origin === 'ai' && p?.source === sourceForLinkInput(v.input_claim)
+            : v.input_claim?.origin === 'unknown' ? provenanceOf({ link: x }).origin === 'unknown' && p?.source === sourceForLinkInput(v.input_claim) : linkSizing(x) === 'user';
           return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded
             // B1: a same-band confirm reviews the unchanged mean; it may still be an unsized placeholder.
             && (v.intent === 'confirm_current' || !approvalSizes(x));
@@ -6834,7 +6847,9 @@ export function createAgentCapabilities(
         const sizing = storedEdge === undefined ? undefined : linkSizing(storedEdge);
         const fromLabel = after.nodes.find((n) => n.id === fromId)?.label;
         const toLabel = after.nodes.find((n) => n.id === toId)?.label;
-        const followUp = sizing === 'user' && replacedQuote !== undefined && statedBand !== undefined
+        const followUp = v.input_claim?.origin === 'unknown' && v.intent === 'set'
+          ? `Recorded the proposed strength on "${fromLabel}" → "${toLabel}". Its origin remains unknown.`
+          : sizing === 'user' && replacedQuote !== undefined && statedBand !== undefined
           // ⭐ F1 (d5 6006667946): the receipt names exactly what was replaced, and with what.
           ? userFigureReplacedReceipt({ quote: replacedQuote }, linkBandWord(statedBand))
           : sizing === 'user'

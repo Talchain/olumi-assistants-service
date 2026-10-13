@@ -1,4 +1,4 @@
-import { approvedLinkInputFor } from '../../../cee/provenance/approved-link-input.js';
+import { approvedLinkInputFor, sourceForLinkInput } from '../../../cee/provenance/approved-link-input.js';
 /**
  * V5 D1 — `adjust_edge_strength` handler.
  *
@@ -585,12 +585,13 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         const approvedInput = approvedLinkInputFor(invocation.payload.scenario_id, invocation.payload.turn_id, parsed.from, parsed.to);
         if (approvedInput) {
           edge.provenance = { ...edge.provenance,
-            source: approvedInput.claim.origin === 'ai' ? 'cee_hypothesis' : 'user_specified',
-            magnitude: approvedInput.claim.origin === 'ai' ? 'olumi_estimate' : 'user_stated',
+            source: sourceForLinkInput(approvedInput.claim),
+            magnitude: approvedInput.claim.origin === 'unknown' ? undefined : approvedInput.claim.origin === 'ai' ? 'olumi_estimate' : 'user_stated',
             ...(approvedInput.claim.origin === 'ai' ? { reasoning: approvedInput.claim.basis } : {}),
             input_claim: approvedInput.claim, replaced_input: approvedInput.previous,
           } as typeof edge.provenance;
-          edge.provenance_display = approvedInput.claim.origin === 'ai' ? 'ai_inferred' : 'user_set';
+          if (approvedInput.claim.origin === 'unknown') delete edge.provenance_display;
+          else edge.provenance_display = approvedInput.claim.origin === 'ai' ? 'ai_inferred' : 'user_set';
         }
         // The same stamp ends Olumi's default: `defaulted: true` says a default
         // strength was applied (EdgeV3), and this write makes the strength the

@@ -124,6 +124,54 @@ describe('T2sm authorship at the real agent route', () => {
     expect(provenanceOf({ link: edge }).origin).toBe('human');
   });
 
+  it('T2sm3 (b): a claimed-human band for another link is refused', async () => {
+    await turn('Price has a weak effect on MRR.');
+    queue('propose_link_strength', { ...linkArgs, from_label: 'Product quality', user_stated: true });
+    await turn('Prepare the other link for review.');
+    expect(lastResult().refusal).toBe('strength_not_stated');
+    expect(writes).toBe(0);
+  });
+
+  it.each([undefined, false])('T2sm3 (b): another link stays unknown with user_stated=%s', async user_stated => {
+    await turn('Price has a weak effect on MRR.');
+    queue('propose_link_strength', { ...linkArgs, from_label: 'Product quality', user_stated });
+    const offered = await turn('Prepare the other link for review.');
+    expect(lastResult().ok).toBe(true);
+    expect(lastResult().input_claim.origin).toBe('unknown');
+    const card = offered.suggested_actions.find((c: Rec) => c.id === `agent-approve-proposal:${lastResult().proposal_id}`);
+    const saved = await turn(card.message, { source: 'chip', chip: { id: card.id } });
+    expect(saved._agent.tool_calls.map((c: Rec) => ({ name: c.name, ok: c.ok }))).toEqual([{ name: 'authorise_change', ok: true }]);
+    const read = (await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${sid}/graph`, payload: {} })).json();
+    const edge = read.graph.edges.find((e: Rec) => e.from === 'f-quality' && e.to === 'g-revenue');
+    expect(edge.strength.mean).toBe(0.1);
+    expect(edge.provenance.source).toBe('cee_hypothesis');
+    expect(edge.provenance.magnitude).toBeUndefined();
+    expect(edge.provenance.input_claim.origin).toBe('unknown');
+    expect(provenanceOf({ link: edge }).origin).toBe('unknown');
+    expect(writes).toBe(1);
+    await turn(card.message, { source: 'chip', chip: { id: card.id } });
+    expect(writes).toBe(1);
+  });
+
+  it('T2sm3 (b): a declared estimate for another link stays AI through approval/readback', async () => {
+    await turn('Price has a weak effect on MRR.');
+    queue('propose_link_strength', { ...linkArgs, from_label: 'Product quality', user_stated: false,
+      basis: 'A new estimate: product quality is a secondary driver in this model.' });
+    const offered = await turn('Prepare the other link for review.');
+    expect(lastResult().input_claim.origin).toBe('ai');
+    const card = offered.suggested_actions.find((c: Rec) => c.id === `agent-approve-proposal:${lastResult().proposal_id}`);
+    const saved = await turn(card.message, { source: 'chip', chip: { id: card.id } });
+    expect(saved._agent.tool_calls.map((c: Rec) => ({ name: c.name, ok: c.ok }))).toEqual([{ name: 'authorise_change', ok: true }]);
+    const read = (await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${sid}/graph`, payload: {} })).json();
+    const edge = read.graph.edges.find((e: Rec) => e.from === 'f-quality' && e.to === 'g-revenue');
+    expect(edge.strength.mean).toBe(0.1);
+    expect(edge.provenance.source).toBe('cee_hypothesis');
+    expect(provenanceOf({ link: edge }).origin).toBe('ai');
+    expect(writes).toBe(1);
+    await turn(card.message, { source: 'chip', chip: { id: card.id } });
+    expect(writes).toBe(1);
+  });
+
   it.each(['absent', 'assistant', 'unverified'])('row (b) negative: %s band is never saved as human or AI', async where => {
     if (where === 'assistant') script.push({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'Price has a weak effect on MRR.' }] }] });
     if (where === 'unverified') brief = 'Price has a weak effect on MRR.';
@@ -208,6 +256,15 @@ describe('T2sm authorship at the real agent route', () => {
     await turn('Prepare the proposed assumption.');
     expect(lastResult().refusal).toBe('origin_unknown');
     expect(writes).toBe(0);
+  });
+
+  it('T2sm3: an unrelated unverified amount cannot veto a declared own estimate', async () => {
+    brief = 'MRR is £17.';
+    await turn('Consider the price assumptions.');
+    queue('propose_assumptions', assumptionArgs(false));
+    await turn('Prepare a new price estimate for review.');
+    expect(lastResult().ok).toBe(true);
+    expect(lastResult().assumptions).toEqual([{ factor: 'Price', value: 17, unit: 'GBP', basis: 'A new planning estimate.' }]);
   });
 
   it('a genuinely new declared assumption with a basis still has AI authorship', async () => {
