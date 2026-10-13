@@ -42,7 +42,14 @@ export interface Figure {
   /** The user's words this figure is read from (a stated or derived figure). */
   readonly quote?: string;
 }
-export interface Statement { readonly quote: string; readonly form: HiringForm['kind']; readonly source?: 'model_proposed' }
+export interface Statement {
+  readonly quote: string;
+  readonly form: HiringForm['kind'];
+  readonly source?: 'user_stated' | 'model_proposed';
+  /** Complete verified words retain their original subject and qualifications, separate from the new pairing. */
+  readonly original_source?: { readonly text: string; readonly authored_by: 'user_stated' };
+  readonly pairing?: { readonly option_id: string; readonly authored_by: 'model_proposed' };
+}
 export interface PlannedPart { readonly statement: Statement; readonly lead_low: Figure; readonly lead_high: Figure; readonly monthly_share: Figure }
 export interface PlannedOption {
   readonly option_id: string;
@@ -158,7 +165,7 @@ export type PlanRefusal = { readonly refusal: 'hiring_timings_unusable' | 'relat
   | { readonly refusal: 'hiring_bound_conflict'; readonly quote: string; readonly bound: 'lower' | 'upper'; readonly value: number; readonly source: 'user_stated' | 'model_proposed' };
 
 /** The option's planned parts from the user's starts and Olumi's estimate; the pace split equally. */
-export function planStarts(quotes: readonly string[], estimate: PlannedOption['olumi_estimate'], heldParts: number, readings?: readonly { months?: unknown; stated: boolean; held?: Pick<PlannedPart, 'statement' | 'lead_low' | 'lead_high'> }[]):
+export function planStarts(quotes: readonly string[], estimate: PlannedOption['olumi_estimate'], heldParts: number, readings?: readonly { months?: unknown; stated: boolean; original_source?: Statement['original_source']; pairing?: Statement['pairing']; held?: Pick<PlannedPart, 'statement' | 'lead_low' | 'lead_high'> }[]):
   { readonly parts: PlannedPart[] } | PlanRefusal {
   if (quotes.length === 0 || quotes.length > MAX_STARTS_PER_OPTION) return { refusal: 'too_many_starts' };
   if (quotes.length < heldParts) return { refusal: 'fewer_starts_than_held' };
@@ -212,7 +219,9 @@ export function planStarts(quotes: readonly string[], estimate: PlannedOption['o
       low = olumiFigure(low.value, 'olumi_estimate');
       high = olumiFigure(high.value, 'olumi_estimate');
     }
-    parts.push({ statement: { quote, form: form.kind, ...(!own ? { source: 'model_proposed' as const } : {}) }, lead_low: low, lead_high: high, monthly_share: pace(share) });
+    parts.push({ statement: { quote, form: form.kind, ...(reading?.original_source && reading.pairing
+      ? { source: 'user_stated' as const, original_source: reading.original_source, pairing: reading.pairing }
+      : !own ? { source: 'model_proposed' as const } : {}) }, lead_low: low, lead_high: high, monthly_share: pace(share) });
   }
   return { parts };
 }
@@ -365,7 +374,7 @@ type StartView = { readonly statement?: Statement; readonly low: HeldFigure; rea
 function assumptionsOf(starts: readonly StartView[], deliverable: string): string[] {
   const items: string[] = [];
   for (const s of starts) {
-    if (s.statement?.source === 'model_proposed' && s.low.value === s.high.value) {
+    if ((s.statement?.source === 'model_proposed' || s.statement?.pairing?.authored_by === 'model_proposed') && s.low.value === s.high.value) {
       items.push(`an assumption that this start is exactly ${figure(s.low.value)} months from the reference date`);
     }
     const derived = s.low.role === 'derived' && s.high.role === 'derived';
@@ -398,10 +407,14 @@ const viewOfPlanned = (p: PlannedPart): StartView => ({ statement: p.statement,
 /** The ONE card covering all proposed hiring timings (r2; DL/AIE ACK of SYS1-E5-STRINGS r2 pending). */
 export function hiringTimesCard(a: ApprovedHiringTimes, deliverable: string): string {
   const lines = a.options.map((o) => {
-    const views = o.parts.map(viewOfPlanned), said = o.parts.every(p => p.statement.source !== 'model_proposed') ? `you said “${o.quotes.join('”, then “')}”` : o.parts.map(p => `${p.statement.source === 'model_proposed' ? 'Olumi proposed' : 'you said'} “${p.statement.quote}”`).join(', then ');
+    const views = o.parts.map(viewOfPlanned), said = o.parts.some(p => p.statement.pairing !== undefined)
+      ? o.parts.map(p => p.statement.original_source && p.statement.pairing
+        ? `Your words: “${p.statement.original_source.text}”. Olumi proposes using this timing for ‘${o.label}’; your message did not establish that pairing.`
+        : `${p.statement.source === 'model_proposed' ? 'Olumi proposed' : 'you said'} “${p.statement.quote}”.`).join(' Then ')
+      : o.parts.every(p => p.statement.source !== 'model_proposed') ? `you said “${o.quotes.join('”, then “')}”` : o.parts.map(p => `${p.statement.source === 'model_proposed' ? 'Olumi proposed' : 'you said'} “${p.statement.quote}”`).join(', then ');
     const timing = views.length === 1 ? `starts after ${spanOf(views[0]!.low.value, views[0]!.high.value)} months`
       : `one person after ${spanOf(views[0]!.low.value, views[0]!.high.value)} months and another after ${spanOf(views[1]!.low.value, views[1]!.high.value)} months`;
-    return `‘${o.label}’: ${said}. Modelled timing: ${timing}, with ${listed(assumptionsOf(views, deliverable))}.`;
+    return `‘${o.label}’: ${said}${o.parts.some(p => p.statement.pairing !== undefined) ? '' : '.'} Modelled timing: ${timing}, with ${listed(assumptionsOf(views, deliverable))}.`;
   });
   return `Use these hiring assumptions? ${lines.join(' ')}`;
 }
@@ -421,11 +434,17 @@ export function hiringTimesLabel(nodes: readonly unknown[], deliverable: string)
   const quotes = views.flatMap(v => v.statement === undefined ? [] : [v.statement.quote]);
   if (quotes.length === 0) return '';
   const spans = views.map(v => spanOf(v.low.value, v.high.value)).join(' and ');
-  return `${views.some(v => v.statement?.source === 'model_proposed') ? 'proposed' : 'your'} hiring time${quotes.length === 1 ? '' : 's'} (“${quotes.join('”, then “')}”) as modelled: ${spans} months, with ${listed(assumptionsOf(views, deliverable))}`;
+  if (views.some(v => v.statement?.original_source && v.statement.pairing)) {
+    const sources = views.map(v => v.statement?.original_source
+      ? `your words “${v.statement.original_source.text}”`
+      : `${v.statement?.source === 'model_proposed' ? 'Olumi’s words' : 'your words'} “${v.statement?.quote ?? ''}”`).join(', then ');
+    return `Olumi’s proposed timing for this option from ${sources}, as modelled: ${spans} months, with ${listed(assumptionsOf(views, deliverable))}`;
+  }
+  return `${views.some(v => v.statement?.source === 'model_proposed' || v.statement?.pairing?.authored_by === 'model_proposed') ? 'proposed' : 'your'} hiring time${quotes.length === 1 ? '' : 's'} (“${quotes.join('”, then “')}”) as modelled: ${spans} months, with ${listed(assumptionsOf(views, deliverable))}`;
 }
 
 /** How the model summary says whose each figure is (r2; DL/AIE ACK pending). */
-export const HIRING_TIMES_USE = 'Each option’s hiring timings as the model holds them: the user’s own words, then each modelled figure with whose it is (yours, olumi_estimate, olumi_accepted or unknown) and its role (stated, olumi_estimate, derived or unknown). Call a figure the user’s only where whose is "yours" and role is "stated"; an estimated or derived figure is Olumi’s modelling even when it equals the user’s number; never call an unknown figure Olumi’s.';
+export const HIRING_TIMES_USE = 'Each option’s hiring timings as the model holds them: the user’s own words, then each modelled figure with whose it is (yours, olumi_estimate, olumi_accepted or unknown) and its role (stated, olumi_estimate, derived or unknown). Call a figure the user’s only where whose is "yours" and role is "stated"; an estimated or derived figure is Olumi’s modelling even when it equals the user’s number; never call an unknown figure Olumi’s. Where a statement carries original_source and pairing, its complete words remain user-authored with their original subject and qualifications; pairing.authored_by records Olumi’s proposed use for the selected option, not a pairing the user originally stated.';
 
 /** Every option's capacity parts as the model holds them: the statement, each start's figures and its pace, with whose and role. */
 export function hiringTimesSummaryOf(graph: unknown, goalId: string): Record<string, unknown>[] {
@@ -435,7 +454,7 @@ export function hiringTimesSummaryOf(graph: unknown, goalId: string): Record<str
     if (parts.length === 0) return [];
     return [{ option_id: o.id, option: o.label, starts: parts.map((p) => {
       const st = p.observed_state.extra_share_by_date.statement;
-      return { ...(rec(st) ? { statement: { quote: st.quote, form: st.form, ...(st.source === 'model_proposed' ? { source: st.source } : {}) } } : {}),
+      return { ...(rec(st) ? { statement: { ...st } } : {}),
         soonest_months: heldFigureOf(p, 'lead_low'), latest_months: heldFigureOf(p, 'lead_high'),
         pace_percent_per_month: heldFigureOf(p, 'monthly_share') };
     }) }];

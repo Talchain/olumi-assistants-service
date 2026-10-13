@@ -164,8 +164,8 @@ describe('Paul\'s sentence → each start, with whose figure it is (AIE S8 rule 
   });
   it('DL CUT: forms Olumi cannot model as quoted get ONE refusal; R16 and the two-start limit keep their own', () => {
     const est = { lead_low: 2, lead_high: 4, monthly_share: 20 };
-    expect(planStarts(['at least 5 months'], est, 1)).toMatchObject({ parts: [{ lead_low: Y(5, 'at least 5 months'), lead_high: O(5) }] });
-    expect(planStarts(['within 1 month'], est, 1)).toMatchObject({ parts: [{ lead_low: O(1), lead_high: Y(1, 'within 1 month') }] });
+    expect(planStarts(['at least 5 months'], est, 1)).toEqual({ refusal: 'hiring_bound_conflict', quote: 'at least 5 months', bound: 'lower', value: 5, source: 'user_stated' });
+    expect(planStarts(['within 1 month'], est, 1)).toEqual({ refusal: 'hiring_bound_conflict', quote: 'within 1 month', bound: 'upper', value: 1, source: 'user_stated' });
     expect(planStarts(['another a month later'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'another a month later' });
     expect(planStarts(['soon'], est, 1)).toEqual({ refusal: 'hiring_timings_unusable', quote: 'soon' });
     expect(planStarts(['in 2 months'], est, 2)).toEqual({ refusal: 'fewer_starts_than_held' }); // AIE R6 keeps its own words

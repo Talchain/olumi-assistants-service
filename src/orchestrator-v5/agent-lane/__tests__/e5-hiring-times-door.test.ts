@@ -17,6 +17,7 @@ import { withEventShareDate } from '../../goal-target/event-by-date-model.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { sharePartsForOption, shareOptionEstimateWords } from '../../goal-target/share-by-date-run.js';
 import { createAgentCapabilities, projectModelContext, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 import { ProposalStore } from '../proposal.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { approvalChipIdFor, approvalChipsFor } from '../approval-chips.js';
@@ -189,10 +190,16 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
       starts: [{ quote: 'within 2 months' }, { quote: 'the second developer would join two months after the first' }] }] }), ctx(later) as never, w.caps) as Rec;
     expect(again.ok, JSON.stringify(again)).toBe(true);
     expect(again.public_label).toContain('one person after 2 months and another after 4 months');
-    // A quote the model never held, and the user never typed, still binds nothing.
+    // AIE bound science: a model-origin bound cannot clamp the held earliest start to a point.
+    const before = w.graph(), pending = w.proposals.outstanding(SCENARIO, null), registers = [...w.registers];
     expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: DEVS,
       starts: [{ quote: 'within 1 month' }, { quote: 'the second developer would join two months after the first' }] }] }), ctx(later) as never, w.caps))
-      .toMatchObject({ ok: true, mutated: false, public_label: expect.stringContaining('Olumi proposed') });
+      .toEqual({ ok: false, mutated: false, refusal: 'hiring_bound_conflict', calculation_supported: false,
+        statement: { quote: 'within 1 month', source: 'model_proposed', bound: 'upper', value: 1 },
+        detail: "Olumi proposed ‘within 1 month’. That gives a upper bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation." });
+    expect(w.proposals.outstanding(SCENARIO, null)).toEqual(pending);
+    expect(w.registers).toEqual(registers);
+    expect(w.graph()).toEqual(before);
   });
 
   it('"about N" is offered as Olumi\'s reading of the user\'s approximate time, never as an exact human figure', async () => {
@@ -211,21 +218,68 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     expect(w.registers).toHaveLength(0);
   });
 
-  it('W12 attribution: a time bound to another option is offered as Olumi’s', async () => {
-    const w = world();
-    const r = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: DEVS, starts: [{ quote: 'at least 3 months' }] }] }),
-      ctx(PAUL) as never, w.caps) as Rec;
-    expect(r).toMatchObject({ ok: true, mutated: false, public_label: expect.stringContaining('Olumi proposed') });
-    expect(w.proposals.get(r.proposal_id)?.provenance.authored_by).toBe('model_proposed');
+  it.each([true, false])('A2i4 NB-c: verified words retain their subject and qualifications; only the new option pairing is Olumi’s (source complete: %s)', async complete => {
+    const w = world(), before = w.graph();
+    const source = "For a tech lead, I think it would take at least 3 months, but I am not sure; this depends on funding.";
+    const quote = 'at least 3 months';
+    const context = { ...ctx(source), user_text_complete: complete };
+    const args = { options: [{ option_id: DEVS, starts: [{ quote }] }] };
+    const r = await dispatchTool('propose_hiring_times', JSON.stringify(args), context as never, w.caps) as Rec;
+    const face = `Your words: “${source}”. Olumi proposes using this timing for ‘Hire two developers’; your message did not establish that pairing.`;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.public_label).toBe(`Use these hiring assumptions? ‘Hire two developers’: ${face} Modelled timing: starts after 3–4 months, with Olumi’s estimate of the soonest start (3 months), Olumi’s estimate of the latest start (4 months), and Olumi’s estimate of the additional progress from the hires (20% of next feature launch per month).`);
+    const statement = { quote, form: 'at_least', source: 'user_stated',
+      original_source: { text: source, authored_by: 'user_stated' },
+      pairing: { option_id: DEVS, authored_by: 'model_proposed' } };
+    const proposal = w.proposals.get(r.proposal_id)!;
+    expect(proposal.provenance.authored_by).toBe('model_proposed');
+    expect((proposal.operations[0]!.value as Rec).options[0].parts[0].statement).toEqual(statement);
+    expect(w.graph()).toEqual(before);
+    expect(w.registers).toEqual([]);
+    expect(await press(w, r.proposal_id)).toMatchObject({ ok: true, applied: true });
+    const after = w.graph(); // JSON reload through the register ingress and persistence projection.
+    const carrier = after.nodes.find((n: Rec) => n.id === 'event_capacity_2').observed_state.extra_share_by_date;
+    expect(carrier.statement).toEqual(statement);
+    expect(shareOptionEstimateWords(after, DEVS)).toBe(`using Olumi’s proposed timing for this option from your words “${source}”, as modelled: 3–4 months, with Olumi’s estimate of the soonest start (3 months), Olumi’s estimate of the latest start (4 months), and Olumi’s estimate of the additional progress from the hires (20% of next feature launch per month)`);
+    expect(carrier.figures.lead_low).toEqual({ value: 3, role: 'olumi_estimate', source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } });
+    expect(after.nodes.find((n: Rec) => n.id === 'event_capacity_1')).toEqual(before.nodes.find((n: Rec) => n.id === 'event_capacity_1'));
+    const summary = projectModelContext({ nodes: after.nodes, edges: after.edges, raw: after, analysis_state: null, analysis_ready: null } as never) as Rec;
+    expect(summary.hiring_times.options.find((o: Rec) => o.option_id === DEVS).starts[0].statement).toEqual(statement);
+    expect(await press(w, r.proposal_id)).toMatchObject({ ok: true, applied: true, already_applied: true });
+    expect(w.registers).toHaveLength(1);
+    const cold = world(after);
+    expect(await dispatchTool('propose_hiring_times', JSON.stringify(args),
+      { ...ctx('Keep the selected timing.'), user_text_complete: false } as never, cold.caps))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'already_held' });
+    expect(cold.graph()).toEqual(after);
+    expect(cold.registers).toEqual([]);
   });
 
-  it('W12/W13 an unbound figure is labelled; "at least" past Olumi\'s latest is proposed with a valid bound', async () => {
+  it('A2i4 NB-c: unverified words and an incomplete-source miss stay unknown, with no pairing or write', async () => {
+    for (const unverified of ['', 'For a tech lead, at least 3 months, if funding is available.']) {
+      const w = world(), before = w.graph();
+      const r = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: DEVS, starts: [{ quote: 'at least 3 months' }] }] }),
+        { ...ctx('Consider a timing.'), user_text_complete: false, unverified_user_text: unverified } as never, w.caps);
+      expect(r).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
+      expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);
+      expect(w.graph()).toEqual(before);
+      expect(w.registers).toEqual([]);
+    }
+  });
+
+  it('W12/W13 an unbound figure is labelled; "at least" past Olumi\'s latest refuses without a write', async () => {
     const w = world();
     expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: 'at least 4 months' }] }] }),
       ctx(PAUL) as never, w.caps)).toMatchObject({ ok: true, mutated: false, public_label: expect.stringContaining('Olumi proposed') });
     const later = 'For the tech lead it would be at least 6 months.';
-    expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: 'at least 6 months' }] }] }),
-      ctx(later) as never, w.caps)).toMatchObject({ ok: true, public_label: expect.stringContaining('starts after 6 months') });
+    const before = w.graph(), pending = w.proposals.outstanding(SCENARIO, null);
+    expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: later }] }] }),
+      ctx(later) as never, w.caps)).toEqual({ ok: false, mutated: false, refusal: 'hiring_bound_conflict', calculation_supported: false,
+        statement: { quote: later, source: 'user_stated', bound: 'lower', value: 6 },
+        detail: `You gave ‘${later}’. That gives a lower bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` });
+    expect(w.proposals.outstanding(SCENARIO, null)).toEqual(pending);
+    expect(w.registers).toEqual([]);
+    expect(w.graph()).toEqual(before);
   });
 
   it.each([['at least 6 months', 'lower', 6], ['within 1 month', 'upper', 1]])(

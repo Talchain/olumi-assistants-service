@@ -1,5 +1,6 @@
+import { verbatimSourceLine } from '../quote-confirmation.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
-import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
+import { statementOrigin, claimsUserAuthorship, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
@@ -5424,12 +5425,25 @@ export function createAgentCapabilities(
         const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
         const heldQuotes = heldStatementsOf(held);
         const starts = o.starts as readonly { months?: unknown }[];
+        const pairings = quotes.map(quote => {
+          const source = verbatimSourceLine(texts, quote);
+          if (source !== undefined && quoteStatedFor(texts, quote, label) === 'not_for_option') {
+            return { original_source: { text: source, authored_by: 'user_stated' as const },
+              pairing: { option_id: id, authored_by: 'model_proposed' as const } };
+          }
+          const retained = heldQuotes.includes(quote)
+            ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date.statement
+            : undefined;
+          return retained?.original_source?.authored_by === 'user_stated' && retained?.pairing?.option_id === id
+            && retained.pairing.authored_by === 'model_proposed'
+            ? { original_source: retained.original_source, pairing: retained.pairing } : undefined;
+        });
         const origins = quotes.map((quote, i) => {
           const retained = heldQuotes.includes(quote)
             ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date.statement
             : undefined;
-          const heldOlumi = retained?.source === 'model_proposed';
-          return statementOrigin(quoteStatedFor(texts, quote, label) === 'ok' || (retained !== undefined && !heldOlumi),
+          const heldOlumi = retained?.source === 'model_proposed' || retained?.pairing?.authored_by === 'model_proposed';
+          return statementOrigin(pairings[i] !== undefined || quoteStatedFor(texts, quote, label) === 'ok' || (retained !== undefined && !heldOlumi),
             !heldOlumi && (quoteSpansIn(plainWords(ctx.unverified_user_text ?? ''), plainWords(quote)).length > 0
               || quoteSpansIn(plainWords(g.brief_text ?? ''), plainWords(quote)).length > 0), ctx.user_text_complete,
             heldOlumi || (quote === '' && typeof starts[i]?.months === 'number'));
@@ -5441,7 +5455,8 @@ export function createAgentCapabilities(
           const prior = starts[i]?.months === undefined && heldQuotes.includes(quote)
             ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date
             : undefined;
-          return { months: starts[i]?.months, stated: origins[i] === 'human',
+          return { months: starts[i]?.months, stated: origins[i] === 'human' && pairings[i] === undefined,
+            ...pairings[i],
             ...(prior?.figures ? { held: { statement: prior.statement,
               lead_low: prior.figures.lead_low, lead_high: prior.figures.lead_high } } : {}) };
         }));
@@ -5467,7 +5482,7 @@ export function createAgentCapabilities(
       if (!hiringTimesHeld(withHiringTimes(g.raw, a), a)) return unusable();
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_HIRING_TIMES, path: goalId, value: a }],
-        provenance: { authored_by: planned.some(o => o.parts.some(p => p.statement.source === 'model_proposed')) ? 'model_proposed' : 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
+        provenance: { authored_by: planned.some(o => o.parts.some(p => p.statement.source === 'model_proposed' || p.statement.pairing?.authored_by === 'model_proposed')) ? 'model_proposed' : 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: hiringTimesCard(a, part.deliverable) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
@@ -5773,7 +5788,7 @@ export function createAgentCapabilities(
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
         if (statementOrigin(writtenAbout || quote !== null,
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
-          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete) === 'unknown') {
+          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, !claimsUserAuthorship(a)) === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         adopted.push({
@@ -6261,7 +6276,7 @@ export function createAgentCapabilities(
         const userWrote = claimedByUser && (likelyRange !== undefined
           || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
         if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
-          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i?.user_stated === false) === 'unknown') {
+          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, !claimsUserAuthorship(i)) === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
@@ -9652,6 +9667,7 @@ export function createAgentCapabilities(
       const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string;
         range?: { low: number; high: number; quote: string } }[] = [];
       const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
+      let originUnknown = false;
       const ambiguous: AmbiguousTarget[] = [];
       const recordOf = (x: unknown): Record<string, unknown> => (x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {});
       // Every new factor named in THIS call, with its declared unit: each one's figure is never another's (`newFactorScopeIn`).
@@ -9750,6 +9766,7 @@ export function createAgentCapabilities(
           || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null, ctx.user_text_complete);
         const ownsIt = origin === 'human';
         if (origin === 'unknown') {
+          originUnknown = true;
           todayNotSet.push({ factor: label, value: t.value,
             reason: `The retained source of ${shown} for "${label}" is not verified. Its origin stays unknown; nothing was prepared. Ask for its source rather than relabelling it as Olumi’s estimate.` });
           continue;
@@ -9789,8 +9806,8 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
       }
       if (todayNotSet.length > 0) {
-        return { ok: false, mutated: false, refusal: 'today_not_set', today_not_set: todayNotSet,
-          detail: 'Nothing was prepared or held: each new factor needs a finite figure in its known unit. '
+        return { ok: false, mutated: false, refusal: originUnknown ? 'origin_unknown' : 'today_not_set', today_not_set: todayNotSet,
+          detail: originUnknown ? UNKNOWN_ORIGIN_DETAIL : 'Nothing was prepared or held: each new factor needs a finite figure in its known unit. '
             + 'Explain the invalid figure or unit from today_not_set; do not substitute zero or invent a unit.' };
       }
       // The door's own builder, run here purely: a spec it would refuse is never sent.

@@ -18,6 +18,7 @@ import { narrateWriteOutcome } from '../write-outcome.js';
 import { APPROVAL_LABEL_MAX, approvalChipIdFor, approvalChipsFor } from '../approval-chips.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import type { ToolResult } from '../runtime/agent-tools.js';
+import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 import { ProposalStore } from '../proposal.js';
 import { asSent } from './helpers/as-sent.js';
 
@@ -134,6 +135,75 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
       [approvalChipIdFor(String(r.proposal_id)), 'Save £50,000 for Hire PA', 'Yes, use those.'],
       ['agent-amend-proposal', 'Change something first', 'Before you apply it, I want to change some of it.'],
     ]);
+  });
+
+  it('A2i5 K3: unclaimed starting-point estimates need no special flag in incomplete source', async () => {
+    const levels = [
+      { option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, basis: 'market rate' },
+      { option_label: 'Use an agency', factor_label: 'Annual PA salary', value: 30000, basis: 'agency day rate over a year' },
+    ];
+    const context = { ...ctx, user_text: 'Suggest starting figures.', user_turn_text: 'Suggest starting figures.', user_text_complete: false };
+    for (const explicit of [false, true]) {
+      const graph = structuredClone(PA_GRAPH), before = JSON.stringify(graph);
+      const { store, caps } = capsOver(graph);
+      const r = await caps.proposeStartingPoint(context, { assumptions: [],
+        option_levels: levels.map(level => ({ ...level, ...(explicit ? { user_stated: false } : {}) })) });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      const p = store.get(String(r.proposal_id))!;
+      expect(p.provenance.authored_by).toBe('model_proposed');
+      expect(p.operations.map(op => (op.value as { authored_by: string }).authored_by)).toEqual(['model_proposed', 'model_proposed']);
+      expect(chipsFor(store, [{ name: 'propose_starting_point', result: r }])[0]!.label).toBe('Use these 2 starting figures');
+      expect(JSON.stringify(graph)).toBe(before);
+    }
+  });
+
+  it.each([
+    { basis: 'You said £5,000.' },
+    { basis: 'The user stated £5,000.' },
+    { basis: '“Recruitment fee is £5,000.”' },
+    { basis: 'a starting estimate', user_stated: true },
+    { basis: 'a starting estimate', quote: 'Recruitment fee is £5,000.' },
+    { basis: 'a starting estimate', revise: true },
+  ])('A2i5 K3: incomplete-source unverified assumption claim is refused: %j', async claim => {
+    const graph = structuredClone(PA_GRAPH), before = JSON.stringify(graph);
+    const { store, caps } = capsOver(graph);
+    const r = await caps.proposeAssumptions({ ...ctx, user_text: 'Suggest starting figures.', user_text_complete: false },
+      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', ...claim }] });
+    expect(r).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
+    expect(store.outstanding(SCENARIO, 'user-a')).toEqual([]);
+    expect(chipsFor(store, [{ name: 'propose_assumptions', result: r }])).toEqual([]);
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it.each([undefined, false])('A2i5 K3: tier-2 assumption match cannot be relabelled (user_stated=%s)', async user_stated => {
+    const graph = structuredClone(PA_GRAPH), before = JSON.stringify(graph);
+    const { store, caps } = capsOver(graph);
+    const r = await caps.proposeAssumptions({ ...ctx, user_text: 'Suggest starting figures.', user_text_complete: false,
+      unverified_user_text: 'Recruitment fee is £5,000.' },
+      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', basis: 'a starting estimate', ...{ user_stated } }] });
+    expect(r).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
+    expect(store.outstanding(SCENARIO, 'user-a')).toEqual([]);
+    expect(chipsFor(store, [{ name: 'propose_assumptions', result: r }])).toEqual([]);
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it.each([
+    { user_stated: true, basis: 'starting figure', unverified: '' },
+    { basis: 'You said £45,000.', unverified: '' },
+    { basis: '“Hire PA at £45,000.”', unverified: '' },
+    { basis: 'starting estimate', unverified: 'Hire PA at £45,000.' },
+    { user_stated: false, basis: 'starting estimate', unverified: 'Hire PA at £45,000.' },
+  ])('A2i5 K3: claimed or tier-2 starting-point level stays unknown: %j', async ({ unverified, ...claim }) => {
+    const graph = structuredClone(PA_GRAPH), before = JSON.stringify(graph);
+    const { store, caps } = capsOver(graph);
+    const r = await caps.proposeStartingPoint({ ...ctx, user_text: 'Suggest starting figures.', user_text_complete: false,
+      unverified_user_text: unverified }, { assumptions: [],
+      option_levels: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, ...claim }] });
+    expect(r).toEqual({ ok: false, mutated: false, refusal: 'nothing_to_propose',
+      option_levels_refused: { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL } });
+    expect(store.outstanding(SCENARIO, 'user-a')).toEqual([]);
+    expect(chipsFor(store, [{ name: 'propose_starting_point', result: r }])).toEqual([]);
+    expect(JSON.stringify(graph)).toBe(before);
   });
 
   it('RED: one starting value → "Set Recruitment fee to £5,000"', async () => {

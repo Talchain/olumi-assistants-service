@@ -391,6 +391,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
 
   it.each(['verified', 'unknown', 'model'])('A2h deadline phrase on real route (%s)', async origin => {
     graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
     const words = '30 April 2028';
     if (origin !== 'model') await turn({ message: `Our deadline is ${words}.` });
     let output: Record<string, any> = {};
@@ -398,13 +399,19 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       body => { output = toolOutputIn(body); return say('Check the deadline card.'); }];
     const result = await turn({ message: 'Prepare the deadline.', ...(origin === 'unknown' ? { agent_session_id: randomUUID() } : {}) });
     const call = result._agent.tool_calls.find(c => c.name === 'propose_goal_deadline');
-    expect(call, JSON.stringify(output)).toMatchObject(origin === 'unknown' ? { ok: false, refusal: 'origin_unknown' } : { ok: true });
-    if (origin !== 'unknown') {
+    expect(call, JSON.stringify(output)).toMatchObject(origin !== 'verified' ? { ok: false, mutated: false, refusal: 'origin_unknown' } : { ok: true });
+    if (origin === 'verified') {
       const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
       const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
-      expect(proposal?.provenance.authored_by).toBe(origin === 'verified' ? 'user_stated' : 'model_proposed');
-      expect(proposal?.public_label).toContain(`${origin === 'verified' ? 'Your words' : 'Olumi’s wording'}: “${words}”.`);
+      expect(proposal?.provenance.authored_by).toBe('user_stated');
+      expect(proposal?.public_label).toContain(`Your words: “${words}”.`);
+    } else {
+      expect(output).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown',
+        detail: 'The retained source is not verified. Its origin stays unknown; nothing was prepared. Ask for its source.' });
+      expect(await heldOnLatestRow()).toEqual([]);
+      expect(approveChipOf(result)).toBeUndefined();
     }
+    expect(bytes()).toBe(before);
   });
 
   it('A2h multiline verified figure retains its subject across a line break', async () => {
@@ -427,7 +434,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       body => { output = toolOutputIn(body); return say('Please confirm the source.'); }];
     const result = await turn({ message: 'Add those two to the model.', agent_session_id: randomUUID() });
     expect(saw).toBe(true);
-    expect(callOf(result)).toMatchObject({ ok: false, refusal: 'today_not_set' });
+    expect(callOf(result)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
     expect(JSON.stringify(output)).toContain('origin stays unknown');
     expect(await heldOnLatestRow()).toHaveLength(0);
     expect(bytes()).toBe(before);
@@ -634,27 +641,22 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis?: string }[])[0]!.basis).toBe('written_about');
     nextScenario();
     graphOf.set(SCENARIO, journeyE());
+    const before = bytes();
     const t2 = await propose(one(120000, 'Junior engineer salary'), 'Senior engineers cost £120k a year each.');
-    expect(callOf(t2)).toMatchObject({ ok: true, mutated: false });
-    expect((await heldOnLatestRow())[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([{ basis: 'olumi_estimate' }]);
+    expect(callOf(t2)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(t2)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
   }, 120_000);
 
-  it('W14 real path: an unquoted estimate remains Olumi’s after card approval and reload', async () => {
+  it('W14 real path: an absent salary in incomplete source stays unknown, with no proposal or write', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
     const t1 = await propose(factorArgs(), 'Senior engineers cost £120k a year each.');
-    expect(callOf(t1)).toMatchObject({ ok: true, mutated: false });
+    expect(callOf(t1)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);
-    const held = await heldOnLatestRow();
-    expect(held[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([
-      { observed_state: { source: 'user_override' } },
-      { basis: 'olumi_estimate', observed_state: { source: 'cee_inference', extractionType: 'inferred', raw_value: 65000 } },
-    ]);
-    const approve = approveChipOf(t1)!;
-    const done = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
-    expect(done._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
-    expect(newFactors().find(n => n.label === 'Junior engineer salary')?.observed_state)
-      .toMatchObject({ source: 'cee_inference', extractionType: 'inferred', raw_value: 65000 });
   }, 120_000);
 
   it('(c) RED: the model moves before the approval → refused, nothing written; and the DOOR refuses a stale base with no row', async () => {
@@ -734,16 +736,14 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(bytes()).toBe(before);
   }, 120_000);
 
-  it('W14 a signed today quantity survives the real hold and approval without an invented frame', async () => {
+  it('W14 an absent signed today quantity in incomplete source stays unknown, with no proposal or write', async () => {
     graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
     const t1 = await propose([{ label: 'Net contribution', unit: 'GBP/year', today: { value: -120000 }, affects: 'Annual salary spend', direction: 'positive' }], 'Consider net contribution.');
-    expect(callOf(t1)).toMatchObject({ ok: true, mutated: false });
-    const approve = approveChipOf(t1)!;
-    const done = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
-    expect(done._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true }));
-    const os = graphNow().nodes.find(n => n.label === 'Net contribution')?.observed_state;
-    expect(os).toMatchObject({ value: -120000, unit: 'GBP/year', source: 'cee_inference' });
-    expect(os).not.toHaveProperty('cap');
+    expect(callOf(t1)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
   }, 120_000);
 
   it.each([
@@ -946,7 +946,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const before = bytes();
     let out: Record<string, unknown> = {};
     const again = await propose(factorArgs(), 'Add those figures.', o => { out = o; });
-    expect(callOf(again)).toMatchObject({ ok: false, mutated: false, refusal: 'today_not_set' });
+    expect(callOf(again)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     expect(JSON.stringify(out.today_not_set)).toContain('origin stays unknown');
     expect(bytes()).toBe(before);
   }, 120_000);
@@ -1018,7 +1018,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     await sayRangeFirst();
     const before = bytes();
     const t1 = await propose(rangedArgs(over), saidTwentyFive ? HIRING_MSG : 'Use my range for it.');
-    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: saidTwentyFive ? 'today_not_set' : 'origin_unknown' }));
     expect(approveChipOf(t1)).toBeUndefined();
     expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);
