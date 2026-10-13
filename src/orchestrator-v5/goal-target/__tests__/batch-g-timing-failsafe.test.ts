@@ -1,7 +1,7 @@
 /** G2: AI timing argument → existing capability/chip → real Run handler → stored enrichment. No timing sweep. */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { AGENT_TOOLS, AIE_TEXT_PENDING_EFFECTS_TIMING, dispatchTool } from '../../agent-lane/runtime/agent-tools.js';
+import { AGENT_TOOLS, AIE_APPROVED_EFFECTS_TIMING_DESCRIPTION, dispatchTool } from '../../agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
@@ -16,11 +16,14 @@ const WITHHOLD = 'The chance of reaching your target for ‘productivity’ (up 
   + 'the model has not established how much of these effects would be in place by then.';
 
 describe('G2: AI reading is required and carried into this Run, with Olumi origin', () => {
-  it('one required enum argument uses the pending AIE text', () => {
+  it('one required nullable enum argument uses the exact approved AIE text', () => {
     const tool = AGENT_TOOLS.find((t) => t.name === 'run_analysis')!;
     expect(tool.parameters.required).toEqual(['reason', 'effects_timing']);
-    expect((tool.parameters.properties as Rec).effects_timing).toEqual({ type: 'string',
-      enum: ['in_place_by_period', 'later_or_partial', 'not_stated'], description: AIE_TEXT_PENDING_EFFECTS_TIMING });
+    expect(AIE_APPROVED_EFFECTS_TIMING_DESCRIPTION).toBe("Your reading of the current held target, its period and the options being analysed, using the current canonical model and all relevant readable user statements, including later turns. Choose in_place_by_period only when those statements support the relevant effects being fully in place by that period; later_or_partial when a relevant effect arrives later or only partly; not_stated only when the complete readable relevant source states no effects timing (the goal's period alone is not effects timing). Use null when required context is missing, truncated, unreadable, has unknown authorship, conflicts, or cannot be classified reliably; never turn unknown into not_stated. In reason, identify the actual target/period and the source or missing context for your reading. This is Olumi's interpretation, not a measurement, human approval or a change to the user's evidence.");
+    expect((tool.parameters.properties as Rec).effects_timing).toEqual({ anyOf: [
+      { type: 'string', enum: ['in_place_by_period', 'later_or_partial', 'not_stated'] },
+      { type: 'null' },
+    ], description: AIE_APPROVED_EFFECTS_TIMING_DESCRIPTION });
   });
 
   it.each([
@@ -28,6 +31,7 @@ describe('G2: AI reading is required and carried into this Run, with Olumi origi
     ['The hires cannot contribute during that window.', 'later_or_partial', false],
     ['', 'not_stated', true],
     ['The effects are fully in place by month three.', 'in_place_by_period', true],
+    ['', null, false],
     ['', undefined, false],
     ['', 'invalid', false],
   ] as const)('%s / %s → licensed=%s', async (words, effects_timing, licensed) => {
@@ -63,7 +67,7 @@ describe('G2: AI reading is required and carried into this Run, with Olumi origi
       { scenario_id: SCENARIO, authenticated_user_id: 'g2', request_id: 'g2' }, caps);
     expect(plotRun).toHaveBeenCalledTimes(1);
     expect(stored).toBeDefined();
-    const valid = effects_timing !== undefined && effects_timing !== 'invalid';
+    const valid = effects_timing !== null && effects_timing !== undefined && effects_timing !== 'invalid';
     expect(stored!.effects_timing).toBe(valid ? effects_timing : null);
     expect(stored!.effects_timing_origin).toBe(valid ? 'olumi' : null);
     const licence = goalChanceLicenceForAgent({ type: 'analysis_result', enrichment: stored });

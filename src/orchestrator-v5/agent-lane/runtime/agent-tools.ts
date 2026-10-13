@@ -182,8 +182,8 @@ const ACTS_ON = {
   }, ['factor_label', 'direction']),
 };
 
-/** AIE signs these words before merge. */
-export const AIE_TEXT_PENDING_EFFECTS_TIMING = "Your reading of everything the user has said: are the options' effects in place by the goal's date (in_place_by_period), later or only partly (later_or_partial), or not stated (not_stated)?";
+/** Exact wording approved by AIE comment 6134928624. */
+export const AIE_APPROVED_EFFECTS_TIMING_DESCRIPTION = "Your reading of the current held target, its period and the options being analysed, using the current canonical model and all relevant readable user statements, including later turns. Choose in_place_by_period only when those statements support the relevant effects being fully in place by that period; later_or_partial when a relevant effect arrives later or only partly; not_stated only when the complete readable relevant source states no effects timing (the goal's period alone is not effects timing). Use null when required context is missing, truncated, unreadable, has unknown authorship, conflicts, or cannot be classified reliably; never turn unknown into not_stated. In reason, identify the actual target/period and the source or missing context for your reading. This is Olumi's interpretation, not a measurement, human approval or a change to the user's evidence.";
 
 export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
@@ -245,8 +245,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'missing; report that honestly rather than guessing what the result would have been.',
     parameters: obj({
       reason: { type: 'string' },
-      effects_timing: { type: 'string', enum: ['in_place_by_period', 'later_or_partial', 'not_stated'],
-        description: AIE_TEXT_PENDING_EFFECTS_TIMING },
+      effects_timing: { anyOf: [
+        { type: 'string', enum: ['in_place_by_period', 'later_or_partial', 'not_stated'] },
+        { type: 'null' },
+      ], description: AIE_APPROVED_EFFECTS_TIMING_DESCRIPTION },
     }, ['reason', 'effects_timing']),
   },
   {
@@ -993,7 +995,7 @@ export interface AgentCapabilities {
     /** A2 follow-up: the comparator the user stated in this message, typed; absent for a new figure alone. */
     stated_operator?: '<' | '<=' | '>' | '>=';
   }): Promise<ToolResult>;
-  runAnalysis(ctx: AgentToolContext, args: { reason: string; effects_timing: EffectsTiming }): Promise<ToolResult>;
+  runAnalysis(ctx: AgentToolContext, args: { reason: string; effects_timing: EffectsTiming | null }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
