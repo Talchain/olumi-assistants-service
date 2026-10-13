@@ -1010,7 +1010,7 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 /** One internal dispatch, so every path is the product's own. */
 import { reconcileGoalScope } from '../reconcile-goal-scope.js';
 import { noSuchLinkUserWords } from '../no-direct-link.js';
-import { goalScopeCheck, scopeIssueBlocks, scopeOf, scopeOfGoal, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
+import { goalScopeCheck, scopeIssueBlocks, scopeOfGoal, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
 import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
@@ -5108,7 +5108,10 @@ export function createAgentCapabilities(
       const goals = g.nodes.filter(n => n.kind === 'goal');
       if (goals.length !== 1) return { ok: false, mutated: false, refusal: 'goal_not_resolved' };
       const parsed = SavedEffectsTimingSchema.safeParse({ ...args, goal_id: goals[0]!.id,
-        source_status: ctx.user_text_complete === false ? 'incomplete' : args.source_status,
+        // PL 6135017311 (11:16Z): only an explicit host attestation of complete, readable, non-empty source permits
+        // 'complete'; a missing/undefined flag never inherits the model's claim. Other statuses pass through unchanged.
+        source_status: args.source_status === 'complete' && !(ctx.user_text_complete === true && (ctx.user_text ?? '').trim() !== '')
+          ? 'incomplete' : args.source_status,
         source: ctx.user_text ?? '', option_ids: g.nodes.filter(n => n.kind === 'option').map(n => n.id).sort(), graph_revision: g.graph_hash });
       if (!parsed.success) return { ok: false, mutated: false, refusal: 'unreadable_timing', detail: 'Supply a typed interpretation, source status and basis. Nothing was prepared.' };
       const record = parsed.data;

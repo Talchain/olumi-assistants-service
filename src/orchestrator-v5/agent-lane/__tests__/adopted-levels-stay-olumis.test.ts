@@ -233,3 +233,23 @@ vi.mock('../../build-turn-context.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../build-turn-context.js')>(),
   loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
 }));
+
+describe('saved effects timing: only the host can attest complete source (PL 6135017311)', () => {
+  const claim = { interpretation: 'in_place_by_period', source_status: 'complete', basis: 'Read endpoint effectiveness separately.' };
+  it.each([
+    ['flag absent', { ...ctx }, 'incomplete'],
+    ['flag false', { ...ctx, user_text_complete: false }, 'incomplete'],
+    ['flag true, empty source', { ...ctx, user_text: '  ', user_text_complete: true }, 'incomplete'],
+    ['flag true, readable source', { ...ctx, user_text_complete: true }, 'complete'],
+  ] as const)('%s → %s', async (_name, c, expected) => {
+    const caps = createAgentCapabilities(product(hiring()).d, new ProposalStore());
+    const r = await caps.proposeEffectsTiming(c as never, claim as never) as Record<string, any>;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.effects_timing_record.source_status).toBe(expected);
+  });
+  it('a non-complete status the AI reports passes through unchanged', async () => {
+    const caps = createAgentCapabilities(product(hiring()).d, new ProposalStore());
+    const r = await caps.proposeEffectsTiming({ ...ctx } as never, { ...claim, source_status: 'conflicting' } as never) as Record<string, any>;
+    expect(r.effects_timing_record.source_status).toBe('conflicting');
+  });
+});
