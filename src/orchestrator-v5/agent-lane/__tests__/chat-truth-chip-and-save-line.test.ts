@@ -128,7 +128,7 @@ describe('the build line says what approval changes', () => {
 describe('the approve chip is labelled from the stored proposal it approves', () => {
   it('RED: one option level → "Save £50,000 for Hire PA"; id and message exactly as before', async () => {
     const { store, caps } = capsOver();
-    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, basis: 'the figure the user gave' }] });
+    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, user_stated: true, basis: 'the figure the user gave' }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const chips = chipsFor(store, [{ name: 'propose_option_interventions', result: r }]);
     expect(chips.map((c) => [c.id, c.label, c.message])).toEqual([
@@ -191,6 +191,9 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
       expect(proposal.operations.map(op => (op.value as { authored_by: string }).authored_by)).toEqual(['model_proposed']);
       expect(proposal.operations.map(op => (op.value as { basis: string }).basis)).toEqual(['From your earlier note, campaign effectiveness is 0.2']);
       expect(chipsFor(store, [{ name: 'propose_assumptions', result: r }])).toHaveLength(2);
+      expect(chipsFor(store, [{ name: 'propose_assumptions', result: r }])[0].detail).toBe(
+        'Adopt 1 starting assumption: Campaign effectiveness = 0.2 proportion\n'
+        + "Olumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “From your earlier note, campaign effectiveness is 0.2”");
     }
     expect(JSON.stringify(graph)).toBe(before);
   });
@@ -293,7 +296,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
   it('RED: a per-period money unit reads as money per period', async () => {
     const graph = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_salary' ? { ...n, observed_state: { ...n.observed_state!, unit: 'GBP/year' } } : n)) };
     const { store, caps } = capsOver(graph);
-    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, basis: 'x' }] });
+    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, user_stated: false, basis: 'x' }] });
     expect(chipsFor(store, [{ name: 'propose_option_interventions', result: r }])[0]!.label).toBe('Save £50,000/year for Hire PA');
   });
 
@@ -301,7 +304,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const long = 'Hire a full-time executive PA based in the London office';
     const graph = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'opt_pa' ? { ...n, label: long } : n)) };
     const { store, caps } = capsOver(graph);
-    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: long, factor_label: 'Annual PA salary', value: 50000, basis: 'x' }] });
+    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: long, factor_label: 'Annual PA salary', value: 50000, user_stated: false, basis: 'x' }] });
     const label = chipsFor(store, [{ name: 'propose_option_interventions', result: r }])[0]!.label;
     expect(label).toMatch(/^Save £50,000 for Hire a full-time.*…$/);
     expect(label.length).toBeLessThanOrEqual(APPROVAL_LABEL_MAX);
@@ -365,7 +368,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
 
   it('FALLBACK: a result that does not agree with the stored proposal figure for figure keeps today’s label', async () => {
     const { store, caps } = capsOver();
-    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, basis: 'x' }] });
+    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, user_stated: false, basis: 'x' }] });
     const tampered = { ...r, interventions: (r.interventions as Record<string, unknown>[]).map((i) => ({ ...i, value: 60000 })) };
     expect(chipsFor(store, [{ name: 'propose_option_interventions', result: tampered }])[0]!.label).toBe('Use as starting option levels');
     // And with no stored proposal at all (a process that no longer holds it), today's label.

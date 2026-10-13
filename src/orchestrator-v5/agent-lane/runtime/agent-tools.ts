@@ -18,6 +18,8 @@ import { sendableQuery } from './public-research.js';
 import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
 import { LOSS_THRESHOLD_CONSEQUENCES } from '../stated-limit.js';
 
+// AIE 6141593167: exact option-level authorship contract at both entry points.
+const OPTION_LEVEL_USER_STATED = {"type": "boolean", "description": "Set true ONLY for a level the user supplied for this option and factor, with its actual source; the host must verify that source before recording it as theirs. A verified retained human statement counts. Set false ONLY when explicitly proposing a new Olumi estimate now, with its own basis. Never infer false from missing, truncated or unmatched source, or from the absence of a user-authorship claim. Do not use false to relabel an old quoted, copied or recorded figure. Keep the original statement, subject and qualifications separate from any new interpretation. This flag is a claim to check, not proof of authorship; accepting an Olumi estimate does not turn it into a user-supplied fact. On an option in `status_quo_held`, a level is permitted only with true and verified user words saying that carrying on changes this factor and giving that level. Never restate the factor's starting value: carrying on as now already keeps that, so such a level is not recorded."} as const;
 const ASSUMPTION_USER_STATED = {"type": "boolean", "description": "Set true ONLY for a figure the user supplied for this factor, with its actual source; the host must verify that source before recording it as theirs. A verified retained human statement counts. Set false ONLY when explicitly proposing a new Olumi estimate now, with its own basis; for keep: true, false identifies the existing recorded Olumi estimate being retained. Never infer false from missing, truncated or unmatched source, or from the absence of a user-authorship claim. Do not use false to relabel an old quoted, copied or recorded figure. Keep the original statement, subject and qualifications separate from any new interpretation. This flag is a claim to check, not proof of authorship; accepting an Olumi estimate does not turn it into a user-supplied fact."} as const;
 
 /**
@@ -671,15 +673,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           unit: { type: 'string', description: 'The unit the user wrote this figure in, if any (\u00a3 per month for \u201c\u00a310 per month\u201d).' },
           basis: { type: 'string' },
           unmodelled_mechanisms: UNMODELLED_MECHANISMS,
-          user_stated: {
-            type: 'boolean',
-            description:
-              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
-              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
-              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
-              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
-              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
-          },
+          user_stated: OPTION_LEVEL_USER_STATED,
           likely_low: {
             type: 'number',
             description:
@@ -700,7 +694,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             type: 'boolean',
             description: 'Set true ONLY when the USER gave this range (both ends) for this option and factor.',
           },
-        }, ['option_label', 'factor_label', 'value', 'basis']),
+        }, ['option_label', 'factor_label', 'value', 'basis', 'user_stated']),
       },
       whole_request: WHOLE_REQUEST,
     }, ['interventions']),
@@ -737,16 +731,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           value: { type: 'number' },
           basis: { type: 'string' },
           unmodelled_mechanisms: UNMODELLED_MECHANISMS,
-          user_stated: {
-            type: 'boolean',
-            description:
-              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
-              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
-              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
-              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
-              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
-          },
-        }, ['option_label', 'factor_label', 'value', 'basis']),
+          user_stated: OPTION_LEVEL_USER_STATED,
+        }, ['option_label', 'factor_label', 'value', 'basis', 'user_stated']),
       },
     }, ['assumptions', 'option_levels']),
   },

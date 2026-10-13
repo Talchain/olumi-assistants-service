@@ -5910,7 +5910,13 @@ export function createAgentCapabilities(
         // offered to them; `leftOutClause` is staging’s disclosure of the labels that
         // were not factors. Both are required — the heading alone drops the disclosure,
         // and staging’s label alone calls a revision an adoption.
-        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
+        public_label: heading + ordered.map(a => {
+          const figure = describe(a);
+          // AIE 6141593167: the complete basis belongs on the bound card, beside its figure.
+          // Keeping a canonical estimate is retention, not a newly authored estimate.
+          return usersOwn(a) || a.kept ? figure
+            : `${figure}\nOlumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “${a.basis}”`;
+        }).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
       return {
