@@ -4060,8 +4060,9 @@ export function createAgentCapabilities(
       if (args.deadline_date !== undefined && (!isCalendarDate(args.deadline_date) || args.deadline_date <= today)) {
         return { ok: false, mutated: false, refusal: 'unreadable_deadline', detail: 'The proposed deadline must be a valid future ISO calendar date.' };
       }
-      const stated: StatedDeadline | null = args.deadline_date === undefined ? parsed
-        : { words, form: 'date' as const, date: args.deadline_date as string, reference: today };
+      // A resolved source owns both its date and stated count; a model date is only an interpretation fallback.
+      const stated: StatedDeadline | null = parsed ?? (args.deadline_date === undefined ? null
+        : { words, form: 'date' as const, date: args.deadline_date as string, reference: today });
       const authoredBy = userWords && userReference && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
       if (stated === null) {
         const deadlineAsk = chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
@@ -5384,12 +5385,19 @@ export function createAgentCapabilities(
         writes(plainOf(ctx.unverified_user_text ?? '')) || writes(plainOf(g.brief_text ?? '')), ctx.user_text_complete);
       if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
-      const typedAsOfDates = [...typed.matchAll(/(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu)].map(match => match[1]);
-      const asOf = args.reference_date;
+      const asOfPattern = /(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu;
+      const typedAsOfDates = [...typed.matchAll(asOfPattern)].map(match => match[1]);
+      const asOf = typedAsOfDates.find(date => date === args.reference_date);
+      // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
+      const reference = draftReferenceDate({ ...(isCalendarDate(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
+      if (args.reference_date !== undefined && args.reference_date !== asOf) {
+        // Trace only: keep the ignored model argument out of the card, saved tuple and model-context projection.
+        const { log } = await import('../../../utils/telemetry.js');
+        log.info({ event: 'v5.agent.deadline_reference_ignored', request_id: ctx.request_id, reference_date: reference, ignored_reference_date: args.reference_date },
+          'Ignored model deadline reference without verified current-turn user dating');
+      }
       if (asOf !== undefined && !isCalendarDate(asOf)) return { ok: false, mutated: false, refusal: 'reference_invalid',
         detail: 'The reference must be a valid ISO calendar date. Nothing was prepared.' };
-      // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
-      const reference = draftReferenceDate({ ...(typeof asOf === 'string' && typedAsOfDates.includes(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
