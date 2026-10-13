@@ -2071,9 +2071,9 @@ export class SupabaseSessionStore implements SessionStore {
     const columns = 'id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance';
     const read = (select: string) => this.client.from('v5_conversation_turns').select(select)
       .eq('scenario_id', scenarioId).eq('turn_id', turnId).limit(1);
-    let { data, error } = await read(`${columns}, suggested_actions_run_key, run_narration`);
-    // Order-safe: without migrations 20261006230000 / 20261013230000 those two columns are absent; the row is then read
-    // as before T1h, its Run identity unknown, never refused.
+    let { data, error } = await read(`${columns}, run_narration`);
+    // Order-safe: before migration 20261013230000 the column is absent; the row is then read as before T1h, its Run
+    // identity unknown, never refused.
     if (error && errCode(error) === '42703') ({ data, error } = await read(columns));
     // A failed read is an UNKNOWN and is thrown, never folded into "no row":
     // the caller would otherwise re-execute a turn that may already have run.
@@ -2094,9 +2094,6 @@ export class SupabaseSessionStore implements SessionStore {
       pending_actions: (Array.isArray(row.pending_actions) ? row.pending_actions : [])
         .map((pa) => parsePendingAction(pa))
         .filter((pa): pa is NonNullable<typeof pa> => pa !== null && pa.scenario_id === scenarioId),
-      // This exact row's Run, never another row's. Anything but the RPC's 16-hex key reads as unknown.
-      suggested_actions_run_key: typeof row.suggested_actions_run_key === 'string' && /^[0-9a-f]{16}$/.test(row.suggested_actions_run_key)
-        ? row.suggested_actions_run_key : null,
       // The narration this exact answer was sent with; absent or malformed reads as unknown.
       run_narration: answerRunNarrationOf(row.run_narration),
     };

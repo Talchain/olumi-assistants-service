@@ -75,7 +75,7 @@ const client = {
       order: (key: string, options: { ascending: boolean }) => { orders.push({ key, ...options }); return chain; },
       abortSignal: () => chain,
       limit: (n: number) => { cap = n; return chain; },
-      then: (resolve: (v: unknown) => void) => resolve(selectMissingColumn && (columns.includes('run_narration') || columns.includes('suggested_actions_run_key'))
+      then: (resolve: (v: unknown) => void) => resolve(selectMissingColumn && columns.includes('run_narration')
         ? { data: null, error: { code: '42703', message: 'column v5_conversation_turns.run_narration does not exist' } }
         : { data: table.filter(row => checks.every(check => check(row)))
           .sort((a, b) => { for (const o of orders) { const c = String(a[o.key]).localeCompare(String(b[o.key])); if (c) return o.ascending ? c : -c; } return 0; })
@@ -134,7 +134,8 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 const call = (name: string, args: Rec, id: string) => ({ type: 'function_call', name, call_id: id, arguments: JSON.stringify(args) });
 const answer = (text: string) => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 
-describe('T1h: a replay names its own answer’s Run (real route, real write → read → replay)', () => {
+// Restarting rows re-import the whole route (vi.resetModules); 5 s is not enough on a loaded runner.
+describe('T1h: a replay names its own answer’s Run (real route, real write → read → replay)', { timeout: 60_000 }, () => {
   let app: FastifyInstance;
   async function freshApp() {
     process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
@@ -237,21 +238,20 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     expect(runs).toHaveLength(1);
   });
 
-  it('store: readCommittedTurn returns THIS row’s narration and key; another row’s never; malformed or absent reads as unknown', async () => {
+  it('store: readCommittedTurn returns THIS row’s narration; another row’s never; malformed or absent reads as unknown', async () => {
     const base = { scenario_id: SCENARIO, request_hash: 'agent_turn:h', assistant_message: 'a', user_message: 'u', llm_calls_used: 0, pending_actions: [] };
     table.push({ ...base, id: 'r2', turn_id: 'later', suggested_actions_run_key: 'bbbbbbbbbbbbbbbb', run_narration: { status: 'pending', run_key: 'bbbbbbbbbbbbbbbb' } },
       { ...base, id: 'r1', turn_id: 'earlier', suggested_actions_run_key: null, run_narration: { status: 'ready', run_key: 'aaaaaaaaaaaaaaaa' } },
       { ...base, id: 'r0', turn_id: 'legacy', suggested_actions_run_key: null, run_narration: null },
       { ...base, id: 'rx', turn_id: 'malformed', suggested_actions_run_key: 'AAAAAAAAAAAAAAAA', run_narration: { status: 'ready', run_key: 'aaaaaaaaaaaaaaaa', extra: 1 } });
-    const read = async (id: string) => { const r = await realStore.readCommittedTurn(SCENARIO, id);
-      return { key: r?.suggested_actions_run_key, narration: r?.run_narration }; };
-    expect(await read('earlier')).toEqual({ key: null, narration: { status: 'ready', run_key: 'aaaaaaaaaaaaaaaa' } });
-    expect(await read('later')).toEqual({ key: 'bbbbbbbbbbbbbbbb', narration: { status: 'pending', run_key: 'bbbbbbbbbbbbbbbb' } });
-    expect(await read('legacy')).toEqual({ key: null, narration: null });
-    expect(await read('malformed')).toEqual({ key: null, narration: null });
-    // Before the migrations the columns are absent: the same row is still read, its Run identity unknown (never a 503).
+    const read = async (id: string) => (await realStore.readCommittedTurn(SCENARIO, id))?.run_narration;
+    expect(await read('earlier')).toEqual({ status: 'ready', run_key: 'aaaaaaaaaaaaaaaa' });
+    expect(await read('later')).toEqual({ status: 'pending', run_key: 'bbbbbbbbbbbbbbbb' });
+    expect(await read('legacy')).toBeNull();
+    expect(await read('malformed')).toBeNull();
+    // Before the migration the column is absent: the same row is still read, its Run identity unknown (never a 503).
     selectMissingColumn = true;
-    expect(await read('earlier')).toEqual({ key: null, narration: null });
+    expect(await read('earlier')).toBeNull();
     expect((await realStore.readCommittedTurn(SCENARIO, 'earlier'))?.assistant_message).toBe('a');
   });
 

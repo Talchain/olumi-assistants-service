@@ -2479,12 +2479,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && replayText !== RUN_FAILED_TEXT
         && replayText !== 'The analysis did not run. Press Run to try again.';
       // Original bound controls only: never borrow today's key to identify yesterday's answer. After a restart, the
-      // narration (else the offers' key) persisted WITH this exact row names its Run, never the latest row's; a row
-      // without either leaves the Run unknown.
+      // narration persisted WITH this exact row names its Run, never the latest row's; a row without it leaves the Run
+      // unknown.
       const durableNarration = prior.run_narration ?? undefined;
       const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length)
         || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey
-        || durableNarration?.run_key || prior.suggested_actions_run_key || undefined;
+        || durableNarration?.run_key || undefined;
       // Currentness is a separate fact: an answer is re-sent as current only with the narration it was sent with (this
       // process's memory, else its row's). A key alone names the original Run on the historical receipt.
       const replayLoopRunCurrent = replayLoopRun && (rememberedControls !== undefined || durableNarration !== undefined)

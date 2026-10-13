@@ -328,6 +328,12 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(live.narration.status).toBe(path === 'ordinary' ? 'ready' : 'unavailable');
     if (path === 'ordinary') expect(live.assistant_text).toContain('The result is current.');
     const callCount = bodies.length;
+    // T1h: an answer now stores the narration it was sent with, so after a restart its Run is known. The original is
+    // unknown only for a row written before migration 20261013230000; that is the row a cold replay must not relabel.
+    if (identity === 'cold') {
+      expect(rows.find(r => r.turn_id === request.turn_id)?.run_narration, 'precondition: the route stores the narration it sent').toEqual(live.narration);
+      for (const r of rows) delete r.run_narration;
+    }
     const savedRows = structuredClone(rows);
     if (identity === 'moved') {
       STATE.run_state.computed_at = '2026-10-13T02:00:00.000Z';
@@ -368,6 +374,9 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(savedText).toBe(first.json().assistant_text);
     expect(turnToolResult?.ran).toBe(true);
     expect(modelWords.length).toBeGreaterThan(0);
+    // T1h: a row written before migration 20261013230000 carries no narration, so its original Run is unknown.
+    expect(row.run_narration, 'precondition: the route stores the narration it sent').toEqual(first.json().narration);
+    for (const r of rows) delete r.run_narration;
     const savedRows = structuredClone(rows);
     const callCount = bodies.length;
     await app.close(); vi.resetModules(); await freshApp();
