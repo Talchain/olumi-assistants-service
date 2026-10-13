@@ -510,25 +510,23 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     // ⭐ E5 (Paul's manual test, 12 Oct): the start of each person an option adds, quoted; Olumi reads the months (`hiring-times.ts`).
     type: 'function', name: 'propose_hiring_times',
-    description: 'Prepare hiring timings for the options that add people, after the deadline is held. Give each option_id and one entry per start, in order, with its source quote and optional months interpretation. Keep limits and uncertainty in the quote. Bound user figures are labelled theirs; other interpretations are labelled Olumi’s. Never substitute the team’s finish time or deadline. This prepares one card; only its approval writes it.',
+    description: 'Prepare one approval card for hiring starts, after the deadline is held. Use this turn and verified retained sources. Give each option_id and one entry per start in order, keeping its exact source words, bounds, uncertainty and relative timing. A human figure keeps its verified origin; your interpretation remains Olumi\'s. Assistant, chip, document or unknown-origin text is not new typed human authority. Do not substitute team completion, the goal deadline or effects being fully in place for a person\'s start. Show the complete replacement timings and sources; only approval bound to this card writes them.',
     parameters: obj({
       options: { type: 'array', minItems: 1, maxItems: 6, items: obj({
         option_id: { type: 'string' },
-        starts: { type: 'array', minItems: 1, maxItems: 2, items: obj({ quote: { type: 'string' }, months: { type: 'number', minimum: 0, maximum: 60, description: 'Optional time in months; quote binding determines authorship, not permission to propose.' } }, ['quote']) },
+        starts: { type: 'array', minItems: 1, maxItems: 2, items: obj({ quote: { type: 'string' }, months: { type: 'number', minimum: 0, maximum: 60, description: 'Optional proposed interpretation of this start in months. Keep the quote\'s bounds, uncertainty and relative order; do not turn a bound into an exact human figure. An inferred number remains Olumi\'s interpretation.' } }, ['quote']) },
       }, ['option_id', 'starts']) },
     }, ['options']),
   },
   {
     type: 'function',
     name: 'propose_goal_deadline',
-    description: 'Prepare a deadline for approval. Supply the deadline words and optionally your ISO calendar-date interpretation. '
-      + 'Preserve the actual known reference; never invent one. Never invent a unit, reference or level. Figures bound to the user’s words are labelled theirs, otherwise Olumi’s interpretation. '
-      + 'The returned card is the user’s check; nothing is saved until its approval.',
+    description: 'Prepare one deadline card for approval. Keep the exact source deadline phrase and its conditions, using this turn or verified retained source. Interpret it from the actual known reference and any explicitly stated start; these have different roles. You may supply the proposed ISO deadline date, showing how it follows from that source. Never invent or silently replace a reference, unit or level, or use recruitment/team completion time as the goal deadline. Put the full relevant source and uncertainty in rationale. Distinguish human wording from your interpretation; approval selects the displayed change without rewriting its original source. Nothing is saved before approval bound to this card.',
     parameters: obj({
-      reference_date: { type: 'string', description: 'Optional known ISO reference date. Omit when unknown; never invent a reference.' },
-      deadline_date: { type: 'string', description: 'Optional proposed ISO deadline date, shown for confirmation and labelled by its source.' },
-      deadline_words: { type: 'string', maxLength: 80, description: 'Deadline phrase being interpreted.' },
-      rationale: { type: 'string', description: 'Source and reasoning for this interpretation.' },
+      reference_date: { type: 'string', description: 'Optional actual known or verified ISO reference date for this interpretation. Otherwise omit it and use the recorded reference. Do not substitute a duration\'s start or an invented date; retain an explicitly stated start in deadline_words and rationale.' },
+      deadline_date: { type: 'string', description: 'Optional proposed ISO calendar deadline date derived from the actual source and known reference, shown with that basis for approval. An interpretation is not a newly stated human date.' },
+      deadline_words: { type: 'string', maxLength: 80, description: 'Exact source deadline phrase being interpreted, including its timing qualifiers, within this field\'s limit. Retain the full surrounding source, conditions and authorship in rationale. A new Olumi proposal must be identified as such, not quoted as the user\'s words.' },
+      rationale: { type: 'string', description: 'Full relevant source wording and conditions, its verified or unknown origin, the known reference and any stated start, and your reasoning for the proposed date. Distinguish source statements from your interpretation; do not drop negation, uncertainty or limits.' },
     }, ['deadline_words', 'rationale']),
   },
   {
@@ -590,15 +588,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'propose_new_factor',
     description:
-      'Propose 1–3 NEW factors with finite today figures in known units. Figures bound to the user’s words are theirs; '
-      + 'other figures are labelled Olumi’s estimates. Never invent a unit. Prepare one card showing every figure and source; '
-      + 'authorise_change only after approval. For an existing factor use propose_assumptions.',
+      'Propose 1–3 NEW factors with finite current figures in known units, using this turn and verified retained quantity/source records. Preserve the original central figure, any bounds and qualifications, and their separate origins; do not invent a midpoint or turn a range into a probability law. A verified human figure remains human when reused later; your estimates remain Olumi\'s, and unknown origin stays unknown. Never invent a unit or use a coordinate cap or goal target as evidence for the figure. Show every value and source on one complete card; authorise_change only after approval bound to it. For an existing factor use propose_assumptions.',
     parameters: obj({
       factors: {
         type: 'array', minItems: 1, maxItems: 3,
         items: obj({
           label: { type: 'string' },
-          unit: { type: 'string', description: 'The known quantity’s unit, e.g. "GBP/year per engineer". Never invent a unit.' },
+          unit: { type: 'string', description: 'The actual known quantity\'s unit, from the model or verified source, for example GBP/year per engineer. Preserve its physical meaning; never invent a unit or silently change it.' },
           today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' },
             range_low: { type: 'number', description: 'Only when the user also gave a range for this figure, both ends in one sentence of theirs ("between 20% and 30%"): its low end, in the same unit as value. value stays the one figure they chose; never a midpoint.' },
             range_high: { type: 'number', description: 'The high end of that same range. Send it with range_low.' } }, ['value']),

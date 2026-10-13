@@ -367,16 +367,26 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(approveChipOf(t1), 'the approve chip is offered').toBeDefined();
   }, 120_000);
 
-  it('W14 earlier figures are proposed as Olumi’s with no pre-approval graph write', async () => {
+  it('W14 earlier human figures keep their source through approval and reload', async () => {
     graphOf.set(SCENARIO, seedGraph());
     await turn({ message: FIG_MSG });
     const before = bytes();
     const t2 = await propose(factorArgs(), 'Add those two to the model.');
     expect(callOf(t2)).toMatchObject({ ok: true, mutated: false });
     const held = await heldOnLatestRow();
-    expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis: string }[]).every(m => m.basis === 'olumi_estimate')).toBe(true);
+    expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis: string }[]).every(m => m.basis === 'confirmed_by_approval')).toBe(true);
     expect(approveChipOf(t2)).toBeDefined();
     expect(bytes()).toBe(before);
+    expect(held[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([
+      { quote: FIG_MSG, observed_state: { source: USER_SOURCE, raw_value: 120000 } },
+      { quote: FIG_MSG, observed_state: { source: USER_SOURCE, raw_value: 65000 } },
+    ]);
+    const approve = approveChipOf(t2)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(graphNow()))) as unknown as G;
+    expect(reloaded.nodes.filter(n => n.label.endsWith('engineer salary')).map(n => n.observed_state))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ source: USER_SOURCE, raw_value: 120000 }), expect.objectContaining({ source: USER_SOURCE, raw_value: 65000 })]));
   }, 120_000);
 
   // ⛔ DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it ABOUT it. The
@@ -776,6 +786,40 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     script = [() => say('That is a useful capacity input.')];
     await turn({ message: RANGE_MSG });
   };
+
+  it('A2 retained quantity record keeps the human figure and range when later tool args omit the range', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    await propose(rangedArgs(), HIRING_MSG);
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const again = await propose(rangedArgs({ range_low: undefined, range_high: undefined }), 'Add that factor.', o => { out = o; });
+    expect(callOf(again)).toMatchObject({ ok: true, mutated: false });
+    expect(out.factors).toMatchObject([{ current_value: { value: 25, stated_by: 'user', range: { low: 20, high: 30, quote: RANGE_MSG } } }]);
+    expect(bytes()).toBe(before);
+    const approve = approveChipOf(again)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const reloaded = GraphV3.parse(JSON.parse(bytes())) as unknown as G;
+    expect(reloaded.nodes.find(n => n.label === 'Non-development time')?.observed_state).toMatchObject({ raw_value: 25, source: USER_SOURCE,
+      range: { low: 20, high: 30, meaning: 'min_max', source: USER_SOURCE, source_quote: RANGE_MSG } });
+  }, 120_000);
+
+  it('A2 a retained quantity with unknown origin is never relabelled as an Olumi estimate', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await propose(factorArgs(), 'Prepare salary estimates.');
+    const row = latestRow(SCENARIO)!;
+    for (const pending of row.pending_actions as { action: { inline_patch: Record<string, unknown> } }[]) {
+      const members = pending.action.inline_patch[GM_HELD_USER_TODAY] as { observed_state: Record<string, unknown> }[] | undefined;
+      for (const member of members ?? []) { delete member.observed_state.source; delete member.observed_state.extractionType; }
+    }
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const again = await propose(factorArgs(), 'Add those figures.', o => { out = o; });
+    expect(callOf(again)).toMatchObject({ ok: false, mutated: false, refusal: 'today_not_set' });
+    expect(JSON.stringify(out.today_not_set)).toContain('origin stays unknown');
+    expect(bytes()).toBe(before);
+  }, 120_000);
 
   it('(r) RED (L6, Paul\'s words): "between 20% and 30%" then "Let\'s go with 25%." → committed: 25 % as his figure AND his 20–30 % range beside it, as a range, with his sentence', async () => {
     graphOf.set(SCENARIO, hiringGraph());

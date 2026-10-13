@@ -4092,6 +4092,8 @@ export function createAgentCapabilities(
       const fromToday = reference === undefined ? sayDeadlineFromToday(stated)
         : sayDeadlineFromToday(stated).replace('from today', `from ${sayDate(reference)}`);
       const question = `Is your deadline ${date} (${fromToday})?`;
+      const rationale = typeof args.rationale === 'string' ? args.rationale : '';
+      const sourceDetail = rationale.trim() === '' ? '' : ` Basis supplied for this interpretation: ${rationale}`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -4103,7 +4105,7 @@ export function createAgentCapabilities(
             ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
         provenance: { authored_by: authoredBy, basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${question}${replaces}${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}`,
+        public_label: `${question}${replaces}${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
       });
       proposals.put(proposal);
       return {
@@ -5375,11 +5377,11 @@ export function createAgentCapabilities(
       if (asOf !== undefined && !isCalendarDate(asOf)) return { ok: false, mutated: false, refusal: 'reference_invalid',
         detail: 'The reference must be a valid ISO calendar date. Nothing was prepared.' };
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
-      const reference = draftReferenceDate({ ...(typeof asOf === 'string' ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
+      const reference = draftReferenceDate({ ...(typeof asOf === 'string' && typedAsOfDates.includes(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
-        writes(typed) || fromEarlier, asOf === undefined || typedAsOfDates.includes(asOf));
+        writes(typed) || fromEarlier, true);
     },
 
     /**
@@ -9619,14 +9621,23 @@ export function createAgentCapabilities(
         label: typeof x.label === 'string' ? x.label.trim() : '',
         unit: typeof x.unit === 'string' ? x.unit.trim() : '',
       }));
-      // ⛔ HUMAN CONTROL IS THE PROVENANCE GATE (DL ruling on #2235, 14:05Z 28 Sep). When this message writes two figures or
-      // more, or the change adds two factors or more, WHOSE each figure is cannot be read from word proximity: three review
-      // rounds moved the failure from one common phrasing to the next. So nothing is credited by the words alone: each
-      // figure must be WRITTEN in this message (in its kind of unit), and Olumi's pairing is shown on the approval card with
-      // the user's own sentence (`quoteOfFigure`) — their approval makes it theirs (`confirmed_by_approval`, on the hold).
-      // One figure for one new factor: the strict match decides, as before (`written_about`).
+      // The route's retained typed-word records exclude chips, assistant text and source-unknown restored rows.
+      // Reusing a verified earlier figure does not change its author. Multiple figures still need pairing approval.
       const turnText = ctx.user_turn_text ?? '';
+      const sourceText = ctx.user_text ?? turnText;
       const confirmPairing = inCall.length >= 2 || figuresWrittenIn(turnText) >= 2;
+      // Existing held quantity records retain their independently verified figure/range source across turns.
+      const retained = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).flatMap(hold => {
+        const patch = (hold.action as { inline_patch?: Record<string, unknown> }).inline_patch;
+        const raw = patch?.[GM_HELD_USER_TODAY_KEY];
+        const verified = readUserTodayMember(raw);
+        return (Array.isArray(raw) ? raw : []).flatMap(entry => {
+          const row = recordOf(entry), os = recordOf(row.observed_state);
+          const op = heldOpsOf(hold).find(o => o.op === 'add_node' && o.path === row.factor_id);
+          const name = recordOf(op?.value).label;
+          return typeof name === 'string' ? [{ label: name, os, member: verified?.find(m => m.factor_id === row.factor_id) }] : [];
+        });
+      });
       for (const raw of requested) {
         const f = recordOf(raw);
         const label = typeof f.label === 'string' ? f.label.trim() : '';
@@ -9686,13 +9697,22 @@ export function createAgentCapabilities(
             reason: `${shown} is in a scaled unit; give the figure in whole units (120000 for £120k) in the user's own unit.` });
           continue;
         }
-        // The lane's SCOPED matcher, over THIS message's words (Canonical, on the door's review F4; DL CHANGES_REQUIRED on
-        // #2235): the figure must be written ABOUT this factor. Over the whole conversation, or anywhere in the message, a
-        // figure typed about anything else — the £400k LIMIT, the other factor's figure (a swap) — could be committed as
-        // this new factor's value, as the user's. A factor the user is adding now is one they state now, beside its name.
-        const quote = quoteOfFigure(t.value, todayUnit, turnText);
-        const ownsIt = quote !== null
-          && (confirmPairing || figureTheUserWroteFor(t.value, todayUnit, turnText, newFactorScopeIn(g, label, todayUnit, inCall)));
+        // Read each verified message separately: a figure in a different message cannot lend its subject to this one.
+        const source = [turnText, ...sourceText.split('\n').reverse()].find(text =>
+          quoteOfFigure(t.value as number, todayUnit, text) !== null
+          && (confirmPairing || figureTheUserWroteFor(t.value as number, todayUnit, text, newFactorScopeIn(g, label, todayUnit, inCall))));
+        const prior = retained.find(r => norm(r.label) === norm(label)
+          && (r.os.raw_value ?? r.os.value) === t.value && unitComparisonKey(String(r.os.unit ?? '')) === unitComparisonKey(todayUnit));
+        const priorHuman = prior?.member !== undefined && prior.member.basis !== 'olumi_estimate'
+          && provenanceOf({ value: prior.os }).origin === 'human';
+        const quote = source === undefined ? (priorHuman ? prior!.member!.quote ?? null : null) : quoteOfFigure(t.value, todayUnit, source);
+        const ownsIt = source !== undefined || priorHuman;
+        if (!ownsIt && ((prior !== undefined && prior.member === undefined)
+          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null)) {
+          todayNotSet.push({ factor: label, value: t.value,
+            reason: `The retained source of ${shown} for "${label}" is not verified. Its origin stays unknown; nothing was prepared. Ask for its source rather than relabelling it as Olumi’s estimate.` });
+          continue;
+        }
         // THE ONE FRAMING RULE (ruling point 3; `proposeNewOption` statedToday): Olumi's default range over the largest
         // figure this change carries. The frame stays Olumi's; the figure keeps its actual source.
         const v = t.value;
@@ -9703,7 +9723,9 @@ export function createAgentCapabilities(
         // RANGE beside the figure they chose (`isStatedLevelRange`, add-factor-transaction.ts), only when BOTH ends are in ONE
         // sentence the user wrote in this conversation and the chosen figure lies inside. Never a midpoint: the figure is still
         // attributed independently of the range; an Olumi point is never a user-stated figure.
-        let range: { low: number; high: number; quote: string } | undefined;
+        const heldRange = prior?.member?.observed_state.range;
+        let range: { low: number; high: number; quote: string } | undefined = isStatedLevelRange(heldRange, framed)
+          ? { low: (heldRange as { low: number }).low, high: (heldRange as { high: number }).high, quote: (heldRange as { source_quote: string }).source_quote } : undefined;
         if (t.range_low !== undefined || t.range_high !== undefined) {
           const lo = t.range_low, hi = t.range_high;
           const sentence = typeof lo === 'number' && typeof hi === 'number' ? sentenceStatingBoth(lo, hi, todayUnit, ctx.user_text ?? turnText) : null;
@@ -9720,7 +9742,7 @@ export function createAgentCapabilities(
         const observed = range === undefined ? framed
           : { ...framed, range: { low: range.low, high: range.high, meaning: 'min_max', source: USER_TODAY_SOURCE, source_quote: range.quote } };
         planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed,
-          basis: ownsIt ? (confirmPairing ? 'confirmed_by_approval' : 'written_about') : 'olumi_estimate', quote: ownsIt ? quote! : '', ...(range !== undefined ? { range } : {}) });
+          basis: ownsIt ? (source === undefined ? prior!.member!.basis ?? 'written_about' : confirmPairing ? 'confirmed_by_approval' : 'written_about') : 'olumi_estimate', quote: ownsIt ? quote ?? '' : '', ...(range !== undefined ? { range } : {}) });
       }
       if (ambiguous.length > 0) {
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };

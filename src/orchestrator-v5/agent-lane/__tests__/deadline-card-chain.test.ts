@@ -106,6 +106,15 @@ function card(body: Rec) {
   return { call: calls[0], yes };
 }
 describe('deterministic deadline card on the first Agent turn', () => {
+  it('A2 keeps full source, qualifiers and interpretation in the existing rationale on the approval card', async () => {
+    const w = world();
+    const source = 'We hope to launch within ten months, provided the evidence supports it; this is not a firm commitment and hiring completion is a separate milestone.';
+    const rationale = `${source} The source is the current human message; Olumi interprets ten months from the known draft reference.`;
+    const out = await w.caps.proposeGoalDeadline!(w.ctx(source), { deadline_words: 'ten months', rationale }) as Rec;
+    expect(out).toMatchObject({ ok: true, mutated: false });
+    expect(out.public_label).toContain(rationale);
+    expect(out.deadline.words).toBe('ten months');
+  });
   it('R1 Run-chip offers exactly one bound card using draft R; no graph change', async () => {
     const w = world(), before = w.read(), turn = await route(w), body = await turn(), { call, yes } = card(body);
     expect(body.assistant_text).toBe(yes.detail); expect(w.read()).toEqual(before);
