@@ -155,6 +155,26 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     expect(replay.assistant_text).not.toMatch(/\brose\b/);
   });
 
+  it.each([
+    "AI Reporting Sprint's chance rose to 57%.",
+    'AI Reporting Sprint: 20% of simulations.',
+  ])('B2s: every Explain sentence removed uses unavailable text on wire, storage and replay: %s', async removed => {
+    modelText = removed;
+    const { interpretationUnavailableText } = await import('../../../routes/agent-v1-turn.js');
+    const unavailable = interpretationUnavailableText({ ok: true, ran: true });
+    const first = (await runTurn(randomUUID())).json() as Body;
+    const id = randomUUID();
+    const response = await explainTurn(id, first);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().assistant_text).toBe(unavailable);
+    expect(unavailable.trim().length).toBeGreaterThan(0);
+    expect(response.json().narration.status).toBe('unavailable');
+    expect(rows.find(row => row.turn_id === id)?.assistantMessage).toBe(unavailable);
+    const replay = await explainTurn(id, first);
+    expect(replay.json().assistant_text).toBe(unavailable);
+    expect(interpretCalls).toBe(1);
+  });
+
   it('CONTROL: the complete AI explanation ships unchanged, with no host paragraph', async () => {
     modelText = WHY;
     const first = (await runTurn(randomUUID())).json() as Body;

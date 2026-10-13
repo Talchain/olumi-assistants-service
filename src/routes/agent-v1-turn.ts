@@ -3410,9 +3410,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
         if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
         else if (answer.trim().length > 0) {
-          explanationReady = true;
+          const checked = rerunPlan === null ? answer : withoutUnlicensedRerunMovement(answer, rerunPlan);
+          explanationReady = checked.trim().length > 0;
+          const said = explanationReady ? checked : interpretationUnavailableText({ ok: true, ran: true });
           narratorWords = answer;
-          const said = rerunPlan === null ? answer : withoutUnlicensedRerunMovement(answer, rerunPlan);
           interpreted = typed !== null || said !== answer
             // A typed or fact-checked answer gets one id-less message with exactly the sent words.
             ? { answer: said, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }] }
@@ -4954,6 +4955,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       userAuthoredTexts: userTextsForEgress(
         [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
     }) as OlumiResponse & Record<string, unknown>;
+    // Explain must remain nonempty even when the final numerical/permission gates remove every sentence.
+    if (fastPath === 'explain' && String(wireBody.assistant_text ?? '').trim() === '') {
+      narrationStatus = 'unavailable';
+      wireBody = { ...wireBody, assistant_text: interpretationUnavailableText({ ok: true, ran: true }),
+        ...(narrationKey !== undefined ? { narration: { status: 'unavailable', run_key: narrationKey } } : {}) };
+    }
     // AIE quality evidence: raw final model answer, guard input, numerical edit and visible
     // answer are distinct. No filtered answer is presented as unedited model quality.
     log.info({ event: 'agent_lane.reply_evidence', request_id: String(req.id), turn_id: turnId,

@@ -9,6 +9,49 @@ type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
 const plain = (s: string): string => foldQuotes(s.replace(/â€˜|â€™|â€œ|â€\u009d/g, "'")).replace(/['"`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
 
+/** DL rule v2: bare likelihood belongs to the named option; an explicit other subject does not.
+ * Grammar only: of + noun phrase, (that) + clause, likely to + verb phrase.
+ * Callers retain the existing option identity, display precision and attribution checks.
+ */
+export function isGoalChanceStatement(sentence: string, optionLabel: string, goalLabel: string): boolean {
+  const goalWords = new Set(['goal', 'goals', 'target', 'targets', 'objective', 'aim']);
+  const likelihoodWords = new Set(['chance', 'chances', 'likely', 'likelihood', 'probability', 'probable', 'odds']);
+  const text = plain(sentence);
+  const hasLabel = (part: string, label: string): boolean => {
+    const needle = plain(label).trim();
+    if (!needle) return false;
+    for (let at = part.indexOf(needle); at >= 0; at = part.indexOf(needle, at + needle.length)) {
+      if (!/[\p{L}\p{N}]/u.test(part[at - 1] ?? '') && !/[\p{L}\p{N}]/u.test(part[at + needle.length] ?? '')) return true;
+    }
+    return false;
+  };
+  if (!hasLabel(text, optionLabel)) return false;
+  const hasGoal = (part: string): boolean => hasLabel(part, goalLabel)
+    || (part.match(/\b[a-z]+\b/g) ?? []).some(word => goalWords.has(word));
+  const terms = [...text.matchAll(/\b[a-z]+\b|%\s+of\s+(?:(?:the|model)\s+)?(?:time|cases|runs|scenarios|simulations|samples|draws)\b/g)]
+    .filter(term => likelihoodWords.has(term[0]) || term[0].startsWith('%'));
+  return terms.some(term => {
+    const after = text.slice(term.index! + term[0].length).trimStart();
+    let attached: string | undefined;
+    if (term[0].startsWith('%')) {
+      // A frequency's subject precedes its figure, within the same clause.
+      const before = text.slice(0, term.index).split(/[;,:]/).at(-1) ?? '';
+      const predicate = before.replace(plain(optionLabel), '').replace(/[-+]?\d+(?:\.\d+)?\s*$/, '').trim();
+      if (predicate !== '') attached = before;
+    } else if (/^(?:of|that)\s+/.test(after) || (term[0] === 'likely' && /^to\s+/.test(after))) {
+      const subject = after.replace(/^(?:of|that|to)\s+/, '');
+      // 'chance of 24%' is a bare value, not an explicit other subject.
+      if (!/^(?:(?:about|roughly|around|approximately)\s+)?[-+<>=≤≥]?\s*\d/.test(subject)) attached = subject;
+    } else if (/^(?:a|an|the|this|that|these|those|my|your|our|their|its|it|we|you|they|he|she)\s+/.test(after)
+      || /^(?!is\b|was\b|are\b|were\b|for\b|in\b|at\b|on\b|as\b|with\b)[\p{L}]+\s+(?:[\p{L}]+s|is|was|will|would|can|could|may|might)\b/u.test(after)) {
+      attached = after;
+    }
+    // A following independent clause cannot turn supplier failure into a goal subject.
+    const subject = attached?.split(/[;,.!?]|\b(?:but|which)\b/)[0];
+    return subject === undefined || hasGoal(subject);
+  });
+}
+
 /**
  * The shared live, stored-answer replay and conversation-reload boundary. A named licensed option and its goal
  * bind goal-attainment percentages to the licence display or a verified input in that sentence. Goal-only narration
@@ -43,11 +86,6 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
     positiveCount(line.olumi_estimate_link_count)
     || positiveCount(licence.olumi_estimate_value_count)
     || positiveCount(rec(licence.olumi_estimate_settings_by_option)?.[line.option_id]);
-  // Reuse the old producer-owned goal predicates, including dated/compound targets.
-  const producerGoalPredicates = lines.flatMap(l => {
-    const match = plain(l.chance).match(/\bchance of (.+?), in this model\b/);
-    return match === null ? [] : [match[1]!];
-  });
   // Also resolve explicitly named unlicensed options: they cannot fall through to another option's goal-only tuple.
   const labelsById = new Map((Array.isArray(nodes) ? nodes : []).map(rec).flatMap(n =>
     n?.kind === 'option' && typeof n.id === 'string' && typeof n.label === 'string' ? [[n.id, n.label] as const] : []));
@@ -252,19 +290,13 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
           || /^(?:has|gives) (?:a )?chance$/.test(shorthand)
           || /^is likely$/.test(shorthand)
           || /^(?:the )?recorded (?:chance|figure|probability) for (?:is|was)$/.test(shorthand));
-        const goalSubject = [...(typeof goalLabel === 'string' ? [goalLabel] : []),
-          ...goals.filter(g => goalId === undefined || g?.id === goalId).flatMap(g => typeof g?.label === 'string' ? [g.label] : [])]
-          .reduce((s, label) => s.split(plain(label)).join('__scored_goal__'), bindingSubject);
-        const goalAttainment = /\b(?:meet(?:s|ing)?|reach(?:es|ing)?|achiev(?:e|es|ing)|hit(?:s|ting)?) (?:its |the |your |our |this )?(?:goal|target|__scored_goal__)\b/.test(goalSubject)
-          || /\b(?:goal|target|__scored_goal__) (?:is |was )?(?:met|reached|achieved|hit)\b/.test(goalSubject)
-          || /\b(?:chance|probability|likelihood) (?:of |to )?__scored_goal__\b/.test(goalSubject)
-          || /\b(?:chance|probability|likelihood) (?:of |to )?(?:meet(?:ing)?|reach(?:ing)?|achiev(?:e|ing)|hit(?:ting)?) [£$€]?\d/.test(goalSubject)
-          || /\bchance(?: in this model)?(?:[.!?]|$)/.test(goalSubject)
-          || producerGoalPredicates.some(predicate => ['chance', 'probability', 'likelihood']
-            .some(word => names(bindingSubject, `${word} of ${predicate}`)))
-          || (typeof licence.chance_words === 'string' && names(bindingSubject, licence.chance_words));
-        // B2r narrow trigger: the old shorthand still binds, but unrelated option percentages do not.
-        if (!optionShorthand && !goalAttainment) continue;
+        const goalAttainment = namedOptions.some(o => isGoalChanceStatement(bindingSubject, o.label,
+          typeof goalLabel === 'string' ? goalLabel : '')
+          || isGoalChanceStatement(bindingSubject, o.id, typeof goalLabel === 'string' ? goalLabel : ''));
+        // Legacy compact points and unbound goal narration retain their identity/precision contract.
+        const unboundGoalChance = namedOptions.length === 0 && namesGoal
+          && /\b(?:chance|chances|likely|likelihood|probability|probable|odds)\b|% of (?:the |model )?(?:time|cases|runs|scenarios|simulations|samples|draws)\b/.test(bindingSubject);
+        if (!optionShorthand && !goalAttainment && !unboundGoalChance) continue;
         if (namedOptions.length === 0 && !namesGoal) continue;
         if (optionShorthand && goalIds.size > 1 && !/^is likely$/.test(shorthand)) continue;
         if (namedOptions.length === 0 && goalId === undefined && goalIds.size === 0
@@ -284,11 +316,17 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
             const tail = plain(unit).replace(/^(?:%|percent|per cent)/, '').trim();
             const before = subject.slice(0, p.index);
             const after = figures.slice(p.index! + p[0].length);
-            const labelAtValue = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escape(plain(label))}\\s*(?:(?:is|of|at|was|equals|being|up)\\s*|[:=]\\s*)$`, 'u');
+            const labelAtValue = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escape(plain(label))}\\s*(?:(?:is|of|at(?: or)?|was|equals|being|up)\\s*|[:=]\\s*)$`, 'u');
             return labelAtValue.test(before) && (tail === '' || after.trimStart().startsWith(tail));
           };
-          if (namesGoal && percentageUnit(target?.unit) && target?.value === value
-            && ['target', ...(typeof goalLabel === 'string' ? [goalLabel] : [])].some(label => inputOccurrence(label, target.unit as string))) return true;
+          if (namesGoal && percentageUnit(target?.unit) && target?.value === value) {
+            const labels = ['target', ...(typeof goalLabel === 'string' ? [goalLabel] : [])];
+            const after = subject.slice(p.index! + p[0].length).trimStart();
+            // The typed target can also be a prenominal value: '10% productivity target'.
+            const targetAfterValue = typeof goalLabel === 'string'
+              && new RegExp(`^${escape(plain(goalLabel))}\\s+target\\b`).test(after);
+            if (targetAfterValue || labels.some(label => inputOccurrence(label, target.unit as string))) return true;
+          }
           // Only typed raw values with an explicit percentage unit can exempt a model input.
           // Internal normalized values and analysis outputs (win shares, sensitivities) cannot.
           return (Array.isArray(nodes) ? nodes : []).some(raw => {

@@ -175,6 +175,27 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(bodies).toHaveLength(count);
   });
 
+  it.each([
+    'Hire a tech lead: target chance 12%.',
+    'Hire a tech lead has a goal chance of 12%.',
+    'Hire a tech lead is 12% likely to get you to your goal.',
+  ])('B2s F3: %s never ships beside licensed 24%, including storage and replay', async sentence => {
+    extraModelWords = ` ${sentence}`;
+    const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
+    const first = await press(request);
+    expect(first.statusCode).toBe(200);
+    expect(licensedRecord!.pct_by_option.hire_a_tech_lead).toBe(24);
+    const text = first.json().assistant_text;
+    expect(text).not.toContain('12%');
+    expect(text).toContain('24%');
+    expect(rows.find(row => row.turn_id === request.turn_id)?.assistant_message).toBe(text);
+    const count = bodies.length;
+    const replay = await press(request);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(replay.json().assistant_text).toBe(text);
+    expect(bodies).toHaveLength(count);
+  });
+
   it('N1: client chip/body timing cannot override the agent reading', async () => {
     timing = 'later_or_partial';
     const r = await press({ effects_timing: 'in_place_by_period', timing: 'in_place_by_period', parameters: { effects_timing: 'in_place_by_period' },

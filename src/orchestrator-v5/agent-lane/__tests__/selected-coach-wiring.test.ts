@@ -2,7 +2,7 @@ import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /** Selected coaching reaches the real Agent route on every conversation path. No provider is called. */
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
@@ -121,7 +121,6 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body?: unknown }) => {
       const body = asSent(JSON.parse(String(init.body))) as Sent;
       sent.push(body);
-      if (process.env.B2R_SELECTED_CAPTURE) writeFileSync(process.env.B2R_SELECTED_CAPTURE, JSON.stringify(sent));
       const runCall = runPressToolResponse(body as unknown as Record<string, unknown>);
       if (runCall) return runCall;
       registeredAtCall.push(registered);
