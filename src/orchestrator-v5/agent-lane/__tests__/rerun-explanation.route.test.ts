@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * M2 RERUN-EXPLANATION through the LIVE route (CODEX CEE BUDDY preflight 5939219187: "rejected words must disappear from
  * wire/history/replay"). Request 2 of a result-first Run, with the selected Run's `current_read.run_delta` carrying the
@@ -77,7 +78,13 @@ type Body = { assistant_text: string; suggested_actions: { id: string }[]; _agen
 describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches the wire, the stored rows or a replay', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
+      if (body.tool_choice !== 'none') return new Response(JSON.stringify({ output: [
+        { type: 'message', content: [{ type: 'output_text', text: 'The model result is available.' }] },
+      ] }), { status: 200 });
       modelCalls += 1;
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: modelText }] }] }), { status: 200 });
     }));

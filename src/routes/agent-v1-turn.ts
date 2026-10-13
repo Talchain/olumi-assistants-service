@@ -1317,6 +1317,10 @@ export function typedRunOf(body: Record<string, unknown>): boolean {
   if (typeof chip?.id === 'string' && chip.id.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) return false;
   // ⭐ S-B (Codex r1 P1-2 on #2751): an action press is dispatched by its id whatever else the chip carries: never a Run.
   if (actionPressOf(chip, body['message']) !== null) return false;
+  if (typedApprovalOf(body) !== undefined || isRunExplanationChip(chip?.id)
+    || (typeof chip?.id === 'string' && (METHOD_PRESS_IDS.has(chip.id)
+      || isMethodPress(chip.id) || isWidenAddPressId(chip.id) || isDrawnLinkPress(chip.id)
+      || chip.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id))) return false;
   // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
   return (body['kind'] === undefined || body['kind'] === 'message') && (chip?.action_type === 'run_analysis' || chip?.id === RUN_OFFER_CHIP.id);
 }
@@ -1333,7 +1337,11 @@ export const CHIP_TURN_WITHHELD_TOOLS: readonly string[] = ['authorise_change', 
 export function withheldToolsOf(body: Record<string, unknown>): readonly string[] {
   const chip = body['chip'];
   if (chip === null || typeof chip !== 'object') return [];
-  return typedApprovalOf(body) === undefined && !typedRunOf(body) ? CHIP_TURN_WITHHELD_TOOLS : [];
+  if (typedApprovalOf(body) !== undefined) return ['run_analysis'];
+  // A Run permits calculation and reading only, never a proposal, construction or approval.
+  if (typedRunOf(body)) return toolsFor('full').map((t) => t.name)
+    .filter((name) => !['get_canonical_state', 'run_analysis', 'give_provisional_view'].includes(name));
+  return CHIP_TURN_WITHHELD_TOOLS;
 }
 
 /**
@@ -2452,8 +2460,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           replayText = RUN_RESULT_UNVERIFIED_TEXT;
         }
       }
-      const resultFirstReplay = replayNarration !== undefined;
       const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
+      // A loop reply keeps its words. Attach result/guided carriers only while its own recorded Run is current.
+      const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length);
+      const replayLoopRunCurrent = approvedProposal === undefined && typedRunOf(body)
+        && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;
+      const resultFirstReplay = replayNarration !== undefined || replayLoopRunCurrent;
       // The durable carrier: this exact row's persisted Run offer, still within its lifetime.
       const durableRun = (prior.pending_actions ?? []).some((pa) =>
         pa.chip_id === RUN_OFFER_CHIP.id && pa.action.kind === 'run_analysis' && !isPendingActionExpired(pa, Date.now()));
@@ -2489,13 +2501,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         });
       const replayCard = replayRecords[0];
       const replayActions = firstOfEachId([...stillValid, ...boundControl]);
-      const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready'
+      const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready' || replayLoopRunCurrent
         ? replayScopedDraftForRun : undefined;
       const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
         await guidedSizingHistory(historyReader, scenarioId, turnId));
       replayActions.push(...replayGuidedActions);
       const replayGuided = bindGuidedSizing(replayGuidedDraft, replayGuidedActions, {
-        graph_hash: state.graphHash ?? '', run_key: replayNarration?.run_key ?? '',
+        graph_hash: state.graphHash ?? '', run_key: replayNarration?.run_key ?? (replayLoopRunCurrent ? replayLoopRunKey : '') ?? '',
       });
       const methodTerminalReplay = approvedProposal === undefined && (whatChangesReplay || isMethodPress(explanationId)
         || widenTargetOf(explanationId, message) !== null || isWidenAddPressId(explanationId) || pressedChipIsStructural
@@ -3007,6 +3019,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.
     const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    // The existing K2-bound press authorises one calculation on this turn, not model writes.
+    const runPress = approvedProposal === undefined && typedRunOf(body);
+    let runPressConsumed = false;
+    const loopCapabilities = !runPress ? capabilities : {
+      ...capabilities,
+      runAnalysis: async (ctx: AgentToolContext, args: Parameters<typeof capabilities.runAnalysis>[1]) => {
+        if (runPressConsumed) return { ok: false, mutated: false, ran: false, refusal: 'run_press_consumed',
+          detail: 'This Run press has already been used. No second analysis ran.' };
+        runPressConsumed = true;
+        // N1: only this agent call supplies timing. Never merge request or chip parameters here.
+        return capabilities.runAnalysis(ctx, { reason: args.reason, effects_timing: args.effects_timing });
+      },
+    };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
     // Publishing typed words to in-memory session history is not a durable save, but "Nothing was saved" can't cover it.
     if (typedNow !== null) recordUnsavableEffect();
@@ -3260,6 +3285,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const currentRead = selectedRead.status === 200
         ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
       let matches = message === RUN_EXPLANATION_MESSAGE && !typedRunOf(body)
+        && (body['chip'] as { action_type?: unknown } | undefined)?.action_type !== 'run_analysis'
         && runExplanationMatches(explanationId, scenarioId, st);
       const priorAndRun = [
         ...(history ?? []),
@@ -3383,31 +3409,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
         tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
         timing: { total_ms: ms, provider_ms: providerMs, tool_ms: 0, overhead_ms: Math.max(0, ms - providerMs), tool_provider_ms: 0, provider_calls: runInterpreted ? 1 : 0, tool_calls: 0, hops: 0 },
-      };
-    }
-    if (result === undefined && approvedProposal === undefined && typedRunOf(body)) {
-      const fastStartedAt = Date.now();
-      const ran = await dispatchTool('run_analysis', JSON.stringify({ reason: 'the user pressed Run' }), toolCtx, capabilities, mode);
-      const callId = `fast_run_${req.id}`.replace(/[^A-Za-z0-9_-]/g, '_');
-      const priorAndRun = [
-        ...(history ?? []),
-        { role: 'user', content: [{ type: 'input_text', text: message }] },
-        { type: 'function_call', name: 'run_analysis', call_id: callId, arguments: JSON.stringify({ reason: 'the user pressed Run' }) },
-        { type: 'function_call_output', call_id: callId, output: JSON.stringify(ran) },
-      ];
-      const outcome = (ran as { run_outcome?: RunOutcome }).run_outcome;
-      if (outcome !== undefined) { runOutcomeChips = outcome.chips.map((c) => ({ ...c })); runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
-      if (ran.ran !== true && outcome !== undefined) runOutcomeText = outcome.text;
-      const text = ran.ran === true ? RUN_RESULT_READY_TEXT
-        : outcome !== undefined ? outcome.text : interpretationUnavailableText(ran);
-      fastPath = 'run';
-      const ms = Date.now() - fastStartedAt;
-      result = {
-        assistant_text: text,
-        items: [...priorAndRun, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }],
-        tool_calls: [{ name: 'run_analysis', ok: ran.ok === true, mutated: false, ...(typeof ran.refusal === 'string' ? { refusal: ran.refusal } : {}) }],
-        tool_results: [ran], mutated: false, hops: 1, stopped_reason: 'answered',
-        timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 1, hops: 1 },
       };
     }
     /**
@@ -3919,6 +3920,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
             ...(methodTurn?.kind === 'run' || widenRun !== undefined || risksRun !== undefined ? { maxHops: 1 } : {}),
             // Before the widen and chip forcings below, which win if both were ever set.
+            ...(runPress ? { firstCallTool: 'run_analysis' } : {}),
             ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
             ...(levelAnswerTool !== undefined ? { firstCallTool: levelAnswerTool } : {}),
             ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
@@ -3937,7 +3939,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
           },
           // Widen: RC's structured checks run INSIDE the door, before it stores anything; a refusal stores nothing.
-          widenRun === undefined ? capabilities : {
+          widenRun === undefined ? loopCapabilities : {
             ...capabilities,
             proposeNewOption: async (gateCtx, gateArgs) => {
               // ONE card or none: only the press's FIRST door call is gated and may reach the door (HARNESS P2 on #2512;
@@ -3984,12 +3986,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       briefReadingOpen = false;
     }
 
+    // Preserve the existing typed engine refusal on a Run press, even if the model invents another cause.
+    if (runPress && !result.tool_results.some(r => r.ran === true)) {
+      const outcome = result.tool_results.map(r => (r as { run_outcome?: RunOutcome }).run_outcome)
+        .find((value): value is RunOutcome => value !== undefined);
+      if (outcome !== undefined) { runOutcomeText = outcome.text; runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
+    }
     // A hop limit is never returned as an empty answer.
-    let text = result.stopped_reason === 'incomplete'
+    let text = runOutcomeText ?? (result.stopped_reason === 'incomplete'
       ? unfinishedAnswerText(result)
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
         ? hopLimitText(result)
-        : result.assistant_text;
+        : result.assistant_text);
     if (fastPath === undefined && result.stopped_reason === 'answered') narratorWords = result.assistant_text;
 
     // ⭐ T3: the method turn's draft is checked BEFORE it is sent; a failed check sends RC's deterministic fallback
@@ -4175,7 +4183,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const composedRead = await withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues, String(req.id));
     const { analysisState, analysisResult } = composedRead;
     const chanceCells = replyChanceCells(composedRead, scenarioId);
-    const resultFirstRunCompleted = firstAnalysisResultFirst || (fastPath === 'run' && result.tool_results.some((r) => r.ran === true));
+    const resultFirstRunCompleted = firstAnalysisResultFirst || (runPress && result.tool_results.some((r) => r.ran === true));
     // One final scoped draft supplies the words, the offered presses and the hook on this bound Run.
     const guidedDraftForRun = ((resultFirstRunCompleted && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null)
       || (fastPath === 'explain' && narrationStatus === 'ready'))
@@ -4346,17 +4354,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (by the Agent's run, or by the first analysis), and only when the canonical readiness in
     // THIS response admits a run. A first analysis stopped only by the turn's time was admitted on
     // this same revision, so the same readiness offers Run beside Olumi's sentence.
-    const offerRun = result.mutated
+    const offerRun = (runPress && !runPressConsumed) || (result.mutated
       // A Run the server refused because this request's approval applied a change analysed nothing:
       // it must not suppress the Run the refusal tells the user to press.
       && !result.tool_calls.some((c) => c.name === 'run_analysis' && c.refusal !== 'run_not_requested')
       && !firstAnalysisExists
-      && admitsRunOffer(analysisReady);
+      && admitsRunOffer(analysisReady));
 
     // A typed Run that answered but did not complete (blocked) offers the next step instead.
-    const runBlocked = fastPath === 'run'
-      && (result.tool_results[0] as { ok?: unknown; ran?: unknown } | undefined)?.ok === true
-      && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran !== true;
+    const runBlocked = runPress && result.tool_calls.some((call, i) => call.name === 'run_analysis'
+      && result.tool_results[i]?.ok === true && result.tool_results[i]?.ran !== true);
     // The turn's LAST build was refused as too large and nothing was saved: offer the rebuild the reply names.
     const lastBuild = result.tool_calls.filter((c) => c.name === 'build_model_from_brief').at(-1);
     const offerRebuild = lastBuild?.refusal === 'model_too_large' && !result.mutated;
@@ -4374,9 +4381,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const carriedApproval = ((): OfferedAction[] => {
       // Not when this turn prepared a proposal of its own: that one's card is the offer.
       const preparedNow = result.tool_calls.some((c) => c.name !== 'authorise_change' && c.ok && typeof c.proposal_id === 'string');
-      if (fastPath !== 'run' && fastPath !== 'explain' && (toTheCard.length === 0 || preparedNow)) return [];
+      if (!runPress && fastPath !== 'explain' && (toTheCard.length === 0 || preparedNow)) return [];
       const id = executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph);
-      if (id === undefined || (fastPath !== 'run' && fastPath !== 'explain' && !toTheCard.includes(id))) return [];
+      if (id === undefined || (!runPress && fastPath !== 'explain' && !toTheCard.includes(id))) return [];
       const chip = [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
         .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
       return chip !== undefined ? [chip, AMEND_CHIP] : [];
@@ -4783,12 +4790,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // above says the same, from the same readback, in the same place.
     // ⛔ Only about the result on screen (Codex #2577 P1): when the readback no longer binds to this Run (an edit landed
     // before the readback, a stale or missing result), the readback's roots are not the ones this Run treated as zero.
-    const rootLine = fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true
+    const rootLine = runPress && resultFirstRunCompleted
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       ? treatedAsZeroReplyLine(readbackGraph, analysisReady) : null;
     // GOAL-REACH 3b (DL CHANGES_REQUIRED #2816): an explicit Run says why the goal chance was refused (§(g)), on the same
     // binding as the root line; its replay says the same in the same place.
-    const reasonLine = fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true
+    const reasonLine = runPress && resultFirstRunCompleted
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       ? thresholdReasonLine(readbackGraph, analysisResult) : null;
     if (reasonLine !== null && !narrationText.includes(reasonLine)) owed.push(reasonLine);
@@ -4849,6 +4856,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const explanationChip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult });
     if (fastPath === 'run' || firstAnalysisResultFirst) narrationStatus = explanationChip !== null
       && resultFirstRunCompleted ? 'pending' : 'unavailable';
+    if (runPress && resultFirstRunCompleted) narrationStatus = explanationChip !== null
+      && result.stopped_reason === 'answered' && result.assistant_text.trim() !== '' ? 'ready' : 'unavailable';
     const narrationKey = fastPath === 'explain' && typeof explanationId === 'string'
       ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : explanationChip?.id.slice(RUN_EXPLANATION_PREFIX.length);
     // The turn cache sees this turn's writes only. Recheck other writers before licensing the additive UI view.
@@ -5163,7 +5172,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // this same final body, plus the paragraph the gate appended and every fixed no-leader sentence present.
       const coHold = goalFigureCoHoldOf((wireBody as { blocks?: unknown }).blocks, readbackGraph ?? null, typedNow ?? undefined);
       const faceContract = result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true)
-        ? 'draft' as const : fastPath === 'run' || fastPath === 'explain' || screenLines.length > 0 || goalChanceOwed !== null || coHold !== undefined
+        ? 'draft' as const : runPress || fastPath === 'explain' || screenLines.length > 0 || goalChanceOwed !== null || coHold !== undefined
           ? 'run' as const : undefined;
       // R2 N1 (friction audit): only a Run/Explain turn leads with the chance status; a draft, Run or Explain shows estimates.
       const runOrExplainTurn = ranAnalysisThisTurn || fastPath === 'explain';
@@ -5311,6 +5320,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? { ...unshaped, assistant_text: composedReply.text,
           ...(composedReply.shape !== null ? { _answer_shape: composedReply.shape } : {}) }
         : unshaped) as OlumiResponse & Record<string, unknown>;
+      if (runPress && !runPressConsumed) {
+        const { _answer_shape: _skippedShape, ...withoutShape } = wireBody;
+        wireBody = { ...withoutShape, assistant_text: 'The analysis did not run. Press Run to try again.',
+          suggested_actions: firstOfEachId([RUN_OFFER_CHIP, ...(wireBody.suggested_actions ?? [])]) };
+      }
       log.info({
         event: 'agent_lane.reply_shaped', request_id: String(req.id), ...(turnId !== undefined ? { turn_id: turnId } : {}),
         outcome: composedReply.outcome, ...(composedReply.reason !== undefined ? { reason: composedReply.reason } : {}),

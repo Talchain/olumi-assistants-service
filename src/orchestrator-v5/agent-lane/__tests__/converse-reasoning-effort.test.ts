@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * Selected coach request configuration: #78 5915316114 and DL #75 5916003868.
@@ -38,6 +39,9 @@ describe('selected coach: populated conversation and Run use high; construction 
     vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
       if (String(url) !== 'https://api.openai.com/v1/responses') throw new Error(`Unexpected mocked fetch target: ${String(url)}`);
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const forced = runPressToolResponse(body);
+      if (forced) return forced;
       modelBodies.push(JSON.parse(String(init?.body ?? '{}')) as Body);
       const envelope = {
         id: 'resp_synthetic', status: 'completed', incomplete_details: null,

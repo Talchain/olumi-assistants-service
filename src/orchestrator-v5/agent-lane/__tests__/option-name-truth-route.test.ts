@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun, explanationContext } from './fixtures/run-explanation-follow-up.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -45,7 +46,10 @@ describe('Agent Run result names a changed option level without renaming the gra
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
-      modelRequests.push(JSON.parse(String(init?.body ?? '{}')));
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      modelRequests.push(body);
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       return new Response(JSON.stringify({ output: [
         { type: 'message', content: [{ type: 'output_text', text: modelText }] },
       ] }), { status: 200 });
@@ -117,7 +121,8 @@ describe('Agent Run result names a changed option level without renaming the gra
         chip: { action_type: 'run_analysis' }, turn_id: `4382b44d-7672-4c9d-9f2b-2b76a266${kind === 'complete_stale' ? '2341' : '2342'}`,
       } });
       expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
-      expect(modelRequests).toHaveLength(before);
+      expect(modelRequests).toHaveLength(before + 2);
+      expect(modelRequests.slice(before).some(body => body.tool_choice === 'none'), 'no Explain narration of a stale result').toBe(false);
       expect(r.json().suggested_actions.some((c: { id: string }) => c.id.startsWith('agent-explain-run:'))).toBe(false);
     } finally {
       readBody = { graph, graph_hash: HASH, analysis_result: result, analysis_state: state,
