@@ -1,4 +1,3 @@
-import { explainRun, explanationContext } from './fixtures/run-explanation-follow-up.js';
 /**
  * AI EXPERIENCE / CHATGPT: bounded typed-Run versus free-text-Run regression.
  *
@@ -85,7 +84,7 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
         envelope = { id: 'resp_direct_synthetic', status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' },
           output: [{ type: 'message', role: 'assistant', status: 'incomplete', content: [{ type: 'output_text', text: 'The biggest driver is' }] }] };
       } else if (body.tool_choice !== 'none' && runOutput(body) === undefined) {
-        // Only free-text Run needs the routing request. This is a scripted tool choice,
+        // Every Run enters the loop through a tool call. This is a scripted tool choice,
         // not a claim about how a real model will route the message.
         envelope = {
           id: 'resp_route_synthetic', status: 'completed', incomplete_details: null,
@@ -145,7 +144,7 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
         ...(entry === 'typed_run' ? { source: 'chip_click', chip: { action_type: 'run_analysis' } } : {}),
       },
     });
-    const final = entry === 'typed_run' ? await explainRun(app, scenarioId, response) : response;
+    const final = response;
     const body = final.json() as Body;
     // Keep complete capture available in assertion failures. Expected rules are never model input.
     return { response: final, body, capture: { modelBodies, providerReplies } };
@@ -157,34 +156,19 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
       expect(response.statusCode, JSON.stringify(capture)).toBe(200);
       expect(runs).toBe(1);
       // The model receives the same run-domain result and correct supplied reason in both paths.
-      const answering = modelBodies.find((b) => entry === 'typed_run' ? explanationContext(b.input) !== undefined : runOutput(b) !== undefined);
+      const answering = modelBodies.find((b) => runOutput(b) !== undefined);
       expect(answering).toBeDefined();
-      const seen = entry === 'typed_run' ? explanationContext(answering!.input)! : runOutput(answering!)!;
-      if (entry === 'free_text_run') {
-        expect(seen.ran).toBe(true);
-        expect(seen.what_is_missing).toBe(WHY);
-        expect(JSON.stringify(seen.result)).toContain('same-canonical-result');
-        expect(seen.claim_permissions).toBeDefined();
-      } else {
-        expect(seen).not.toHaveProperty('result');
-        expect(JSON.stringify(seen)).not.toContain('same-canonical-result');
-        expect((seen.canonical_state as Body).analysis).toMatchObject({
-          claim_permissions: { leader_may_be_named: false, withheld_reason: 'constraint_verdict_withheld' },
-          earlier_analysis: 'complete_current', run_state: STATE.run_state,
-        });
-      }
+      const seen = runOutput(answering!)!;
+      expect(seen.ran).toBe(true);
+      expect(seen.what_is_missing).toBe(WHY);
+      expect(JSON.stringify(seen.result)).toContain('same-canonical-result');
+      expect(seen.claim_permissions).toBeDefined();
       expect(body.assistant_text).toContain('Capacity');
       expect(body.assistant_text).toContain(WHY);
       expect(body.assistant_text).not.toBe(fallback);
-      if (entry === 'typed_run') {
-        expect(modelBodies).toHaveLength(1);
-        expect(answering!.tools).toEqual([]);
-        expect(answering!.tool_choice).toBe('none');
-      } else {
-        expect(modelBodies).toHaveLength(2);
-        // Do not demand identical prompts or prematurely disable the ordinary Agent's tools.
-        expect(Array.isArray(answering!.tools)).toBe(true);
-      }
+      expect(modelBodies).toHaveLength(2);
+      expect(Array.isArray(answering!.tools)).toBe(true);
+      if (entry === 'typed_run') expect(modelBodies[0]!.tool_choice).toEqual({ type: 'function', name: 'run_analysis' });
     });
 
     for (const variant of ['incomplete_same_text', 'incomplete_cut_caveat'] as const) {
@@ -194,12 +178,12 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
         expect(providerReplies.at(-1)?.status).toBe('incomplete');
         expect(response.statusCode, JSON.stringify(capture)).toBe(200);
         expect(runs, 'Do not repeat a successful run to recover its explanation').toBe(1);
-        expect(modelBodies, 'No additional provider call or action-enabled recovery').toHaveLength(entry === 'typed_run' ? 1 : 2);
+        expect(modelBodies, 'No additional provider call or action-enabled recovery').toHaveLength(2);
         // Proposed minimal policy: reuse the existing completed-run/explanation-unavailable
         // response, preserving the successful run. This is not a new public result schema.
         expect(body.assistant_text, JSON.stringify(capture)).toBe(fallback);
         const toolCalls = (body._agent as { tool_calls?: { name: string }[] } | undefined)?.tool_calls ?? [];
-        expect(toolCalls.map((c) => c.name)).toEqual(entry === 'typed_run' ? [] : ['run_analysis']);
+        expect(toolCalls.map((c) => c.name)).toEqual(['run_analysis']);
       });
     }
   }

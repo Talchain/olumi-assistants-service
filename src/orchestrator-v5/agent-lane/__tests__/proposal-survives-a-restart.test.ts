@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { installOwnershipHarness } from "../../../../tests/utils/ownership-route-harness.js";
 /**
  * ⛔ A PENDING APPROVAL SURVIVES A RESTART (root cause of Paul's failing test, 24 Sep 09:39–09:53Z,
@@ -121,6 +122,8 @@ describe('a pending approval survives a restart', () => {
   beforeAll(() => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       if (body['tool_choice'] !== 'none' && proposeNext) {
         proposeNext = false;
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'propose_model_change', call_id: 'c1',
@@ -407,7 +410,7 @@ describe('a pending approval survives a restart', () => {
   const RUN_CHIP = { id: 'agent-run-analysis', action_type: 'run_analysis' };
   const runIn = async (a: FastifyInstance): Promise<Body> => {
     const t = await turn(a, { message: 'Run analysis.', source: 'chip', chip: RUN_CHIP });
-    expect(t._diagnostic_trace.fast_path, 'the control: the typed Run path').toBe('run');
+    expect(t._diagnostic_trace.fast_path, 'the control: the typed Run path').toBeUndefined();
     expect(t._agent.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis', ok: true })]);
     return t;
   };

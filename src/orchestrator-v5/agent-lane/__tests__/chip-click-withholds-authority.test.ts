@@ -172,8 +172,9 @@ describe('a chip click that is not the approval or the Run withholds authority f
   });
 
   it('CONTROL (scope): the typed Run chip still runs', async () => {
+    script = [call('run_analysis', () => ({ reason: 'User pressed Run', effects_timing: null })), say('The analysis ran.')];
     const b = await send({ kind: 'message', scenario_id: SCENARIO, source: 'chip_click', message: 'Run the analysis', chip: { action_type: 'run_analysis' } });
-    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(b._diagnostic_trace.fast_path).toBeUndefined();
     expect(runs).toBe(1);
   });
 });

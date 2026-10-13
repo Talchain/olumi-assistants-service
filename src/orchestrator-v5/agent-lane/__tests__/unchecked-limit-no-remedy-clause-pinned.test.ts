@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⛔ THE UNCHECKED-LIMIT CLAUSE IS PINNED ON THE WIRE (AI Quality, programme-docs #63 5826106622).
@@ -52,6 +53,8 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown>;
       modelBodies.push(body);
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'That limit cannot be checked in this model yet.' }] }] }), { status: 200 });
     }));
     vi.resetModules();
@@ -79,9 +82,14 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } }));
     expect(r.statusCode).toBe(200);
-    expect(modelBodies, 'exactly one interpreting call').toHaveLength(1);
-    expect(modelBodies[0]!['tool_choice']).toBe('none');
-    const instructions = String(modelBodies[0]!['instructions']);
+    expect(modelBodies, 'two Run loop calls and one Explain call').toHaveLength(3);
+    for (const body of modelBodies) {
+      expect(String(body.instructions)).toContain(`${ANCHOR} ${CLAUSE}`);
+      expect(String(body.instructions)).not.toContain(REPLACED);
+    }
+    const explain = modelBodies.filter(body => body.tool_choice === 'none');
+    expect(explain).toHaveLength(1);
+    const instructions = String(explain[0]!.instructions);
     expect(instructions).toContain(`${ANCHOR} ${CLAUSE}`);
     expect(instructions.split(CLAUSE), 'stated once, not repeated').toHaveLength(2);
     expect(instructions).not.toContain(REPLACED);

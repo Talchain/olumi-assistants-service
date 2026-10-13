@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * DL BUILD, HIGH — a licensed leader is not proof of a robust result. Press the real
  * bound Explain control with fixed narrator words, through the served-readback/store
@@ -101,7 +102,13 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   let readbackGraph: typeof FX.state.draft_graph;
   let duringNarration: (() => void) | undefined;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
+      if (body.tool_choice !== 'none') return new Response(JSON.stringify({ output: [
+        { type: 'message', content: [{ type: 'output_text', text: 'The analysis result is available.' }] },
+      ] }), { status: 200 });
       providerCalls += 1;
       duringNarration?.();
       return new Response(JSON.stringify({ output: emptyNarration ? [] : [
@@ -143,7 +150,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     analysis_state: { leader_claim: { permitted: boolean } }; _agent: { replayed?: boolean } };
   const run = async () => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.',
+      kind: 'message', agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run analysis.',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
     } });
     expect(r.statusCode, r.body).toBe(200);

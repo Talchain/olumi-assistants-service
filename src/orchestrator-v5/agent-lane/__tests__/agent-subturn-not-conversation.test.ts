@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⛔ THE AGENT'S INTERNAL SUB-TURNS ARE NOT THE CONVERSATION (Canvas #75 5910906799; MG root cause 5910983526).
  *
@@ -50,6 +51,8 @@ describe('a row written inside an Agent sub-turn is not the user’s conversatio
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const forced = runPressToolResponse(body);
+      if (forced) return forced;
       if (body['tool_choice'] === 'none') {
         return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: AGENT_REPLY }] }] }), { status: 200 });
       }
@@ -106,14 +109,14 @@ describe('a row written inside an Agent sub-turn is not the user’s conversatio
     expect(JSON.stringify(rowsOf(S)), 'the model’s paraphrase is stored nowhere as conversation').not.toContain(REASON);
   });
 
-  it('RED: the Run chip fast path — the same rule', async () => {
+  it('RED: the Run chip loop — the same rule', async () => {
     const S = '7a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a02';
     const T = '8b1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a02';
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: S, turn_id: T, message: 'Run analysis.', source: 'chip', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
     expect(r.statusCode).toBe(200);
     const sub = rowsOf(S).filter((x) => x.handler_id === 'run_analysis');
-    expect(sub.length, 'the control: the fast path dispatched a sub-turn').toBe(1);
+    expect(sub.length, 'the control: the loop dispatched a sub-turn').toBe(1);
     expect(sub[0]).toMatchObject({ user_message: null, assistant_message: null });
     expect(rowsOf(S).find((x) => x.turn === T)?.user_message).toBe('Run analysis.');
   });

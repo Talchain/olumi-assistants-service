@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ A CURRENT RESULT OFFERS THE PRODUCT'S OWN NEXT STEPS (Paul's staging test, 1 Oct 00:1xZ: "the chips are gone
  * (Run, pre-mortem…)"; DL #75 5922040401 + 5922121657; AIQ words 5922131997; CODEX control class 5922106400).
@@ -50,6 +51,8 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       if (body['tool_choice'] !== 'none' && script.length > 0) return new Response(JSON.stringify({ output: [script.shift()] }), { status: 200 });
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 });
     }));
@@ -98,7 +101,7 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
 
   it("RED: the Run button's turn ends on the next steps when its result reads back current (Paul: 'the Run, pre-mortem…')", async () => {
     const b = await ask('Run analysis.', { source: 'chip', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
-    expect(runs, 'vacuity: the Run fast path really ran').toBe(1);
+    expect(runs, 'vacuity: the Run loop really ran').toBe(1);
     expect(b.suggested_actions.map((c) => c.id)).toEqual(NEXT_IDS);
   });
 

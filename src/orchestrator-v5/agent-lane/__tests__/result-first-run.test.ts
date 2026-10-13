@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -40,6 +41,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 describe('two-request Run through the real handler and canonical analysis reader', () => {
   let app: FastifyInstance;
   let modelBodies: Record<string, unknown>[] = [];
+  let runModelBodies: Record<string, unknown>[] = [];
   let runs = 0;
   let graphReads = 0;
   let mutateDuringExplanation: (() => void) | undefined;
@@ -48,7 +50,14 @@ describe('two-request Run through the real handler and canonical analysis reader
   let timeoutController: AbortController | undefined;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-      modelBodies.push(JSON.parse(String(init?.body ?? '{}')));
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      if (body.tool_choice !== 'none') {
+        runModelBodies.push(body);
+        return runPressToolResponse(body) ?? new Response(JSON.stringify({ output: [
+          { type: 'message', content: [{ type: 'output_text', text: 'The result depends on the assumptions in your model.' }] },
+        ] }), { status: 200 });
+      }
+      modelBodies.push(body);
       mutateDuringExplanation?.();
       if (providerMode === 'timeout') return await new Promise<Response>((_resolve, reject) => {
         init.signal.addEventListener('abort', () => reject(new DOMException('Timed out', 'AbortError')), { once: true });
@@ -91,7 +100,7 @@ describe('two-request Run through the real handler and canonical analysis reader
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
   beforeEach(() => { graph = GRAPH; briefText = 'The strategic brief'; fact = null; readFails = false; rows.length = 0; runs = 0; graphReads = 0; scenarioOwner = null; restored = null; editFacts = [];
-    modelBodies = []; providerMode = 'ok'; mutateDuringExplanation = undefined; store.readRunCurrentness = undefined; });
+    modelBodies = []; runModelBodies = []; providerMode = 'ok'; mutateDuringExplanation = undefined; store.readRunCurrentness = undefined; });
   const run = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     turn_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
   } });
@@ -103,12 +112,13 @@ describe('two-request Run through the real handler and canonical analysis reader
       agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id }, ...extra } });
   };
 
-  it('Run and Re-run each read the post-run graph once, without an unused prefetch', async () => {
+  it('Run and Re-run each read context before the loop and once after the Run', async () => {
     expect((await run()).statusCode).toBe(200);
-    expect(graphReads, 'Run: the one post-run canonical read').toBe(1);
+    expect(graphReads, 'Run: canonical context and one post-run read').toBe(2);
     const beforeRerun = graphReads;
     expect((await run()).statusCode).toBe(200);
-    expect(graphReads - beforeRerun, 'Re-run: the one post-run canonical read').toBe(1);
+    expect(graphReads - beforeRerun, 'Re-run: canonical context and one post-run read').toBe(2);
+    expect(runModelBodies).toHaveLength(4);
     expect(runs).toBe(2);
     expect(modelBodies).toHaveLength(0);
   });
@@ -194,15 +204,16 @@ describe('two-request Run through the real handler and canonical analysis reader
     expect(runs).toBe(1);
   });
 
-  it('returns the saved current result with zero narration calls; the follow-up only explains that Run', async () => {
+  it('Run interprets the current result in its loop; the retained follow-up only explains that Run', async () => {
     const response = await run();
     expect(response.statusCode).toBe(200);
     const first = response.json();
     expect(runs).toBe(1); expect(modelBodies).toHaveLength(0);
     expect(first.blocks.some((b: { type: string }) => b.type === 'analysis_result')).toBe(true);
     expect(first.analysis_state.run_state.kind).toBe('complete_current');
-    expect(first._diagnostic_trace.timing.provider_calls).toBe(0);
-    expect(first.narration).toEqual({ status: 'pending', run_key: expect.stringMatching(/^[0-9a-f]{16}$/) });
+    expect(first._diagnostic_trace.timing.provider_calls).toBe(2);
+    expect(runModelBodies).toHaveLength(2);
+    expect(first.narration).toEqual({ status: 'ready', run_key: expect.stringMatching(/^[0-9a-f]{16}$/) });
     const second = await explanation(first);
     expect(second.statusCode).toBe(200);
     expect(runs).toBe(1); expect(modelBodies).toHaveLength(1);
@@ -218,15 +229,15 @@ describe('two-request Run through the real handler and canonical analysis reader
     // Both answers use the existing transcript persistence; no separate interpretation store.
     const answers = rows.filter((r) => typeof r.assistantMessage === 'string');
     expect(answers).toHaveLength(2);
-    expect(answers[0].assistantMessage).toContain('results are ready');
+    expect(answers[0].assistantMessage).toContain('depends on the assumptions');
     expect(answers[1].assistantMessage).toContain('depends on the assumptions');
     const { historyFromDurableTurns } = await import('../history-store.js');
     const stored = [...rows].reverse().map((r) => ({ request_hash: r.request_hash as string,
       user_message: r.userMessage as string, assistant_message: r.assistantMessage as string }));
     const cold = historyFromDurableTurns(stored);
     expect(historyFromDurableTurns(stored)).toEqual(cold);
-    expect(JSON.stringify(cold).match(/depends on the assumptions/g)).toHaveLength(1);
-    expect(JSON.stringify(cold).match(/results are ready/g)).toHaveLength(1);
+    expect(JSON.stringify(cold).match(/depends on the assumptions/g)).toHaveLength(2);
+    expect(JSON.stringify(cold)).not.toContain('results are ready');
   });
 
   for (const change of ['graph', 'new-run', 'missing-result', 'unavailable', 'substitution', 'run-substitution', 'foreign-key'] as const) {

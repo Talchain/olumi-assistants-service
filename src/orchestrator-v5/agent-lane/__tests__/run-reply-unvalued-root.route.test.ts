@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ GATE 2 CONSUMER (DL 0df0e1, 5 Oct; Science #2571; Acceptance #87 5987804248, scenario 9b9a4b81): a native Run on a
  * model whose goal path has an unvalued non-factor root ("Demand shortfall", treated as zero) said "Your results are
@@ -16,7 +17,7 @@ import { decisionInputAsk } from '../decision-input-ask.js';
 import { sentencesOf } from '../reply/compose-reply.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
-import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
+const RUN_INTERPRETATION = 'The model result is provisional.';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
 import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE } from '../root-line.js';
@@ -132,17 +133,17 @@ function expectWithheldContract(body: Body, rootLine?: string): void {
   expect(shape!.headline).toBe('Not shown yet; why is under More detail');
   const rootOwnsAsk = rootLine?.includes('?') === true;
   const targetAsk = rootOwnsAsk ? null : decisionInputAsk(graphWith(riskValued, riskLabel), {
-    restingText: [RUN_RESULT_READY_TEXT, rootLine, WITHHELD_FINDING].filter(Boolean).join('\n\n'),
+    restingText: [RUN_INTERPRETATION, rootLine, WITHHELD_FINDING].filter(Boolean).join('\n\n'),
     questionsToggle: false, awaitingApproval: false, builtOrRan: true,
   });
   if (!rootOwnsAsk) expect(targetAsk).toBe('What figure should "Meet our next feature-launch deadline" reach or stay under? I\'ll propose it as your target.');
   const targetSentences = targetAsk === null ? [] : sentencesOf(targetAsk);
   expect(shape!.bullets).toEqual([rootOwnsAsk ? rootLine! : targetSentences[0]!]);
-  expect(shape!.detail).toBe([RUN_RESULT_READY_TEXT, rootOwnsAsk ? undefined : rootLine, ...targetSentences.slice(1), WITHHELD_FINDING].filter(Boolean).join('\n\n'));
+  expect(shape!.detail).toBe([RUN_INTERPRETATION, rootOwnsAsk ? undefined : rootLine, ...targetSentences.slice(1), WITHHELD_FINDING].filter(Boolean).join('\n\n'));
   expect(shape!.detail.split(WITHHELD_FINDING)).toHaveLength(2);
   expect(body.assistant_text.split(WITHHELD_FINDING)).toHaveLength(2);
   expect(body.assistant_text).toBe(deriveAnswerTextFromShape(shape!));
-  expect(body.assistant_text.split(RUN_RESULT_READY_TEXT)).toHaveLength(2);
+  expect(body.assistant_text.split(RUN_INTERPRETATION)).toHaveLength(2);
   if (rootLine !== undefined) expect(body.assistant_text.split(rootLine)).toHaveLength(2);
   for (const sentence of targetSentences) expect(body.assistant_text.split(sentence)).toHaveLength(2);
   const face = [shape!.headline, ...shape!.bullets].join('\n');
@@ -153,7 +154,9 @@ function expectWithheldContract(body: Body, rootLine?: string): void {
 describe('a native Run with an unvalued risk root says it is treated as zero, and asks for it (live route)', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [] }), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [
+      { type: 'message', content: [{ type: 'output_text', text: RUN_INTERPRETATION }] },
+    ] }), { status: 200 })));
     app = await freshApp();
   }, 60_000);
   afterAll(async () => {
@@ -187,7 +190,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   // NEVER RE-ASK parity (Codex r1 on #2664 P2): the live Run turn adds this line AFTER its never-re-ask rule, so it keeps its
   // question even when an earlier answer asked it; a lost response must replay those same words, not a shorter line.
   it('a lost Run response replays the live words after an earlier answer asked the root question (live = replay)', async () => {
-    const earlier = { turn_id: randomUUID(), request_hash: 'agent_turn:earlier', assistant_message: `${RUN_RESULT_READY_TEXT} ${SENTENCE}` };
+    const earlier = { turn_id: randomUUID(), request_hash: 'agent_turn:earlier', assistant_message: `${RUN_INTERPRETATION} ${SENTENCE}` };
     store.readRecent.mockImplementation((async () => [earlier]) as never);
     try {
       const turnId = randomUUID();
@@ -221,7 +224,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     readback = kind;
     const turnId = randomUUID();
     const first = (await runTurn(turnId)).json() as Body;
-    expect(first.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(false); // the unbound headline, not "ready"
+    expect(first.assistant_text.startsWith(RUN_INTERPRETATION)).toBe(false); // the unbound headline, not "ready"
     expect(first.assistant_text).not.toContain('treats it as zero');
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }

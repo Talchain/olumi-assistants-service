@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /** A real route keeps only a neutral Run marker after an edit or an unchanged follow-up. */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -34,6 +35,8 @@ describe('the retained Run output is a neutral pointer after a change and withou
   const edges = new Map<string, { from: string; to: string }[]>();
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       requests.push({ input: (JSON.parse(String(init?.body ?? '{}')) as { input?: Item[] }).input ?? [] });
       const output = script.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis cannot name an option yet.' }] }];
       return new Response(JSON.stringify({ output }), { status: 200 });
@@ -75,7 +78,7 @@ describe('the retained Run output is a neutral pointer after a change and withou
   const turn = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', ...payload } });
   const runChip = async (scenario_id: string) => {
     const r = await turn({ scenario_id, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
-    expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path, 'control: the Run chip took its fast path').toBe('run');
+    expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path, 'control: the Run chip entered the loop').toBeUndefined();
   };
   /** The run's output in the LAST request, parsed, and whether its call is still beside it. */
   const carriedRun = () => {
