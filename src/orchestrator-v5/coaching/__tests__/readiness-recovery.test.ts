@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 import {
   buildReadinessEffectPending,
@@ -195,5 +196,34 @@ describe('readiness recovery authority', () => {
       id: 'chip_prompt_review_model_gaps',
       label: 'Review model gaps',
     });
+  });
+});
+
+
+describe('canonical current-level recovery', () => {
+  const readiness = () => buildCanonicalAnalysisReadyFromGraph({
+    nodes: [{ id: 'g', kind: 'goal', label: 'Delivery' },
+      { id: 'fac_capacity', kind: 'factor', label: 'Delivery capacity', category: 'controllable' }],
+    edges: [{ from: 'fac_capacity', to: 'g', strength: { mean: 0.4, std: 0.1 },
+      exists_probability: 1, effect_direction: 'positive' }],
+  })!;
+
+  it('keeps the canonical named ask without offering or arming an option-effect repair', () => {
+    const ar = readiness();
+    const message = ar.readiness_issues!.find(issue => issue.code === 'MISSING_FACTOR_LEVEL')!.message;
+    expect(projectReadinessRecovery(ar, NODES)).toEqual({
+      kind: 'provide_value', status: 'needs_user_input', optionLabel: null, optionLabelFull: null,
+      factorLabel: 'Delivery capacity', factorLabelFull: 'Delivery capacity', nextStep: message,
+    });
+    expect(buildReadinessRecoveryChip(ar, NODES)).toBeNull();
+    expect(buildReadinessEffectPending({ ...PENDING_INPUT, analysisReady: ar })).toBeNull();
+  });
+
+  it('does not override a blocked status or borrow a later root ask for an option-effect head', () => {
+    const ar = readiness();
+    expect(projectReadinessRecovery({ ...ar, status: 'blocked' }, NODES))
+      .toEqual(projectReadinessRecovery({ status: 'blocked' }, NODES));
+    expect(projectReadinessRecovery({ ...ASKED_READINESS, readiness_issues: ar.readiness_issues }, NODES))
+      .toEqual(projectReadinessRecovery(ASKED_READINESS, NODES));
   });
 });
