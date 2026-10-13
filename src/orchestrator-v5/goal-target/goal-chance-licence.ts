@@ -395,7 +395,7 @@ function goalTargetStateOf(
   const block = goalTargetsBlockOf({ envelope, graph: horizonGraph, optionIds,
     storedConstraints: constraints.storedConstraints, sentConstraints: constraints.sentConstraints,
     basis: goalTargetBasisOf(goal), perLimit: constraints.perLimit, primaryGoalId: goalId, primaryRefused: true });
-  const target = block?.conditions.find((c) => c.role === 'target');
+  const target = block?.conditions.find((c) => c.role === 'target' && c.node_id === goalId);
   if (block === null || target === undefined || optionIds.length === 0) return null;
   // The primary percentage remains empty; secondary targets use the existing per-target guards and attribution.
   const seed: GoalChanceLicence = { code: GOAL_CHANCE_LICENSED, severity: 'info', message: '', form: 'each', option_ids: optionIds,
@@ -946,7 +946,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   // period or reference) is said beside the joint, never claimed by it. ⛔ Re-scope (r2 BLOCKING 2): EVERY one is said — a
   // retained condition sharing a figure with a target the joint names (the same 15% over a distinct period) is not that target.
   const covers = partialGoalWords(targetNames, c.alsoRequired);
-  if (covers !== undefined && targetNames.length > 0) notes.push(covers);
+  if (covers !== undefined && targetNames.length > 0 && (block.joint.status === 'licensed' || block.per_target.length > 0)) notes.push(covers);
   // The status quo's own line is said only where EVERY target's reference is the same-draw one (never universal by default);
   // a status quo whose own share disagrees with that reference is withheld with that reason.
   // R5-3: "no change" only where EVERY condition of the joint is on the same-draw reference — and then it names every one.

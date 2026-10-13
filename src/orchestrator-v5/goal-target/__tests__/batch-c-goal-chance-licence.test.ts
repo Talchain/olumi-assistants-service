@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
+import { agentLicenceRecordOf, goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { conditionsRefusedBasis, CONDITIONS_NOT_KEPT, targetChanceWords } from '../goal-target-basis.js';
@@ -1577,9 +1577,9 @@ describe('MA2 complete condition inventory when the primary target cannot be lic
     ]);
     expect(licence.notes).toEqual([
       '‘New customers’ being at least 20 customers over the first three months after launch: Not shown. The customer forecast has no supported scoring frame.',
+      '‘Conversion rate’ being above 15% over the first three months after launch: Not shown. The customer forecast has no supported scoring frame.',
       '‘Annual spend’ is at most £100,000 / year: The contributing quantities have links whose sizes are not yet specified. Define those contributions or supply a forecast for this quantity.',
       '‘Founder time’ is at most 25%: The calculation still rests on Olumi’s estimated quantities. Review their basis and uncertainty; the limit or target itself is not a forecast.',
-      '‘Conversion rate’ being above 15% over the first three months after launch: This Run did not return a usable chance for ‘Hire a marketing manager’ and ‘AI planning plus advertising’.',
     ]);
     expect(licence.targets!.joint).toEqual({ status: 'withheld', reason: 'condition_unscored',
       line: 'The chance of meeting all of them together isn’t shown: one or more conditions could not be evaluated. The condition notes explain why.' });
@@ -1596,5 +1596,81 @@ describe('MA2 complete condition inventory when the primary target cannot be lic
     expect(licence.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
     expect(licence.notes).toContain('‘Conversion rate’ being above 15% over the first three months after launch: This Run did not test the stated target. Its quantity and scoring frame need to be resolved.');
     expect(licence.targets!.joint.status).toBe('withheld');
+  });
+});
+
+
+describe('MA2a2: target state cannot license a withheld result', () => {
+  const inspect = (run: Rec, g = marketingGraph(), sent: unknown = wireGoalConstraints(g.goal_constraints)) => {
+    const envelope = withGoalChanceLicence(run, g, 'new_customers', () => false, undefined, g,
+      { storedConstraints: g.goal_constraints, sentConstraints: sent });
+    const saved = JSON.parse(JSON.stringify({ enrichment: envelope }));
+    return { licence: goalChanceLicenceForAgent(saved)!, record: agentLicenceRecordOf(saved)!, facts: goalChanceFactsForAgent(saved, g, true) };
+  };
+  const probes = [
+    ['GOAL_FIGURES_PLACEHOLDER_PATH', 'The conversion links have not been sized.'],
+    ['GOAL_FIGURES_HORIZON_NOT_TESTED', "Your goal is for month 3, and this model only has today's numbers."],
+    ['GOAL_FIGURES_OPTIONS_IDENTICAL', 'The options make the same changes in this model.'],
+  ] as const;
+  it.each(probes)('%s: a run-wide refusal reaches every target and keeps its actual reason', (code, message) => {
+    const run = marketingRun({ probability_of_goal: undefined, probability_of_joint_goal: undefined });
+    run.inference_warnings = [{ code, message, node_ids: ['conversion_rate'], option_ids: ['hire_manager', 'ai_plus_ads'] }];
+    const g = marketingGraph();
+    (g.nodes as Rec[])[0].goal_target_basis = { ...MARKETING_BASIS, also_required: ['customer satisfaction maintained'] };
+    const { licence, record, facts } = inspect(run, g);
+    expect(licence.targets!.per_target).toEqual([]);
+    expect(facts?.goal_targets?.per_target).toEqual([]);
+    expect(record.pct_by_option).toEqual({});
+    expect(licence.targets!.conditions.map(c => c.constraint_id)).toEqual(['target:new_customers', 'target:conversion_rate']);
+    expect(licence.notes).toEqual([
+      `‘New customers’ being at least 20 customers over the first three months after launch: ${message}`,
+      `‘Conversion rate’ being above 15% over the first three months after launch: ${message}`,
+    ]);
+  });
+  it('a fully licensed second target keeps its exact chances', () => {
+    const { licence, facts } = inspect(marketingRun());
+    expect(licence.targets!.per_target.find(t => t.constraint_id === 'target:conversion_rate')!.pct_by_option)
+      .toEqual({ hire_manager: 42, ai_plus_ads: 55 });
+    expect(facts?.goal_targets?.per_target.find(t => t.constraint_id === 'target:conversion_rate')?.pct_by_option)
+      .toEqual({ hire_manager: 42, ai_plus_ads: 55 });
+  });
+  it('a constraint-bound refusal does not withhold a different, licensed second target', () => {
+    const run = marketingRun({ probability_of_goal: undefined, probability_of_joint_goal: undefined });
+    run.inference_warnings = [{ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', constraint_ids: ['target:new_customers'],
+      message: 'The customer forecast has no supported scoring frame.' }];
+    const { licence } = inspect(run);
+    expect(licence.targets!.per_target.map(t => [t.constraint_id, t.pct_by_option]))
+      .toEqual([['target:conversion_rate', { hire_manager: 42, ai_plus_ads: 55 }]]);
+  });
+  it('a run-wide withhold keeps its option scope for every target and the joint', () => {
+    const run = marketingRun();
+    delete (run.option_comparison as Rec[])[0].probability_of_goal;
+    run.inference_warnings = [{ code: 'GOAL_FIGURES_PLACEHOLDER_PATH', option_ids: ['hire_manager'],
+      message: 'The hiring option has an unsized link.' }];
+    const { licence, record } = inspect(run);
+    expect(licence.targets!.per_target.map(t => [t.constraint_id, t.pct_by_option])).toEqual([
+      ['target:new_customers', { ai_plus_ads: 70 }], ['target:conversion_rate', { ai_plus_ads: 55 }],
+    ]);
+    expect(record.pct_by_option).toEqual({ ai_plus_ads: 48 });
+  });
+  it('an unearned exact score is described as scored and withheld, never untested', () => {
+    const g = marketingGraph();
+    const run = marketingRun({ probability_of_goal: 1, probability_of_joint_goal: undefined });
+    const { licence } = inspect(run, g);
+    expect(licence.notes).toEqual([
+      '‘New customers’ being at least 20 customers over the first three months after launch: This Run scored this target, but its chance is withheld.',
+    ]);
+    expect(licence.targets!.joint).toEqual({ status: 'withheld', reason: 'condition_withheld',
+      line: 'The chance of meeting both together isn’t shown: one or more condition chances are withheld. The condition notes explain why.' });
+    expect(licence.targets!.per_target.map(t => t.constraint_id)).toEqual(['target:conversion_rate']);
+    expect(JSON.stringify(licence)).not.toMatch(/did not test|could not be evaluated|quantity and scoring frame/);
+  });
+  it('the state-only record keeps the primary target identity when its row was not sent', () => {
+    const g = marketingGraph();
+    const sent = (wireGoalConstraints(g.goal_constraints) as Rec[]).filter(r => r.node_id !== 'new_customers');
+    const { licence } = inspect(marketingRun({ probability_of_goal: undefined }), g, sent);
+    expect([licence.goal_node_id, licence.goal_label, licence.target]).toEqual([
+      'new_customers', 'New customers', { comparator: 'at_least', value: 20, unit: 'customers' },
+    ]);
   });
 });

@@ -35,7 +35,7 @@ const unit01 = (v: unknown): v is number => finite(v) && v >= 0 && v <= 1;
 export const GOAL_TARGET_ROLE = 'goal_target';
 
 export type JointWithholdReason = 'not_returned' | 'precision_missing' | 'strict_not_preserved' | 'condition_not_named' | 'olumi_base' | 'no_option'
-  | 'target_not_supported' | 'figure_not_preserved' | 'condition_unscored';
+  | 'target_not_supported' | 'figure_not_preserved' | 'condition_unscored' | 'condition_withheld';
 
 export interface GoalCondition {
   readonly constraint_id: string;
@@ -110,6 +110,7 @@ export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupp
       : `, and nor is the chance of ${listWords(strictLost)} on ${strictLost.length === 1 ? 'its' : 'their'} own`;
     return `The chance of meeting ${all} together isn’t shown${own}: this analysis did not use every stated target as specified.`;
   }
+  if (reason === 'condition_withheld') return `The chance of meeting ${all} together isn’t shown: one or more condition chances are withheld. The condition notes explain why.`;
   if (reason === 'condition_unscored') return `The chance of meeting ${all} together isn’t shown: one or more conditions could not be evaluated. The condition notes explain why.`;
   if (reason === 'condition_not_named') return `The chance of meeting ${all} together isn’t shown: one of its conditions can’t be said in your units.`;
   if (reason === 'olumi_base') return `The chance of meeting ${all} together isn’t shown yet: it rests on Olumi’s own assumed starting value for a target, which you haven’t given.`;
@@ -246,8 +247,7 @@ export function goalTargetsBlockOf(args: {
   const limitNotes = new Set<string>();
   const retainedIds = new Set(unresolvedRetainedLimits(args.graph).map((r) => r.constraint_id));
   const targetWarnings = (t: GoalCondition) => upstream.filter((w) =>
-    (Array.isArray(w.constraint_ids) && w.constraint_ids.includes(t.constraint_id))
-    || (t.node_id === args.primaryGoalId));
+    !Array.isArray(w.constraint_ids) || w.constraint_ids.length === 0 || w.constraint_ids.includes(t.constraint_id));
   const refusedTargets = new Set(targets.filter((t) => (args.primaryRefused && t.node_id === args.primaryGoalId)
     || !sent.some((r) => r.constraint_id === t.constraint_id)).map((t) => t.constraint_id));
   for (const c of ordered) {
@@ -262,10 +262,15 @@ export function goalTargetsBlockOf(args: {
       notes.push(note);
       limitNotes.add(note);
     }
-    if (c.role === 'target' && olumiBase.has(c.constraint_id)) notes.push(`${c.clause}: ${jointWithheldLine(2, 'olumi_base')}`);
+    if (c.role === 'target' && olumiBase.has(c.constraint_id)) notes.push(`${c.clause}: ${jointWithheldLine(Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2), 'olumi_base')}`);
     if (c.role === 'target' && (refusedTargets.has(c.constraint_id) || targetWarnings(c).length > 0)) {
       const messages = targetWarnings(c).flatMap((w) => typeof w.message === 'string' ? [w.message] : []);
-      notes.push(`${c.clause}: ${messages.length > 0 ? [...new Set(messages)].join(' ') : 'This Run did not test the stated target. Its quantity and scoring frame need to be resolved.'}`);
+      const fallback = !sent.some((r) => r.constraint_id === c.constraint_id)
+        ? 'This Run did not test the stated target. Its quantity and scoring frame need to be resolved.'
+        : c.node_id === args.primaryGoalId && records.some((r) => unit01(r.probability_of_goal))
+          ? 'This Run scored this target, but its chance is withheld.'
+          : 'This Run returned no licensed chance for this target.';
+      notes.push(`${c.clause}: ${messages.length > 0 ? [...new Set(messages)].join(' ') : fallback}`);
     }
   }
 
@@ -286,7 +291,8 @@ export function goalTargetsBlockOf(args: {
       pct[id] = displayedPctAt(p, step);
       if (pr !== null) rounding[id] = step;
     }
-    const absent = comparedFor(t.constraint_id).filter((id) => !Object.hasOwn(pct, id));
+    const absent = comparedFor(t.constraint_id).filter((id) => !Object.hasOwn(pct, id)
+      && !targetWarnings(t).some((w) => !Array.isArray(w.option_ids) || w.option_ids.includes(id)));
     if (absent.length > 0) notes.push(`${t.clause}: This Run did not return a usable chance for ${listWords(absent.map((id) => `‘${labelOf(id) ?? id}’`))}.`);
     if (Object.keys(pct).length === 0) return [];
     return [{ constraint_id: t.constraint_id, words: t.clause, pct_by_option: pct,
@@ -309,7 +315,7 @@ export function goalTargetsBlockOf(args: {
   else if (strictLost) joint = withheld('strict_not_preserved');
   else if (figureLostIds.size > 0 || unsentTargets.length > 0) joint = withheld('figure_not_preserved');
   else if (olumiBase.size > 0) joint = withheld('olumi_base');
-  else if (args.primaryRefused) joint = withheld('condition_unscored');
+  else if (args.primaryRefused) joint = withheld(args.perLimit?.some((v) => v.state === 'unscored') ? 'condition_unscored' : 'condition_withheld');
   else {
     const pct: Record<string, number> = {};
     const rounding: Record<string, GoalChanceDisplayRounding> = {};
@@ -317,6 +323,9 @@ export function goalTargetsBlockOf(args: {
     let anyFigure = false;
     let anyPrecisionMissing = false;
     for (const id of compared) {
+      if (upstream.some((w) => (!Array.isArray(w.constraint_ids) || w.constraint_ids.length === 0
+        || ordered.some((c) => (w.constraint_ids as unknown[]).includes(c.constraint_id)))
+        && (!Array.isArray(w.option_ids) || w.option_ids.includes(id)))) { missing.push(id); continue; }
       const r = recordOf.get(id);
       const p = r?.probability_of_joint_goal;
       if (!unit01(p)) { missing.push(id); continue; }
@@ -330,7 +339,7 @@ export function goalTargetsBlockOf(args: {
       rounding[id] = step;
     }
     if (compared.length === 0) joint = withheld('no_option');
-    else if (Object.keys(pct).length === 0) joint = withheld(notes.length > 0 ? 'condition_unscored' : anyFigure && anyPrecisionMissing ? 'precision_missing' : 'not_returned');
+    else if (Object.keys(pct).length === 0) joint = withheld(notes.length > 0 ? args.perLimit?.some((v) => v.state === 'unscored') ? 'condition_unscored' : 'condition_withheld' : anyFigure && anyPrecisionMissing ? 'precision_missing' : 'not_returned');
     else {
       // Amendment 5 / ruling 22: the targets share the stated period; a limit keeps its own (annual budget) and is said after
       // "while", so the period is never read as the limit's.
