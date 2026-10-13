@@ -1,0 +1,304 @@
+{
+  "nodes": [
+    {
+      "id": "decision_weekly_support_capacity",
+      "kind": "decision",
+      "label": "Decision: Weekly support capacity",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "weekly_support_capacity",
+      "kind": "goal",
+      "label": "Weekly support capacity",
+      "observed_state": {
+        "value": 0.64,
+        "baseline": 0.64,
+        "unit": "tickets per week",
+        "source": "brief_extraction",
+        "raw_value": 80,
+        "cap": 125,
+        "extractionType": "explicit"
+      },
+      "goal_threshold": 0.8,
+      "goal_threshold_raw": 100,
+      "goal_threshold_unit": "tickets per week",
+      "goal_threshold_cap": 125,
+      "goal_threshold_cap_provenance": "target_derived_headroom",
+      "goal_threshold_frame": "level",
+      "threshold_source": "brief_extraction",
+      "goal_direction": ">=",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "keep_current_staffing",
+      "kind": "option",
+      "label": "Keep current staffing",
+      "is_baseline": true,
+      "provenance": "from_brief"
+    },
+    {
+      "id": "add_one_specialist",
+      "kind": "option",
+      "label": "Add one specialist",
+      "interventions": {
+        "additional_specialists": {
+          "value": 0.1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "additional_specialists",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "raw_value": 1,
+          "unit": "specialists"
+        }
+      },
+      "provenance": "from_brief"
+    },
+    {
+      "id": "add_two_specialists",
+      "kind": "option",
+      "label": "Add two specialists",
+      "interventions": {
+        "additional_specialists": {
+          "value": 0.2,
+          "source": "cee_hypothesis",
+          "target_match": {
+            "node_id": "additional_specialists",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "raw_value": 2,
+          "unit": "specialists"
+        }
+      },
+      "proposed_by": "olumi",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "existing_team_ticket_resolution_capacity",
+      "kind": "factor",
+      "label": "Existing team ticket resolution capacity",
+      "observed_state": {
+        "value": 0.26666666666666666,
+        "unit": "tickets per week",
+        "source": "brief_extraction",
+        "raw_value": 80,
+        "cap": 300,
+        "extractionType": "explicit",
+        "declared_scale": "unit_interval"
+      },
+      "category": "observable",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "additional_specialists",
+      "kind": "factor",
+      "label": "Additional specialists",
+      "observed_state": {
+        "value": 0,
+        "unit": "specialists",
+        "source": "cee_inference",
+        "user_material_unverified": true,
+        "raw_value": 0,
+        "cap": 10,
+        "extractionType": "inferred",
+        "declared_scale": "unit_interval"
+      },
+      "category": "controllable",
+      "provenance": "unverified_brief"
+    },
+    {
+      "id": "per_specialist_ticket_resolution_capacity",
+      "kind": "factor",
+      "label": "Per-specialist ticket resolution capacity",
+      "observed_state": {
+        "value": 0.4,
+        "unit": "tickets per week per specialist",
+        "source": "cee_inference",
+        "user_material_unverified": true,
+        "raw_value": 20,
+        "cap": 50,
+        "extractionType": "inferred",
+        "declared_scale": "unit_interval",
+        "range": {
+          "low": 10,
+          "high": 30,
+          "meaning": "min_max",
+          "source": "user_override",
+          "source_quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30."
+        }
+      },
+      "category": "observable",
+      "provenance": "unverified_brief"
+    },
+    {
+      "id": "specialist_integration_drag",
+      "kind": "risk",
+      "label": "Specialist integration drag",
+      "provenance": "ai_inferred"
+    }
+  ],
+  "edges": [
+    {
+      "from": "decision_weekly_support_capacity",
+      "to": "keep_current_staffing",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "decision_weekly_support_capacity",
+      "to": "add_one_specialist",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "decision_weekly_support_capacity",
+      "to": "add_two_specialists",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "add_one_specialist",
+      "to": "additional_specialists",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "add_two_specialists",
+      "to": "additional_specialists",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "keep_current_staffing",
+      "to": "additional_specialists",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "origin": "repair"
+    },
+    {
+      "from": "existing_team_ticket_resolution_capacity",
+      "to": "weekly_support_capacity",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder",
+        "mean_projected": true
+      },
+      "defaulted": true
+    },
+    {
+      "from": "additional_specialists",
+      "to": "weekly_support_capacity",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder",
+        "mean_projected": true
+      },
+      "defaulted": true
+    },
+    {
+      "from": "per_specialist_ticket_resolution_capacity",
+      "to": "weekly_support_capacity",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder",
+        "mean_projected": true
+      },
+      "defaulted": true
+    },
+    {
+      "from": "additional_specialists",
+      "to": "specialist_integration_drag",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder",
+        "mean_projected": true
+      },
+      "defaulted": true
+    },
+    {
+      "from": "specialist_integration_drag",
+      "to": "weekly_support_capacity",
+      "strength": {
+        "mean": -0.5,
+        "std": 0.125
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder",
+        "mean_projected": true
+      },
+      "defaulted": true
+    }
+  ]
+}

@@ -232,17 +232,18 @@ describe('CONTRASTS', () => {
     expect((result.open_questions ?? []).join(' ')).not.toContain('the definition your brief gives');
   });
 
-  it.each(DENIALS)('accepted AI-misreading residual: false declaration from a denial is operative, quote visible: %s', async (quote) => {
+  it.each(DENIALS)('L4 row (c): an unverified false declaration from a denial is nonoperative, with AI origin and retained evidence: %s', async (quote) => {
     const brief = FX.brief.replace(SENTENCE, quote);
     const { graph, result: acceptedResult } = await construct(declare(run5Shape(), { quote }), brief);
-    expect(node(graph, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: true });
+    // L4 explicitly supersedes the L3b wrong-author expectation. Keep exact assertions RED until the source is fixed.
+    expect(node(graph, GOAL).nonlinear_identity).toEqual(undefined);
     for (const from of [EXISTING, PART]) {
-      expect(edge(graph, from, GOAL).provenance).toMatchObject({
-        source: 'brief_extraction', magnitude: 'user_stated', source_quote: quote, definitional: true,
-      });
+      const p = edge(graph, from, GOAL).provenance;
+      expect({ source: p.source, magnitude: p.magnitude, source_quote: p.source_quote, definitional: p.definitional })
+        .toEqual({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', source_quote: quote, definitional: false });
     }
     expect(acceptedResult.open_questions[0]).toContain(`Brief quote: “${quote}”`);
-    for (const k of OPERANDS) expect(naturalLinks(graph).get(k), k).toMatchObject({ exists: 1, mean: 1 });
+    expect(node((await runRequest(graph)).graph, GOAL).nonlinear_identity).toEqual(undefined);
     const inconsistent = partWithLevel(goalLevelAsRun5(served()), 15);
     const { graph: rejected, result } = await construct(declare(inconsistent, { quote }), brief);
     const { graph: plain } = await construct(inconsistent, brief);

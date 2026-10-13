@@ -1,0 +1,62 @@
+[
+  {
+    "run": "A-d1",
+    "file": "A-d1-call-1-response.raw.json",
+    "sha256": "04753f45e84755aee38bbd4ebfba13a106b186479fc343d340cff4d497124842"
+  },
+  {
+    "run": "A-d1",
+    "file": "A-d1-brief.txt",
+    "sha256": "c5f2dacf88474c22ba4f84d82d1a5e5eb6904485cda15d7946490fd33bccef4f"
+  },
+  {
+    "run": "A-d2",
+    "file": "A-d2-call-1-response.raw.json",
+    "sha256": "08cf3bedeee354e03b4bcd26ed8675e37bb3f738a21818118195cade84e81a54"
+  },
+  {
+    "run": "A-d2",
+    "file": "A-d2-brief.txt",
+    "sha256": "c5f2dacf88474c22ba4f84d82d1a5e5eb6904485cda15d7946490fd33bccef4f"
+  },
+  {
+    "run": "N1-d1",
+    "file": "N1-d1-call-1-response.raw.json",
+    "sha256": "d3d4e9b62a0851a7d088d1be9a9d518c2b9517e1d4636e71972118a4d3169055"
+  },
+  {
+    "run": "N1-d1",
+    "file": "N1-d1-brief.txt",
+    "sha256": "b57c760b483d60f32ca3808e70ad2874d2bf70401a14c3eaae7240e585c507dc"
+  },
+  {
+    "run": "N1-d2",
+    "file": "N1-d2-call-1-response.raw.json",
+    "sha256": "7fde3280ef2048c2d96d48c76dc3c40148ad07f4e2d3e68b1f6dc25b3b76d12e"
+  },
+  {
+    "run": "N1-d2",
+    "file": "N1-d2-brief.txt",
+    "sha256": "b57c760b483d60f32ca3808e70ad2874d2bf70401a14c3eaae7240e585c507dc"
+  },
+  {
+    "run": "N2-d1",
+    "file": "N2-d1-call-1-response.raw.json",
+    "sha256": "b8fdbc1cc46ceefeeb2e575a2d87072d3f789646bb0381950d2b592ccd3c467c"
+  },
+  {
+    "run": "N2-d1",
+    "file": "N2-d1-brief.txt",
+    "sha256": "f1011a53548b70abf7de15e3c61e9876d6180fd876cd490d44a73e999d7048a5"
+  },
+  {
+    "run": "N2-d2",
+    "file": "N2-d2-call-1-response.raw.json",
+    "sha256": "7b0393dfad85bf6cdd0f5a317fa0a808d765b8331af702d91072604363c39996"
+  },
+  {
+    "run": "N2-d2",
+    "file": "N2-d2-brief.txt",
+    "sha256": "f1011a53548b70abf7de15e3c61e9876d6180fd876cd490d44a73e999d7048a5"
+  }
+]

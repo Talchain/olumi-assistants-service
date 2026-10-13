@@ -2281,7 +2281,9 @@ export async function buildModelFromBrief(
     // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
     // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
     const setAside = setAsideEstimatesOf(admitted.loss);
-    const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
+    const openQuestions = questionsAfterSumAdmission(
+      withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside), admitted.loss,
+    );
     // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
     // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
     // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
@@ -2741,6 +2743,27 @@ function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAside
   if (amounts.length === 0) return questions;
   const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, a, b);
   return questions.filter((q) => !findStatedAmounts(q).some((w) => amounts.some((a) => same(Math.abs(w.magnitude), a))));
+}
+
+/** A refused sum cannot retain drafter prose describing that quantity as calculated.
+ * Match the declaration's exact quantity labels, not affirmation/denial phrases. The
+ * admission receipt supplies the explanation; independent questions remain verbatim.
+ */
+export function questionsAfterSumAdmission(questions: string[], loss: AdmittedModel['loss']): string[] {
+  const refused = loss.flatMap((entry) => {
+    const before = entry.before as { operation?: unknown; outcome?: unknown; factors?: unknown } | null;
+    if (!entry.field_path.endsWith('.nonlinear_identity_rejected') || before?.operation !== 'sum'
+      || typeof before.outcome !== 'string') return [];
+    const labels = [before.outcome, ...(Array.isArray(before.factors)
+      ? before.factors.filter((f): f is string => typeof f === 'string') : [])];
+    return [{ outcome: before.outcome, labels, reason: entry.reason }];
+  });
+  if (refused.length === 0) return questions;
+  const words = (s: string): string => ` ${s.toLocaleLowerCase('en').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
+  return [
+    ...refused.map((r) => `${r.reason} What definition and current figures should be used for "${r.outcome}"?`),
+    ...questions.filter((q) => !refused.some((r) => r.labels.some((label) => words(q).includes(words(label))))),
+  ];
 }
 
 export function userFacingDrafterQuestions(parked: unknown): string[] {

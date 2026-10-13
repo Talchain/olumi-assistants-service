@@ -1,0 +1,988 @@
+{
+  "id": "resp_01669270f3906308006ace32ef423887d2af2df15fc0c6473c",
+  "object": "response",
+  "created_at": 1791898351,
+  "status": "completed",
+  "access_programs": null,
+  "background": false,
+  "billing": {
+    "payer": "openai"
+  },
+  "completed_at": 1791898367,
+  "error": null,
+  "frequency_penalty": 0.0,
+  "incomplete_details": null,
+  "instructions": "For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (\u00a3150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0\u2013100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi\u2019s estimates, never user figures. The status quo has added_capacity null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. Ask for the date first, then how long today\u2019s team takes, then when new people start. Never ask today\u2019s level of the event goal. r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership. For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership. When the brief DEFINES a quantity as other quantities added together (\"total = the existing 80 plus the additional capacity\"), declare it in identities with operation sum: the total\u2019s exact model label, every part\u2019s exact model label, and evidence.quote the complete defining sentence. Include every addend once; represent a stated constant as a part with its own stated level and unit. Every part needs a level today in the total\u2019s unit, using the supported factor/quantity shape. A stated amount (\"the existing 80\") remains that amount. Use zero today only when the brief establishes that this contribution is absent, or when the quantity is an additional increment from today that is zero by construction; retain which reading it is, rather than calling a derived zero an observed fact. If its level today is unknown, keep that uncertainty or identify your proposed estimate as yours; never invent zero merely to make the sum computable. Link each sum part to the total at +1 per 1 with definitional true. A sum the brief does not define is your own modelling interpretation: declare it only with evidence null and inferred provenance, preserving any uncertainty or unresolved qualification. An addition-only sum must not encode subtraction, a missing addend, or an overlapping component counted twice. Produce a complete causal decision model from the brief in ONE pass. Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input. Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance \"explicit\". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target. For each option fill `interventions` with its factor settings. value_kind:\"absolute\" means the resulting total or level; value_kind:\"additional\" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options. Mark the option that keeps things as they are now with is_status_quo:true \u2014 at most one option, whatever it is called \u2014 and give it no levels; every other option has is_status_quo:null. KEEP AN ACTIVITY\u2019S EFFORT AND ITS COST APART. When the brief weighs an activity against its overhead, time or cost (\"whether the overhead would be worth it\"), draft TWO quantities, never one that means both: the EFFORT the options set, named for the activity itself (for example \"Hours per week on angel outreach\"), linked to what that effort produces; and its COST as a separate factor, outcome or risk (for example \"Fundraising admin time\" or \"Distraction from the product\"), linked from the effort and on to what it harms. Never name a lever the options set for its cost (\"overhead\"), and never let one node carry both the benefit and the cost of the same activity: a user who sizes it must be able to tell which one it is. This never splits MONEY the options set: a budget, a price, a spend or a split of spend IS the lever, and stays ONE quantity in its own money unit. Connect options to the controllable factors they change, then through supported causal mechanisms to risks and the goal. Never emit a direct option-to-risk link: it cannot be interpreted as an option setting a risk value. Retain each meaningful risk hypothesis, its sign and its downstream path; express its exposure through a causal factor or mediator, rather than deleting the risk or claiming equal exposure. A RISK THAT CUTS A MONEY GOAL IS THAT MONEY. When the goal is an amount of money the user wants MORE of (funding, revenue, MRR, profit), draft each risk that would cut it as the money it would cost, named for that loss (for example \"Funding lost to fundraising distraction\"), in the goal\u2019s money unit with a plausible_max, and link it to the goal with effect_amount -1, effect_per_source_change 1 and definitional true: money lost to it is money the goal does not get. What causes it still links into it as usual. This rule says nothing about a goal the user wants LESS of (a cost or a spend). EVERY OPTION MUST SAY WHAT IT DOES \u2014 except the one marked is_status_quo, which names no changes and no levels because it keeps things as they are. Any OTHER option (not marked is_status_quo) with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. The option marked is_status_quo is meant to be empty \u2014 it is compared by holding today\u2019s levels, so leave it empty. If the brief does not say what an option changes, still decide which factors it ACTS ON \u2014 that is a structural claim \u2014 and then give each one a level. EVERY FACTOR IT ACTS ON NEEDS A LEVEL: for every option except the one marked is_status_quo, put one `interventions` entry for EACH factor it acts on \u2014 the user\u2019s own number where the brief states one, otherwise your estimated resulting level (value_kind:\"absolute\", provenance ai_proposed) in that factor\u2019s own unit and plausible_max frame. A factor an option acts on with no level leaves the user a value question before anything can be calculated. Use `changes` ONLY for a factor where no defensible level exists, and name that missing level in `unknowns`. Every factor an option acts on also needs a baseline_value (a provisional estimate with baseline_known:false when the brief gives none). An option (other than the one marked is_status_quo) that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping. KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE \u2014 BUT NOT THIN. The shape to aim for is this envelope: one goal; EVERY option the user stated, never dropped or merged, and normally 3 to 5 options in total \u2014 when the user states fewer than 3, add carrying on as now if they did not state it, then the strongest alternative the question itself points to (such as a partial, phased or smaller version of a stated option), each marked \"ai_proposed\"; roughly 4 to 8 factors that actually move the goal \u2014 besides any factor an option sets directly, name the MECHANISMS through which those changes reach the goal, never an option merely restated as a quantity; and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could reverse the answer). ALWAYS KEEP AT LEAST ONE RISK: the downside that could reverse the answer is part of the decision the user must weigh. The rules below limit how a risk is LINKED or SIZED; none of them is a reason to leave a risk out. EVERY RISK THE USER NAMES IS DRAWN AS A RISK NODE: each downside the user states in their own words (for example that they will run out of money, lose a key customer, or miss a deadline) is its own risk, linked to what it threatens, even when you also draw a risk of your own. A RISK THE USER NAMED OUTRANKS THE ENVELOPE: when the risks the user named do not all fit beside your own, leave out your own risks and outcomes first; never leave out or merge a risk the user named, even when that takes the model past 6 outcomes and risks. A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. Stay within 18 nodes and 30 links in total, counting one link from the decision to each option, one from each option to each factor it acts on (for the option that keeps things as they are, each factor the other options act on) and each entry in `links`. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas. THE ONE EXCEPTION IS THE USER'S OWN MATERIAL: when what the user stated (their options, figures, relationships and the risks they named) cannot fit this budget, keep all of it and leave out your own additions; that model is admitted, not refused. Every option you add must differ from every other option in at least one factor level; a test, pilot or phased rollout of another option is not a separate option unless it sets a factor the model holds to a different level, such as the share of customers it reaches. Mark provenance honestly on EVERY item: \"explicit\" only for what the user stated, \"inferred\" for what you read out of the brief, \"ai_proposed\" for anything you added beyond it. A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 \"to 40%\", \"by \u00a33m\", \"under 4 weeks\" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 \"increase productivity\", \"cut churn\", \"improve velocity\" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for. State the goal\u2019s `frame`: \"level\" when the user names the level to reach (\"MRR to \u00a3250k\", \"keep the bill under \u00a340k\"); \"change_rel\" when they name a PERCENTAGE change from today (\"cut the cloud bill by 15%\", \"grow MRR by 10%\"): `value` is that signed percentage (-15, or 10); \"change_abs\" when they name a change from today in the metric\u2019s own unit (\"reduce churn by 2 points\", \"grow revenue by \u00a35k\"): `value` is that signed amount. With no number, \"level\". `unit` is always the goal metric\u2019s own unit, the unit of its current level. NEVER PICK THE SCOPE OF THE GOAL SILENTLY. When the goal metric could mean one part or the whole \u2014 the brief says \"MRR\" or \"revenue\" and the decision is about one plan, product, segment or region \u2014 set `goal.scope`: `modelled` is what your model actually measures (e.g. \"the Pro plan only\"), `alternative` is the other reading (e.g. \"all plans together\"), and `stated_in_brief` is true only when the brief itself says which. Keep `goal.metric` in the user\u2019s own words: Olumi states the modelled scope as its own assumption and asks the user which they meant from `goal.scope`. When the goal metric has no part-or-whole reading, `goal.scope` is null. DECLARE A PRODUCT ONLY WHERE ONE HOLDS BY DEFINITION. When a quantity you keep is, by definition, other quantities you keep multiplied together \u2014 a plan\u2019s revenue is its price times its paying subscribers; a cost is headcount times cost per head \u2014 add one entry to `identities`: `outcome` is that quantity\u2019s EXACT label, `operation` \"product\", and `factors` the EXACT labels of every quantity multiplied. Still state each factor\u2019s own link toward the outcome in `links`. Only a definition, never a correlation or a guess. `identities` is empty when none holds. A STOCK AT THE DEADLINE IS WORKED OUT, NEVER GUESSED. Only when the goal states a deadline in months AND the goal depends on a stock that loses a share each month and gains an amount each month (paying subscribers with monthly churn and new sign-ups): add an outcome labelled with the stock and the deadline (e.g. \"Pro subscribers at month 12\"), link the stock today, its monthly churn and its monthly new additions each DIRECTLY to that outcome, and add one entry to `identities` with `operation` \"accumulation\", `outcome` that label, and `factors` EXACTLY [the stock today, the churn as a percentage per month (unit \"%\"), the amount added per month], in that order. Each of the three needs today\u2019s level. Whenever an accumulation is declared, the goal\u2019s PRODUCT in `identities` over [the price-like part, \"<stock> at month N\"] is REQUIRED; link both parts directly to the goal. Never use it for a churn stated per year, or without a stated deadline. When the brief states the goal\u2019s level today and its monthly change, the accumulation outcome may be the GOAL itself, with no product required. Use TWO factors [the level today, the net amount added per month] and reading \"net\" ONLY for a stated net change or an amount it \"grows by\"; a gross inflow with no stated losses has reading \"gross\" and is refused without assuming losses. THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like \"X Improvement\" for a goal called \"X change\", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all. EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: \"level\" when the user limits the value itself (\"total first-year cost under \u00a3250k\", \"gross margin above 70%\"); \"change_abs\" when they limit a CHANGE from today in the quantity\u2019s own unit (\"churn no more than 2 points higher than now\"); \"change_rel\" when they limit a PERCENTAGE change from today (\"cost no more than 10% above today\", \"cut spend by at least 15%\"): give `value` as that signed percentage (10, or -15) and `unit` \"%\". When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound and a floor such as a minimum margin is a lower bound; never add the opposite bound to the same limit. Type the comparator the user wrote: \"<\" for \"under\", \"below\" or \"less than\"; \"<=\" for \"at most\", \"no more than\" or \"up to\"; \">\" for \"over\", \"above\" or \"more than\"; \">=\" for \"at least\" or \"no less than\". EVERY RISK AND EVERY FACTOR MUST BE WIRED IN. A node with no link, or with links that dead-end before the goal (except at a limit the user set: see THE ONE EXCEPTION below), is not merely decorative \u2014 it stops the ENTIRE model being analysed. Measured on a real model: 8 of 20 nodes were unreachable, all five risks among them, and the analysis refused outright. EVERY FACTOR YOU KEEP NEEDS ITS OWN LINK TOWARD THE GOAL in `links` (or toward a quantity the user only limits, THE ONE EXCEPTION below): straight to the goal metric (its EXACT label), or to a kept outcome that itself links to the goal metric. An option naming a factor in `changes` connects the option TO the factor; it does NOT connect the factor to anything, so a factor that only receives links from options dead-ends. Measured on a real first model: two factors, both fed only by options, neither linked on, the goal orphaned and the analysis refused. Give every risk a link to what it threatens. THE ONE EXCEPTION: a quantity the user only LIMITS (\"no more than 2 weeks of migration downtime\") may END at that limit, and so may the factors that only feed it, because a limit is judged on the quantity it names, not through the goal. Link into it what the options change, and link it on toward the goal ONLY if it really changes the goal metric. Never add a link to the goal just to connect it: migration downtime does not change the cloud bill. AND NEVER LINK AN OPTION STRAIGHT TO A RISK. An option changes a FACTOR, and it is the factor that raises or lowers the risk, so state it as `option -> factor` (through `changes`/`interventions`) and then `factor -> risk` with its own direction, and the risk on to what it threatens. A bare option -> risk link is the one shape that LOOKS connected and cannot be analysed at all: Olumi has to stop and ask how that option changes that risk before ANY of the model can run. Measured: ONE such link refuses the whole analysis, and a real first model carried four of them. If you cannot name the factor in between, do not draw the link: ask which factor carries it in `unknowns`. EACH LINK IS A CAUSAL HYPOTHESIS, AND ITS DIRECTION MUST BE STATED, NOT DEFAULTED. Take the direction from the brief where it says so; otherwise from the causal reasoning you could state in one line (\"more delivery capacity raises velocity\"; \"a higher price raises churn\"; \"higher churn lowers recurring revenue\"). Such a link is Olumi's hypothesis, not the user's claim: provenance \"inferred\" when it is read out of the brief, \"ai_proposed\" when it is your own reasoning, and \"explicit\" ONLY when the user stated that relationship. WHICH option is better is the question the analysis answers \u2014 it is never a reason to mark a factor's link to the goal \"unknown\": more capacity raises velocity whichever option supplies it. Only when you genuinely cannot say which way a link runs, set its direction to \"unknown\" AND add a question to `unknowns` asking the user which way it runs. An \"unknown\" link is withheld from the model and never counts as a path, so every option must still reach the goal through links whose direction you can state. STATE EACH LINK\u2019S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target\u2019s own unit (in percentage points when the target is a percentage level, so 4% to 3% is -1; for a goal measured as percentage change from today's level, use % of today's level as specified in CHANGE QUANTITIES, not percentage points) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), negative whenever the link\u2019s direction is negative, and `basis` one short line on why that size and direction hold, with `effect_provenance` \"explicit\" only when the user stated that size, and all three null when you cannot give a defensible size. A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING (per deal, per contract, per subscriber) belongs on the link from THAT countable to the money goal. Keep the countable as its own quantity (an outcome such as \"Deals closed\", unit \"deals\", with a `plausible_max`), link it to the goal with that size per one (`effect_per_source_change` 1, `effect_provenance` \"explicit\"), and never put the size on a link from anything else. When the brief gives a RANGE for that size, use its LOW end. What moves the countable (how many conversations become deals, say) is not stated: link it with your own estimate or no size, never \"explicit\", and ask it in `unknowns`. A LIMIT CAN ONLY BE CHECKED THROUGH SIZED LINKS. NO LINK MAY POINT FROM A RISK TO A QUANTITY IN `constraints`: a risk has no unit, so that link cannot be sized and the user\u2019s limit cannot be checked. Instead, link every factor an option changes that moves the limited quantity STRAIGHT to it and give that link its size. That sized link already carries the limited quantity moving the wrong way, so do not size that loss a second time: keep that risk as a node, linked to the goal metric with all three size fields null. Every OTHER risk stays exactly as you would draw it, linked to the goal metric or to the quantity it threatens. GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models. CHANGE QUANTITIES. When the goal is a percentage change of a quantity that has no unit of its own in the brief and whose level today the brief does not give (\"increase productivity by at least 10%\"), measure the goal AS that change: goal.quantity_frame \"change\", goal.frame \"change_abs\", goal.unit \"%\", goal.value the signed percentage (10), and the metric named for the quantity (\"Productivity\"). Every link into that goal then states effect_amount in % of today\u2019s level of it, per effect_per_source_change of its source, as the size AT the end of the goal\u2019s period, including recruitment, notice and ramp-up \u2014 never a steady-state size. For the provisional hiring calculation, use additive per-person effects at that horizon; this assumes no diminishing returns or additional onboarding interaction beyond the stated per-person estimate. Keep that assumption explicit rather than presenting linear scaling as a fact. A quantity with a unit of its own (money, customers, a rate in %) keeps goal.quantity_frame \"level\" and the frames above. TARGET SEMANTICS. Whenever the goal states a target, give goal.basis: reference \"today\", or \"launch\" when the targets are measured from a launch; denominator, for a change, what 100% is, in words (for example \"today\u2019s monthly development capacity\"), null for a level target; period_months, the months at which or over which the target is measured; period_kind \"at_end\" for the level or change AT that month, \"over_period\" for a rate or a count over the first period_months; effect_unit, the unit every link into the goal states its effect in; effects_at_period_end is true only when every incoming effect is sized for the selected period_kind: the effect at that month for at_end, or the cumulative count/period rate over the stated window for over_period, including relevant recruitment and ramp-up. Otherwise false. A deadline or period label alone does not establish the timing basis. also_required, the other conditions the user says the goal needs that this target does not include, in their words (for example \"code quality maintained\", \"spend within \u00a3200,000\"), else null; open_question, when the user\u2019s own words let the target be read more than one way (for example productivity described as a share of time, so \"+10%\" could mean 10% more than today or 10 more percentage points), the ONE question that asks which \u2014 never pick a reading \u2014 else null. With no stated target, basis is null. SEVERAL TARGETS. When the user names several success targets, keep one as the goal and each other as a constraint with role target. Give each its stated comparator and target frame by the same level/change rules; never force a change target into level. For the conversion/new-customer example both are level targets over the same first three months after launch, conversion>15% and new customers>=20. Preserve any distinct reference or period the user states; where this contract cannot represent or support it, retain the condition in also_required/unknowns with a focused clarification, rather than inventing a shared period or claiming the full conjunction. Budget, time and other constraints keep role limit. A period count is the cumulative total from that period's start, and a period conversion rate is the conversion rate over that window, never a month-end snapshot. Labels are NAMES, not sentences. Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it. Output only the schema.",
+  "max_output_tokens": 12000,
+  "max_tool_calls": null,
+  "model": "gpt-5.6-terra",
+  "moderation": null,
+  "output": [
+    {
+      "id": "rs_01669270f3906308006ace32efd12887d2b24e645ff2feb93e",
+      "type": "reasoning",
+      "content": [],
+      "encrypted_content": "gAAAAABqzjL_HfUuzCF0tXyysp-t7oH0syJEiF3b4oPsNEtzAvDHaGnGZSsA0KsVyKWZ2K2BI3mKDtmxFvls3hZpAOaMbPwDeuwqAYFAXU4ddPeW2H8ah3b7gvoHuwG54DDwAskAQS_wooojm-J_mpvz-VA7GtYJ63P4IzNXmsSCUhT-ZdcOMzs__DKRwS9UcxXt8gGOkNh51wKQd5NI-kxI6kT4QX00lf9rktRyn3b93mZbFwtzw1frDZXrdlCzL7i2GPkdOL017vnHmTpV9B0etB8E3qzjdD70pWWHLjoZFZ_fOvASAD1D9He4AjrICC55F6a2LuUfZp_KOcrU1xoJb8L6Szr6BS_vzXnvFScr0Ono-_ujYH4lZpWO-eS4VqBZYgJSbDiQuvmJ-r-bZgxGC6uIg0052fmkCPygiWYl7wRt184xNtdItnADMjqQFsO6z_ZjdlbNM8nQ3QWJGXCgUruUP_1DXcz2MYcKo2Iqmz9mTLfOiTogHwAHuIxDh0dxwCD-r38-lNJUmnUoOy4Wy1nph-_p7EQrdn3cGECPwN7lIbsdScHyLqUMxrSc6giAB0cJe0bjLhe6uDthTGllq4fQHU0wjXoMT46duLgNgrmr5TtM-vjyI6NY-txwgYc3SE_5B8jOQSVrIuWcBP29RD3sOT_LZ6Rl5ndNplqkRQ9QhRGAdSMXgD2vjGg5-WDsIUQuwwZzvqQ356BoUtR0g2iCpgUfcQVJm9B04u8AAjmyo8HZlDPagOj4wTIQ0Xab5d9JM8kqqvE46vtoh_SdWo1z6esS_M6ioQlhzTl4mmll-uw3tRXaipiaz983XuvL8-p8O9BpWqiavXt8E8dR-OwB9ns3_GY2bUoDpapGhHgxNJTqK94Ud4aY0TtZionEzbKYAmMK62mqEcTKv2RUMkb6AhF5K2sbnEk4SBQnY1QpRSezEl2NWVnXUPi-mN7NQoBR4tGstYLb9uetskx_VR9xyLP88ArELe87p8YWOymup787HofEuZq7nir6dJ6OAXkIiBHa9MedzvXSsiSs-C56x-LwudIpo8rVW0DK8eK1a5Ic5RnWZtUYvj14V214xyqVxmnYEyLCXCfElj_SCfeFEsteUK5E8_elJV0X6C0bxfyYWh-MEHzNzz2kHmQFpb2wplcpVF3-hpOX256EIy6bwzVLCyKqRZvAYp0waHnl0AV05OLoi9ZcbqzZi8oBwAskBAoW3X2IHY1mYz4JPO9AXPDO-Wiu5-NY4ilFN_7_xMrM1SPCsc-d_-9xYdDtdSI2N3nqnyc0BFiWctnh0U8h6g9UIgNVBo5S0dMsNYabyVB_FhstqHfD66fG3S7O4EZydzLcKgPtr32yPaC-iCUwYbFm2zBGh6nUlr9-yvUArb3C-Ce-dONN_30DuwPyjfSkPiT7pdnllkrdth2BBdJIDITd7DPZJrc_2g70lPURqzJPVpRhcYX-Jh78sZ128TdXGJBi9Ou-mNOfT6CQ5psACNQilf1useJvrrxFA-3snzYXIrQwVZioiZVDzhnE8kLBdI0eefQ2urHHPAsjubG25aTqbpdW7FOU4Xtg0Cb7rAdIR5j9jh6eo-To_k6hGhpSOon0h4U0CL7FUTDM9Gi-FfLMArjOhjBp2PEwyC-uUt9_o5ebVpaZqpuFXBGkqPYCID4Sw_3oEmdFlcjbHHyCtXka0Ft-0lxXG6YApJI3Sgi_L95OMLMq1ShCIRrUgPl9cN6pYmxFoS38F_-V8KdCrpP5c5tHM07b6X4_avXo86O-fRIM4XirVsjWs-EewiwvMDskhB42vPyBTLPlCJ0FDre4svKX8J8ACt7pcNGe4nTH53R1lIlaoDqhtRrHCcwGBSk0M9DA09gtdp11MBY6NZo1-pO06CoysgtfO1x6MqW4i2vBy3q2ocHgTR3jOs8RzZy6bdaYqgsNBvPTAg8AvJ3RzioCBOmw3c6f16IyyMlWWNYMiopZnXachhGHWYDJcUDsqi0Df1AgfAEBT0_3BjBtLGGQiyegHZ032ZMYsiv10a_vxE1xryiMRx5oNt6XdVEHZD60AO-vfG8q2EuK5BLACDDX6mtYs0-ZRYXzTcHzRDIPZYI-WVig9zLm7BdL5FFfxQg0OEMHMyNkfqbYAXBAx_lgBed7F-jeEmIhDp_N8r9agoigUp-dPoCvSypx8DwpxJLoVqAS9bNMFwJTNF5lNXWcMncvQn5p_6SeAHo7toklpav4seKTpQjtLnfvbWnQ_iB_iXQBIVwYzu_QGBwLBe-6RI64ghm-XPnAlJ7d3Ui6OWp-joWGnJYY74XYUxfH9GjhV76U--2EcdsrlfF5_YfY1XL9mnJixCJCMG1MvO7b0BV-9QrjjQwP1Y1ZVr_mKQyGOz2XTb9GZeQKrjCMRf9qUwFuwbe5nS6_Lti9xtLeEOEFHR2x-zvdQmfmJnXnX3b7784N3LaU1C7i2piZxpD2Y2ivejdA4o4LR2MoBkqv9hku7m2V7VHXchi_KoS2fZs8LTGTjtq2DVp2PRSmvveiLdu8NfLsOoMIM2QQcaR93QyxZamDhYzpYIUeuyOXj_g2Y_F3k_hxw1Jo8NqxfaN_FEwpdwN2P1LSukxpEYcp0y4iB80zpPnnaRdGWcwR5A55UHZmnm3pc4YbgYXx1Af3tO0QLhOQ0vVlRG3Ep2lM6ECts6rOgDxWecRrmyHvXl4tjL0rJZcldfJceSwuulQH2NduCXGf71ykGr4F5rwEgFtk2BsdVGSAvP3wu4_tZxQNQGjdTFDj9puJNhiReVHVywq5EQYvR8DKAel5QpuVavdP4KSpQJXg_jjGf8Ot5dHPUV92Z5zRSBwHmCzrha35Q5IdZVlF1Y_0Y_CV03S7RIk6AvWLwa_FevB_6p35BkHjsm88Ec-HGVswjIRsRZlBkWBa6ZWrBnuigiMAz5IMFWLvOAToCaMzVDFzDV6EU_bwFORX5e9TV7EcY_0vjjLu0jgP7r3bGFXaA2tQQSBgpN60_rhLvYNRvkffsFeItp8U8V6ocxA8XXKic9lyN6NUtKDlL3YRfQBXFtqSF5yuN0VPqOzVw5zbhCsl2SR7htHaq6VqEfDwpV0mbDhMhM-SG0T0pm3Zl4rPc8d5SPSaB24buf1dYnErKTeEJaBScZkbWh-dj9evo0WvkI6tmIqkIlk96jvTLACdNRCqsy_wPg00mmSI4IYurOwbnioBRecpgTVPee0kiwW7xkPdJ1YJeVHRnEYG2HPlWzXlyKE7Gm-hz1a9mEMJb_bgtI08LrkzHe18ayMHdcRhbQbQriI4c-L8gIrdG5p7JfUqt-5QvBTzfHWCFPvuYnClyqsnDmgDYU6KOt3GHMOsG6z2B3JnkVmmsg16BwSXRjk-yA6lp7By9toSwpkSxqeXrU-rwE3JXq1pQS0n3skrOvd9X97bwp2UELlGkxFuUwh15WNzQYP_E0EaZxGZQpnjOhxasz2FjLbgFEbhtxYOdSXiFW9y0YYoIAvsOc4WRE2ZrTfUPTj1VcqwCENqJHO1empdxhWObtJu0_PA-6x-lECgG5TJz8GOfrfpGo9s1Pov0-BGoMgQiB-o07yXH3rOJNp8Jxpu01eWJ-FReu3c-5oILarL9rnyRTW3uTdO3dY4QISQ-Jf17EEgb0fMGLAhbQ8OxhU59PdD-80YpLHH-iLhJCpmMBoij1tHeQK8HPL0UiXM3FUIaVTe_q0E1X0iA5Q7_71VjcDymx2Udd08NQ6QT7UEVWZet4U6dmSaRTFhNEanV9i8JpTZ9p-vpmCmCztzmo6wG39LurnFyUEVN1GWxr0r0dPyWAezQA7IXBBdoQq3nYxlP2f4C3K0J_aFpX4iaafoiYF4aM8jsHW834Fw8NSAG2nspNz5fZI6ExfhRUmrDVnZ2VfVmZGd3eFZh2KMazQpDkQLgZPGOwrRpuz6j81tYETV9kJtTQjUrb8-8iMUJFntsb3rDxdSsPP_8McH-JGG1s2xCqB4P1NT6p5v-c_naBZtU0sXefKKHwziN9IqxiKuNxpLOubMT9i_NNaQnZdUBDT7HcPHFe6rSz-dxesGb3l18LnIsOLlPMVdf7i85xqHjAqOYgJdSkG5lQyDUy6PBVQgzpTfZTE3cIqVWQJ8ZGTOD4v5jQYXoJZDYaksS0TOkE2SlDbBNu5IeD_pKW_4_MNyrZldmOYHDLhQCpWyRc33pZeR7FbXSGWVkFX7oUm6ZNTaPcMgUSNYbN-Ym_dXNChclhheOfng5vGim-gR03UFq2euQSwJRhHly39MvvBe6U09F6n2ifCr0ne37uhdkJ3WdPAviSI8OW30zasYYUgJ4TW9xDM_YptQxoy63x02R3fUnbulrkxj4Ng5IL-ey29jgmLqwe_cbql3o2j7bYyuexJ1rn8Nc2jSUJ8TyAxHLMsYcQNUJEvhQBQGHk1U06fVHLzV6gRmfY9pe9tsZrKw8hVFie9G1-nQtqdPNcUohDJH0VT3c_scaFoG4tUoGzKdD9L1cp4gD8SUF_HSXSQSLnc-igBUsT1viiomJzTCrbCDsZw1yE0XSWekjOQe1Pn6IePV6zZ5xNmNmFokxIC2k15Qf9ZSJcJwkNjHcML4PrwxxF7vXe7lYhtpzXhPCQUGxj_8reSXSz7YLY626YDufCD6J_1MatXWSDlYWw73zPvjpJ5VKlrJRH5wm1CDdT64b1fFCznIkAtyrEWtQc2M1wRLjBcjALsIE3H7wnRripiueWQwfk77a0Nqusq7TqvxYJgLSlatVpMBprSlGmnnIDJxBgHc8Th6DZMqqyoVGojEgNJzIL73e99K4EYZDUXVkjaqJxcO7GSKeqZcqZfsa8XIqsFEyC8QSLUpqtuqKWdX4x_lPOi1YzZF-rQ1UIgXPoEgbQwIoiv4b6j6rp34zM_X6EyNpoi8Fv7DcA5rjlc_I-kZFL4HVfggyCnyrrdRWaD0hYE0LA588adR2N6N9x3M7ywWYgkByJIOeFHx9pa_RFX1MYY493hZKUmO-IRovyBY2emHFSNioEr6GdKW7rzkUKSj8a8t4zQvtjhTXhft2_AnyUQMYQwnkfcPJSOhQP5naqm2ChuZuW35uNyg1psMX0rO9wGGpwSNv0GLHpik2UQh633Kp-_00u8foaSd4AQwxXk_IqRpPjBkvJgS83ouSRwLe78LwrUxFFPzPXVI0_zmqWaazQcY4fQxu3b_UWOr6vqbetqVYE4_yyXWym-nP71A6H54UZd-KdEuzJbBuWjs4DEXU_KsSNS4zCu9tvCsGKXm6qEFw1WEuuNm4E4KbGlmMJnO8S-6wD2YKGxZNVMFP2CzjY0lVZeE6q2tdn_ah2Tt61nfAZai5jhh9v8WxAFrSqLPxgl9pEjp9HxhaIBXMqTICgb24Su_b-2OMnkrzqlKPdoFM5Pbas9k9htU2x0uppmmlVcg3_Po2s_cz5gdTF_pmxuoj02X_mL_NiIHVwkXXiDWtHXfQdw6hQ4AUeysm9KXewNG0jgqN38Fh5XHq2ZJQMyYtYkxHVuPsrRQ_tFPhSntQmmOtoOinozFfqUGVGNpPOmNeZ6PpsW-ajpD7aae59wOJT3wfuhAspfC1D5MIaFywE8ZJCOmnHxjpduClmZ6IXS10MWuuJ-odCvT3z0IFg8OflslYJ-PXZbYfr9ZMEF4yfikN7d2Zztpt3kqD2TwVG-MRDnqOs2lsyzM6BocitB_8uZW29Nlx0PkLnFTdmuDot9dycMRsazMX7IkwgFWgwilvPGVv41OiukZkcWjULWN_9Duq7KSBYBbE4NgX9O3p7LUJtNhpN2-umPlidAimXE522Z0342uT5wjZ1OsQ4sWDpaX9CsCvrYhRP1zwtE_nawmD5w9rGzGvGySRqVlT1SY7bEcQCyCKIiRvF8ZzNYcpFerUJg1cMUYLim5CJzF6DjO-Bhtd8TYg0w78ZHKEXLjFEMDMqRXUkUatLbrFA4bnUh9o2XVuQoDo3t8tBld7S-czJPEzO4wB8Cq7-pidhAcjjp_aiKRGkmLRcaTQ3K60Ug9D44vtp9gSX09sU5bYYZVJipkJjbRWeVNohXqj5JDwT9RbVY_ycqNxer3L2nHkdLgqGe79IIvNxJGzsHJfvWc_fevEkqN1aLJvz5lWB6Sysh30hG4s0BCzLo1bE4cXPWbz9y_27cgAB2QVUkgl5gxPtFTrw8V7zJ2HipKKlsmUM1iM4zdDIdmiw3skTCS8m8R76J-OL-R2pAVZxRcGhxKocyxooMhty6hUbT-Jl6PCiVS7hjFXuOTe8IW-0TEnLS7fgbXGg6HbHAMKCFR-6K8ZmU-U9vjRKZIj4XznbDO1vW_bz1t8-nxxajwoWRiqvOzRyfQPnfBtukdSCBk3z3GgP3hu35Hmzw7YqIfqmz35FdAbAb7bdqUEsuYukGVH56UfNqiRfo1yQQvZwbns-TXU-jJmOHavniXmO7o1DQQwJI4DaP_bJ2JUZJOUaeTZFe6R10LolKn5mlRaIpPm5k6AWHkX9XNnjr4N-XQvhgdAtHUuwKyAlYkAN1JRaqDca9-2A-lg4j1EAubxzT3Tc2s867I09wG5KlJ1niEOiYJaZpcArP1tTx6nU-nHMdd0j6ryT0ftTzUXtUkoob6n0CdCYUISQiuyuVflPrepnbXUyc2EP1Qwte70EFnzv7286ot8SJMckPn0M9Kf8MtDTGlDo3zzqiY7VQUoTDkNKV695gdtHKlIGVMTrTSVII69_P-HfrF5B_5o34zFcUnyFL2uCy57Pfykopt47Kd0XgTxI91sEg0Qm33w1_HXkv6vMdz1fhjDmNj-zmEORJtebvPTVFg6nZo2qiSBp2CaLJcBMXVdny7LL6GSaXZ5Bq18rZXjiwgiJqu9EFpvnCOALx9avwi6QxkMCeDVPIACro3qEHF-z-VoIp-KXB_oPXz9LddJSurU-egcnYvW4jWYa6byvxRNIPPSxt5SU_-Tp5cFGw2z5Dx3ztqaFPetXBk0v5UZId5MlFNGfTjeM62-LH9T1OoBES2YbeDPTyR9ZxY0VoQbxIfTmMckrmb_fHYT4BJRZSC2tTegLU7yngq5qHR-bn2RNOhCYMBySG1zo3VNumsuLY7XC5jWm3OVDEwFaPbomJhMN8koDoXu15x1wtVoxED1KMYoe2KOFU73YN9pt5e2lJhUIdmU5uxNlhBfc_y4e257PwEsbiolgZ8f74XH9_BzVE60aLQYPb7BYdI-NzGnRHwpSXYdd539dk-nmW0GhmSo93ufejua-VSWvsqgO5zEU8AlaLtJZ22H2GPiPrbQetJgwfp1KFfC4ZH4wX4Si6gK7L-rufr1H3s06V8afNpU1mlOICKfMuaTTW37W_Zc7bySsKvcY5eYQMXRycUreWRt6mujCyBEFNCERfIxmBsSxAQMV3XWZbedmQSB-26fW4XLeg3duWSyk1kSdg0kU_39mOaalpNg_rbgPTarZgcHggZmy4VitAU8MsmwPTzanXPx3p5aFB1VniHLD6-kVpwh7NtDJKPZtzHIDlcWbo9mDQc-TGgXTCgx6lTj8ECRiEP-iDqUqypCYBcTupST83W8Aiv6lDVJVdmLAknc4vOCZIbKucr4UzxQ8MEopJ0yJn-ey_hzii3jPwBUIkBT8I5f8KxyphA3rmvpKeEkq2N8OK7xM6gp4c18Fb2ASuK6feiwXTqn1z6Z0nvHjjgK8uTjNxPXDbO8VDgzENhoU_Bke2YBn7nCBATdK-7ndrvUU9D5py5Efj4bcimyIWbcQLBiH0TQGIF2zSq7Ax9Z3Vewpl3eStWiZRDgpbTda7whriJ1Xem8N9_OEFYeedc_ow51aznB_jf7CiBlnaP3G-OIL7sQGSnZ95fq2po0CJ0avgGVSutPU7vcbmFEH00gHhFmI19rQEb-T0Z3kNBIlZvvhAsfHMi81RyDprQ8RnMNwcjOyh3RoeM5y-zaVPeK2gbyOCGltcyOYoWaIWinebSZ1prTXmHLmoqqIGQfTiCINpL7Ud0o5rCK-JIOr1QmP7tBTfuPiDIdsyFwTePjneiCWNjyUDwjZaznyvPz36ymxxYV-Lg-K_PHhT1UOrAKSRQpljj85F5wzjmy2ERZYtrLojlghplUm-pycPj0Ouu8pz-XsVRHCzPSF0S025Jz_cDL_mYc5OHxBauQRRcDcCcVntSERTPoRUzHIzxpudBnV4lbwfNqHVdlWFN3QmUIx4YFcSKtQprPWVlKZoljBfNX7PUmEt4txG0wZgdeyd2IZdlVdOFyu5yccgasNjnG5N17pZjvzSu8UI5EdzXOxFW-SlbtTR8vtu_mvOF5tScDDsydJnH_sSieyyhM-G2JCNC5QXdGAo1edwOVw7IL9YO7F_5qjU-khH0nxi0PDeS2eRgrsc4ijNR-QPBUWI1NcvGdRTjHGxNldLAHK9183q-mkrAwyaASB308AYV4WLXQlIAAE21aao6FiQpG9idBghYrPJwCQMpSmfd6SkwbAThyjchHRLPFFZ0ayk=",
+      "summary": []
+    },
+    {
+      "id": "msg_01669270f3906308006ace32f801b087d28576b24d54196f20",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "logprobs": [],
+          "text": "{\"goal\":{\"kind\":null,\"deliverable\":null,\"metric\":\"Weekly support capacity\",\"operator\":\">=\",\"target_stated\":true,\"value\":100,\"unit\":\"tickets per week\",\"horizon_months\":null,\"provenance\":\"explicit\",\"frame\":\"level\",\"baseline_known\":true,\"baseline_value\":80,\"baseline_provenance\":\"explicit\",\"scope\":null,\"quantity_frame\":\"level\",\"basis\":{\"reference\":\"today\",\"denominator\":null,\"period_months\":null,\"period_kind\":\"at_end\",\"effect_unit\":\"tickets per week\",\"effects_at_period_end\":true,\"also_required\":null,\"open_question\":null}},\"constraints\":[],\"options\":[{\"label\":\"Keep current staffing\",\"provenance\":\"explicit\",\"changes\":[],\"interventions\":[],\"added_capacity\":null,\"is_status_quo\":true},{\"label\":\"Add one specialist\",\"provenance\":\"explicit\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Additional specialists\",\"value\":1,\"value_kind\":\"additional\",\"unit\":\"specialists\",\"provenance\":\"explicit\",\"stated_evidence\":{\"quote\":\"Add one specialist adds one specialist.\",\"start\":180,\"end\":218,\"amount_start\":205,\"option_quote\":\"Add one specialist\",\"option_start\":159,\"option_end\":177}}],\"added_capacity\":null,\"is_status_quo\":null},{\"label\":\"Add two specialists\",\"provenance\":\"ai_proposed\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Additional specialists\",\"value\":2,\"value_kind\":\"additional\",\"unit\":\"specialists\",\"provenance\":\"ai_proposed\",\"stated_evidence\":null}],\"added_capacity\":null,\"is_status_quo\":null}],\"factors\":[{\"label\":\"Existing team ticket resolution\",\"role\":\"observable\",\"baseline_known\":true,\"baseline_evidence\":{\"quote\":\"Our existing team resolves 80 tickets per week.\"},\"baseline_value\":80,\"unit\":\"tickets per week\",\"provenance\":\"explicit\",\"plausible_max\":500},{\"label\":\"Additional specialists\",\"role\":\"controllable\",\"baseline_known\":true,\"baseline_evidence\":{\"quote\":\"Keep current staffing adds no specialist.\"},\"baseline_value\":0,\"unit\":\"specialists\",\"provenance\":\"explicit\",\"plausible_max\":20},{\"label\":\"Ticket resolution per additional specialist\",\"role\":\"observable\",\"baseline_known\":true,\"baseline_evidence\":{\"quote\":\"Each additional specialist resolves about 20 tickets per week, between 10 and 30.\"},\"baseline_value\":20,\"unit\":\"tickets per specialist per week\",\"provenance\":\"explicit\",\"plausible_max\":100}],\"risks\":[{\"label\":\"Specialist capacity variability\",\"provenance\":\"explicit\",\"unit\":\"tickets per week\",\"plausible_max\":100}],\"outcomes\":[{\"label\":\"Additional specialist capacity\",\"provenance\":\"inferred\",\"unit\":\"tickets per week\",\"plausible_max\":500}],\"links\":[{\"from\":\"Existing team ticket resolution\",\"to\":\"Weekly support capacity\",\"direction\":\"positive\",\"provenance\":\"explicit\",\"effect_amount\":1,\"effect_per_source_change\":1,\"effect_provenance\":\"inferred\",\"definitional\":null,\"basis\":\"Existing team ticket resolution is part of weekly support capacity.\"},{\"from\":\"Additional specialists\",\"to\":\"Additional specialist capacity\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":20,\"effect_per_source_change\":1,\"effect_provenance\":\"explicit\",\"definitional\":null,\"basis\":null},{\"from\":\"Ticket resolution per additional specialist\",\"to\":\"Additional specialist capacity\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":1,\"effect_per_source_change\":1,\"effect_provenance\":\"ai_proposed\",\"definitional\":null,\"basis\":\"Higher ticket resolution per specialist raises additional specialist capacity.\"},{\"from\":\"Additional specialist capacity\",\"to\":\"Weekly support capacity\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null},{\"from\":\"Ticket resolution per additional specialist\",\"to\":\"Specialist capacity variability\",\"direction\":\"negative\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null},{\"from\":\"Specialist capacity variability\",\"to\":\"Weekly support capacity\",\"direction\":\"negative\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null}],\"identities\":[],\"unknowns\":[\"The brief says that total weekly support capacity is not the existing 80 tickets per week plus the additional specialist capacity. What is the rule that determines Weekly support capacity after specialists are added? Until this is specified, the effect of additional specialist capacity on the goal cannot be calculated.\",\"Does the stated 10\u201330 tickets per week range represent expected specialist capacity after onboarding, or a range of possible outcomes?\",\"What downside could make added specialist capacity lower than expected (for example onboarding time, ticket mix, or coverage overlap)?\"],\"decision_question\":null}"
+        }
+      ],
+      "phase": "final_answer",
+      "role": "assistant"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0.0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "24h",
+  "reasoning": {
+    "context": "all_turns",
+    "effort": "low",
+    "mode": "standard",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "store": true,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "json_schema",
+      "description": null,
+      "name": "whole_candidate",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "goal": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "event_by_date"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "deliverable": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "metric": {
+                "type": "string"
+              },
+              "operator": {
+                "type": "string",
+                "enum": [
+                  ">=",
+                  "<=",
+                  ">",
+                  "<"
+                ]
+              },
+              "target_stated": {
+                "type": "boolean"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "unit": {
+                "type": "string"
+              },
+              "horizon_months": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "provenance": {
+                "type": "string",
+                "enum": [
+                  "explicit",
+                  "inferred",
+                  "ai_proposed"
+                ]
+              },
+              "frame": {
+                "type": "string",
+                "enum": [
+                  "level",
+                  "change_abs",
+                  "change_rel"
+                ]
+              },
+              "baseline_known": {
+                "type": "boolean",
+                "description": "True only when the brief states the goal metric\u2019s CURRENT level."
+              },
+              "baseline_value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The goal metric\u2019s current level in the goal unit, exactly as the brief states it; null when the brief does not. Never an estimate, never the target."
+              },
+              "baseline_provenance": {
+                "type": "string",
+                "enum": [
+                  "explicit",
+                  "inferred",
+                  "ai_proposed"
+                ]
+              },
+              "scope": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "modelled": {
+                        "type": "string",
+                        "description": "The part or whole the model measures, in words, e.g. \"the Pro plan only\"."
+                      },
+                      "alternative": {
+                        "type": "string",
+                        "description": "The other reading the goal could have, e.g. \"all plans together\"."
+                      },
+                      "stated_in_brief": {
+                        "type": "boolean",
+                        "description": "True only when the brief itself says which."
+                      }
+                    },
+                    "required": [
+                      "modelled",
+                      "alternative",
+                      "stated_in_brief"
+                    ]
+                  }
+                ],
+                "description": "Null unless the goal metric could mean one part (a plan, product, segment or region) or the whole."
+              },
+              "quantity_frame": {
+                "type": "string",
+                "enum": [
+                  "level",
+                  "change"
+                ],
+                "description": "\"change\" ONLY when the goal metric is itself measured as a change from today (see the CHANGE QUANTITIES rule); otherwise \"level\"."
+              },
+              "basis": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "reference": {
+                        "type": "string",
+                        "enum": [
+                          "today",
+                          "launch"
+                        ]
+                      },
+                      "denominator": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "period_months": {
+                        "anyOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "period_kind": {
+                        "type": "string",
+                        "enum": [
+                          "at_end",
+                          "over_period"
+                        ]
+                      },
+                      "effect_unit": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "effects_at_period_end": {
+                        "type": "boolean"
+                      },
+                      "also_required": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "open_question": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "reference",
+                      "denominator",
+                      "period_months",
+                      "period_kind",
+                      "effect_unit",
+                      "effects_at_period_end",
+                      "also_required",
+                      "open_question"
+                    ]
+                  }
+                ],
+                "description": "What the target is measured against (see the TARGET SEMANTICS rule). null when the goal states no target."
+              }
+            },
+            "required": [
+              "metric",
+              "operator",
+              "target_stated",
+              "value",
+              "unit",
+              "horizon_months",
+              "provenance",
+              "frame",
+              "baseline_known",
+              "baseline_value",
+              "baseline_provenance",
+              "scope",
+              "kind",
+              "deliverable",
+              "quantity_frame",
+              "basis"
+            ]
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "metric": {
+                  "type": "string"
+                },
+                "operator": {
+                  "type": "string",
+                  "enum": [
+                    ">=",
+                    "<=",
+                    ">",
+                    "<"
+                  ]
+                },
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string"
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                },
+                "frame": {
+                  "type": "string",
+                  "enum": [
+                    "level",
+                    "change_abs",
+                    "change_rel"
+                  ]
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "limit",
+                    "target"
+                  ],
+                  "description": "\"target\" ONLY for one of SEVERAL success targets the user names beside the goal\u2019s own (see the SEVERAL TARGETS rule); a budget, time or other limit is \"limit\"."
+                }
+              },
+              "required": [
+                "metric",
+                "operator",
+                "value",
+                "unit",
+                "provenance",
+                "frame",
+                "role"
+              ]
+            }
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "A NAME, not a sentence. Keep it under 33 characters where you can."
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                },
+                "changes": {
+                  "type": "array",
+                  "description": "Factor labels this option acts on for which no defensible level exists \u2014 each one leaves the user a value question before anything can be calculated, so prefer a level in `interventions` (your ai_proposed estimate when the brief states none). Use the factor labels exactly. The option marked is_status_quo leaves this empty. An option (other than the one marked is_status_quo) that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "interventions": {
+                  "type": "array",
+                  "description": "The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "factor_label": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "number"
+                      },
+                      "value_kind": {
+                        "type": "string",
+                        "enum": [
+                          "absolute",
+                          "additional"
+                        ]
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "provenance": {
+                        "type": "string",
+                        "enum": [
+                          "explicit",
+                          "inferred",
+                          "ai_proposed"
+                        ]
+                      },
+                      "stated_evidence": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "quote": {
+                                "type": "string"
+                              },
+                              "start": {
+                                "type": "integer"
+                              },
+                              "end": {
+                                "type": "integer"
+                              },
+                              "amount_start": {
+                                "type": "integer"
+                              },
+                              "option_quote": {
+                                "type": "string"
+                              },
+                              "option_start": {
+                                "type": "integer"
+                              },
+                              "option_end": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "quote",
+                              "start",
+                              "end",
+                              "amount_start",
+                              "option_quote",
+                              "option_start",
+                              "option_end"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "factor_label",
+                      "value",
+                      "value_kind",
+                      "unit",
+                      "provenance",
+                      "stated_evidence"
+                    ]
+                  }
+                },
+                "added_capacity": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "monthly_share_pct": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 100
+                        },
+                        "lead_months_low": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "lead_months_high": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "monthly_share_pct",
+                        "lead_months_low",
+                        "lead_months_high"
+                      ]
+                    }
+                  ]
+                },
+                "is_status_quo": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "true ONLY for the one option that keeps things as they are now (the current state or status quo), whatever it is called. null for every other option. Never true on more than one option."
+                }
+              },
+              "required": [
+                "label",
+                "provenance",
+                "changes",
+                "interventions",
+                "is_status_quo",
+                "added_capacity"
+              ]
+            }
+          },
+          "factors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "controllable",
+                    "observable",
+                    "external"
+                  ]
+                },
+                "baseline_known": {
+                  "type": "boolean",
+                  "description": "True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false. EXCEPTION: a factor measured as a CHANGE FROM TODAY (e.g. \"% change from the current price\", \"extra hires\") is 0 today by definition: baseline_known true, baseline_value 0."
+                },
+                "baseline_evidence": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "quote": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "quote"
+                      ]
+                    }
+                  ],
+                  "description": "Complete verbatim brief sentence stating this factor\u2019s current level; null otherwise."
+                },
+                "baseline_value": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available."
+                },
+                "unit": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The unit of baseline_value, as the brief writes it (\"%\", a count such as \"subscribers\", \"<currency>/<period>\"). ONLY a money amount charged, paid or earned PER ITEM names that item: \"<currency> per <item> per <period>\", where <item> is what another factor counts."
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                },
+                "plausible_max": {
+                  "type": "number",
+                  "description": "REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range."
+                }
+              },
+              "required": [
+                "label",
+                "role",
+                "baseline_known",
+                "baseline_value",
+                "unit",
+                "provenance",
+                "plausible_max",
+                "baseline_evidence"
+              ]
+            }
+          },
+          "risks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                },
+                "unit": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "For an outcome that is a QUANTITY (a count such as \"qualified conversations\", an amount of money): its unit. A risk that bears on a money goal is drafted as its money EXPOSURE (for example \"Funding lost to distraction\"), with the money unit. null for an outcome or risk that is not a quantity."
+                },
+                "plausible_max": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "With a unit: a SCALE for it, exactly as for a factor \u2014 a round number comfortably above anything realistic. null with no unit."
+                }
+              },
+              "required": [
+                "label",
+                "provenance",
+                "unit",
+                "plausible_max"
+              ]
+            }
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                },
+                "unit": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "For an outcome that is a QUANTITY (a count such as \"qualified conversations\", an amount of money): its unit. A risk that bears on a money goal is drafted as its money EXPOSURE (for example \"Funding lost to distraction\"), with the money unit. null for an outcome or risk that is not a quantity."
+                },
+                "plausible_max": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "With a unit: a SCALE for it, exactly as for a factor \u2014 a round number comfortably above anything realistic. null with no unit."
+                }
+              },
+              "required": [
+                "label",
+                "provenance",
+                "unit",
+                "plausible_max"
+              ]
+            }
+          },
+          "links": {
+            "type": "array",
+            "description": "Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal). Never link an option directly to a risk \u2014 link the option to the factor it changes and the factor to the risk, because a bare option-to-risk link cannot be analysed.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "positive",
+                    "negative",
+                    "unknown"
+                  ],
+                  "description": "The direction read from the brief or from causal reasoning you can state in one line. \"unknown\" only when you genuinely cannot say \u2014 then ask which way it runs in `unknowns`; an unknown link is withheld and is not a path."
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                },
+                "effect_amount": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage-level target, use percentage points: 4% to 3% is -1. For a goal measured as percentage change from today's level, use % of today's level as specified in CHANGE QUANTITIES, not percentage points. null when you cannot give a defensible size."
+                },
+                "effect_per_source_change": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The change in the SOURCE\u2019s own unit that causes `effect_amount`: 1 for switching a yes/no on, 10 for a GBP 10 price rise. null when `effect_amount` is null."
+                },
+                "effect_provenance": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "explicit",
+                        "inferred",
+                        "ai_proposed"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\"explicit\" only when the user stated this size; null when `effect_amount` is null."
+                },
+                "definitional": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "true ONLY when this link holds BY DEFINITION, not by estimate: the source is part of the target\u2019s own quantity, in the SAME unit, so one unit of the source moves the target by exactly one unit (money lost to a risk is money the goal does not get: effect_amount -1, effect_per_source_change 1). null for every other link."
+                },
+                "basis": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "One short line, from the brief, saying why this size and its direction hold (for example \"a higher price pushes more customers to cancel\"). null when `effect_amount` is null or the user stated the size."
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "direction",
+                "provenance",
+                "effect_amount",
+                "effect_per_source_change",
+                "effect_provenance",
+                "definitional",
+                "basis"
+              ]
+            }
+          },
+          "identities": {
+            "type": "array",
+            "description": "Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (sum) added together, or (accumulation) a stock worked out month by month to the goal\u2019s deadline, including the goal itself. Empty when none.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "description": "The EXACT label of the quantity defined by the product or sum, or the stock at the deadline."
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "product",
+                    "sum",
+                    "accumulation"
+                  ]
+                },
+                "factors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The EXACT labels of every quantity multiplied, or for a sum every quantity added (each once, in the same unit as the total); for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month; for a stated net change EXACTLY two: the level today, the net amount added per month."
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                },
+                "reading": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "net",
+                        "gross"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "evidence": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "quote": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "quote"
+                      ]
+                    }
+                  ],
+                  "description": "For a sum the brief itself defines: the complete verbatim brief sentence that defines it. null when the sum is your own reading, and for every product or accumulation."
+                }
+              },
+              "required": [
+                "outcome",
+                "operation",
+                "factors",
+                "provenance",
+                "reading",
+                "evidence"
+              ]
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none."
+          }
+        },
+        "required": [
+          "goal",
+          "constraints",
+          "options",
+          "factors",
+          "risks",
+          "outcomes",
+          "links",
+          "identities",
+          "unknowns",
+          "decision_question"
+        ]
+      },
+      "strict": true
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tool_usage": {
+    "image_gen": {
+      "input_tokens": 0,
+      "input_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "total_tokens": 0
+    },
+    "web_search": {
+      "num_requests": 0
+    }
+  },
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 8998,
+    "input_tokens_details": {
+      "cache_write_tokens": 120,
+      "cached_tokens": 8875
+    },
+    "output_tokens": 1570,
+    "output_tokens_details": {
+      "reasoning_tokens": 516
+    },
+    "total_tokens": 10568
+  },
+  "user": null,
+  "metadata": {}
+}
