@@ -10,11 +10,15 @@ const OFFERS = '20261006230000_agent_answer_offers.sql';
 const CONDITIONAL = '20261007090000_agent_answer_conditional_append.sql';
 
 describe('T1h additive answer-narration migration (static, no DB)', () => {
-  it('adds one nullable column and exactly two NEW functions; no existing function, grant or constraint is touched', () => {
+  it('adds one nullable column with its own CHECK and exactly two NEW functions; nothing existing is touched', () => {
     const code = executable(read(`${name}.sql`));
     expect(code.match(/CREATE\s+(?:OR REPLACE\s+)?FUNCTION\s+[^\s(]+/gi)).toEqual([
       'CREATE FUNCTION public.append_agent_answer_narrated', 'CREATE FUNCTION public.append_agent_answer_if_latest_narrated']);
-    expect(code.match(/\bALTER\b[^;]*;/gi)).toEqual(['ALTER TABLE public.v5_conversation_turns ADD COLUMN IF NOT EXISTS run_narration JSONB;']);
+    expect(code.match(/\bALTER\b[^;]*;/gi)).toEqual(['ALTER TABLE public.v5_conversation_turns ADD COLUMN IF NOT EXISTS run_narration JSONB;',
+      'ALTER TABLE public.v5_conversation_turns ADD CONSTRAINT v5_conversation_turns_run_narration_shape CHECK ( run_narration IS NULL OR ( '
+      + "jsonb_typeof(run_narration) = 'object' AND (run_narration - 'status' - 'run_key') = '{}'::jsonb "
+      + "AND jsonb_typeof(run_narration->'status') = 'string' AND (run_narration->>'status') IN ('pending', 'ready', 'unavailable', 'stale') "
+      + "AND jsonb_typeof(run_narration->'run_key') = 'string' AND (run_narration->>'run_key') ~ '^[0-9a-f]{16}$' ) ) NOT VALID;"]);
     expect(code).not.toMatch(/\bDROP\b|CREATE\s+(?:TABLE|INDEX|TRIGGER)\b|\bDEFAULT\b/i);
     // The only data write: this column, on the new row the delegate just appended.
     expect(code.match(/(?<!FOR )\b(?:INSERT|UPDATE|DELETE)\b[^;]*;/gi)).toEqual([
@@ -55,7 +59,7 @@ describe('T1h additive answer-narration migration (static, no DB)', () => {
     expect(code.indexOf("RAISE EXCEPTION 'invalid answer Run narration'")).toBeLessThan(code.indexOf('PERFORM 1 FROM public.scenarios'));
   });
 
-  it('grants match the wrappers; the rollback drops exactly the two functions and the column', () => {
+  it('grants match the wrappers; the rollback drops exactly the two functions, the CHECK and the column', () => {
     const code = executable(read(`${name}.sql`)), rollback = executable(read(`rollback/${name}_rollback.sql.do-not-apply`)).trim();
     const one = 'uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text, jsonb, jsonb, text, text, jsonb, jsonb, text, jsonb';
     for (const [fn, sig] of [['append_agent_answer_narrated', one], ['append_agent_answer_if_latest_narrated', `uuid, ${one}`]] as const) {
@@ -64,6 +68,7 @@ describe('T1h additive answer-narration migration (static, no DB)', () => {
     }
     expect(rollback).toBe(`DROP FUNCTION IF EXISTS public.append_agent_answer_if_latest_narrated( uuid, ${one} ); `
       + `DROP FUNCTION IF EXISTS public.append_agent_answer_narrated( ${one} ); `
+      + 'ALTER TABLE public.v5_conversation_turns DROP CONSTRAINT IF EXISTS v5_conversation_turns_run_narration_shape; '
       + "ALTER TABLE public.v5_conversation_turns DROP COLUMN IF EXISTS run_narration; NOTIFY pgrst, 'reload schema';");
   });
 });

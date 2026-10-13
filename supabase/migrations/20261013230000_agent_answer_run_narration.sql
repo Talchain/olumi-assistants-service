@@ -1,7 +1,7 @@
 -- Context (T1h): a replayed Agent answer names the Run it was sent with, after a restart too. The answer's own
 -- narration ({status, run_key}) is stored WITH its row, whatever offers or guidance the answer carried.
--- Additive: ONE nullable column and TWO NEW, distinctly named functions. No existing function, grant, constraint
--- or policy changes, so every existing caller (production CEE included) resolves exactly as before. A new name, not
+-- Additive: ONE nullable column (with its own CHECK) and TWO NEW, distinctly named functions. No existing function,
+-- grant, constraint or policy changes, so every existing caller (production CEE included) resolves exactly as before. A new name, not
 -- a defaulted parameter on the live wrappers: Postgres cannot add a parameter in place, and an overload beside the
 -- live signature makes PostgREST's named-argument resolution ambiguous (20260426160532).
 -- Order-safe: the store calls these only for a write that carries narration, and falls back to the existing
@@ -9,6 +9,19 @@
 ALTER TABLE public.v5_conversation_turns ADD COLUMN IF NOT EXISTS run_narration JSONB;
 COMMENT ON COLUMN public.v5_conversation_turns.run_narration IS
   'The final Agent answer''s own narration, {status, run_key}: the Run it was sent with (16-hex key). NULL = unknown.';
+-- NULL, or exactly {status, run_key}: every status the live route sends (`stale` included: an Explain press on a
+-- moved Run, agent-v1-turn.ts narrationStatus) and a 16-hex key. NOT VALID: the column is new, so every existing row
+-- is NULL; this skips a validation scan under the ADD COLUMN lock on a shared table, and still checks every write.
+ALTER TABLE public.v5_conversation_turns ADD CONSTRAINT v5_conversation_turns_run_narration_shape CHECK (
+  run_narration IS NULL OR (
+    jsonb_typeof(run_narration) = 'object'
+    AND (run_narration - 'status' - 'run_key') = '{}'::jsonb
+    AND jsonb_typeof(run_narration->'status') = 'string'
+    AND (run_narration->>'status') IN ('pending', 'ready', 'unavailable', 'stale')
+    AND jsonb_typeof(run_narration->'run_key') = 'string'
+    AND (run_narration->>'run_key') ~ '^[0-9a-f]{16}$'
+  )
+) NOT VALID;
 
 CREATE FUNCTION public.append_agent_answer_narrated(
   p_scenario_id UUID, p_turn_id TEXT, p_turn_class TEXT, p_handler_id TEXT,

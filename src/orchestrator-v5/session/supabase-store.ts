@@ -297,7 +297,6 @@ const NOT_A_CLAIM_PATTERN = `%${TURN_CLAIM_SUFFIX}`;
 const isMissingAppendFunction = (error: unknown): boolean =>
   errCode(error) === 'PGRST202' || errCode(error) === '42883';
 let conditionalAppendMissingLogged = false;
-let narratedAppendMissingLogged = false;
 
 export interface AnalysisRunDrainResult {
   derived: number;
@@ -814,11 +813,10 @@ export class SupabaseSessionStore implements SessionStore {
     });
     if (error) {
       if (isMissingAppendFunction(error)) {
-        if (!narratedAppendMissingLogged) {
-          narratedAppendMissingLogged = true;
-          log.warn({ event: 'v5.agent_answer.narrated_rpc_missing', rpc_code: errCode(error) },
-            'Narrated answer RPC is unavailable; recording the answer without its narration until migration 20261013230000 is applied');
-        }
+        // Never silent: every answer recorded without its narration says so.
+        log.warn({ event: 'v5.agent_answer.narrated_rpc_missing', rpc: rpcName, rpc_code: errCode(error),
+          scenario_id: write.scenario_id, turn_id: write.turn_id },
+        'Narrated answer RPC is unavailable; recording the answer without its narration until migration 20261013230000 is applied');
         return undefined;
       }
       throw new StateCommitFailedError(`${rpcName} RPC failed: ${errMsg(error)}`,
