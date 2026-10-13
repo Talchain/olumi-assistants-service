@@ -9,6 +9,7 @@ import {
   PREMORTEM_PRESS_ID, TALK_IT_THROUGH_CHIP, cardCallFor,
   methodTurnForReadback, planMethodTurn, planPickChipId, type RunMethodTurn,
 } from '../method-turn.js';
+import { withApprovedMethodWords } from './helpers/approved-method-words.js';
 
 type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[]; goal_constraints?: unknown };
 type Capture = {
@@ -71,7 +72,7 @@ describe('W9: empty licensed-leader path on a generic pre-mortem press', () => {
     ]);
     // Original W9 licensed-leader contract is an explicit control, including its existing card.
     const base = JSON.parse(readFileSync(new URL('./fixtures/w9c/r2-base-controls.json', import.meta.url), 'utf8')).draw1;
-    assert.equal(JSON.stringify(out), JSON.stringify(base.turn));
+    assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(base.turn)));
     assert.equal(cardCallFor(out.context.supplied_items[0], c.graph)?.tool, 'propose_link_strengths');
     assert.equal(out.context.dsk, null);
     assert.equal(out.context.not_cited, 'no_identified_plan');

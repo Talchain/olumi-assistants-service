@@ -322,7 +322,8 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
   const plan = ctx.plan === null ? 'this decision' : quote(ctx.plan.label);
   const decision = ctx.decision_level === true;
   return [
-    'METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.',
+    'METHOD TURN: the user asked for a pre-mortem, and this reply calls no tools.',
+    'Use the selected method and its supplied facts to develop a useful answer for the actual question. Keep it concise without omitting relevant reasoning, evidence, dissent or uncertainty to fit an arbitrary word limit. Preserve this role’s required response schema.',
     `${decision ? 'Stress-test the whole decision' : `The plan to stress-test is ${plan}`}.${ctx.goal_label !== null ? ` The goal is ${quote(ctx.goal_label)}.` : ''}`,
     ...(decision ? [CONTRACT.decision_plan.rule,
       `The current option labels are: ${ctx.current_option_labels.map(quote).join(', ')}.`] : []),
@@ -348,7 +349,6 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
       + 'likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.',
     ...(storyOnlyDecision(ctx) ? ['Outside the model’s own labels, give no Run figures, leader or ranking claims; durations are allowed. This exercise prepares no model change or approval card.'] : []),
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
-    `At most ${POLICY.method_turns.shared.max_words} words.`,
   ].join('\n');
 }
 
