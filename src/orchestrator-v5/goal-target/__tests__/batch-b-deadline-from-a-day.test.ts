@@ -162,9 +162,9 @@ describe('the deadline door on Paul\'s marketing turns', () => {
   });
 
   it.each([
-    ['an earlier phrase this message does not date (Codex r1 kept)', 'Yes, add the AI tool option.', 'deadline_not_stated'],
+    ['an earlier ambiguous weekday this message does not date', 'Yes, add the AI tool option.', 'deadline_not_placed'],
     ['a dating that is not that weekday', 'Last Friday was the 8th of October.', 'deadline_not_placed'],
-    ['a dating of another weekday', 'Last Monday was the 5th of October.', 'deadline_not_stated'],
+    ['a dating of another weekday', 'Last Monday was the 5th of October.', 'deadline_not_placed'],
   ])('refused, nothing prepared: %s', async (_what, thisMessage, refusal) => {
     const d = door();
     const r = await d.caps.proposeGoalDeadline!(saying(thisMessage, [TURN_A]), { deadline_words: A_WORDS, rationale: thisMessage }) as Rec;

@@ -2674,11 +2674,11 @@ export function createAgentCapabilities(
       const statedRaw = (os as { raw_value?: unknown } | undefined)?.raw_value ?? os?.value;
       // ⭐ PJ-E-FIG: a factor the add-factor door committed WITH the user's figure — said as theirs, never asked again; its
       // range (Olumi's) is disclosed once below, never re-framed later (`levelFrameOf` reads the stored cap).
-      if (userTodayIds.has(fid) && (os?.source === USER_TODAY_SOURCE || os?.source === 'cee_inference') && typeof statedRaw === 'number') {
+      if (userTodayIds.has(fid) && (os?.source === USER_TODAY_SOURCE || provenanceOf({ value: os }).origin === 'ai') && typeof statedRaw === 'number') {
         const u = (os as { unit?: unknown }).unit;
         const cap = (os as { cap?: unknown }).cap;
         sentences.push(`Added "${String(f.label ?? fid)}" as a factor, affecting ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
-          + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, ${os?.source === 'cee_inference' ? 'Olumi’s estimate' : confirmedIds.has(fid) ? 'as you confirmed' : 'as you said'}.`);
+          + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, ${provenanceOf({ value: os }).origin === 'ai' ? 'Olumi’s estimate' : confirmedIds.has(fid) ? 'as you confirmed' : 'as you said'}.`);
         // ⭐ Recovery Batch E (run 4 hiring step 13, B5/U5): a factor that holds the range the user stated is never said to
         // have a range "not yours" (`isUserStatedRange`).
         if (typeof cap === 'number' && Number.isFinite(cap) && cap > 1 && !isUserStatedRange((os as { range?: unknown }).range)) {
@@ -5346,7 +5346,8 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash, team_time: a };
     },
 
-    /** Prepare the interpreted date with its actual source; approval binds the date and recorded reference. */
+    /** THE USER approves the interpreted deadline and its actual source.
+     * A chance goal holds a date, never a target percentage; approval binds the date and recorded reference. */
     async proposeGoalDeadline(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const words = typeof args?.deadline_words === 'string' ? args.deadline_words.trim() : '';
@@ -5354,8 +5355,8 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'unreadable_deadline',
           detail: 'A deadline needs a non-empty phrase of at most 80 characters to interpret. Nothing was prepared.' };
       }
-      // ⛔ The words must be the USER'S, typed in THIS turn, as whole words (Codex buddy r1 on #2742: "6 months" matched inside
-      // "16 months", and an earlier message's duration could stand in for today's). Case, spacing and dash/apostrophe forms aside.
+      // Whole-word matching establishes authorship, not admission: "6 months" inside "16 months" is Olumi's
+      // interpretation, never the user's stated duration. The approval card keeps that distinction visible.
       const plainOf = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
       const phrase = plainOf(words).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const typed = typeof ctx.user_turn_text === 'string' ? plainOf(ctx.user_turn_text) : '';
@@ -9708,7 +9709,7 @@ export function createAgentCapabilities(
           const sentence = typeof lo === 'number' && typeof hi === 'number' ? sentenceStatingBoth(lo, hi, todayUnit, ctx.user_text ?? turnText) : null;
           const stored = sentence === null ? undefined
             : { low: lo as number, high: hi as number, meaning: 'min_max' as const, source: USER_TODAY_SOURCE, source_quote: sentence };
-          if (stored === undefined || !isStatedLevelRange(stored, framed)) {
+          if (!ownsIt || stored === undefined || !isStatedLevelRange(stored, framed)) {
             todayNotSet.push({ factor: label, value: t.value,
               reason: `The range ${String(lo ?? '?')} to ${String(hi ?? '?')} ${todayUnit} for "${label}" is not one the user wrote, both ends in one sentence of theirs, `
                 + `with ${shown} inside it, so nothing was prepared. Ask the user; never supply a range, an end or a midpoint of your own.` });

@@ -205,6 +205,11 @@ export interface UserTodayLevel {
   readonly quote?: string;
 }
 
+// Validate this writer's exact held-record stamps. Display authorship belongs to provenanceOf.
+const olumiTodayStamp = z.object({ source: z.literal('cee_inference'), extractionType: z.literal('inferred') }).passthrough();
+const userTodayStamp = z.object({ source: z.literal(USER_TODAY_SOURCE), extractionType: z.literal('explicit').optional() }).passthrough();
+const isOlumiToday = (os: unknown): boolean => olumiTodayStamp.safeParse(os).success;
+
 /**
  * Whether `os` is exactly the ONE framing rule's output (`framedObservedState`, the stated-baseline shape
  * `isStatedTodayObservedState` pins) re-stamped as the user's: `{ value: raw / cap, raw_value, cap, declared_scale,
@@ -213,9 +218,8 @@ export interface UserTodayLevel {
 export function isUserTodayObservedState(os: unknown): boolean {
   if (os === null || typeof os !== 'object' || Array.isArray(os)) return false;
   const { range, ...o } = os as Record<string, unknown>;
-  if (o.source !== USER_TODAY_SOURCE && o.source !== 'cee_inference') return false;
-  if (o.source === 'cee_inference' && o.extractionType !== 'inferred') return false;
-  if (o.source === USER_TODAY_SOURCE && o.extractionType !== undefined && o.extractionType !== 'explicit') return false;
+  if (o.source !== USER_TODAY_SOURCE && !isOlumiToday(o)) return false;
+  if (!isOlumiToday(o) && !userTodayStamp.safeParse(o).success) return false;
   // Recovery Batch B (L6): a range rides only beside the user's own figure, and only as `isStatedLevelRange` admits it.
   if (range !== undefined && !isStatedLevelRange(range, o)) return false;
   // The shape rule is the stated-baseline one, verbatim: only the source differs.
@@ -273,7 +277,8 @@ export function isUserStatedRange(range: unknown): boolean {
 export function levelRangePointBasis(os: Readonly<Record<string, unknown>>): 'stated_figure' | 'midpoint' | undefined {
   const parsed = StoredInterventionRange.safeParse(os.range);
   if (!parsed.success) return undefined;
-  if (os.source !== 'cee_inference' && isStatedLevelRange(os.range, os)) return 'stated_figure';
+  // Unverified user material can carry an inference stamp; origin belongs to the provenance authority.
+  if (provenanceOf({ value: os }).origin === 'human' && isStatedLevelRange(os.range, os)) return 'stated_figure';
   const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
   const olumis = os.source === 'cee_inference' && os.user_material_unverified !== true;
   return olumis && figure === rangePointEstimate({ min: parsed.data.low, max: parsed.data.high }) ? 'midpoint' : undefined;
@@ -313,7 +318,7 @@ export function readUserTodayMember(raw: unknown): readonly UserTodayLevel[] | u
     if (basis !== undefined && !(USER_TODAY_BASES as readonly unknown[]).includes(basis)) return undefined;
     if (quote !== undefined && (typeof quote !== 'string' || quote.trim() === '' || quote.length > USER_TODAY_QUOTE_MAX)) return undefined;
     if (basis === 'confirmed_by_approval' && quote === undefined) return undefined;
-    if (((os as Record<string, unknown>).source === 'cee_inference') !== (basis === 'olumi_estimate')) return undefined;
+    if (isOlumiToday(os) !== (basis === 'olumi_estimate')) return undefined;
     out.push({
       factor_id: id,
       observed_state: { ...(os as Record<string, unknown>) },
@@ -338,7 +343,7 @@ export function stampNewUserTodayLevels<T extends PatchOperation>(
   if (new Set(levels.map((l) => l.factor_id)).size !== levels.length) return { ok: false };
   const out = [...operations];
   for (const l of levels) {
-    if (!isUserTodayObservedState(l.observed_state) || (l.observed_state.source === 'cee_inference') !== (l.basis === 'olumi_estimate')) return { ok: false };
+    if (!isUserTodayObservedState(l.observed_state) || isOlumiToday(l.observed_state) !== (l.basis === 'olumi_estimate')) return { ok: false };
     const at = out.flatMap((o, i) => (o.op === 'add_node' && o.path === l.factor_id ? [i] : []));
     if (at.length !== 1) return { ok: false };
     const value = out[at[0]!]!.value;

@@ -522,7 +522,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'propose_goal_deadline',
     description: 'Prepare a deadline for approval. Supply the deadline words and optionally your ISO calendar-date interpretation. '
-      + 'Preserve the actual known reference; never invent one. Figures bound to the user’s words are labelled theirs, otherwise Olumi’s interpretation. '
+      + 'Preserve the actual known reference; never invent one. Never invent a unit, reference or level. Figures bound to the user’s words are labelled theirs, otherwise Olumi’s interpretation. '
       + 'The returned card is the user’s check; nothing is saved until its approval.',
     parameters: obj({
       reference_date: { type: 'string', description: 'Optional known ISO reference date. Omit when unknown; never invent a reference.' },
