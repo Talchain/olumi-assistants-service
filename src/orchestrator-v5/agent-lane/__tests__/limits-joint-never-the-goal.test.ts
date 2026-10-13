@@ -42,7 +42,7 @@ function world(enrichment: Json, state: Json = STATE) {
   return createAgentCapabilities(d, new ProposalStore());
 }
 const runOf = async (enrichment: Json, state?: Json): Promise<Json> =>
-  await world(enrichment, state).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+  await world(enrichment, state).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Json;
 const keptOf = (output: Json): Json => {
   const kept = pruneSupersededToolOutputs([
     { type: 'function_call', call_id: 'c1', name: 'run_analysis', arguments: '{}' },

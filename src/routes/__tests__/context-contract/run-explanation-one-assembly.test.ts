@@ -185,7 +185,9 @@ describe('Explain scoped assembly safety', () => {
   it('Explain instruction bytes retain the approved sha256', async () => {
     const w = await capture('Run-explanation','run2');
     expect(createHash('sha256').update(String(w.calls[0].body.instructions)).digest('hex'))
-      .toBe('fb8392d685fc041eefb6924758a587f930ef21d24841249c4b6e31059680f400');
+      // G (12 Oct, AIE #94 6133027121): the selected-Run scope line and its range/headline/ranking edits: 39,550 → 39,914 bytes
+      // (+364, the selected-coach delta). Reversing exactly those edits on the SENT instructions reproduces fb8392d6….
+      .toBe('a792187f43143d7167124826b051330589ab397b5599812299c1176a7400a37f');
   },60000);
 });
 

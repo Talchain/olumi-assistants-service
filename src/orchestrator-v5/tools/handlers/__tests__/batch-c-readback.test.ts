@@ -34,6 +34,7 @@ import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../../a
 import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+import { toTypedRunRows } from '../../../runs/typed-run-rows.js';
 
 type Rec = Record<string, any>;
 
@@ -302,15 +303,16 @@ describe('readback — gap 1: a change goal\'s effects are stored and said in th
 // against the reopened graph. Expected words are written by hand from the decision text, never read off the code.
 
 /** The Run handler end to end, PLoT faked with `rowsOf(request)`: the request, the stored Run result, its screen view. */
-async function runAndRead(bytes: string, rowsOf: (request: Rec) => Rec[]): Promise<{ payload: Rec; result: Rec; view: Rec; reloaded: Rec }> {
+async function runAndRead(bytes: string, rowsOf: (request: Rec) => Rec[], briefText: string | null = null, effectsTiming: 'not_stated' | 'later_or_partial' | null = null): Promise<{ payload: Rec; result: Rec; view: Rec; reloaded: Rec }> {
   const port = {
-    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 3 })),
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText, revision: 3 })),
     readMostRecentPendingActions: vi.fn(async () => []),
   };
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-batch-c-response', port as never);
   const run = vi.fn(async (request: Rec) => ({ ...structuredClone(minimalFixture), option_comparison: rowsOf(request) }));
   const handler = createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn() } as never, scenarioReader: async () => snapshot });
-  const outcome = await handler({ payload: { scenario_id: SCENARIO, turn_id: 't-batch-c-response' }, requestId: 'req-batch-c-response',
+  const outcome = await handler({ payload: { scenario_id: SCENARIO, turn_id: 't-batch-c-response',
+    ...(effectsTiming === null ? {} : { kind: 'message', chip: { parameters: { effects_timing: effectsTiming } } }) }, requestId: 'req-batch-c-response',
     signal: new AbortController().signal, context: {}, orientationText: '' } as never) as Rec;
   expect(run).toHaveBeenCalledTimes(1);
   const fact = outcome.handler_facts[0] as Rec;
@@ -387,6 +389,62 @@ describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "
       expect(r, String(r.option_id)).not.toHaveProperty('probability_of_goal');
     }
   });
+
+  it('G (AIE #94 6128697025; amendments 6131950992): with the brief read, the same Run is licensed CONDITIONALLY through the real handler, and it survives the stored bytes', async () => {
+    const g = JSON.parse(store(hiringSized())) as Rec;
+    const goal = (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    goal.goal_target_basis = { ...(goal.goal_target_basis as Rec), effects_at_period_end: false };
+    const brief = 'Should we hire a tech lead or two developers to raise productivity by at least 10% within three months?';
+    const { result, payload, reloaded } = await runAndRead(JSON.stringify(g), hiringAnswer, brief, 'not_stated');
+    // G2: the AI reading replaces the deleted word-list inference; outcome assertions remain unchanged.
+    // The sent goal is the held one: the handler's own request carries the same basis (false, never flipped).
+    expect(node(payload.graph, 'productivity').goal_target_basis).toMatchObject({ effects_at_period_end: false, period_months: 3 });
+    // The AI reading is CEE's licence fact, never a new provider-envelope field.
+    expect(result.enrichment).not.toHaveProperty('effects_timing');
+    expect(result.enrichment).not.toHaveProperty('effects_timing_origin');
+    expect((result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_CHANCE_LICENSED'))
+      .toMatchObject({ effects_timing: 'not_stated', effects_timing_origin: 'olumi' });
+    // The stored fact, as bytes, read cold.
+    const view = { type: 'analysis_result', enrichment: (JSON.parse(JSON.stringify(result)) as Rec).enrichment };
+    const licence = goalChanceLicenceForAgent(view)!;
+    const note = 'Provisional: this calculation assumes the estimated effects are in place by month three. It does not model when they arrive.';
+    expect(licence.period_end_assumption).toEqual({ origin: 'olumi', period_months: 3, reference: 'today' });
+    expect(licence.chance_words).toBe('chance of ‘Productivity’ being at least 10% higher than today at three months');
+    expect(goalChanceNotesForAgent(view, reloaded, true).filter((n) => n === note)).toHaveLength(1);
+    expect([...goalChanceCellFacesForAgent(view, reloaded, true)].map(([id]) => id)).toEqual(['hire_a_tech_lead', 'hire_two_developers']);
+    expect((result.enrichment.inference_warnings as Rec[]).some((w) => (w.detail as Rec | undefined)?.reason === 'effects_at_period_end_unstated')).toBe(false);
+    expect(goalTargetBasisOf(node(reloaded, 'productivity'))!.effects_at_period_end).toBe(false);
+    // The typed Run rows store each licensed chance as CONDITIONAL (permitted_with_caveat), never an unqualified permission.
+    const rows = toTypedRunRows({ fact_type: 'run_analysis', fact_version: 1, noop: false, result: JSON.parse(JSON.stringify(result)) },
+      { scenarioId: SCENARIO });
+    expect(rows, JSON.stringify(rows).slice(0, 300)).toHaveProperty('ok');
+    if (!('ok' in rows)) throw new Error(JSON.stringify(rows));
+    const typed = Object.fromEntries(rows.ok.options.map((o) => [o.option_id, o.licence_status]));
+    expect(typed).toMatchObject({ hire_a_tech_lead: 'permitted_with_caveat', hire_two_developers: 'permitted_with_caveat' });
+    // CONTRAST, the same handler: a brief stating only half the gain by month three withholds with E's sentence.
+    const half = await runAndRead(JSON.stringify(g), hiringAnswer, `${brief} We expect only half the productivity gain by month 3.`, 'later_or_partial');
+    expect(goalChanceLicenceForAgent({ type: 'analysis_result', enrichment: half.result.enrichment })).toBeUndefined();
+    expect((half.result.enrichment.inference_warnings as Rec[]).find((w) => (w.detail as Rec | undefined)?.reason === 'effects_at_period_end_unstated')!.message)
+      .toBe('The chance of reaching your target for ‘Productivity’ (up 10% from today) by month three isn’t shown: '
+        + 'the model has not established how much of these effects would be in place by then.');
+  });
+
+  it.each((JSON.parse(readFileSync('tests/fixtures/batch-g/AIE-G-TIMING-PHRASES-20261012.json', 'utf8')) as {
+    cases: { id: string; text: string; expected: string }[] }).cases.map((c) => [c.id, c] as const))(
+    'G corpus (AIE #94 6133027121), through the real Run handler — every case states timing, so all withhold (DL G r2, fail safe): %s', async (_id, c) => {
+      const g = JSON.parse(store(hiringSized())) as Rec;
+      const goal = (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+      goal.goal_target_basis = { ...(goal.goal_target_basis as Rec), effects_at_period_end: false };
+      const brief = `Should we hire a tech lead or two developers to raise productivity by at least 10% within three months? ${c.text}`;
+      const { result } = await runAndRead(JSON.stringify(g), hiringAnswer, brief);
+      const view = { type: 'analysis_result', enrichment: (JSON.parse(JSON.stringify(result)) as Rec).enrichment };
+      const withheld = (result.enrichment.inference_warnings as Rec[]).some((w) => (w.detail as Rec | undefined)?.reason === 'effects_at_period_end_unstated');
+      const licence = goalChanceLicenceForAgent(view);
+      const verdict = withheld && licence === undefined ? 'CONTRADICTS'
+        : !withheld && licence?.period_end_assumption?.origin === 'olumi' ? 'NOT_A_CONTRADICTION' : 'OTHER';
+      // The AIE's NOT_A_CONTRADICTION cases (GT05–GT10) state timing too, so they now withhold (listed in the G r2 handback).
+      expect(verdict, `${c.id} (AIE: ${c.expected})`).toBe('CONTRADICTS');
+    });
 
   it('RED (amendment 7, per option): an option whose OWN setting is Olumi\'s says so on its result only — never on another option\'s', async () => {
     const h = hiringSized() as unknown as Rec;

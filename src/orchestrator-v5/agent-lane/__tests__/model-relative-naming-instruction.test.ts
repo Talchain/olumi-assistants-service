@@ -35,7 +35,8 @@ describe('the model-relative naming rule', () => {
 
   it('N is the share of runs credited to the option, never its chance of reaching the goal (#35 keeps that meaning)', () => {
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('N the share of model runs credited to it, taken from the result; N is never its chance of reaching the goal.');
-    expect(HOST_TOOL_CONTRACT).toContain('the per-option headline is its chance of meeting the goal, in this model, on current information');
+    // ⛔ CHANGED EXPECTATION (G, AIE #94 6133027121): the headline no longer directs whole-goal words; the licensed target wording does.
+    expect(HOST_TOOL_CONTRACT).toContain('the per-option headline is its chance, in this model, on current information');
   });
 
   it('never "fragile": says what the result rests on, and names an assumption only when sensitivity was measured', () => {

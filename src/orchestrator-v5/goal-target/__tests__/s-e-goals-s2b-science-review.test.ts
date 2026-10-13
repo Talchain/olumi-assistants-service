@@ -63,7 +63,7 @@ async function agentDoor(g: Rec, block: Rec, door: 'Run' | 'saved-read'): Promis
       : { status: 500, json: {} };
   const caps = createAgentCapabilities(dispatch, new ProposalStore());
   const ctx = { scenario_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', authenticated_user_id: null, request_id: 'r4-p40' };
-  return door === 'Run' ? (await caps.runAnalysis(ctx, { reason: 'Run analysis.' }) as Rec).result
+  return door === 'Run' ? (await caps.runAnalysis(ctx, { reason: 'Run analysis.', effects_timing: null }) as Rec).result
     : (await caps.getCanonicalState(ctx) as Rec).analysis;
 }
 const agentRows = (view: Rec): Rec[] => view.saved_run_options ?? view.enrichment.option_comparison;
