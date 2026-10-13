@@ -2073,8 +2073,13 @@ export class SupabaseSessionStore implements SessionStore {
       .eq('scenario_id', scenarioId).eq('turn_id', turnId).limit(1);
     let { data, error } = await read(`${columns}, run_narration`);
     // Order-safe: before migration 20261013230000 the column is absent; the row is then read as before T1h, its Run
-    // identity unknown, never refused.
-    if (error && errCode(error) === '42703') ({ data, error } = await read(columns));
+    // identity unknown, never refused. Never silent: every such read says so.
+    if (error && errCode(error) === '42703') {
+      log.warn({ event: 'v5.committed_turn.run_narration_column_missing', rpc_code: errCode(error),
+        scenario_id: scenarioId, turn_id: turnId },
+      'Committed-turn read without run_narration; its Run is unknown until migration 20261013230000 is applied');
+      ({ data, error } = await read(columns));
+    }
     // A failed read is an UNKNOWN and is thrown, never folded into "no row":
     // the caller would otherwise re-execute a turn that may already have run.
     if (error) throw new Error(`readCommittedTurn failed: ${error.message ?? String(error)}`);

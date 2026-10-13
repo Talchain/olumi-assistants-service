@@ -18,6 +18,7 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { SupabaseSessionStore } from '../../session/supabase-store.js';
 import { SessionLRUCache } from '../../session/cache.js';
+import { log } from '../../../utils/telemetry.js';
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 
 type Rec = Record<string, any>;
@@ -249,9 +250,14 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     expect(await read('later')).toEqual({ status: 'pending', run_key: 'bbbbbbbbbbbbbbbb' });
     expect(await read('legacy')).toBeNull();
     expect(await read('malformed')).toBeNull();
-    // Before the migration the column is absent: the same row is still read, its Run identity unknown (never a 503).
+    // Before the migration the column is absent: the same row is still read, its Run identity unknown (never a 503),
+    // and never silently (Codex check on 1c4362de).
+    const warn = vi.spyOn(log, 'warn');
     selectMissingColumn = true;
     expect(await read('earlier')).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'v5.committed_turn.run_narration_column_missing',
+      scenario_id: SCENARIO, turn_id: 'earlier' }), expect.any(String));
+    warn.mockRestore();
     expect((await realStore.readCommittedTurn(SCENARIO, 'earlier'))?.assistant_message).toBe('a');
   });
 
@@ -372,4 +378,28 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     expect(body.suggested_actions.map((a: Rec) => a.id)).toEqual(['agent-run-analysis']);
     expect(runs).toHaveLength(2);
   });
+
+  it.each([['still current', false], ['after a later Run B', true]] as const)(
+    'default result-first Run press, LEGACY (written before the migration), %s: a cold replay is {stale, \'\'}, its words, never today\'s Run', async (_n, laterRun) => {
+      originalLoop = false;
+      narratedMissing = true;
+      const turnId = randomUUID();
+      const first = await press(turnId);
+      expect(first.statusCode, first.body).toBe(200);
+      const live = first.json();
+      expect(live.narration?.status).toBe('pending');
+      expect(table.find(r => r.turn_id === turnId)?.run_narration, 'precondition: recorded without its narration').toBeNull();
+      narratedMissing = false;
+      const keyB = laterRun ? await runB(live.narration.run_key) : undefined;
+      await restart();
+      const body = (await resend(turnId)).json();
+      expect(body._agent.replayed).toBe(true);
+      // Its original Run is unknown: never re-answered on the current Run (Codex check on 1c4362de: it named B's key).
+      expect(body.narration).toEqual({ status: 'stale', run_key: '' });
+      if (keyB !== undefined) expect(body.narration.run_key).not.toBe(keyB);
+      expect(body.assistant_text).toBe(live.assistant_text);
+      expect(body.blocks ?? []).toEqual([]);
+      expect(body.suggested_actions.map((a: Rec) => a.id)).toEqual(['agent-run-analysis']);
+      expect(runs).toHaveLength(laterRun ? 2 : 1);
+    });
 });
