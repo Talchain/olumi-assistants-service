@@ -3585,6 +3585,15 @@ export function createAgentCapabilities(
     return { proposal, held, candidate };
   };
 
+  /** Every word (three letters or more) and every number of `call` is one of `name`'s, exactly, singular or plural. */
+  const namedWithin = (call: string, name: string): boolean => {
+    const one = (w: string): string => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
+    const own = new Set(wordsOf(name).map(one));
+    const numbers = new Set(name.match(/\d+(?:\.\d+)?/g) ?? []);
+    const words = wordsOf(call).filter((w) => !/^\d/.test(w));
+    return words.length > 0 && words.every((w) => own.has(one(w))) && (call.match(/\d+(?:\.\d+)?/g) ?? []).every((n) => numbers.has(n));
+  };
+
   /** This target call's answer from the turn's one revised draft: the same card, or why this target is not in it. */
   const offerRevisedDraft = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
@@ -3603,13 +3612,15 @@ export function createAgentCapabilities(
         onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
     }
     // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
+    // A figure per period is not the same figure as a total ("20 customers/month" is not "20 customers"; Codex buddy).
     const sameFigure = draft.held.filter((t) => t.value === target.value && t.comparator === target.comparator
-      && unitsConflict(target.unit, t.unit) === null);
+      && unitsConflict(target.unit, t.unit) === null && ratePeriodOf(target.unit) === ratePeriodOf(t.unit));
     /**
      * ⛔ …by the CARD'S TARGET, not only its exact label (served marketing-2992, 13 Oct 23:05Z: "new customers" against the
      * card's ‘New customers in first 3 months’ read false, so the note said a target the card holds was NOT in it). The one
-     * held target with this figure, comparator and unit holds it when every word the call names is a word of that target's
-     * own name and the call's words name no other quantity of the candidate ("returning customers" is not it).
+     * held target with this figure, comparator and unit holds it when every word and number the call names is, exactly
+     * (singular or plural), a word or number of that target's own name, and the call's words name no other quantity of the
+     * candidate: "returning customers", "new customers in first 6 months" and "monthly new customers" are not it.
      */
     const candidateNodes = (Array.isArray(draft.candidate.nodes) ? draft.candidate.nodes : []) as GraphRead['nodes'];
     const theOne = sameFigure.length === 1 ? sameFigure[0]! : undefined;
@@ -3618,8 +3629,7 @@ export function createAgentCapabilities(
     const holds = sameFigure.some((t) => t.quantity === canonicalLabel(target.measures))
       || (theOne !== undefined && typeof theOneLabel === 'string' && theOneLabel.trim() !== ''
         && (named.kind === 'none' || ((named.kind === 'one' || named.kind === 'other') && named.node.id === theOne.node_id))
-        && wordsOf(target.measures).length > 0
-        && wordsOf(target.measures).every((w) => wordsOf(theOneLabel).some((l) => sameWord(w, l))));
+        && namedWithin(target.measures, theOneLabel));
     return {
       ok: true, mutated: false,
       proposal_id: draft.proposal.proposal_id,

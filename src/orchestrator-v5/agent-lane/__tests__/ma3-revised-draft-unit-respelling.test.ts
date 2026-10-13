@@ -157,6 +157,18 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
     }
   });
 
+  it('(b) only the currency over ONE period is carried for a bare "£": per-customer, scaled or qualified earlier units still refuse (Codex buddy)', async () => {
+    for (const [unit, carried] of [['GBP/customer', false], ['GBP million', false], ['GBP MRR/year', false], ['£ per year', true], ['GBP/month', true]] as const) {
+      const base = structuredClone(FX.graph);
+      (base.goal_constraints as Rec[]).find((r) => r.constraint_id === SPEND_ID)!.unit = unit;
+      const s = server(base);
+      const a = await lane(s).caps.proposeGoalTarget!(turn as never, conversion as never) as Rec;
+      if (carried) expect(a, `${unit}: ${JSON.stringify(a)}`).toMatchObject({ ok: true, mutated: false });
+      else expect(a, `${unit}: ${JSON.stringify(a)}`).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
+      expect(s.graph()).toEqual(base);
+    }
+  });
+
   it('(c) holds_this_target is bound to the card\'s target: "new customers" holds ‘New customers in first 3 months’; another quantity does not', async () => {
     const s = server();
     const { caps } = lane(s);
@@ -176,6 +188,15 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
       { ...customers, measures: 'returning customers', rationale: said } as never) as Rec;
     expect(returning, JSON.stringify(returning)).toMatchObject({ ok: true, revised_draft: { replaces_goal: 'product feature launch', holds_this_target: false } });
     expect(String(returning.note)).toContain('This target (20 customers) is NOT in the revised draft');
+    // CONTRAST (Codex buddy): another window, and a rate per month, on the same figure are not the card's three-month count.
+    for (const [said, args] of [
+      ["We want at least 20 new customers in first 6 months.", { ...customers, measures: 'new customers in first 6 months' }],
+      ["We want at least 20 new customers per month.", { ...customers, unit: 'customers/month' }],
+    ] as const) {
+      const r = await caps.proposeGoalTarget!({ ...turn, turn_id: `turn-${said.length}`, user_turn_text: said, user_text: `${FX.brief_text}\n${said}` } as never,
+        { ...args, rationale: said } as never) as Rec;
+      expect(r, `${said} ${JSON.stringify(r)}`).toMatchObject({ ok: true, revised_draft: { holds_this_target: false } });
+    }
   });
 
   it('(c) CONTRAST: the call\'s words that exactly name ANOTHER quantity of the revised draft are not the card\'s target', async () => {

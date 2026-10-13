@@ -33,6 +33,7 @@ import type { CommittedTurnLedger } from '../../session/store.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js';
 import { normaliseGraphForIdentity } from '../../context/graph-identity.js';
 import { unitPhraseHead, unitPhraseTail } from '../unit-conflict.js';
+import { ratePeriodOf } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -192,16 +193,18 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
      * ⛔ THE SAME ROW, RE-SPELLED WITHOUT ITS PERIOD (served marketing-2992, 13 Oct 23:04Z): the redraft wrote the budget's
      * `GBP/year` as `£` on the SAME constraint id, so it was neither kept nor carriable (the id collides) and the whole card
      * was refused. That row is carried UNCHANGED, the earlier row replacing the candidate's, only when the identity, the
-     * quantity, the stated comparator, the value and the frame are the same, the earlier unit states a period the
-     * candidate's lacks, and the two figures say the same amount. `sameFigure` is NOT loosened: "£" never stands for a
-     * yearly limit by itself, and any other same-id difference still refuses.
+     * quantity, the stated comparator, the value and the frame are the same, the earlier unit is the currency over ONE period
+     * (`ratePeriodOf`, and nothing else after the currency: not "GBP/customer", "GBP million" or "GBP MRR/year"; Codex buddy),
+     * the candidate's unit has nothing after its currency, and the two figures say the same amount. `sameFigure` is NOT
+     * loosened: "£" never stands for a yearly limit by itself, and any other same-id difference still refuses.
      */
     const sameId = theirs.find((t) => t.constraint_id === c.constraint_id);
     const head = unitPhraseHead(row.unit);
     if (sameId !== undefined && quantity !== null && quantityOf(candidate, sameId) === quantity && head !== null
       && String(sameId.operator_as_stated ?? sameId.operator) === row.operator && sameId.value === row.value
       && (sameId.value_frame ?? 'level') === (c.value_frame ?? 'level')
-      && unitPhraseTail(row.unit) !== '' && unitPhraseTail(unitOf(sameId)) === ''
+      && ratePeriodOf(row.unit) !== null && unitPhraseTail(row.unit).split(' ').filter((w) => w !== '' && w !== 'per').length === 1
+      && unitPhraseTail(unitOf(sameId)) === ''
       && figure(row.value, unitOf(sameId)) === figure(row.value, head)) {
       rows[rows.indexOf(sameId)] = structuredClone(c);
       kept.push(row);
