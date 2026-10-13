@@ -253,3 +253,31 @@ describe('B2j horizon prose and numerical licence', () => {
     expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult: result, graph: held, current: true }).assistant_text).toBe(text);
   });
 });
+
+describe('B2k fact-bound timed attainment', () => {
+  const timedGraph = { ...graph, nodes: graph.nodes.map(n => n.kind === 'goal' ? { ...n,
+    goal_horizon_months: 6, goal_threshold_raw: 20000, goal_threshold_unit: '£/month',
+    goal_direction: '>=', goal_threshold_frame: 'level', quantity_frame: 'level',
+    goal_target_basis: { quantity_frame: 'level', target_frame: 'level', target_raw: 20000,
+      reference: 'today', period_months: 6, period_kind: 'at_end', effect_unit: '£/month',
+      effects_at_period_end: true, source: 'olumi_reading' },
+  } : n) };
+  const timed = (text: string, run: unknown = result) => withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+    analysisResult: run, graph: timedGraph, current: true,
+  }).assistant_text;
+  const fallback = 'The recorded comparison does not support that explanation.';
+  it('keeps attainment only for the licensed target and period', () => {
+    expect(goalHorizonVerdict(timedGraph, result.enrichment)).toBe('basis_at_h');
+    const text = 'The goal will be met by month 6.';
+    expect(timed(text)).toBe(text);
+    expect(timed('The goal will be met by month 9.')).toBe(fallback);
+    expect(timed(text, { enrichment: { inference_warnings: [{ ...licence,
+      target: { ...licence.target, value: 30000 } }] } })).toBe(fallback);
+    expect(timed(text, { enrichment: { inference_warnings: [] } })).toBe(fallback);
+  });
+  it('removes only the unlicensed sentence and preserves a numerical limitation exactly', () => {
+    expect(timed('The goal is on track by month 9. The model has 2 options.')).toBe(' The model has 2 options.');
+    const limitation = 'The goal is not on track by month 9; this model cannot establish that.';
+    expect(timed(limitation)).toBe(limitation);
+  });
+});

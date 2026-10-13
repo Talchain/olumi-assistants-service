@@ -39,7 +39,7 @@ import { parseAnswerOffers, storedOfferId } from '../orchestrator-v5/agent-lane/
 
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
 import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
-import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
+import { tippingPointCoachingFor, settleTippingPointCoaching, settleNoSignalThresholdClaims, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
 import { composeRerunExplanation, rerunViewFailures, rerunExplanationPlan } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
 
@@ -2281,6 +2281,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           turnId === undefined ? null : measuredWhatChanges.get(`${scenarioId}:${turnId}`) ?? null, replayText);
         if (current.measured === null) {
           if (current.tippingTurn?.kind === 'unavailable') replayText = RUN_EXPLANATION_UNAVAILABLE_TEXT;
+          else if (current.tippingTurn?.kind === 'no_signal') replayText = settleNoSignalThresholdClaims(current.tippingTurn, replayText);
           else if (current.tippingTurn?.kind === 'found') {
             if (!settleTippingPointCoaching(current.tippingTurn, replayText).passed)
               replayText = 'I could not verify that threshold explanation against the current result.';
@@ -4108,6 +4109,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       text = 'I could not verify that threshold explanation against the current result.';
     } else if (tippingTurn?.kind === 'unavailable') {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
+    } else if (tippingTurn?.kind === 'no_signal') {
+      text = settleNoSignalThresholdClaims(tippingTurn, text);
     }
     // Every bound coaching answer, a "no threshold" one included, is about ITS Run: re-checked on the fresh read (Codex P1 #2542).
     if ((tippingTurn?.kind === 'found' || tippingTurn?.kind === 'no_signal') && !runExplanationMatches(tippingTurn.run_key, scenarioId, composedRead)) {

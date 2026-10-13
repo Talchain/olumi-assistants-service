@@ -1,6 +1,9 @@
 import { agentLicenceRecordOf } from '../goal-target/goal-chance-licence.js';
 import { licensedGoalChanceLinesForAgent } from './goal-chance-screen-lines.js';
 import { foldQuotes } from './quote-normalisation.js';
+import { goalHorizonVerdict, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
+import { goalTargetBasisOf } from '../goal-target/goal-target-basis.js';
+import { readGoalRecord } from '../goal-target/goal-record.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -71,6 +74,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const protectedSpans: { start: number; end: number }[] = [];
   const userSpans: { start: number; end: number }[] = [];
   const edits: { start: number; end: number; replacement: string }[] = [];
+  let removedTimedAttainment = false;
   const said = new Set<string>();
   const folded = foldQuotes(text);
   // An echoed user statement is still theirs. Keep those exact spans opaque even when an option name and percentage
@@ -139,6 +143,38 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         cursor = sentenceEnd;
         const start = rowStart + at, end = start + sentence.length;
         const subject = plain(sentence);
+        // K-a: bind a positive timed-attainment assertion to this turn's goal and
+        // period. Questions and limitations are not assertions. This deliberately
+        // recognises the narrow month-based claim, not arbitrary timing vocabulary.
+        const claimGoal = goal ?? (goals.length === 1 ? goals[0] : undefined);
+        const period = subject.match(/\b(?:by month (\d+(?:\.\d+)?)|within (\d+(?:\.\d+)?) months)\b/);
+        const attainmentSubject = typeof claimGoal?.label === 'string' ? subject.split(plain(claimGoal.label)).join('__goal__') : subject;
+        const attainment = !sentence.trimEnd().endsWith('?') && (
+          /^(?:the (?:leading )?option|__goal__|(?:the|your|our) (?:goal|target)) (?:is|will be) on track (?:by month|within)\b/.test(attainmentSubject)
+          || /^(?:__goal__|(?:the|your|our) (?:goal|target)) (?:is|will be) (?:met|reached|achieved) (?:by month|within)\b/.test(attainmentSubject)
+          || optionLabels.some(o => names(subject, o.label) && (
+            subject.startsWith(`${plain(o.label)} is on track `) || subject.startsWith(`${plain(o.label)} will be on track `))));
+        if (period !== null && claimGoal !== undefined && attainment) {
+          const months = Number(period?.[1] ?? period?.[2]);
+          const heldMonths = heldGoalHorizonMonths(claimGoal) ?? goalTargetBasisOf(claimGoal)?.period_months;
+          const verdict = goalHorizonVerdict(context.graph, enrichment ?? run);
+          const named = optionLabels.filter(o => names(subject, o.label) || names(subject, o.id));
+          const target = readGoalRecord(context.graph, claimGoal.id)?.target;
+          const licensedTarget = rec(licence.target);
+          const comparator = target?.comparator === '>=' ? 'at_least' : target?.comparator === '<=' ? 'at_most'
+            : target?.comparator === '>' ? 'above' : target?.comparator === '<' ? 'below' : undefined;
+          const licensed = licence.code === 'GOAL_CHANCE_LICENSED' && goalId === claimGoal.id
+            && target?.raw !== undefined && target.unit !== undefined && comparator !== undefined
+            && licensedTarget?.value === target.raw && licensedTarget.unit === target.unit && licensedTarget.comparator === comparator
+            && months === heldMonths
+            && ['computed_at_h', 'basis_at_h', 'steady_attested'].includes(verdict)
+            && lines.some(l => named.length === 0 || (named.length === 1 && l.option_id === named[0]!.id));
+          if (!licensed) {
+            edits.push({ start, end, replacement: '' });
+            removedTimedAttainment = true;
+            continue;
+          }
+        }
         // Percentages inside node labels are names, not narrated figures (e.g. 'Raise prices 10%').
         let figures = subject;
         for (const label of [...lines.map(l => l.label), ...(typeof goalLabel === 'string' ? [goalLabel] : [])]) {
@@ -232,5 +268,6 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   for (const edit of edits.sort((a, b) => b.start - a.start)) {
     result = result.slice(0, edit.start) + edit.replacement + result.slice(edit.end);
   }
-  return { ...body, assistant_text: result };
+  return { ...body, assistant_text: removedTimedAttainment && result.trim() === ''
+    ? 'The recorded comparison does not support that explanation.' : result };
 }

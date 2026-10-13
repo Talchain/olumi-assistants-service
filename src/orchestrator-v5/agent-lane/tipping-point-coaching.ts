@@ -72,3 +72,24 @@ export function settleTippingPointCoaching(plan: Extract<TippingPointCoaching, {
   const checked = checkMethodTurn('RC-WHAT-CHANGES', draft, plan.check_inputs);
   return { reply: checked.pass ? draft : plan.reply, passed: checked.pass, failed: checked.failed };
 }
+
+/** K-a: a no-signal turn supplies no (factor, threshold, unit) tuple. Remove
+ * numerical crossing assertions only; counts and statements of limits remain
+ * verbatim. The found path continues to use its existing exact fact validator.
+ */
+export function settleNoSignalThresholdClaims(plan: Extract<TippingPointCoaching, { kind: 'no_signal' }>, draft: string): string {
+  const ends = [...draft.matchAll(/[.!?]["'”’)]*(?=\s|$)|\n/g)].map(m => m.index! + m[0].length);
+  if (ends[ends.length - 1] !== draft.length) ends.push(draft.length);
+  let start = 0;
+  let reply = '';
+  for (const end of ends) {
+    const sentence = draft.slice(start, end);
+    start = end;
+    // A factor crossing a numerical boundary, or a numerical threshold for a
+    // factor, claims a tuple absent from this plan. A digit elsewhere does not.
+    const crossing = /^\s*[^.!?\n]+?\s+(?:falls? below|rises? above|cross(?:es)? (?:above|below))\s+[-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+)\s*\S*/iu.test(sentence);
+    const threshold = /^\s*(?:the )?(?:threshold|tipping point) for .+? is\s+[-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+)\s*\S*/iu.test(sentence);
+    if (!(crossing || threshold) || sentence.trimEnd().endsWith('?')) reply += sentence;
+  }
+  return reply.trim() === '' ? plan.reply : reply;
+}
