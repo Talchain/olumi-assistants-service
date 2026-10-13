@@ -296,7 +296,7 @@ export function approvalChipsFor(
       tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' }
         : tool === 'propose_hiring_times' ? { id: 'agent-hiring-times-change', label: 'Change', message: 'I want to change the hiring times.' } : DEADLINE_CHANGE_CHIP];
   }
-  const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
+  const detail = assumptionCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
 }
@@ -369,11 +369,13 @@ const allUsersOwnValues = (proposal: StructuredProposal): boolean =>
  * while the Agent said "Olumi's estimate". The STORED proposal's own card rides in `detail`, only when the proposer's
  * result for that same id returned the same words — never the Agent's prose.
  */
-function usersOwnCardFor(tool: string, source: ApprovalLabelSource | undefined): string | undefined {
+// AIE B4: new assumptions and combined starting points use the same visible, bound carrier.
+function assumptionCardFor(tool: string, source: ApprovalLabelSource | undefined): string | undefined {
   const proposal = source?.proposal;
   const result = source?.result;
-  if (tool !== 'propose_assumptions' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
-  if (!allUsersOwnValues(proposal) || typeof proposal.public_label !== 'string' || proposal.public_label.trim() === '' || result.public_label !== proposal.public_label) return undefined;
+  if ((tool !== 'propose_assumptions' && tool !== 'propose_starting_point') || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
+  if (!proposal.operations.some(op => op.op === 'set_factor_value')) return undefined;
+  if (typeof proposal.public_label !== 'string' || proposal.public_label.trim() === '' || result.public_label !== proposal.public_label) return undefined;
   return proposal.public_label;
 }
 

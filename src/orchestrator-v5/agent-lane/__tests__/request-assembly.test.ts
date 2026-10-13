@@ -13,6 +13,7 @@
  * replayed, or wrong. It must never be able to widen what the model may DO.
  * Every eligibility decision here can only REMOVE a tool, never add one.
  */
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
   assessContextFreshness,
@@ -228,6 +229,17 @@ describe('stable prefix vs dynamic tail, and the diagnostics', () => {
     });
     expect(reordered.hashes.context).toBe(a.hashes.context);
     expect(assembleRequest(base).hashes.prefix).toBe(a.hashes.prefix);
+  });
+
+  it('A2i9: assembled tools preserve the exact AIE option-level schemas and required arrays', () => {
+    const approved = JSON.parse(readFileSync(new URL('./fixtures/aie-a2-option-level-field-20261013.json', import.meta.url), 'utf8'));
+    const request = assembleRequest(base);
+    for (const [name, list] of [['propose_option_interventions', 'interventions'], ['propose_starting_point', 'option_levels']]) {
+      const tool = request.stablePrefix.tools.find(t => t.name === name)!;
+      const items = (tool.parameters as any).properties[list].items;
+      expect(items.properties.user_stated).toEqual(approved.option_level_user_stated.schema);
+      expect(items.required).toEqual(approved.option_level_user_stated.required_arrays_after[`${name}.parameters.${list}.items.required`]);
+    }
   });
 
   it('reports diagnostics a human can read: what was omitted and why', () => {

@@ -620,10 +620,10 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const buildAndPropose = () => [
       callTool('build_model_from_brief', { brief: BRIEF }),
       callTool('propose_starting_point', {
-        assumptions: [{ factor_label: 'Delivery reliability', value: 70, unit: '%', basis: 'A typical figure for a team this size.' }],
+        assumptions: [{ user_stated: false, factor_label: 'Delivery reliability', value: 70, unit: '%', basis: 'A typical figure for a team this size.' }],
         option_levels: [
-          { option_label: 'Option A', factor_label: 'Delivery reliability', value: 85, basis: 'A lead raises delivery reliability.' },
-          { option_label: 'Option B', factor_label: 'Delivery reliability', value: 80, basis: 'Two developers raise it less at first.' },
+          { user_stated: false, option_label: 'Option A', factor_label: 'Delivery reliability', value: 85, basis: 'A lead raises delivery reliability.' },
+          { user_stated: false, option_label: 'Option B', factor_label: 'Delivery reliability', value: 80, basis: 'Two developers raise it less at first.' },
         ],
       }),
       say(prose),

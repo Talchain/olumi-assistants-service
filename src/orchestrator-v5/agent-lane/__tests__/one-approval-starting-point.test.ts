@@ -136,7 +136,7 @@ function fakeProduct(opts: {
   return { d, posted, read: () => nodes, rev: () => rev, reads: () => reads };
 }
 
-const ASSUMPTIONS = [{ factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
+const ASSUMPTIONS = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
 const LEVELS = [
   { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires' },
   { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire' },
@@ -265,7 +265,7 @@ describe('propose_starting_point', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Tech leads hired', value: 3, unit: 'FTE', basis: 'three leads across the org today' }],
+      assumptions: [{ user_stated: false, factor_label: 'Tech leads hired', value: 3, unit: 'FTE', basis: 'three leads across the org today' }],
       option_levels: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire' }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);

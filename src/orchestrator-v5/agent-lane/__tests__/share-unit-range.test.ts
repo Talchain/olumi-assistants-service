@@ -30,7 +30,7 @@ async function propose(value: number, unit: string, said = R2.sentence) {
   const store = new ProposalStore();
   const r = await createAgentCapabilities(d, store).proposeAssumptions(
     { scenario_id: '550e8400-e29b-41d4-a716-446655440c02', authenticated_user_id: null, request_id: 'r', user_text: said } as never,
-    { assumptions: [{ factor_label: LABEL, value, unit, basis: "the team's quote", revise: true }] } as never) as Json;
+    { assumptions: [{ user_stated: true, factor_label: LABEL, value, unit, basis: "the team's quote", revise: true }] } as never) as Json;
   const op = r.proposal_id ? (store.get(r.proposal_id)!.operations[0] as Json).value : null;
   const chips = r.proposal_id ? approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: r.proposal_id }],
     (id) => ({ proposal: store.get(id), result: id === r.proposal_id ? (r as ToolResult) : undefined })) : [];
@@ -58,7 +58,7 @@ describe('served R2: the user\'s "about 25% cheaper" on a `share (0-1)` factor',
     const store = new ProposalStore();
     const r = await createAgentCapabilities(d, store).proposeAssumptions(
       { scenario_id: '550e8400-e29b-41d4-a716-446655440c03', authenticated_user_id: null, request_id: 'r', user_text: R2.sentence } as never,
-      { assumptions: [{ factor_label: LABEL, value: 25, unit: '%', basis: "the team's quote", revise: true }] } as never) as Json;
+      { assumptions: [{ user_stated: true, factor_label: LABEL, value: 25, unit: '%', basis: "the team's quote", revise: true }] } as never) as Json;
     expect((store.get(r.proposal_id)!.operations[0] as Json).value).toMatchObject({ value: 0.25, authored_by: 'user_stated' });
     expect(r.public_label).toContain('20% \u2192 25%');
     expect(r.public_label).not.toContain('0.2%');
@@ -125,10 +125,12 @@ describe('R2: the approval of the user\'s own figure says it is theirs', () => {
     expect(r.note).toContain('"about" in their words does not make it Olumi\'s');
   });
 
-  it('CONTROL: a value the user did NOT write stays Olumi\'s — no card detail, and the note says an assumption to adopt', async () => {
+  it('CONTROL: a value the user did NOT write stays Olumi\'s — its card shows Olumi\'s basis, and the note says an assumption to adopt', async () => {
     const { r, op, chip } = await propose(0.3, 'share (0-1)', 'Can you tighten the GCP saving assumption?');
     expect(op?.authored_by).toBe('model_proposed');
-    expect(chip?.detail).toBeUndefined();
+    // A2i9 B4 (AIE 6141593167): an Olumi estimate now shows its basis on the consent card, verbatim, as Olumi's.
+    expect(chip?.detail).toBe('Revise 1 value you asked to change: GCP unit-cost saving: 0.2 share (0-1) \u2192 0.3 share (0-1)\n'
+      + 'Olumi\'s proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): \u201cthe team\'s quote\u201d');
     expect(r.note).toContain('assumptions to adopt or correct and NOT measurements');
   });
 });

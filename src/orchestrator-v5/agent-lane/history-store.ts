@@ -444,6 +444,8 @@ const MAX_TYPED_WORDS = 40;
 export class HistoryStore {
   private readonly items = new Map<string, unknown[]>();
   private readonly typed = new Map<string, string[]>();
+  /** Missing source coverage is sticky for the life of this history, including an empty/failed reseed. */
+  private readonly incompleteAuthorship = new Set<string>();
   /** The older words the window has dropped, in the order written, each with its source (`olderWordsItem`). */
   private readonly older = new Map<string, OlderEntry[]>();
   /**
@@ -479,7 +481,7 @@ export class HistoryStore {
     this.items.delete(sessionId);
     if (this.items.size >= this.maxSessions) {
       const oldest = this.items.keys().next().value;
-      if (oldest !== undefined) { this.items.delete(oldest); this.unknownAhead.delete(oldest); this.openingAhead.delete(oldest); }
+      if (oldest !== undefined) { this.items.delete(oldest); this.unknownAhead.delete(oldest); this.openingAhead.delete(oldest); this.incompleteAuthorship.delete(oldest); }
     }
     // The labelled item is re-made from `older` on every read, never stored as history.
     const items = next.filter((i) => !isOlderWordsItem(i));
@@ -534,6 +536,7 @@ export class HistoryStore {
    * rows the seed read (no new read).
    */
   seed(sessionId: string, durable: readonly unknown[], held: readonly unknown[], rows: readonly DurableRow[] = []): void {
+    this.incompleteAuthorship.add(sessionId);
     const found = briefFromDurableTurns(rows);
     if (found !== undefined && found.trim() !== '') this.openingAhead.add(sessionId); else this.openingAhead.delete(sessionId);
     const answers = durableAnswerRows(rows);
@@ -557,25 +560,28 @@ export class HistoryStore {
   }
 
   /** Authorship inputs retain message boundaries and the source of restored rows. */
-  authorshipWords(sessionId: string): { verified: readonly string[]; unknown: readonly string[] } {
+  authorshipWords(sessionId: string): { verified: readonly string[]; unknown: readonly string[]; complete: boolean } {
     const older = this.older.get(sessionId) ?? [];
     const restored = (this.items.get(sessionId) ?? []).filter(isUserMessage)
       .slice(0, this.unknownAhead.get(sessionId) ?? 0).flatMap(i => {
         const text = textOf(i); return text === undefined ? [] : [text];
       });
     return {
+      complete: !this.incompleteAuthorship.has(sessionId) && this.has(sessionId) && this.typedWords(sessionId).length > 0 && this.typedWords(sessionId).length < MAX_TYPED_WORDS
+        && restored.length === 0 && !older.some(e => e.source === 'unknown'),
       verified: [...older.filter(e => e.source === 'typed').map(e => e.text), ...this.typedWords(sessionId)],
       unknown: [...older.filter(e => e.source === 'unknown').map(e => e.text), ...restored],
     };
   }
 
-  recordTyped(sessionId: string, text: string): void {
+  recordTyped(sessionId: string, text: string, sourceComplete = true): void {
+    if (!sourceComplete) this.incompleteAuthorship.add(sessionId);
     if (text.trim() === '') return;
     const next = [...(this.typed.get(sessionId) ?? []), text].slice(-MAX_TYPED_WORDS);
     this.typed.delete(sessionId);
     if (this.typed.size >= this.maxSessions) {
       const oldest = this.typed.keys().next().value;
-      if (oldest !== undefined) this.typed.delete(oldest);
+      if (oldest !== undefined) { this.typed.delete(oldest); this.incompleteAuthorship.delete(oldest); }
     }
     this.typed.set(sessionId, next);
   }

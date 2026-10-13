@@ -78,14 +78,14 @@ describe('propose_new_option refuses a level in another kind of unit — nothing
 describe('propose_assumptions leaves out a value in another kind of unit, and says so', () => {
   it('RED: £49 as the Monthly churn value → not proposed, listed under unit_mismatch', async () => {
     const { caps } = setup();
-    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly churn', value: 49, unit: 'GBP per month', basis: 'x', revise: true }] } as never) as { ok?: boolean; unit_mismatch?: { label: string }[]; assumptions?: unknown[] };
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: false, factor_label: 'Monthly churn', value: 49, unit: 'GBP per month', basis: 'x', revise: true }] } as never) as { ok?: boolean; unit_mismatch?: { label: string }[]; assumptions?: unknown[] };
     expect(r.ok).toBe(false);
     expect(r.unit_mismatch?.map((m) => m.label)).toEqual(['Monthly churn']);
   });
 
   it('CONTRAST: 5 percent per month for Monthly churn is proposed as before', async () => {
     const { caps } = setup();
-    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly churn', value: 5, unit: 'percent per month', basis: 'x', revise: true }] } as never) as { ok?: boolean; unit_mismatch?: unknown };
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: false, factor_label: 'Monthly churn', value: 5, unit: 'percent per month', basis: 'x', revise: true }] } as never) as { ok?: boolean; unit_mismatch?: unknown };
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r).not.toHaveProperty('unit_mismatch');
   });
@@ -101,7 +101,7 @@ describe('a factor with NO level takes its kind from the limit the user stated o
 
   it('RED: level-less churn with its limit → £49 as its starting value is left out, listed under unit_mismatch', async () => {
     const { caps } = setup(levelLessChurn(true));
-    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly churn', value: 49, unit: 'GBP per month', basis: 'x' }] } as never) as { unit_mismatch?: { label: string }[] };
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: false, factor_label: 'Monthly churn', value: 49, unit: 'GBP per month', basis: 'x' }] } as never) as { unit_mismatch?: { label: string }[] };
     expect(r.unit_mismatch?.map((m) => m.label)).toEqual(['Monthly churn']);
   });
 
@@ -114,7 +114,7 @@ describe('a factor with NO level takes its kind from the limit the user stated o
 
   it('CONTRAST: level-less churn with its limit → 7% as its starting value is proposed', async () => {
     const { caps } = setup(levelLessChurn(true));
-    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly churn', value: 7, unit: '%', basis: 'x' }] } as never) as { ok?: boolean; unit_mismatch?: unknown };
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: false, factor_label: 'Monthly churn', value: 7, unit: '%', basis: 'x' }] } as never) as { ok?: boolean; unit_mismatch?: unknown };
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r).not.toHaveProperty('unit_mismatch');
   });

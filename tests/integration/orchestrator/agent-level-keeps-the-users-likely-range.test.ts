@@ -123,7 +123,7 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     const before = JSON.stringify(persisted);
     const count = rows.size;
     const proposed = compound
-      ? await caps.proposeStartingPoint(ctx, { assumptions: [{ factor_label: 'Training time', value: 8, unit: 'days', basis: 'planning assumption' }], option_levels: levels } as never)
+      ? await caps.proposeStartingPoint(ctx, { assumptions: [{ user_stated: false, factor_label: 'Training time', value: 8, unit: 'days', basis: 'planning assumption' }], option_levels: levels } as never)
       : await caps.proposeOptionInterventions(ctx, { interventions: levels } as never);
     expect(JSON.stringify(persisted)).toBe(before);
     expect(rows.size).toBe(count);
