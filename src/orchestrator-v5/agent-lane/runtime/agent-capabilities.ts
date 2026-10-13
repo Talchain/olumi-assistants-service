@@ -1,6 +1,6 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
-import { statementOrigin, claimsUserAuthorship, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
+import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
@@ -295,7 +295,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
-import { heldFigureOwnerOf, provenanceOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { heldFigureOwnerOf, isHumanStatementSource, provenanceOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
@@ -5463,7 +5463,7 @@ export function createAgentCapabilities(
         if (!('parts' in plan)) {
           if (plan.refusal === 'hiring_bound_conflict') return { ok: false, mutated: false, refusal: plan.refusal, calculation_supported: false,
             statement: { quote: plan.quote, source: plan.source, bound: plan.bound, value: plan.value },
-            detail: `${plan.source === 'user_stated' ? 'You gave' : 'Olumi proposed'} ‘${plan.quote}’. That gives a ${plan.bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` };
+            detail: `${isHumanStatementSource(plan) ? 'You gave' : 'Olumi proposed'} ‘${plan.quote}’. That gives a ${plan.bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.` };
           if (plan.refusal === 'too_many_starts') return refuse('too_many_starts', `Olumi can use at most two start times for ‘${label}’ yet, so nothing was prepared. Say so plainly, and ask once which two starts to use; until then Olumi’s own hiring estimate for ‘${label}’ stays in the model, labelled as Olumi’s.`);
           if (plan.refusal === 'fewer_starts_than_held') {
             return refuse('fewer_starts_than_held', heldQuotes.length === held.length
@@ -5652,6 +5652,12 @@ export function createAgentCapabilities(
 
       for (const given of input) {
         let a = given;
+        // AIE #94 6140145484: incomplete source never supplies a missing authorship declaration.
+        // Keep retains the recorded Olumi estimate; it cannot claim a new human origin.
+        if (ctx.user_text_complete === false && (typeof a?.user_stated !== 'boolean'
+          || (a.keep === true && a.user_stated !== false))) {
+          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        }
         const requested = String(a?.factor_label ?? '');
         const identified = a?.factor_id !== undefined ? g.nodes.find(n => n.id === a.factor_id) : undefined;
         const res = a?.factor_id === undefined ? resolveNamed(g, requested, writable)
@@ -5788,7 +5794,7 @@ export function createAgentCapabilities(
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
         if (statementOrigin(writtenAbout || quote !== null,
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
-          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, !claimsUserAuthorship(a)) === 'unknown') {
+          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, a.user_stated === false && a.revise !== true) === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         adopted.push({
@@ -6276,7 +6282,7 @@ export function createAgentCapabilities(
         const userWrote = claimedByUser && (likelyRange !== undefined
           || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
         if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
-          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, !claimsUserAuthorship(i)) === 'unknown') {
+          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false) === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });

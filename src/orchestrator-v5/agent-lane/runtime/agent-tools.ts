@@ -18,6 +18,8 @@ import { sendableQuery } from './public-research.js';
 import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
 import { LOSS_THRESHOLD_CONSEQUENCES } from '../stated-limit.js';
 
+const ASSUMPTION_USER_STATED = {"type": "boolean", "description": "Set true ONLY for a figure the user supplied for this factor, with its actual source; the host must verify that source before recording it as theirs. A verified retained human statement counts. Set false ONLY when explicitly proposing a new Olumi estimate now, with its own basis; for keep: true, false identifies the existing recorded Olumi estimate being retained. Never infer false from missing, truncated or unmatched source, or from the absence of a user-authorship claim. Do not use false to relabel an old quoted, copied or recorded figure. Keep the original statement, subject and qualifications separate from any new interpretation. This flag is a claim to check, not proof of authorship; accepting an Olumi estimate does not turn it into a user-supplied fact."} as const;
+
 /**
  * ⭐ THE CANVAS'S WORD FOR THE LOWEST BAND IS "Slight" (Canvas #70 5847910497). The `strength` enum keeps the wire value
  * `weak`, but the user reads "Slight" on every link pill. Served on CEE `92c2e34`: told "the link … is slight", the model
@@ -273,27 +275,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_assumptions',
-    description:
-      'Propose starting values for factors that have none, so the model can be reasoned about ' +
-      'instead of sitting blank. This does NOT change anything: it records an exact proposal and ' +
-      'returns its id, which you keep for authorise_change: show the user the values, never the id, before asking them to approve. Each value is ' +
-      'an assumption for the user to adopt or correct, NEVER a measurement \u2014 say so; a value the result marks ' +
-      '`your_figure` is the user\u2019s own figure, never called an assumption. Propose only ' +
-      'factors the model actually has, using the labels get_canonical_state returned. ' +
-      'A factor that already holds a value is left alone UNLESS you set `revise: true` on it, which ' +
-      'you may do ONLY when the user has just asked for that factor to be changed and named the ' +
-      'number themselves. Never set it to replace someone\u2019s figure with one of your own. ' +
-      // PTL decision #78 5921683490 (AIQ ruling #75 5921113788): the Agent once scripted "Set Warm introductions to 2 per
-      // month" for the user to type — stored as the user's own override and shown "Set by you", laundering Olumi's figure.
-      'When the user asks to revise an existing value without supplying a replacement figure, ask what figure they ' +
-      'would use; never supply a number or an instruction for them to repeat as their own. ' +
-      'When the user says Olumi\u2019s current estimate for a factor is right and should stay, set `keep: true` on it ' +
-      'instead: nothing changes, and their approval records that they accepted Olumi\u2019s estimate.',
+    // AIE #94 6140145484; approved artifact SHA-256 4de5e7f71fd603d03e39483d1064dfbc94425a0e4208e280441f124b5a924f86
+    description: "Propose starting values for factors that have none, so the model can be reasoned about instead of sitting blank. This does not change anything: it records an exact proposal and returns its id for authorise_change. Show the complete approval card with every proposed value, its unit, source, basis and qualifications, and any omitted or unsupported parts; never show the id as consent. Supply the required user_stated boolean for every item: true identifies a user-supplied figure whose source must verify; false explicitly proposes a new Olumi estimate with its own basis, or identifies an existing recorded Olumi estimate when keep is true. Missing or unverifiable source is unknown, not evidence of a new AI estimate. Preserve verified human origin, known unknown source and the original words separately from a new interpretation; approval adopts an estimate without changing its original authorship. An Olumi estimate is an assumption to adopt or correct, never a measurement; a value the result marks your_figure is the user's own figure and must not be called an Olumi assumption. Propose only factors the model actually has, using the labels returned by get_canonical_state. A factor that already holds a value is left alone unless revise is true, which is allowed only when the user has just requested that factor's change and supplied the replacement figure. Never replace someone's figure with one of your own under revise. When the user requests a revision without a replacement figure, ask what figure they would use; never supply a number or an instruction for them to repeat as their own. When the user says the current recorded Olumi estimate should stay, use keep: true instead: the value does not change, and approval records acceptance of Olumi's estimate. Keep and revise retain their existing separate approval and permission checks.",
     parameters: obj({
       assumptions: {
         type: 'array',
         description: 'The factors to give a starting value, with the reasoning for each.',
         items: obj({
+          user_stated: ASSUMPTION_USER_STATED,
           factor_label: { type: 'string' },
           value: { type: 'number' },
           unit: { type: 'string' },
@@ -313,7 +302,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'records that the user accepted it. Never on the user\u2019s own figure or one from their brief, never with a ' +
               'different number, and never in the same call as other values. Omit it in every other case.',
           },
-        }, ['factor_label', 'value', 'unit', 'basis']),
+        }, ['factor_label', 'value', 'unit', 'basis', 'user_stated']),
       },
     }, ['assumptions']),
   },
@@ -732,11 +721,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         type: 'array',
         description: 'Starting values for factors that have none. May be empty.',
         items: obj({
+          user_stated: ASSUMPTION_USER_STATED,
           factor_label: { type: 'string' },
           value: { type: 'number' },
           unit: { type: 'string' },
           basis: { type: 'string' },
-        }, ['factor_label', 'value', 'unit', 'basis']),
+        }, ['factor_label', 'value', 'unit', 'basis', 'user_stated']),
       },
       option_levels: {
         type: 'array',
@@ -995,7 +985,7 @@ export interface AgentCapabilities {
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
-    assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; revise?: boolean; keep?: boolean }[];
+    assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; user_stated: boolean; revise?: boolean; keep?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label?: string; acts_on?: NewOptionActsOn[]; rationale: string;
@@ -1011,7 +1001,7 @@ export interface AgentCapabilities {
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean; unmodelled_mechanisms?: readonly string[] }[];
   }, internal?: ProposeLevelsInternal): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
+    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; user_stated: boolean }[];
     option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean; unmodelled_mechanisms?: readonly string[] }[];
   }): Promise<ToolResult>;
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */

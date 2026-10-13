@@ -125,7 +125,7 @@ describe('a chip click that is not the approval or the Run withholds authority f
    */
   it('propose AND authorise in the same click turn → nothing written; the proposal still gets its approve chip', async () => {
     script = [
-      call('propose_assumptions', () => ({ assumptions: [{ factor_label: 'Morale', value: 7, unit: 'score', basis: 'x' }] })),
+      call('propose_assumptions', () => ({ assumptions: [{ user_stated: false, factor_label: 'Morale', value: 7, unit: 'score', basis: 'x' }] })),
       call('authorise_change', (b) => ({ proposal_id: lastProposalId(b) })),
       say('I have proposed it; approve it if you want it.'),
     ];

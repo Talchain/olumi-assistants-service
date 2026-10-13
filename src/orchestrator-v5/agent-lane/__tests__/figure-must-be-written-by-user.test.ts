@@ -191,7 +191,7 @@ describe('propose_option_interventions: `user_stated` stands only on a figure th
 });
 
 describe('propose_assumptions: a revision is the user\'s only when they wrote the figure', () => {
-  const revise = { assumptions: [{ factor_label: 'Monthly churn', value: 4, unit: '%', basis: 'x', revise: true }] };
+  const revise = { assumptions: [{ factor_label: 'Monthly churn', value: 4, unit: '%', basis: 'x', user_stated: true, revise: true }] };
   const opAuthor = (store: ProposalStore, id: unknown) =>
     ((store.get(String(id))?.operations[0]?.value ?? {}) as { authored_by?: unknown }).authored_by;
 

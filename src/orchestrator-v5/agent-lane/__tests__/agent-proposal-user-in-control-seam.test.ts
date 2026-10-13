@@ -180,8 +180,8 @@ describe('S-D slice 2 Agent proposals', () => {
   };
   const assumptions = (only = false) => {
     script = [() => fnCall('propose_assumptions', { assumptions: [
-      { factor_label: 'Hours', value: 10, unit: 'hours', basis: 'A starting estimate', ...(graphNow().nodes.find(n => n.id === 'fac_hours')?.observed_state ? { keep: true } : {}) },
-      ...(only ? [] : [{ factor_label: 'Cost', value: 200, unit: 'GBP', basis: 'A starting estimate', ...(graphNow().nodes.find(n => n.id === 'fac_cost')?.observed_state ? { keep: true } : {}) }]),
+      { user_stated: false, factor_label: 'Hours', value: 10, unit: 'hours', basis: 'A starting estimate', ...(graphNow().nodes.find(n => n.id === 'fac_hours')?.observed_state ? { keep: true } : {}) },
+      ...(only ? [] : [{ user_stated: false, factor_label: 'Cost', value: 200, unit: 'GBP', basis: 'A starting estimate', ...(graphNow().nodes.find(n => n.id === 'fac_cost')?.observed_state ? { keep: true } : {}) }]),
     ] }), () => say('Here are starting assumptions for the missing figures.')];
     return turn({ message: 'Suggest starting assumptions for the missing figures.' });
   };
@@ -423,9 +423,9 @@ describe('S-D slice 2 Agent proposals', () => {
   }, 120_000);
   it('P53 prop stale same-target card RED: its own empty binding cannot approve the newer held value', async () => {
     seed();
-    script = [() => fnCall('propose_assumptions', { assumptions: [{ factor_label: 'Hours', value: 10, unit: 'hours', basis: 'First estimate' }] }), () => say('Use ten hours?')];
+    script = [() => fnCall('propose_assumptions', { assumptions: [{ user_stated: false, factor_label: 'Hours', value: 10, unit: 'hours', basis: 'First estimate' }] }), () => say('Use ten hours?')];
     const first = await turn({ message: 'Suggest ten hours as a starting estimate.' }); const old = shown(first);
-    script = [() => fnCall('propose_assumptions', { assumptions: [{ factor_label: 'Hours', value: 20, unit: 'hours', basis: 'Second estimate' }] }), () => say('Use twenty hours?')];
+    script = [() => fnCall('propose_assumptions', { assumptions: [{ user_stated: false, factor_label: 'Hours', value: 20, unit: 'hours', basis: 'Second estimate' }] }), () => say('Use twenty hours?')];
     const second = await turn({ message: 'Suggest twenty hours instead.' }); const newer = shown(second);
     expect(newer.proposal_id).not.toBe(old.proposal_id);
     expect(second._proposal_fields!.proposals.map(p => p.proposal_id)).toEqual([newer.proposal_id]);
@@ -440,10 +440,10 @@ describe('S-D slice 2 Agent proposals', () => {
   }, 120_000);
   it('P53 prop issued rows RED: two distinct live holds preserve order and bind each revision to its first answer row', async () => {
     seed(); const firstTurn = randomUUID();
-    script = [() => fnCall('propose_assumptions', { assumptions: [{ factor_label: 'Hours', value: 10, unit: 'hours', basis: 'First estimate' }] }), () => say('Use ten hours?')];
+    script = [() => fnCall('propose_assumptions', { assumptions: [{ user_stated: false, factor_label: 'Hours', value: 10, unit: 'hours', basis: 'First estimate' }] }), () => say('Use ten hours?')];
     const first = await turn({ turn_id: firstTurn, message: 'Suggest ten hours as a starting estimate.' }); const old = shown(first);
     const secondTurn = randomUUID();
-    script = [() => fnCall('propose_assumptions', { assumptions: [{ factor_label: 'Cost', value: 200, unit: 'GBP', basis: 'Second estimate' }] }), () => say('Use two hundred pounds?')];
+    script = [() => fnCall('propose_assumptions', { assumptions: [{ user_stated: false, factor_label: 'Cost', value: 200, unit: 'GBP', basis: 'Second estimate' }] }), () => say('Use two hundred pounds?')];
     const second = await turn({ turn_id: secondTurn, message: 'Suggest two hundred pounds as the cost estimate.' }); const newer = shown(second);
     expect(newer.proposal_id).not.toBe(old.proposal_id);
     expect(second._proposal_fields!.proposals.map(p => p.proposal_id)).toEqual([old.proposal_id, newer.proposal_id]);
@@ -598,7 +598,7 @@ describe('S-D slice 2 Agent proposals', () => {
     seed(); const first = await assumptions(); const second = await links(); const two = await pending();
     const incoming = await assumptions(true); const incomingRow = await pending();
     await store.append({ scenario_id: SCENARIO, turn_id: randomUUID(), request_hash: 'restore-two', pending_actions: two });
-    script = [() => fnCall('propose_assumptions', { assumptions: [{ factor_label: 'Hours', value: 12, unit: 'hours', basis: 'A different estimate' }] }),
+    script = [() => fnCall('propose_assumptions', { assumptions: [{ user_stated: false, factor_label: 'Hours', value: 12, unit: 'hours', basis: 'A different estimate' }] }),
       () => { atFloorRead = async () => { await store.append({ scenario_id: SCENARIO, turn_id: randomUUID(), request_hash: 'concurrent-offer', pending_actions: incomingRow }); }; return say('Here is a different estimate.'); }];
     const own = await turn({ message: 'Suggest a different estimate of hours.' });
     const held = await pending(); expect(held).toHaveLength(3);
@@ -653,8 +653,8 @@ describe('S-D slice 2 Agent proposals', () => {
     seed(true);
     const { checkEstimatesCall } = await import('../proposal-object/check-estimates.js');
     expect(checkEstimatesCall(graphNow(), ['fac_hours', 'fac_cost'])?.args.assumptions).toEqual([
-      expect.objectContaining({ factor_label: 'Hours', value: 10, unit: 'hours', keep: true }),
-      expect.objectContaining({ factor_label: 'Cost', value: 200, unit: 'GBP', keep: true }),
+      expect.objectContaining({ factor_label: 'Hours', value: 10, unit: 'hours', user_stated: false, keep: true }),
+      expect.objectContaining({ factor_label: 'Cost', value: 200, unit: 'GBP', user_stated: false, keep: true }),
     ]);
     expect(checkEstimatesCall(graphNow(), ['fac_hours', 'fac_hours'])?.args.assumptions).toHaveLength(1);
     expect(checkEstimatesCall(graphNow(), [])).toBeUndefined();

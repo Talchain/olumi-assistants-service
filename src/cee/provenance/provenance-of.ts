@@ -1161,3 +1161,9 @@ export function isUserSizedWithoutOlumiMarks(edge: unknown): boolean {
   return p.source !== 'cee_hypothesis' && p.mean_projected !== true
     && !(typeof p.magnitude === 'string' && p.magnitude.startsWith('olumi_'));
 }
+
+/** A retained/planned statement's explicit human-origin stamp, including a hiring-bound disclosure.
+ * This projects the statement contract, not the factor-value stamp vocabulary. */
+export function isHumanStatementSource(statement: unknown): boolean {
+  return rec(statement)?.source === 'user_stated';
+}
