@@ -305,7 +305,7 @@ describe('result-first on retry, lost response and failed explanation (live rout
 });
 
 // Exercise the real column projection too: a permissive row double cannot prove the SELECT.
-it('the real committed-turn reader selects and returns the answer Run key', async () => {
+it('the real committed-turn reader uses one exact projection without the retired B2 Run key', async () => {
   const { SupabaseSessionStore } = await import('../../session/supabase-store.js');
   const key = '0123456789abcdef';
   const selected: string[] = [];
@@ -316,6 +316,9 @@ it('the real committed-turn reader selects and returns the answer Run key', asyn
       data: [Object.fromEntries(columns.split(',').map(c => c.trim()).map(c => [c, row[c]]))] }) }) }) };
   } }) };
   const reader = new SupabaseSessionStore(client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20 } as never);
-  expect((await reader.readCommittedTurn(SCENARIO, 'turn'))?.suggested_actions_run_key).toBe(key);
-  expect(selected[0]!.split(',').map(c => c.trim())).toContain('suggested_actions_run_key');
+  expect(await reader.readCommittedTurn(SCENARIO, 'turn')).toEqual({
+    id: 'answer', request_hash: 'h', assistant_message: PROSE, user_message: null,
+    llm_calls_used: 0, pending_actions: [],
+  });
+  expect(selected).toEqual(['id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance']);
 });

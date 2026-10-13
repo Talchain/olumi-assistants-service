@@ -2015,13 +2015,6 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
-    // Read the replay's Run binding from this exact answer, using the same narrow
-    // projection as the reload offer reader (never a latest-answer association).
-    const { data: offers, error: offersError } = await this.client.from('v5_conversation_turns')
-      .select('turn_id, request_hash, suggested_actions, suggested_actions_run_key')
-      .eq('scenario_id', scenarioId).eq('turn_id', turnId).limit(1);
-    if (offersError) throw new SessionReadError('Committed turn Run binding unavailable');
-    const offer = ((offers as Array<Record<string, unknown>> | null) ?? [])[0];
     const { data, error } = await this.client
       .from('v5_conversation_turns')
       .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance')
@@ -2039,7 +2032,6 @@ export class SupabaseSessionStore implements SessionStore {
       ...(guidance !== undefined ? { agent_guidance: guidance } : {}),
       id: row.id,
       request_hash: String(row.request_hash ?? ''),
-      suggested_actions_run_key: typeof offer?.suggested_actions_run_key === 'string' ? offer.suggested_actions_run_key : null,
       assistant_message: typeof row.assistant_message === 'string' ? row.assistant_message : null,
       user_message: typeof row.user_message === 'string' ? row.user_message : null,
       llm_calls_used: typeof row.llm_calls_used === 'number' ? row.llm_calls_used : 0,

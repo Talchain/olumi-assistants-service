@@ -5,7 +5,6 @@ import { composeReplyShape, sentencesOf, shapeFromDerivedAnswerText } from '../o
 import { goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { goalChanceLineOwed, identityAskLineFor } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
-import { disclosuresFor } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { conditionalInputBasis } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { whatChangesFaceLine } from '../orchestrator-v5/goal-target/goal-chance-range-agent.js';
 import { textAtRest, withA7AfterGate } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
@@ -93,7 +92,6 @@ import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import { modelFacingToolResult } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
@@ -2626,15 +2624,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graph: state.graph ?? null,
         analysisReady: state.analysisReady,
       }).response;
-      const gatedReplay = replayLoopRun ? { ...leaderGatedReplay, assistant_text: replayText } : withEstimateGoalPointsAtEgress(leaderGatedReplay, {
+      // Recheck warm, identity-matched answers. Historical answers cannot borrow today's numerical licence.
+      const gatedReplay = withEstimateGoalPointsAtEgress(leaderGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
-        current: !replayLoopRun && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
+        current: (!replayLoopRun || replayLoopRunCurrent) && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
         userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedByUser(body) ? [prior.user_message ?? message] : [])], recentRowsForEgress),
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
-      if (replayLoopRun) gatedReplay.assistant_text = withoutProposalIds(prior.assistant_message ?? '');
       if (legacyRunReceipt) return withShapeOnlyIfItDerives(gatedReplay);
       const { _answer_shape: _oldShape, ...wholeReplay } = gatedReplay as typeof gatedReplay & { _answer_shape?: unknown };
       return wholeReplay;
@@ -3121,7 +3119,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let handledGuidancePress: HandledGuidancePress | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
-    let _firstAnalysisResultFirst = false;
     let narrationStatus: 'pending' | 'unavailable' | 'ready' | 'stale' | undefined;
     /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
     let fastPathView: ProvisionalView | null = null;
@@ -3133,7 +3130,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     let narratorWords: string | null = null;
     let _explainRobustnessCaveat: string | null = null;
-    let explainFallbackText: string | undefined;
     let explanationBriefText: string | null = null;
     /** A Run with no result: its typed outcome's own chips (the identity ask's "Check the figures", a retry), `run-outcome.ts`. */
     let runOutcomeChips: OfferedAction[] = [];
@@ -3437,7 +3433,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // M2: with no interpretation, a rerun still says Olumi's code line rather than nothing about what changed.
       const text = interpreted?.answer ?? (matches
         ? (rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true })) : RUN_EXPLANATION_UNAVAILABLE_TEXT);
-      explainFallbackText = rerunPlan?.fallback;
       result = {
         assistant_text: text,
         items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
@@ -4844,9 +4839,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * below edits the text a replay returns, not only the text this request returns.
      */
     const explanationChip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult });
-    if (_firstAnalysisResultFirst) narrationStatus = explanationChip !== null
-      && resultFirstRunCompleted ? 'pending' : 'unavailable';
-    if (runPress && resultFirstRunCompleted) narrationStatus = explanationChip !== null
+    if (resultFirstRunCompleted) narrationStatus = explanationChip !== null
       && result.stopped_reason === 'answered' && result.assistant_text.trim() !== '' ? 'ready' : 'unavailable';
     const narrationKey = fastPath === 'explain' && typeof explanationId === 'string'
       ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : explanationChip?.id.slice(RUN_EXPLANATION_PREFIX.length);

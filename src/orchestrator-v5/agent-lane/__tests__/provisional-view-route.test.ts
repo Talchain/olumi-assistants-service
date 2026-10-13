@@ -294,11 +294,11 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(b._agent.provisional_view).toMatchObject(view);
   });
 
-  it('C5b RED: the Run BUTTON on a withheld result → ONE interpreting call, no tools, a strict schema; the labelled view is typed on `_agent`, never in the prose', async () => {
+  it('C5b: Explain after the Run loop uses one strict interpreting call; the labelled view stays typed', async () => {
     const r = await pressRunAnswering(REPLY.text, VIEW);
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     const b = r.json() as Body & { _diagnostic_trace?: { fast_path?: string } };
-    expect(b._diagnostic_trace?.fast_path).toBe('run');
+    expect(b._diagnostic_trace?.fast_path).toBe('explain');
     expect(modelRequests, 'exactly one model call').toHaveLength(1);
     expect(modelRequests[0]!['tool_choice']).toBe('none');
     expect(modelRequests[0]!['tools']).toEqual([]);
@@ -311,7 +311,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     const instructions = String(modelRequests[0]!['instructions']);
     expect(instructions.endsWith(`${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`)).toBe(true);
     // No tool was called: the view is a field of the interpreting call, never a fabricated tool call.
-    expect(b._agent.tool_calls.map((c) => c.name)).toEqual(['run_analysis']);
+    expect(b._agent.tool_calls.map((c) => c.name)).toEqual([]);
     // B4: the committed answer retains this non-exact-label paraphrase byte-identically.
     expect(b.assistant_text).toBe(REPLY.text);
 

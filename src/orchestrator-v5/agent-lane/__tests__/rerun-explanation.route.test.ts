@@ -69,7 +69,8 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 }));
 
 let modelText = MOVED;
-let modelCalls = 0;
+// R1 Run uses the tool loop; only the separate Explain request is interpret-only.
+let interpretCalls = 0;
 let runDelta: Record<string, unknown> = RUN_DELTA;
 const state = () => ({ ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: '2026-10-01T09:48:47.190Z' } });
 
@@ -85,7 +86,7 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
       if (body.tool_choice !== 'none') return new Response(JSON.stringify({ output: [
         { type: 'message', content: [{ type: 'output_text', text: 'The model result is available.' }] },
       ] }), { status: 200 });
-      modelCalls += 1;
+      interpretCalls += 1;
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: modelText }] }] }), { status: 200 });
     }));
     vi.resetModules();
@@ -104,7 +105,7 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; modelCalls = 0; modelText = MOVED; runDelta = RUN_DELTA; });
+  beforeEach(() => { rows.length = 0; interpretCalls = 0; modelText = MOVED; runDelta = RUN_DELTA; });
 
   const post = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: SCENARIO, ...payload } });
   const runTurn = (turnId: string) => post({ turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
@@ -135,23 +136,23 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     }
     expect(explained.assistant_text).not.toContain(RERUN_NO_CHANGE_LINES.unknown);
     expect(explained.assistant_text).not.toContain('Nothing else changed.');
-    expect(modelCalls).toBe(2);
+    expect(interpretCalls).toBe(1);
     const replay = (await explainTurn(id, first)).json() as Body;
     expect(replay.assistant_text).toBe(explained.assistant_text);
-    expect(modelCalls, 'replay serves the recorded explanation').toBe(2);
+    expect(interpretCalls, 'replay serves the recorded explanation').toBe(1);
   });
 
   it('RED: the model claims "rose" with no prior figures → the wire says RC\'s fallback; no stored row holds "rose"; a replay re-serves the fallback', async () => {
     const first = (await runTurn(randomUUID())).json() as Body;
     const e1 = randomUUID();
     const explained = (await explainTurn(e1, first)).json() as Body;
-    expect(modelCalls, 'the model really answered').toBe(2);
+    expect(interpretCalls, 'the model really answered').toBe(1);
 
     expect(explained.assistant_text).not.toMatch(/\brose\b/);
     expect(rows.length, 'the control: rows were written').toBeGreaterThan(0);
     expect(JSON.stringify(rows)).not.toMatch(/\brose\b/);
     const replay = (await explainTurn(e1, first)).json() as Body;
-    expect(modelCalls, 'a replay calls no model').toBe(2);
+    expect(interpretCalls, 'a replay calls no model').toBe(1);
 
     expect(replay.assistant_text).not.toMatch(/\brose\b/);
   });

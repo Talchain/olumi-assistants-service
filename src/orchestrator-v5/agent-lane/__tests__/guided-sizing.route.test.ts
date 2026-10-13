@@ -315,10 +315,10 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const replay = await run({ turn_id: turnId });
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(replay._answer_shape).toEqual(first._answer_shape);
-    expect(replay.guided_sizing).toBeUndefined();
-    expect(replay.narration).toEqual({ status: 'stale', run_key: '' });
-    expect(replay.blocks ?? []).toEqual([]);
-    expect(wirePresses(replay)).toEqual([]);
+    expect(replay.guided_sizing).toEqual(first.guided_sizing);
+    expect(replay.narration).toEqual(first.narration);
+    expect(replay.blocks).toEqual(first.blocks);
+    expect(wirePresses(replay)).toEqual(wirePresses(first));
     expect(runCalls).toBe(calls);
   });
 
@@ -336,7 +336,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const replay = await run({ turn_id: turnId });
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(replay._answer_shape).toEqual(first._answer_shape);
-    expect(wirePresses(replay)).toEqual([]);
+    expect(wirePresses(replay)).toEqual(wirePresses(first));
     expect(runCalls).toBe(calls);
   });
 
@@ -368,18 +368,18 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(body.guided_sizing.links.map((l: Json) => [l.from, l.to])).toEqual(ORDERED_PAIRS.map(pair => [...pair]));
   });
 
-  it('typed Run replay without a saved key preserves text and withholds current guided controls', async () => {
+  it('warm typed Run replay preserves text and original identity-bound guided controls', async () => {
     const turnId = randomUUID();
     const first = await run({ turn_id: turnId });
     const calls = runCalls;
     const replay = await run({ turn_id: turnId });
     expect(first.guided_sizing.total).toBe(3);
-    expect(replay.guided_sizing).toBeUndefined();
-    expect(replay.narration).toEqual({ status: 'stale', run_key: '' });
-    expect(replay.blocks ?? []).toEqual([]);
+    expect(replay.guided_sizing).toEqual(first.guided_sizing);
+    expect(replay.narration).toEqual(first.narration);
+    expect(replay.blocks).toEqual(first.blocks);
     const presses = (body: Json) => body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-size-link:'));
     expect(replay.assistant_text).toBe(first.assistant_text);
-    expect(presses(replay)).toEqual([]);
+    expect(presses(replay)).toEqual(presses(first));
     expect(runCalls).toBe(calls);
   });
 

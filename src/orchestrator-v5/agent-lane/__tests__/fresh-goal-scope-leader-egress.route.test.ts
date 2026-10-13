@@ -209,8 +209,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message',
       scenario_id: SID, session_id: 'fresh-scope-baseline', turn_id: TID, message: 'Compare the options.', ...overrides } });
     expect(response.statusCode, response.body).toBe(200);
-    if ((overrides.chip as { action_type?: string } | undefined)?.action_type === 'run_analysis' && scripted.concurrent) expect(fetch).toHaveBeenCalledTimes(1);
-    else expect(fetch).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
     expect(scripted.rows.every(row => row.graph === undefined)).toBe(true);
     const body = response.json<Record<string, any>>();
     if (!['503', 'throw', 'missing-analysis', 'malformed-analysis'].includes(scripted.graphMode)) {
@@ -342,14 +341,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
       }
       const { body } = await turn({ chip });
       expect(body._agent.replayed).toBe(true);
-      if (exit === 'append-repair') {
-        // The concurrent committed answer has no saved Run key: restored readback is not its identity.
-        expect(body.assistant_text).toBe(scripted.concurrentText);
-        expect(body.narration).toEqual({ status: 'stale', run_key: '' });
-        expect(body.blocks ?? []).toEqual([]);
-        expect(body.suggested_actions.filter((action: { id: string }) => action.id.startsWith('agent-explain-run:'))).toEqual([]);
-        expect(body.analysis_state.leader_claim).toEqual(readState!.leader_claim);
-      } else assertRestoredResult(body);
+      assertRestoredResult(body);
     });
   }
   for (const unavailable of [false, true]) {

@@ -314,8 +314,6 @@ export interface CommittedTurnLedger {
 
 /** What {@link SessionStore.readCommittedTurn} returns — the durable facts a replay is answered from. */
 export interface CommittedTurnRecord {
-  /** Run identity persisted with this exact answer; absent on legacy rows. */
-  readonly suggested_actions_run_key?: string | null;
   readonly agent_guidance?: AnswerGuidance;
   readonly id: string;
   readonly request_hash: string;

@@ -63,14 +63,14 @@ import { readBackState } from '../../../routes/agent-v1-turn.js';
 const route = ts.createSourceFile('route.ts', readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 let mismatch: ts.IfStatement | undefined;
 function find(node: ts.Node) {
-  if (ts.isIfStatement(node) && node.expression.getText(route).includes("runStillCurrent === false || !runExplanationMatches(interpretedRunId")) mismatch = node;
+  if (ts.isIfStatement(node) && node.expression.getText(route).startsWith("fastPath === 'explain' && (runStillCurrent === false")) mismatch = node;
   ts.forEachChild(node, find);
 }
 find(route);
 function narrationAfter(read: Awaited<ReturnType<typeof readBackState>>, explanationId: string) {
   expect(mismatch).toBeDefined();
   const code = ts.transpileModule(`let result = { assistant_text: 'Verified narration', items: [] }; let text = result.assistant_text;
-    let fastPathView = { view: 'Verified view' }; let narrationStatus = 'ready'; let interpretedRunId = explanationId; let boundRun = undefined;
+    let fastPathView = { view: 'Verified view' }; let narrationStatus = 'ready';
     ${mismatch!.getText(route)}; return { result, text, fastPathView, narrationStatus };`,
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   return new Function('fastPath', 'runStillCurrent', 'runExplanationMatches', 'explanationId', 'scenarioId',
