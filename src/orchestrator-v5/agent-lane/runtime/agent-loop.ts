@@ -37,8 +37,8 @@ export interface ModelCallRequest {
   readonly input: readonly unknown[];
   readonly tools: readonly unknown[];
   readonly max_output_tokens: number;
-  /** The ONE tool this call must make (`AgentTurnInput.firstCallTool`), sent only on the turn's first call. */
-  readonly tool_choice?: { readonly type: 'function'; readonly name: string };
+  /** A forced first tool, or no tool on the host-dispatched Run's interpreting call. */
+  readonly tool_choice?: { readonly type: 'function'; readonly name: string } | 'none';
   /** A caller-set deadline: the call aborts at it and is never retried (`withTransportRetry`). */
   readonly deadline_ms?: number;
   /** T1 (b): the ledger's purpose for a cache prewarm (`PREWARM_OUTPUT_TOKENS`); never sent to the provider. */
@@ -155,7 +155,11 @@ export interface AgentTurnInput {
    * output), then the next hop's call answers from its result. Applied only when that tool is offered on this turn;
    * otherwise hop 0 calls the model as before. Absent ⇒ exactly as before.
    */
-  readonly hostFirstCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>> };
+  readonly hostFirstCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>>;
+    /** Run already names its tool; no discarded provider call is needed. */
+    readonly prewarm?: boolean;
+    /** The following call interprets only; dispatch also refuses any attempted tool. */
+    readonly interpretOnly?: boolean };
   /**
    * ⭐ RT-1: WHAT THE USER HAD SELECTED ON THE CANVAS, as one developer note for THIS turn (`selection-context.ts`).
    * Placed after the model state it is resolved against, and like that state never handed on into the history: the
@@ -519,6 +523,8 @@ export async function runAgentTurn(
   };
   for (let hop = 0; hop < maxHops; hop++) {
     const providerStartedAt = now();
+    const interpretOnly = hop > 0 && input.hostFirstCall?.interpretOnly === true;
+    if (interpretOnly) for (const tool of toolsFor(mode)) withheld.add(tool.name);
     // Eligibility, not the raw catalogue. `eligibleTools` starts from
     // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
     // and a context packet can never widen the surface.
@@ -538,12 +544,13 @@ export async function runAgentTurn(
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
+      ...(interpretOnly ? { tool_choice: 'none' as const } : {}),
       ...(narrateHop ? { reasoning_role: 'narrate' as const } : {}),
     };
-    if (hostCall !== undefined) {
+    if (hostCall !== undefined && hostCall.prewarm !== false) {
       void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
         .catch((err: unknown) => { log.debug({ err: String(err) }, 'agent-lane: cache prewarm failed (nothing reads it)'); });
-    } else {
+    } else if (hostCall === undefined) {
       providerCalls += 1;
     }
     let resp: ModelCallResponse;
@@ -559,6 +566,14 @@ export async function runAgentTurn(
         resp = await callModel(request);
       }
     } catch (err: unknown) {
+      // A completed host Run keeps its exact call/output history even when its interpretation fails.
+      // The route supplies the existing outcome-specific unavailable/blocked reply.
+      if (interpretOnly) {
+        providerMs += Math.max(0, now() - providerStartedAt);
+        return { assistant_text: '', items: handedOn(), tool_calls: toolCalls, tool_results: toolResults,
+          mutated, hops: hop, stopped_reason: 'incomplete',
+          timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)) };
+      }
       if (!narrateHop) throw err;
       providerMs += Math.max(0, now() - providerStartedAt);
       return recoverNarration(err, hop);
@@ -594,7 +609,7 @@ export async function runAgentTurn(
     if (calls.length === 0) {
       // ⛔ An unfinished final answer is never returned as the answer, and never enters the history as one: the
       // route answers from the turn's own outcome instead (a run's result, or "ask me again").
-      if (answerIsIncomplete(resp)) {
+      if (answerIsIncomplete(resp) || (interpretOnly && textOf(out).trim() === '')) {
         log.warn({ hop, incomplete_reason: resp.incomplete_reason ?? null }, 'agent-lane: final answer incomplete — not returned as an answer');
         return {
           assistant_text: '',

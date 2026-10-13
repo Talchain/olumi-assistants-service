@@ -1,3 +1,4 @@
+import type { EffectsTiming } from '../orchestrator-v5/goal-target/period-end-assumption.js';
 import { decisionInputLines, isDecisionInputAsk, untestedHorizonLine, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { breakEvenLine, thresholdReasonLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
@@ -3048,6 +3049,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The existing K2-bound press authorises one calculation on this turn, not model writes.
     const runPress = approvedProposal === undefined && typedRunOf(body);
     let runPressConsumed = false;
+    // R2b / AIE AMEND: no current saved field binds timing to the complete source,
+    // target, quantity, unit, reference, period, options AND revision. The goal basis
+    // and hiring carriers alone cannot attest that reading. Keep G2's null withhold
+    // until the canonical source owner supplies that binding; absence is not not_stated.
+    const runEffectsTiming: EffectsTiming | null = null;
     let runPressResult: Awaited<ReturnType<typeof capabilities.runAnalysis>> | undefined;
     let runPressToolMs = 0;
     const loopCapabilities = !runPress ? capabilities : {
@@ -3056,10 +3062,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (runPressConsumed) return { ok: false, mutated: false, ran: false, refusal: 'run_press_consumed',
           detail: 'This Run press has already been used. No second analysis ran.' };
         runPressConsumed = true;
-        // N1: only this agent call supplies timing. Never merge request or chip parameters here.
+        // R2: only the saved model supplies timing on a press. Neither chip parameters nor narration may override it.
         const started = Date.now();
         try {
-          runPressResult = await capabilities.runAnalysis(ctx, { reason: args.reason, effects_timing: args.effects_timing });
+          runPressResult = await capabilities.runAnalysis(ctx, { reason: args.reason, effects_timing: runEffectsTiming });
           return runPressResult;
         } finally {
           runPressToolMs += Date.now() - started;
@@ -3888,7 +3894,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * the request that WON the turn claim: a losing, refused or replayed request has already returned above.)
          */
         const mayRouteBrief = emitStage !== undefined && knownEmpty && earlierWordsKnown && needsDurableSeed(history) && typedNow !== null && methodTurn === null && widenTurn === null;
-        const reading = emitStage !== undefined && knownEmpty ? readBrief(message, callBriefReading) : undefined;
+        const reading = !runPress && emitStage !== undefined && knownEmpty ? readBrief(message, callBriefReading) : undefined;
         if (reading !== undefined && emitStage !== undefined) {
           briefReadingOpen = true;
           void reading.then((r) => {
@@ -3953,12 +3959,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
             ...(methodTurn?.kind === 'run' || risksRun !== undefined ? { maxHops: 1 } : widenRun !== undefined ? { maxHops: 2 } : {}),
             // Before the widen and chip forcings below, which win if both were ever set.
-            ...(runPress ? { firstCallTool: 'run_analysis' } : {}),
             ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
             ...(levelAnswerTool !== undefined ? { firstCallTool: levelAnswerTool } : {}),
             ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
             ...(canonicalContext !== undefined ? { canonicalContext } : {}),
             ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
+            // Same loop dispatch and receipts, followed by exactly one interpretation; no routing/prewarm call.
+            ...(runPress ? { maxHops: 2, hostFirstCall: { name: 'run_analysis',
+              args: { reason: message, effects_timing: runEffectsTiming }, prewarm: false, interpretOnly: true } } : {}),
             ...(selectionContext !== null && selectionContext !== undefined ? { selectionNote: selectionContext.note } : {}),
             // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
             ...((body['chip'] as { id?: unknown } | null | undefined)?.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id

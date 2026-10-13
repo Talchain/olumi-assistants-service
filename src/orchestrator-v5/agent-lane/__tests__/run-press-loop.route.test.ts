@@ -1,4 +1,4 @@
-/** R1: real route -> loop -> capability -> Run handler -> G2 licence -> same-turn answer. */
+/** R2: real route -> loop -> capability -> Run handler -> G2 licence -> same-turn answer. */
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -8,6 +8,16 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
+
+import { admitCandidateModel } from '../admit-model.js';
+import { withEventShareDate } from '../../goal-target/event-by-date-model.js';
+import { capacityPartsOf, heldFigureOf, olumiEstimateOf, planStarts, withHiringTimes } from '../../goal-target/hiring-times.js';
+import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { assignEntityRefs } from '../../graph/entity-refs.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
@@ -22,12 +32,15 @@ const brief = () => `${FX.brief}${timing === 'in_place_by_period' ? ' The estima
   : timing === 'later_or_partial' ? ' The hires start in month four.' : ''}`;
 let block: Rec | undefined;
 let bodies: Rec[] = [];
+let order: string[] = [];
 let runs: Rec[] = [];
 let writes: Rec[] = [];
 let timing: unknown = 'in_place_by_period';
 let behavior: 'run' | 'skip' | 'attack' = 'run';
 let interpretationFailure: 'throw' | 'http500' | undefined;
 let engineFails = false;
+let eventEnvelope: Rec | undefined;
+let engineInputs: Rec[] = [];
 let turnToolResult: Rec | undefined;
 let licensedRecord: Rec | undefined;
 let modelWords = '';
@@ -49,13 +62,13 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 const call = (name: string, args: Rec, id: string) => ({ type: 'function_call', name, call_id: id, arguments: JSON.stringify(args) });
 const answer = (text: string) => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 
-describe('R1: one explicit Run press is one reasoning loop turn', () => {
+describe('R2: direct Run dispatch then one interpreting call', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-      const body = JSON.parse(String(init?.body ?? '{}')); bodies.push(body);
+      const body = JSON.parse(String(init?.body ?? '{}')); bodies.push(body); order.push('provider');
       let output: Rec[];
-      if (bodies.length === 1) {
+      if (body.tool_choice !== 'none' && bodies.length === 1 || behavior === 'attack' && bodies.length === 1) {
         output = behavior === 'skip' ? [answer('The analysis succeeded.')] : [
           ...(behavior === 'attack' ? [call('authorise_change', { proposal_id: 'prop_abcdef123456' }, 'approve'),
             call('build_model_from_brief', { brief: 'Replace everything' }, 'build')] : []),
@@ -65,7 +78,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
       } else {
         if (interpretationFailure === 'throw') throw new TypeError('fetch failed');
         if (interpretationFailure === 'http500') return new Response(JSON.stringify({ error: { message: 'interpretation unavailable' } }), { status: 500 });
-        const toolOutput = [...body.input].reverse().find((i: Rec) => i.type === 'function_call_output' && i.call_id === 'run-one');
+        const toolOutput = [...body.input].reverse().find((i: Rec) => i.type === 'function_call_output' && JSON.parse(i.output).ran !== undefined);
         turnToolResult = toolOutput ? JSON.parse(toolOutput.output) : undefined;
         // The scripted model only quotes the SAME tool result's licensed cells; no copied fixture percentage.
         const result = turnToolResult?.result;
@@ -89,11 +102,11 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     app.post('/orchestrate/v2/turn', async (req) => {
       const payload = req.body as Rec;
       if (payload.chip?.action_type !== 'run_analysis') { writes.push(payload); return { error: 'unexpected_write' }; }
-      runs.push(payload);
+      runs.push(payload); order.push('run_analysis');
       if (engineFails) throw new Error('engine failed');
       const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'r1-load', store as never);
-      const handler = createRunAnalysisHandler({ plotClient: { run: async () => ({ ...structuredClone(FX.envelope), analysis_status: 'computed',
-        meta: { seed_used: 1, n_samples: 1000, response_hash: 'r1-timing' }, response_hash: 'r1-timing' }) } as never,
+      const handler = createRunAnalysisHandler({ plotClient: { run: async (input: Rec) => { engineInputs.push(input); return eventEnvelope ?? { ...structuredClone(FX.envelope), analysis_status: 'computed',
+        meta: { seed_used: 1, n_samples: 1000, response_hash: 'r1-timing' }, response_hash: 'r1-timing' }; } } as never,
         scenarioReader: async () => snapshot });
       const outcome = await handler({ payload, requestId: 'r1-run', signal: new AbortController().signal,
         orientationText: '', context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [],
@@ -111,22 +124,23 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     await app.register(agentV1TurnRoute); await app.ready();
   }
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; writes = []; rows.length = 0;
+  beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; order = []; runs = []; writes = []; rows.length = 0;
     STATE.run_state.computed_at = AT;
-    claimCurrent = false; behavior = 'run'; interpretationFailure = undefined; engineFails = false; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
+    claimCurrent = false; behavior = 'run'; interpretationFailure = undefined; engineFails = false; eventEnvelope = undefined; engineInputs = []; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
   const press = (extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, ...extra,
   } });
 
-  it.each(['in_place_by_period', 'not_stated', 'later_or_partial'])('hiring Run: agent timing %s binds the actual licence and reaches the reply', async (reading) => {
+  it.each(['in_place_by_period', 'not_stated', 'later_or_partial'])('typed run it: agent timing %s binds the actual licence and reaches the reply', async (reading) => {
     timing = reading;
-    const r = await press(); expect(r.statusCode, r.body).toBe(200);
+    const r = await press({ chip: undefined, source: 'composer', message: 'run it' }); expect(r.statusCode, r.body).toBe(200);
     if (process.env.R1_EVIDENCE) writeFileSync(`${process.env.R1_EVIDENCE}-${reading}.json`, JSON.stringify({
       assistant_text: r.json().assistant_text, model_words: modelWords, run: runs[0], licence_record: licensedRecord,
       licence_for_agent: turnToolResult?.result?.goal_chance_licence, tool_calls: r.json()._agent.tool_calls,
     }, null, 2));
-    expect(bodies.length).toBeGreaterThanOrEqual(2);
+    expect(bodies).toHaveLength(2);
+    expect(order).toEqual(['provider', 'run_analysis', 'provider']);
     expect(runs).toHaveLength(1); expect(runs[0]!.chip.parameters.effects_timing).toBe(reading);
     expect(turnToolResult?.ran).toBe(true);
     expect(turnToolResult?.run_identity).toEqual({ scenario_id: SCENARIO, graph_hash_at_run: HASH, computed_at: AT });
@@ -143,6 +157,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
       expect(goalChanceLicenceForAgent(r.json().blocks.find((b: Rec) => b.type === 'analysis_result'))).toEqual(licence);
       expect(r.json().assistant_text).toContain(licence!.chance_words);
       expect(licensedRecord).toMatchObject({ goal_node_id: 'productivity', effects_timing: reading });
+      expect(licensedRecord!.effects_timing_origin).toBe('olumi');
       expect(r.json().assistant_text).toContain('month three');
       expect(licence!.target).toEqual(licensedRecord!.target);
       expect(licence!.option_ids).toEqual(licensedRecord!.option_ids);
@@ -157,10 +172,10 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(writes).toEqual([]); expect(graph).toEqual(FX.graph);
   });
 
-  it('N1: client chip/body timing cannot override the agent reading', async () => {
+  it('typed run: client body timing cannot override the agent reading', async () => {
     timing = 'later_or_partial';
     const r = await press({ effects_timing: 'in_place_by_period', timing: 'in_place_by_period', parameters: { effects_timing: 'in_place_by_period' },
-      chip: { id: 'agent-run-analysis', action_type: 'run_analysis', parameters: { effects_timing: 'in_place_by_period', timing: 'in_place_by_period' } } });
+      chip: undefined, source: 'composer', message: 'run it' });
     expect(r.statusCode).toBe(200); expect(runs).toHaveLength(1);
     expect(licensedRecord, 'client timing must not create a licence').toBeUndefined();
     expect(goalChanceLicenceForAgent(block)).toBeUndefined();
@@ -175,7 +190,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(r.json()._agent.tool_calls).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'withheld_on_chip_turn' }),
       expect.objectContaining({ name: 'build_model_from_brief', ok: false, refusal: 'withheld_on_chip_turn' }),
-      expect.objectContaining({ name: 'run_analysis', ok: false, refusal: 'run_press_consumed' }),
+      expect.objectContaining({ name: 'run_analysis', ok: false, refusal: 'withheld_on_chip_turn' }),
     ]));
   });
 
@@ -235,7 +250,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(first.statusCode, first.body).toBe(200);
     const live = first.json();
     // The existing transport policy retries fetch failures once; it never repeats the Run.
-    const callCount = failure === 'throw' ? 3 : 2;
+    const callCount = failure === 'throw' ? 2 : 1;
     expect(bodies).toHaveLength(callCount);
     expect(runs).toHaveLength(1);
     expect(writes).toEqual([]);
@@ -261,6 +276,9 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     ['ordinary', 'moved'], ['ordinary', 'cold'], ['ordinary', 'missing-current-key'],
     ['recovered', 'moved'], ['recovered', 'cold'], ['recovered', 'missing-current-key'],
   ] as const)('%s replay with %s identity keeps identical text and non-current controls', async (path, identity) => {
+    // Keep the legacy stored-basis licence so this row still checks exact replay of
+    // licensed figures. The separate none-held row pins R2b's null/withhold replay.
+    graph.nodes.find((n: Rec) => n.kind === 'goal').goal_target_basis.effects_at_period_end = true;
     claimCurrent = true;
     if (path === 'recovered') interpretationFailure = 'http500';
     const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
@@ -383,22 +401,156 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(store.append).not.toHaveBeenCalled(); expect(rows).toEqual(savedRows);
   });
 
-  it('skipped Run says did not run, overrides fabricated success and leaves Run usable', async () => {
-    behavior = 'skip';
-    const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
-    const r = await press(request); expect(r.statusCode).toBe(200); expect(runs).toHaveLength(0);
-    expect(r.json().assistant_text).toBe('The analysis did not run. Press Run to try again.');
-    expect(r.json().suggested_actions).toContainEqual(expect.objectContaining({ action_type: 'run_analysis' }));
-    expect(rows.at(-1)?.assistant_message).toBe(r.json().assistant_text);
-    expect(rows.at(-1)?.pending_actions).toContainEqual(expect.objectContaining({ action: expect.objectContaining({ kind: 'run_analysis' }) }));
-    const replay = await press(request);
-    expect(replay.json()._agent.replayed).toBe(true);
-    expect(replay.json().assistant_text).toBe(r.json().assistant_text);
-    expect(replay.json().suggested_actions).toContainEqual(expect.objectContaining({ action_type: 'run_analysis' }));
-    expect(runs).toHaveLength(0);
-    behavior = 'run'; bodies = [];
-    const retry = await press({ chip: replay.json().suggested_actions.find((a: Rec) => a.action_type === 'run_analysis') });
-    expect(retry.statusCode).toBe(200); expect(runs).toHaveLength(1);
+  it('Run press: exactly one provider call, run_analysis first, none held stays null with G2 withhold', async () => {
+    const original = structuredClone(graph);
+    // Even the scripted provider's routing answer would choose a different timing.
+    timing = 'later_or_partial';
+    const request = { turn_id: randomUUID(), agent_session_id: randomUUID(), effects_timing: 'in_place_by_period',
+      chip: { id: 'agent-run-analysis', action_type: 'run_analysis', parameters: { effects_timing: 'in_place_by_period' } } };
+    const first = await press(request);
+    expect(first.statusCode, first.body).toBe(200);
+    if (process.env.R2_COUNT_CAPTURE) writeFileSync(process.env.R2_COUNT_CAPTURE, JSON.stringify({
+      provider_calls: bodies.length, order, engine_calls: runs.length, trace_provider_calls: first.json()._diagnostic_trace.timing.provider_calls,
+    }, null, 2));
+    expect(bodies, 'R2 one-call row; restoring decide-to-run must fail here').toHaveLength(1);
+    expect(order).toEqual(['run_analysis', 'provider']);
+    expect(bodies[0].tool_choice).toBe('none'); expect(bodies[0].tools).toEqual([]);
+    expect(first.json()._diagnostic_trace.timing.provider_calls).toBe(1);
+    expect(first.json()._provider_calls).toHaveLength(1);
+    expect(runs).toHaveLength(1); expect(runs[0].chip.parameters.effects_timing).toBe(null);
+    expect(licensedRecord).toBeUndefined();
+    expect(goalChanceLicenceForAgent(block)).toBeUndefined();
+    expect(block!.enrichment.inference_warnings.find((w: Rec) => w.detail?.reason === 'effects_at_period_end_unstated')?.detail)
+      .toEqual({ reason: 'effects_at_period_end_unstated', effects_timing: null, effects_timing_origin: null });
     expect(turnToolResult?.ran).toBe(true);
+    expect(turnToolResult?.run_identity).toEqual({ scenario_id: SCENARIO, graph_hash_at_run: HASH, computed_at: AT });
+    expect(goalChanceLicenceForAgent(first.json().blocks.find((b: Rec) => b.type === 'analysis_result')))
+      .toEqual(goalChanceLicenceForAgent(block));
+    expect(first.json().narration.status).toBe('ready');
+    expect(rows.at(-1)?.assistant_message).toBe(first.json().assistant_text);
+    expect(writes).toEqual([]); expect(graph).toEqual(original);
+    const replay = await press(request);
+    for (const key of ['assistant_text', 'blocks', 'narration', 'suggested_actions']) {
+      expect(JSON.stringify(replay.json()[key])).toBe(JSON.stringify(first.json()[key]));
+    }
+    expect(bodies).toHaveLength(1); expect(runs).toHaveLength(1);
+    if (process.env.R2_EVIDENCE) writeFileSync(process.env.R2_EVIDENCE, JSON.stringify({
+      provider_calls: bodies.length, order, engine_calls: runs.length, timing: runs[0].chip.parameters.effects_timing,
+      narration: first.json().narration, replay_equal: true,
+    }, null, 2));
   });
+
+  it.each([true, false])('saved effect basis %s lacks source/options/revision binding: timing stays null', async (inPlace) => {
+    graph.nodes.find((n: Rec) => n.kind === 'goal').goal_target_basis.effects_at_period_end = inPlace;
+    const original = structuredClone(graph);
+    const r = await press(); expect(r.statusCode, r.body).toBe(200);
+    expect(runs[0].chip.parameters.effects_timing).toBe(null);
+    expect(graph.nodes.find((n: Rec) => n.kind === 'goal').goal_target_basis.source).toBe('olumi_reading');
+    expect(graph.nodes.find((n: Rec) => n.kind === 'goal').goal_target_basis.effects_at_period_end).toBe(inPlace);
+    expect(bodies).toHaveLength(1); expect(graph).toEqual(original); expect(writes).toEqual([]);
+  });
+
+  it('a missing saved basis cannot attest that timing was not stated', async () => {
+    delete graph.nodes.find((n: Rec) => n.kind === 'goal').goal_target_basis;
+    const original = structuredClone(graph);
+    const r = await press(); expect(r.statusCode, r.body).toBe(200);
+    expect(runs[0].chip.parameters.effects_timing).toBe(null);
+    expect(goalChanceLicenceForAgent(block)).toBeUndefined();
+    expect(bodies).toHaveLength(1); expect(graph).toEqual(original); expect(writes).toEqual([]);
+  });
+
+  it('a previous Run enum is not a current saved-source timing interpretation', async () => {
+    timing = 'not_stated';
+    const prior = await press({ chip: undefined, source: 'composer', message: 'run it' });
+    expect(prior.statusCode, prior.body).toBe(200);
+    expect(licensedRecord!.effects_timing).toBe('not_stated');
+    expect(licensedRecord!.effects_timing_origin).toBe('olumi');
+    bodies = []; order = []; runs = [];
+    const r = await press(); expect(r.statusCode, r.body).toBe(200);
+    expect(runs).toHaveLength(1); expect(runs[0].chip.parameters.effects_timing).toBe(null);
+    expect(licensedRecord).toBeUndefined();
+    expect(goalChanceLicenceForAgent(block)).toBeUndefined();
+    expect(bodies).toHaveLength(1); expect(order).toEqual(['run_analysis', 'provider']);
+  });
+
+  it.each(['later', 'earlier', 'unknown-origin', 'moved-deadline', 'olumi-approved'] as const)(
+    'approved hiring carriers: %s timing reaches the real Run unchanged', async (variant) => {
+      const ref = '2026-10-12', date = '2027-01-12';
+      const candidate = { goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+        unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false,
+        baseline_value: null, horizon_months: null, provenance: 'inferred' },
+        options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+          { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } }],
+        factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] };
+      const admitted = admitCandidateModel(candidate as never, {}, 'Hire a Tech lead or two developers to meet our next feature-launch deadline.');
+      const plain = (g: unknown): Rec => assignEntityRefs(projectGraphForPersistence(GraphV3.parse(g)), { nodes: [], edges: [] }).graph as Rec;
+      const dated = plain(withEventShareDate(plain({ nodes: admitted.nodes, edges: admitted.edges }), date, ref));
+      const team = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team', low_months: 6, high_months: 10,
+        deadline: date, reference_date: ref } as never, computeAnalysisAffectingGraphHash(dated as never)!);
+      expect(team.kind).toBe('mutated');
+      if (team.kind !== 'mutated') throw new Error('team write failed');
+      const held = plain(team.mutatedGraph);
+      const options = ['event_option_1', 'event_option_2'].map(id => {
+        const parts = capacityPartsOf(held, id, 'event_goal'), estimate = olumiEstimateOf(parts)!;
+        const quotes = [variant === 'earlier' ? 'within 2 months' : 'at least 3 months'];
+        const plan = planStarts(quotes, estimate, parts.length,
+          variant === 'olumi-approved' ? [{ stated: false }] : undefined);
+        if (!('parts' in plan)) throw new Error('timing plan failed');
+        return { option_id: id, label: held.nodes.find((n: Rec) => n.id === id).label, part_ids: parts.map(n => n.id),
+          expected: parts.map(n => n.observed_state.extra_share_by_date), olumi_estimate: estimate, parts: plan.parts, quotes };
+      });
+      graph = assignEntityRefs(projectGraphForPersistence(GraphStateIngressSchema.parse(
+        withHiringTimes(held, { goal_id: 'event_goal', deadline: date, reference_date: ref, options })) as never),
+        { nodes: [], edges: [] }).graph as Rec;
+      const part = capacityPartsOf(graph, 'event_option_1', 'event_goal')[0]!;
+      if (variant === 'unknown-origin') delete part.observed_state.extra_share_by_date.figures.lead_high;
+      if (variant === 'moved-deadline') part.observed_state.extra_share_by_date.deadline = '2027-02-12';
+      const saved = structuredClone(graph);
+      const golden = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')) as Rec;
+      golden.results = ['event_option_1', 'event_option_2'].map((id, i) => ({ ...golden.results[0], option_id: id,
+        option_label: graph.nodes.find((n: Rec) => n.id === id).label, probability_of_goal: 0.3 + i / 10 }));
+      eventEnvelope = golden;
+      const r = await press(); expect(r.statusCode, r.body).toBe(200);
+      expect(runs).toHaveLength(1);
+      expect(runs[0].chip.parameters.effects_timing).toBe(null);
+      expect(bodies).toHaveLength(1); expect(order).toEqual(['run_analysis', 'provider']);
+      expect(graph).toEqual(saved); expect(writes).toEqual([]);
+      if (variant === 'unknown-origin') expect(heldFigureOf(part, 'lead_high')!.whose).toBe('unknown');
+      if (variant === 'olumi-approved') {
+        expect(part.observed_state.extra_share_by_date.statement.source).toBe('model_proposed');
+        expect(heldFigureOf(part, 'lead_low')!.whose).toBe('olumi_accepted');
+        expect(heldFigureOf(part, 'lead_high')!.whose).toBe('olumi_accepted');
+        expect(part.observed_state.extra_share_by_date.figures.lead_low.reviewed_by_user).toEqual({ intent: 'confirm' });
+        expect(part.observed_state.extra_share_by_date.figures.lead_low.source).toBe('user_assumption');
+      }
+      // The normal handler consumes the same persisted model, including complete timing provenance.
+      if (variant === 'later' || variant === 'earlier') {
+        expect(engineInputs).toHaveLength(1); expect(turnToolResult?.ran).toBe(true);
+        expect(r.json().blocks.some((b: Rec) => b.type === 'analysis_result')).toBe(true);
+      }
+    });
+
+  it('a moved Explain authority is still refused and cannot be relabelled as a Run', async () => {
+    const first = (await press()).json();
+    const chip = first.suggested_actions.find((a: Rec) => a.id.startsWith('agent-explain-run:'));
+    STATE.run_state.computed_at = '2026-10-13T03:00:00.000Z';
+    const beforeCalls = bodies.length;
+    const refused = await press({ chip: { ...chip, action_type: 'run_analysis' }, agent_session_id: first._agent.session_id });
+    expect(refused.statusCode).toBe(200);
+    expect(refused.json().narration.status).toBe('stale');
+    expect(runs).toHaveLength(1); expect(bodies).toHaveLength(beforeCalls); expect(writes).toEqual([]);
+  });
+
+  it('stream context on an empty Run does not start a speculative brief-reading provider call', async () => {
+    graph = { nodes: [], edges: [] };
+    const { runWithStageStream } = await import('../../../cee/unified-pipeline/stage-stream-context.js');
+    const stages: string[] = [];
+    const r = await runWithStageStream(event => { stages.push(event.kind); }, () => press());
+    expect(r.statusCode).toBe(200);
+    expect(runs).toHaveLength(1); expect(bodies).toHaveLength(1);
+    expect(order).toEqual(['run_analysis', 'provider']);
+    expect(r.json()._provider_calls).toHaveLength(1);
+    expect(stages).toEqual([]);
+  });
+
 });
