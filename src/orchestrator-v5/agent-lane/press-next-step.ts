@@ -51,18 +51,19 @@ export function oneNextStep(blockers: readonly (PressBlocker | null | undefined)
 }
 
 /**
- * One step, one owner (DL), bound to the step's own identity (Codex buddy r1 on the coaching diff): only an owner of THIS
- * step suppresses it, never an unrelated offer (a research press does not own a missing starting value).
- *   - `guidedRunFinding`: the scoped guided finding (RT `guidedRunFinding`) is itself the Run's input step with its presses,
- *     so it owns an input or implementation step (which it outranks), never a stale result, a repeat Run or a card;
- *   - `said`: the exact lines the reply already carries (the host asks, a typed card's question, the stale line), so the
- *     same ask or stale line is never said twice;
+ * One step, one owner (DL), bound to the step's own identity (Codex buddy r1/r2 on the coaching diff): only an owner of
+ * THIS step suppresses it, never an unrelated offer (a research press does not own a missing starting value).
+ *   - `guidedRunFinding`: the scoped guided finding's own text (RT `guidedRunFinding`); it owns an ask only when it asks it;
+ *   - `said`: the exact lines the reply already carries (the host asks, a typed card's question, the stale line, a
+ *     can't-calculate line), so the same line is never said twice;
  *   - `pressed`: the presses already offered that take this step (a card's own press; `run` for the Run control).
+ * An owned ask keeps its `also_unbuilt` gap: deduplicating the question never drops the disclosure that the answer will not
+ * unlock that calculation. An input step never owns a missing implementation.
  */
 export type OwnedPress = Extract<PressBlocker, { kind: 'confirm' }>['by'] | 'run';
 
 export interface NextStepOwners {
-  readonly guidedRunFinding: boolean;
+  readonly guidedRunFinding: string | null;
   readonly said: readonly string[];
   readonly pressed: readonly OwnedPress[];
 }
@@ -70,10 +71,13 @@ export interface NextStepOwners {
 export function unownedNextStep(step: PressBlocker | null, owners: NextStepOwners): PressBlocker | null {
   if (step === null) return null;
   switch (step.kind) {
-    case 'missing_input':
-      return owners.guidedRunFinding || owners.said.includes(step.ask) ? null : step;
+    case 'missing_input': {
+      const owned = owners.said.includes(step.ask) || (owners.guidedRunFinding?.includes(step.ask) ?? false);
+      if (!owned) return step;
+      return step.also_unbuilt === undefined ? null : { kind: 'missing_implementation', what: step.also_unbuilt };
+    }
     case 'missing_implementation':
-      return owners.guidedRunFinding ? null : step;
+      return owners.said.includes(AIE_TEXT_PENDING_CANNOT_CALCULATE_YET(step.what)) ? null : step;
     case 'confirm':
       return owners.pressed.includes(step.by) ? null : step;
     case 'run_again':
