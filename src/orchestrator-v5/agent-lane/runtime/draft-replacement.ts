@@ -6,9 +6,10 @@
  * target row can land. The remedy offered is a REVISED DRAFT prepared by C's own construction from the stored brief and
  * the typed goal, shown as one card and written only on approval.
  *
- * ⛔ THE GATE IS "AN UNREVIEWED AI SCAFFOLD, ALL ORIGINAL HUMAN MATERIAL PRESERVED", NOT "NOTHING THE USER AUTHORED".
+ * ⛔ ONLY AN UNREVIEWED AI SCAFFOLD MAY BE REPLACED, BY ITS APPROVED CARD.
  * The brief's own facts, goals and limits are the user's, and the revised draft is built from that same brief, so they
- * are kept (and checked kept: {@link limitsKeptBy}). What may NOT exist is any LATER human contribution, which a
+ * are supplied to the drafter again. {@link limitsKeptBy} reports exact matches for card disclosure, not a veto;
+ * the user judges the revised limits on the card. What may NOT exist is any LATER human contribution, which a
  * replacement would discard. Three existing records are read, at the offer AND again at the approval:
  *   · G1 — the model's own authorship stamps ({@link humanMaterialAfterTheDraft}): a value, review, adopted estimate,
  *     stated level, link, target, limit or attested horizon the user set after the draft. An unknown stamp refuses.
@@ -153,7 +154,8 @@ const unitOf = (c: Rec): string => (typeof c.unit === 'string' ? c.unit.trim() :
 /**
  * The draft's limits (rows that are not the goal's targets), and whether the candidate keeps each: the SAME quantity (its
  * node's canonical label; AIE 0452 AMEND 2: "<= 25%" on another node is not the founder-time limit), comparator, figure,
- * unit and frame. A limit whose quantity cannot be named is dropped (unresolved identity refuses).
+ * unit and frame. `dropped` means unmatched by this exact comparison, not proof the limit is absent;
+ * an unnamed quantity is unmatched too. The card discloses these for the human to judge.
  */
 export function limitsKeptBy(base: unknown, candidate: unknown): { kept: HeldRow[]; dropped: HeldRow[] } {
   const isLimit = (c: Rec) => c.role !== 'goal_target' && numeric(c) && (c.operator === '<=' || c.operator === '>=') && c.deadline_metadata == null;

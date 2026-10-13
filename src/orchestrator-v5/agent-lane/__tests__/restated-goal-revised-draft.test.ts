@@ -185,6 +185,92 @@ async function runFromStore(bytes: string): Promise<{ payload: Rec; snapshot: Re
   return { payload: payload!, snapshot: inputSnapshot ?? {} };
 }
 
+// M1: exact base goal_constraints from marketing/turns/02.json (2026-10-12T172858Z).
+// Other base graph/ledger scaffolding remains the existing served L20 fixture.
+const capturedLimits = [
+  {
+    "unit": "£/year",
+    "label": "Annual campaign spend",
+    "value": 100000,
+    "node_id": "annual_campaign_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:annual_campaign_spend:<="
+  },
+  {
+    "unit": "%",
+    "label": "Founder time on campaign",
+    "value": 25,
+    "node_id": "founder_time_on_campaign",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:founder_time_on_campaign:<="
+  }
+];
+const marketingBase = (): Rec => {
+  const g = JSON.parse(JSON.stringify(FX.graph)
+    .replaceAll('annual_marketing_spend', 'annual_campaign_spend')
+    .replaceAll('Annual marketing spend', 'Annual campaign spend')
+    .replaceAll('founder_marketing_time', 'founder_time_on_campaign')
+    .replaceAll('Founder marketing time', 'Founder time on campaign')) as Rec;
+  g.goal_constraints = structuredClone(capturedLimits);
+  return g;
+};
+
+// Drafter goal/target/limits verbatim from a5ada94b as recorded in DIAGNOSIS §1–2.
+// The remaining construction scaffold is scripted, not a fresh provider response.
+const marketingCandidate = (): Rec => {
+  const c = JSON.parse(JSON.stringify(candidate())
+    .replaceAll('New customers', 'New customers in first 3 months')
+    .replaceAll('Conversion rate', 'conversion rate')
+    .replaceAll('Annual marketing spend', 'Annual campaign spend')) as Rec;
+  c.goal = { ...c.goal, metric: 'conversion rate', operator: '>', value: 15, unit: '%',
+    baseline_known: false, baseline_value: null,
+    basis: { ...c.goal.basis, reference: 'launch', period_months: 3, effects_at_period_end: false,
+      also_required: ['secure 20 new customers within the first 3 months'] } };
+  c.constraints[0] = { metric: 'New customers in first 3 months', operator: '>=', value: 20,
+    unit: 'customers', provenance: 'explicit', frame: 'level', role: 'target' };
+  c.factors = c.factors.filter((f: Rec) => f.label !== 'conversion rate');
+  c.outcomes = [{ label: 'New customers in first 3 months', unit: 'customers', provenance: 'explicit' }];
+  return c;
+};
+
+const marketingCard = 'Replace the early draft with a revised one built from your brief and the goal you just gave: '
+  + '‘conversion rate’ above 15% and ‘New customers in first 3 months’ at least 20 customers over the first 3 months after launch '
+  + '(the draft modelled ‘product feature launch’). '
+  + 'Limits in the revised draft: ‘Annual campaign spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
+  + 'Your earlier limit ‘Annual campaign spend’ at most £100,000 / year is not matched exactly in the revised draft; check it is the same limit before choosing.\n'
+  + 'Your earlier limit ‘Founder time on campaign’ at most 25% is not matched exactly in the revised draft; check it is the same limit before choosing.\n'
+  + 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
+  + 'Not carried: Olumi’s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.';
+
+describe('M1 captured marketing limit spellings through revised-draft offer and approval', () => {
+  it('offers both captured targets and limits, discloses both unmatched earlier limits, and saves exact rows after approval', async () => {
+    const s = server({ graph: marketingBase() });
+    const { caps } = lane(s, new ProposalStore(), marketingCandidate);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offer.ok, JSON.stringify(offer)).toBe(true);
+    expect(offer.public_label).toBe(marketingCard);
+    expect(s.commits).toHaveLength(0);
+    s.said(FX.l20.turn_id);
+    const applied = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(applied).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(s.commits).toHaveLength(1);
+    expect(s.graph().goal_constraints).toEqual([
+      { constraint_id: 'agent-lane:conversion_rate:>=', node_id: 'conversion_rate', operator: '>=', operator_as_stated: '>',
+        value: 15, label: 'conversion rate', unit: '%', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'agent-lane:new_customers_in_first_3_months:>=', node_id: 'new_customers_in_first_3_months', operator: '>=',
+        value: 20, label: 'New customers in first 3 months', unit: 'customers', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'agent-lane:annual_campaign_spend:<=', node_id: 'annual_campaign_spend', operator: '<=',
+        value: 100000, label: 'Annual campaign spend', unit: 'GBP/year', provenance: 'explicit', value_frame: 'level' },
+      { constraint_id: 'agent-lane:founder_marketing_time:<=', node_id: 'founder_marketing_time', operator: '<=',
+        value: 25, label: 'Founder marketing time', unit: '%', provenance: 'explicit', value_frame: 'level' },
+    ]);
+  });
+});
+
 describe('the served draft and its record (preconditions, else nothing below proves anything)', () => {
   it('the draft holds neither quantity; its goal is "% complete"; the construction commit id is derived from the stored brief', () => {
     const labels = (FX.graph.nodes as Rec[]).map((n) => String(n.label).toLowerCase());
@@ -217,7 +303,7 @@ describe('L20 on the served early draft: ONE revised-draft card, prepared once, 
     expect(a.public_label).toBe('Replace the early draft with a revised one built from your brief and the goal you just gave: '
       + '‘New customers’ at least 20 customers and ‘Conversion rate’ above 15% over the first 3 months after launch '
       + '(the draft modelled ‘product feature launch’). '
-      + 'Kept from your brief: ‘Annual marketing spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
+      + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
       + 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
       + 'Not carried: Olumi’s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.');
     // ONE chip, the card's own button, and the card rides in its detail.
@@ -325,12 +411,40 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }));
   });
 
-  it('a revised draft that drops one of the brief\'s limits is never offered (the 25%-of-time limit, here)', async () => {
+  it('a revised draft that omits a limit is offered with an exact unmatched-limit warning', async () => {
     const s = server();
     const losesTime = () => { const c = candidate(); c.constraints = (c.constraints as Rec[]).filter((x) => x.metric !== 'Founder marketing time'); return c; };
-    const r = await lane(s, new ProposalStore(), losesTime).caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_dropped_a_limit' });
-    expect(String(r.detail)).toMatch(/\u2018Founder marketing time\u2019 at most 25%/);
+    const { caps } = lane(s, new ProposalStore(), losesTime);
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: true, mutated: false });
+    expect(r.public_label).toBe('Replace the early draft with a revised one built from your brief and the goal you just gave: '
+      + '‘New customers’ at least 20 customers and ‘Conversion rate’ above 15% over the first 3 months after launch '
+      + '(the draft modelled ‘product feature launch’). '
+      + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year. '
+      + 'Your earlier limit ‘Founder marketing time’ at most 25% is not matched exactly in the revised draft; check it is the same limit before choosing.\n'
+      + 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
+      + 'Not carried: Olumi’s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.');
+    expect(s.commits).toHaveLength(0);
+    s.said(FX.l20.turn_id);
+    const applied = await caps.authoriseChange(pressed(r.proposal_id as string), { proposal_id: r.proposal_id } as never);
+    expect(applied).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(applied.follow_up).toBe('Your model is now the revised draft, with the targets and limits shown on the card you approved. The earlier analysis was of the old draft; run the analysis again.');
+    expect(s.graph().goal_constraints.filter((row: Rec) => row.role !== 'goal_target')).toEqual([
+      { constraint_id: 'agent-lane:annual_marketing_spend:<=', node_id: 'annual_marketing_spend', operator: '<=',
+        value: 100000, label: 'Annual marketing spend', unit: 'GBP/year', provenance: 'explicit', value_frame: 'level' },
+    ]);
+  });
+
+  it('a revised draft with no target is still refused', async () => {
+    const s = server();
+    const noTarget = () => {
+      const c = candidate();
+      c.goal = { ...c.goal, target_stated: false, value: null };
+      c.constraints = c.constraints.filter((row: Rec) => row.role !== 'target');
+      return c;
+    };
+    const r = await lane(s, new ProposalStore(), noTarget).caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_has_no_target' });
     expect(s.commits).toHaveLength(0);
   });
 
@@ -428,7 +542,7 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     expect(r).toMatchObject({ ok: true });
   });
 
-  it('RED (quantity): "<= 25%" on ANOTHER quantity is not the founder-time limit; the card is not offered', async () => {
+  it('RED (quantity): "<= 25%" on ANOTHER quantity is disclosed on the offered card', async () => {
     const elsewhere = () => {
       const c = candidate();
       c.constraints = (c.constraints as Rec[]).map((x) => (x.metric === 'Founder marketing time' ? { ...x, metric: 'Advertising time' } : x));
@@ -437,8 +551,9 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     };
     const s = server();
     const r = await offerOn(s, elsewhere);
-    expect(r).toMatchObject({ ok: false, refusal: 'revised_draft_dropped_a_limit' });
-    expect(String(r.detail)).toMatch(/\u2018Founder marketing time\u2019 at most 25%/);
+    expect(r).toMatchObject({ ok: true, mutated: false });
+    expect(String(r.public_label)).toContain('Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year; ‘Advertising time’ at most 25%.');
+    expect(String(r.public_label)).toContain('Your earlier limit ‘Founder marketing time’ at most 25% is not matched exactly in the revised draft; check it is the same limit before choosing.');
   });
 
   it('RED (measures): a target call names its quantity; the same figure on ANOTHER quantity is not "held"', async () => {
