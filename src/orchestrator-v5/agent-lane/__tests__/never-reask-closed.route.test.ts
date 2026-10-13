@@ -1,4 +1,4 @@
-import { RUN_EXPLANATION_UNAVAILABLE_TEXT as _RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ NEVER RE-ASK WHAT IS ALREADY ASKED, through the REAL `/agent/v1/turn` route (DL 0df0e1, 6 Oct; Acceptance G1b d4).
  *
@@ -60,7 +60,10 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
-      modelBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
+      modelBodies.push(body);
       const output = modelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));

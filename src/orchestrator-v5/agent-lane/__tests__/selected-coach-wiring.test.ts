@@ -1,4 +1,5 @@
-import { explainRun as _explainRun } from './fixtures/run-explanation-follow-up.js';
+import { runPressToolResponse } from './fixtures/run-press-model.js';
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /** Selected coaching reaches the real Agent route on every conversation path. No provider is called. */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -120,6 +121,8 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body?: unknown }) => {
       const body = asSent(JSON.parse(String(init.body))) as Sent;
       sent.push(body);
+      const runCall = runPressToolResponse(body as unknown as Record<string, unknown>);
+      if (runCall) return runCall;
       registeredAtCall.push(registered);
       if (body.text?.format?.name === 'whole_candidate') {
         return new Response(JSON.stringify({ status: 'completed', output: say(JSON.stringify(candidate)) }), { status: 200 });
@@ -263,10 +266,16 @@ describe('selected Sol-high coach on the actual Agent route', () => {
   });
 
   it('uses selected coach bytes as the prefix of the typed Run interpretation', async () => {
-    const response = await sendTurn('Run analysis.', [say('The Run is provisional.')],
+    const response = await sendTurn('Run analysis.', [say('The Run is provisional.'), say('The Run is provisional.')],
       { id: 'agent-run-analysis', action_type: 'run_analysis' });
-    expect(response._diagnostic_trace?.fast_path).toBe('run');
-    expect(sent).toHaveLength(1);
+    expect(response._diagnostic_trace?.fast_path).toBeUndefined();
+    expect(sent).toHaveLength(2);
+    for (const body of sent) {
+      expect(body.model).toBe('gpt-6.1-sol');
+      expect(sha256(body.instructions)).toBe(RENDERED_SHA);
+    }
+    sent.length = 0;
+    await explainRun(app, SCENARIO, { statusCode: 200, json: () => response });
     expect(scripted, 'the separate narration consumed the answer').toEqual([]);
     expect(sent).toHaveLength(1);
     const body = sent[0]!;

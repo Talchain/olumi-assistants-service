@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * S4d THROUGH THE ROUTE: the Explain turn says the screen's chance lines too.
  *
@@ -56,7 +57,7 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
   let narrator = '';
   let state: Json = READ.analysis_state;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [
       { type: 'message', content: [{ type: 'output_text', text: narrator }] },
     ] }), { status: 200 })));
     vi.resetModules();
@@ -80,7 +81,7 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
 
   const runThenExplainPayload = async (): Promise<Record<string, unknown>> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.',
+      kind: 'message', agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run analysis.',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
     } });
     expect(r.statusCode, r.body).toBe(200);

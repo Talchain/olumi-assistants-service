@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ D1 + A7 (DL #75 5923918068; lease 5923944336; AIQ words 5923963470): on the brief and Run turns, at rest — A7 a TRUE line
@@ -11,7 +12,6 @@ import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest, 
 import { narrateWriteOutcome, openQuestionsForReply, withWriteOutcome } from '../write-outcome.js';
 import { sentencesOf } from '../reply/compose-reply.js';
 import type { AnswerShape } from '../../routing/answer-shape.js';
-import { RUN_RESULT_READY_TEXT as _RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 type Rec = Record<string, unknown>;
 const SERVED_FX = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')) as { goal_after_build: Rec; goal_after_target: Rec };
@@ -372,7 +372,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   };
   let n = 0;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: modelSays }] }] }), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: modelSays }] }] }), { status: 200 })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
@@ -538,7 +538,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     // Bound to the durable ANSWER ROWS — what each turn shipped and a replay returns (the Explain reply is not the Run's).
     const sid = [...rows.values()].find((r) => r.turn_id === 'c374e586-91a2-43b4-a5c6-d7e8f90a1b23')?.scenario_id;
     const answers = [...rows.values()].filter((r) => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim'));
-    expect(answers.length, 'five single-stage Run answers persisted').toBe(5);
+    expect(answers.length, 'five Run answers plus four separate Explain answers persisted').toBe(9);
     const asking = answers.filter((r) => String(r.assistant_message ?? '').includes(ASK_QUESTION)).map((r) => String(r.turn_id));
     expect(asking, 'the host adds no target question').toEqual([]);
   });

@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * AI HARNESS (#2455 takeover, CR 5933064821) — the two-request Run never hands the model an unlicensed run. Request 2
  * reads the selected run through PR-L1's licensed view (item 3); request 1's run reaches the next Agent turn only as
@@ -42,9 +43,15 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 describe('the two-request Run reads the licensed run on both requests (live route)', () => {
   let app: FastifyInstance;
   let modelBodies: Record<string, unknown>[] = [];
+  let runModelBodies: Record<string, unknown>[] = [];
+  let awaitingRunReply = false;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-      modelBodies.push(JSON.parse(String(init?.body ?? '{}')));
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const forced = runPressToolResponse(body);
+      if (forced) { runModelBodies.push(body); awaitingRunReply = true; return forced; }
+      if (awaitingRunReply) { runModelBodies.push(body); awaitingRunReply = false; }
+      else modelBodies.push(body);
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The result depends on the assumptions in your model.' }] }] }), { status: 200 });
     }));
     vi.resetModules();
@@ -63,10 +70,10 @@ describe('the two-request Run reads the licensed run on both requests (live rout
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { state = SERVED.analysis_state; rows.length = 0; modelBodies = []; });
+  beforeEach(() => { state = SERVED.analysis_state; rows.length = 0; modelBodies = []; runModelBodies = []; awaitingRunReply = false; });
 
   const run = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-    turn_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
   } });
   type First = { suggested_actions: { id: string }[]; _agent: { session_id: string } };
   const explain = (first: First) => {
@@ -81,8 +88,8 @@ describe('the two-request Run reads the licensed run on both requests (live rout
     expect(JSON.stringify(SERVED.block)).toContain(LEAK);
     const first = await run();
     expect(first.statusCode, first.body).toBe(200);
-    expect(modelBodies).toHaveLength(1);
-    modelBodies.length = 0;
+    expect(modelBodies).toHaveLength(0);
+    expect(runModelBodies).toHaveLength(2);
     const second = await explain(first.json() as First);
     expect(second.statusCode, second.body).toBe(200);
     expect(modelBodies).toHaveLength(1);
@@ -107,9 +114,9 @@ describe('the two-request Run reads the licensed run on both requests (live rout
       agent_session_id: (first.json() as First)._agent.session_id, message: 'What should I look at next?' } });
     expect(next.statusCode, next.body).toBe(200);
     const outputs = modelBodies.flatMap((b) => (Array.isArray(b.input) ? b.input : []) as { type?: string; call_id?: string; output?: string }[])
-      .filter((i) => i.type === 'function_call_output' && typeof i.call_id === 'string' && i.call_id.startsWith('fast_run_'));
+      .filter((i) => i.type === 'function_call_output' && typeof i.call_id === 'string' && i.call_id === 'fixture_run_press');
     // Positive control: request 1's run pair IS in the next turn's provider input.
-    expect(outputs.length).toBeGreaterThan(0);
+    expect(outputs.length, JSON.stringify(modelBodies.map(b => b.input))).toBeGreaterThan(0);
     for (const o of outputs) {
       expect(JSON.parse(o.output!)).toEqual({ note: 'Earlier analysis ran at 2026-10-01T09:48:47.190Z; see the current Run in CURRENT MODEL STATE.' });
     }

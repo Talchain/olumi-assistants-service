@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ EVERY SERVED AGENT CALL SAYS WHICH PROMPT IT SENT — `prompt_alias` + `prompt_sha256` on its `_provider_calls` row.
@@ -72,6 +73,8 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
       raw.push(rawBody);
       const body = asSent(rawBody) as Record<string, unknown> & { text?: { format?: { type?: string } } };
       sent.push(body);
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       // Construction: no structured answer (the measured "reasoning ate the budget" shape) — the row is what is tested.
       if (body.text?.format?.type === 'json_schema') return new Response(JSON.stringify({ output: [] }), { status: 200 });
       if (JSON.stringify(body['tools'] ?? []).includes('web_search')) return new Response(JSON.stringify({ output: [], status: 'completed' }), { status: 200 });
@@ -120,8 +123,15 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
     return (r.json() as { _provider_calls: Row[] })._provider_calls;
   };
   const runChip = async (scenarioId: string) => {
+    const start = sent.length;
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: scenarioId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
-    expect(first.json()._provider_calls).toHaveLength(1);
+    const runRows = first.json()._provider_calls as Row[];
+    expect(runRows).toHaveLength(2);
+    runRows.forEach((row, i) => {
+      expect(row.prompt_alias).toBe('agent.converse');
+      expect(row.prompt_sha256).toBe(sha(sent[start + i]!.instructions));
+    });
+    sent = []; raw = [];
     const second = await explainRun(app, scenarioId, first);
     return second.json()._provider_calls as Row[];
   };
@@ -140,7 +150,7 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
     });
   });
 
-  it('RED: a Run-chip fast-path turn — its ONE interpreting call is agent.interpret, hashed as sent', async () => {
+  it('RED: a Run-chip loop followed by Explain — the ONE Explain call is agent.interpret, hashed as sent', async () => {
     const rows = await runChip(RUN_WITHHELD);
     expect(sent, 'exactly one provider request').toHaveLength(1);
     expect(sent[0]!['tool_choice'], 'the interpreting call').toBe('none');

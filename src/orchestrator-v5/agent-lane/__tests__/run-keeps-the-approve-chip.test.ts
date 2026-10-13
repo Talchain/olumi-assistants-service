@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⛔ PRESSING RUN MUST NOT DELETE THE WAY TO APPROVE WHAT IS STILL WAITING.
  *
@@ -35,6 +36,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 let hash: string | undefined = 'h1';
 let modelCalls = 0;
 let agentCalls = 0;
+let awaitingRunReply = false;
 
 describe('a Run turn keeps the approve chip for the proposal still awaiting a yes', () => {
   let app: FastifyInstance;
@@ -42,7 +44,10 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelCalls += 1;
-      if (body['tool_choice'] === 'none') {
+      const runCall = runPressToolResponse(body);
+      if (runCall) { awaitingRunReply = true; return runCall; }
+      if (awaitingRunReply || body['tool_choice'] === 'none') {
+        awaitingRunReply = false;
         return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'On this provisional run, Team size matters most.' }] }] }), { status: 200 });
       }
       agentCalls += 1;
@@ -86,7 +91,7 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
     const r = await run();
     expect(r.statusCode).toBe(200);
     const b = r.json() as Body;
-    expect(b._diagnostic_trace.fast_path, 'the control: fast path 3 ran').toBe('run');
+    expect(b._diagnostic_trace.fast_path, 'the control: Run uses the loop').toBeUndefined();
     // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
     expect(b.suggested_actions.map((a) => [a.id, a.label])).toEqual([
       [`agent-approve-proposal:${proposalId}`, 'Make this change'],
@@ -98,7 +103,7 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
   it('CONTRAST: the model changed since it was proposed → the Run turn offers no stale approve chip', async () => {
     hash = 'h2';
     const b = (await run()).json() as Body;
-    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(b._diagnostic_trace.fast_path).toBeUndefined();
     expect(b.suggested_actions.some((a) => a.id.startsWith('agent-approve-proposal:'))).toBe(false);
   });
 

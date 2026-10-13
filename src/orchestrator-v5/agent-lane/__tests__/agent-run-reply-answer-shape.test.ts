@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ EVERY REPLY ON THE AGENT ROUTE ARRIVES IN ONE SHAPE (S-A REPLY SHAPE v1, lane COPY-SHAPE, 7 Oct 2026; Paul: "It was a
  * better length before with the three bullets as a construct"): a headline and the typed face lines, the rest under "More
@@ -146,7 +147,9 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   let app: FastifyInstance;
   let _noLeaderSentence: string;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const forced = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (forced) return forced;
       const output = callModelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));
@@ -193,7 +196,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(first.statusCode, first.body.slice(0, 300)).toBe(200);
     expect(callModelOutputs, 'Run consumed its scripted interpretation').toEqual([]);
     const b = first.json() as Body;
-    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(b._diagnostic_trace.fast_path).toBeUndefined();
     return { b, turnId: [...rows.keys()].at(-1)! };
   };
   /** An ordinary composer message the Agent answers directly, with no tool call. */

@@ -3,9 +3,18 @@ import { describe, expect, it } from 'vitest';
 const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
 const forbidden = ['composeReplyShape(', 'enforceAgentLaneLeaderClaimsAtWire(', 'withScreenLinesOwed(',
   'withBreakEvenAnswer(', 'withA7AfterGate(', 'withoutDriverAbsenceClaimsAtEgress(', 'withLeftOutOptionCorrectionAtEgress('];
-const retired = (source: string) => forbidden.every(call => !source.includes(call));
+// R1 legacy receipts retain reconstruction; this exception cannot admit AI-loop or live writers.
+const retired = (source: string) => {
+  const legacyStart = source.indexOf("      } else if (approvedProposal === undefined && typedRunOf(body) && replayText.includes(RUN_RESULT_READY_TEXT)) {");
+  const legacyEnd = source.indexOf('      const rememberedControls', legacyStart);
+  const composeStart = source.indexOf('      const composedCandidate = replayObligations === undefined ? null');
+  const composeEnd = source.indexOf('      const parityReplayComposed', composeStart);
+  if (legacyStart < 0 || legacyEnd < legacyStart || composeStart < legacyEnd || composeEnd < composeStart) return false;
+  const active = source.slice(0, legacyStart) + source.slice(legacyEnd, composeStart) + source.slice(composeEnd);
+  return forbidden.every(call => !active.includes(call));
+};
 describe('B2/B3/B4: whole AI answer, one final licence boundary', () => {
-  it('removes live and replay display authors', () => expect(retired(route)).toBe(true));
+  it('removes live and AI-loop replay display authors; only legacy receipts reconstruct', () => expect(retired(route)).toBe(true));
   it.each(forbidden)('mutant restoring %s is caught', call => expect(retired(route + call)).toBe(false));
   it('stores only after the final numerical check; no later prose writer', () => {
     const at = route.lastIndexOf('wireBody = withEstimateGoalPointsAtEgress(');
@@ -21,16 +30,15 @@ describe('B2/B3/B4: whole AI answer, one final licence boundary', () => {
     expect(replay).toContain('enforceLeaderLicenceAtFinalEgress(');
     expect(replay).toContain('withEstimateGoalPointsAtEgress(');
     expect(replay).toContain('explanationId.slice(RUN_EXPLANATION_PREFIX.length)');
-    // The saved key is read once, solely to bind current blocks/Explain to this answer's Run.
-    // Pin the complete branch: it may set identity/status and controls, never select or rebuild words.
-    const identityOnly = "        const savedRunKey = prior.suggested_actions_run_key;\n        if (typeof savedRunKey === 'string' && savedRunKey.length > 0\n          && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${savedRunKey}`) {\n          replayNarration = { status: unavailableExplanation.has(replayText) ? 'unavailable' : 'ready',\n            run_key: savedRunKey };\n          boundControl.push(replayChip);\n        } else {\n          replayNarration = { status: 'stale', run_key: savedRunKey ?? '' };\n        }";
-    expect(replay.slice(replay.indexOf('        const savedRunKey ='),
-      replay.indexOf('\n      }', replay.indexOf('        const savedRunKey =')))).toBe(identityOnly);
-    expect(replay.match(/prior\.suggested_actions_run_key/g)).toEqual(['prior.suggested_actions_run_key']);
-    expect(replay.replace(identityOnly, '')).not.toMatch(/\bsavedRunKey\b/);
-    expect(replay).toContain("const resultFirstReplay = replayNarration?.status === 'ready' || replayNarration?.status === 'unavailable';");
+    // R1 wins: the older B2 saved-key branch is retired. Original in-process controls
+    // identify a warm resend; cold replies cannot borrow a durable offer's key.
+    expect(replay).not.toContain('prior.suggested_actions_run_key');
+    const identityOnly = "      const rememberedControls = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) : undefined;\n      const remembered = rememberedControls?.actions ?? [];\n      // AI-written loop answers need their ORIGINAL bound identity. Legacy host receipts\n      // are regenerated from current state; receipts saying nothing ran are not analysis answers.\n      const replayLoopRun = approvedProposal === undefined && typedRunOf(body)\n        && !legacyRunReceipt\n        && replayText !== RUN_FAILED_TEXT\n        && replayText !== 'The analysis did not run. Press Run to try again.';\n      // Original bound controls only: never borrow today's key to identify yesterday's answer.\n      const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length)\n        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey;\n      const replayLoopRunCurrent = replayLoopRun\n        && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;\n      const historicalLoopReplay = replayLoopRun && !replayLoopRunCurrent;\n      if (replayLoopRunCurrent) {\n        replayNarration = rememberedControls?.narration;\n      }\n      if (historicalLoopReplay) {\n        replayText = prior.assistant_message ?? '';\n        // Empty means unknown original identity, never the current Run's identity.\n        replayNarration = { status: 'stale', run_key: replayLoopRunKey\n          ?? (isRunExplanationChip(explanationId) ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : '') };\n        boundControl.length = 0;\n        // A warm answer with no original bound analysis controls must not gain a Run\n        // control just from being resent. Cold/moved bound answers keep the historical exit.\n        if (rememberedControls === undefined || replayLoopRunKey !== undefined\n          || remembered.some(action => action.id === RUN_OFFER_CHIP.id)) boundControl.push(RUN_OFFER_CHIP);\n      }\n      const resultFirstReplay = !historicalLoopReplay && (replayNarration !== undefined || replayLoopRunCurrent);\n";
+    expect(replay.slice(replay.indexOf('      const rememberedControls'),
+      replay.indexOf('      // The durable carrier:'))).toBe(identityOnly);
+    expect(replay).toContain("if (replayLoopRun) gatedReplay.assistant_text = withoutProposalIds(prior.assistant_message ?? '');");
     expect(replay).toContain('...(resultFirstReplay && state.analysisResult !== undefined ? { blocks: [state.analysisResult] } : {}),');
-    expect(replay).toContain("replayNarration?.status !== 'stale'");
+    expect(replay).toContain("current: !replayLoopRun &&");
   });
 });
 

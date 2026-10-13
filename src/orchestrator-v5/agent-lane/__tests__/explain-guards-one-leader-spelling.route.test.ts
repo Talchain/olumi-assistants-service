@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * P0 CONTEXT (inventory output/p0-context/INVENTORY.md @ cf4ef6e6, defects 3 and 6) — the live route, 0 LLM calls.
  *
@@ -140,7 +141,10 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
   let modelBodies: Json[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-      modelBodies.push(JSON.parse(String(init?.body ?? '{}')));
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
+      modelBodies.push(body);
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The result depends on the assumptions in your model.' }] }] }), { status: 200 });
     }));
     vi.resetModules();
@@ -165,14 +169,14 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
   type First = { suggested_actions: { id: string }[]; _agent: { session_id: string } };
   const run = async (): Promise<First> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      turn_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+      turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
     expect(r.statusCode, r.body).toBe(200);
     return r.json() as First;
   };
   const explainPayload = async (): Promise<Json> => {
     const first = await run();
-    modelBodies = []; // Run now narrates; inspect the subsequent Explain request independently.
+    modelBodies = []; // Inspect only the subsequent Explain or ordinary follow-up.
     const chip = first.suggested_actions.find((c) => isRunExplanationChip(c.id));
     expect(chip, JSON.stringify(first.suggested_actions)).toBeDefined();
     const second = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { turn_id: randomUUID(), scenario_id: SCENARIO,
@@ -185,6 +189,7 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
   };
   const followUpState = async (): Promise<Json> => {
     const first = await run();
+    modelBodies = []; // Inspect only the subsequent Explain or ordinary follow-up.
     const next = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { turn_id: randomUUID(), scenario_id: SCENARIO,
       agent_session_id: first._agent.session_id, message: 'Please describe the assumptions recorded in the model.' } });
     expect(next.statusCode, next.body).toBe(200);

@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ AX1 THROUGH THE AGENT ROUTE (DL #70 5850280205). The served F8 Run (DL's joined run `f-20260926T201724Z`) answered
  * "No option can be put forward…" and nothing else. On a Run whose readback withholds the leader for the product
@@ -32,7 +33,7 @@ describe('AX1: a Run whose leader is withheld for the product still answers with
   let evaluatedIds: unknown;
   let withheldReason = 'nonlinear_identity_sign_unproven';
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: SERVED_REPLY }] }] }), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: SERVED_REPLY }] }] }), { status: 200 })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
@@ -59,7 +60,7 @@ describe('AX1: a Run whose leader is withheld for the product still answers with
 
   it('RED (served F8): the Run\'s reply carries the break-even and the target arithmetic, after the gate', async () => {
     const b = await pressRun();
-    expect(b._diagnostic_trace?.fast_path).toBe('run');
+    expect(b._diagnostic_trace?.fast_path).toBeUndefined();
 
 
 
@@ -84,12 +85,12 @@ describe('AX1: a Run whose leader is withheld for the product still answers with
     withheldReason = 'constraint_verdict_withheld';
     // CONTRAST first, on the same readback without the list: today's arithmetic is appended.
     const today = await pressRun();
-    expect(today._diagnostic_trace?.fast_path).toBe('run');
+    expect(today._diagnostic_trace?.fast_path).toBeUndefined();
 
     expect(today._agent?.break_even).toBeDefined();
     evaluatedIds = ['mrr'];
     const b = await pressRun();
-    expect(b._diagnostic_trace?.fast_path).toBe('run');
+    expect(b._diagnostic_trace?.fast_path).toBeUndefined();
     expect(b.assistant_text).not.toContain('The arithmetic still answers');
     expect(b.assistant_text).not.toContain('MRR stays at least that');
     expect(b._agent, JSON.stringify(b)).toBeDefined();

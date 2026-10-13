@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /** W1b round 2: re-witness wire, typed-turn budget. No provider/DB contacted. */
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { readFileSync } from 'node:fs';
@@ -103,6 +104,8 @@ describe('real Agent final-answer persistence, captured founder requests', () =>
     process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { tool_choice?: { name?: string }; input?: unknown };
+      const forced = runPressToolResponse(body);
+      if (forced) return forced;
       providerBodies.push(body);
       const call = body.tool_choice?.name === CURRENT_LEVEL_TOOL;
       return new Response(JSON.stringify({ output: call ? [{ type: 'function_call', call_id: 'level-answer', name: CURRENT_LEVEL_TOOL,
@@ -140,7 +143,7 @@ describe('real Agent final-answer persistence, captured founder requests', () =>
   };
   const run = async () => {
     const body = await turn(FX.requests.run);
-    expect(body._diagnostic_trace?.fast_path).toBe('run');
+    expect(body._diagnostic_trace?.fast_path).toBeUndefined();
     return body;
   };
   const explain = async () => {

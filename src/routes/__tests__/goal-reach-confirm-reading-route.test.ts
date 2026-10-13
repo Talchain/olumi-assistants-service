@@ -1,3 +1,4 @@
+import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * GOAL-REACH rows 0 and 2: the real Agent and scenario-read routes over an in-memory database transport.
@@ -30,8 +31,8 @@ import { readFileSync } from 'node:fs';
 import * as currentLevel from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { CURRENT_LEVEL_TOOL, goalLevelAskOf } from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { assertIdentityYes, WORDS } from './helpers/goal-reach-confirm-reading.js';
-import { RUN_RESULT_READY_TEXT as _RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
-import { deriveAnswerTextFromShape as _deriveAnswerTextFromShape, type AnswerShape } from '../../orchestrator-v5/routing/answer-shape.js';
+const RUN_INTERPRETATION = 'The model result is provisional.';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../orchestrator-v5/routing/answer-shape.js';
 
 const { port, source } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -153,12 +154,16 @@ function bindStore(): void {
   port.invalidateScoped.mockResolvedValue({ scope: { kind: 'structural' }, entries_invalidated: [] });
   port.invalidateAll.mockResolvedValue({ scope: { kind: 'structural' }, entries_invalidated: [] });
 }
+let failNarration = false;
 beforeEach(async () => {
+  failNarration = false;
   vi.clearAllMocks(); serial += 1; scenario = `6f1e2d3c-4b5a-4e6d-9c7b-${String(serial).padStart(12, '0')}`;
   table = []; fenceGenerations = new Map(); runRequests = []; modelCalls = 0; graphWrites = 0; setWithheld(); bindStore();
   port.ensureScenarioExists.mockResolvedValue({ user_id: OWNER }); port.getScenarioOwner.mockResolvedValue(OWNER);
   port.scenarioExists.mockResolvedValue(true); port.isScenarioMember.mockResolvedValue(false);
-  vi.stubGlobal('fetch', vi.fn(async () => { modelCalls += 1; throw new Error('GOAL-REACH must not call an LLM'); }));
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => { modelCalls += 1; if (failNarration) throw new TypeError('fetch failed'); return runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [
+    { type: 'message', content: [{ type: 'output_text', text: 'The model result is provisional.' }] },
+  ] }), { status: 200 }); }));
   app = Fastify({ logger: false });
   await installOwnershipHarness(app, () => ({ mode: 'verified', userId: OWNER }));
   await scenarioGraphRoute(app);
@@ -189,6 +194,7 @@ async function press(id: string, message: string, parameters?: Record<string, un
   expect(response.statusCode, response.body).toBe(200); return response.json();
 }
 async function assertDoorThenNextRun(card: Record<string, any>, tools = ['propose_identity']): Promise<void> {
+  const callsBeforeApproval = modelCalls;
   await assertIdentityYes(card, press, id => agentProposals.get(id), () => graphWrites, () => source.graph, tools);
   const freshFacts = actionFactsOf({ scenarioId: scenario, graph: source.graph, graphHash: hashOf(source.graph),
     analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result, analysisReady: READY });
@@ -214,7 +220,7 @@ async function assertDoorThenNextRun(card: Record<string, any>, tools = ['propos
   expect(wire!.graph.nodes.find((n: { id: string }) => n.id === 'mrr').nonlinear_identity).toEqual({
     operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: true,
   });
-  expect(plotRun).not.toHaveBeenCalled();
+  expect(plotRun).not.toHaveBeenCalled(); expect(modelCalls).toBe(callsBeforeApproval);
 }
 
 describe('GOAL-REACH row 2 through the real doors', () => {
@@ -231,7 +237,7 @@ describe('GOAL-REACH row 2 through the real doors', () => {
       } });
       expect(response.statusCode, response.body).toBe(200);
       const card = response.json();
-      expect(card._diagnostic_trace?.fast_path).toBe('run');
+      expect(card._diagnostic_trace?.fast_path).toBeUndefined();
       expect(runRequests).toHaveLength(1);
       expect(runRequests[0]).toMatchObject({ stage: 'analyse', chip: { action_type: 'run_analysis' } });
       expect(issue).toHaveBeenCalledWith(
@@ -247,7 +253,7 @@ describe('GOAL-REACH row 2 through the real doors', () => {
         outcome_id: 'mrr', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], words: WORDS,
       } });
       expect(runRequests, 'Yes records the reading without running analysis').toHaveLength(1);
-      expect(modelCalls, 'the Run reply narrates once; approval remains the typed writer').toBe(1);
+      expect(modelCalls, 'two Run-loop calls; approval adds no model call').toBe(2);
     } finally { issue.mockRestore(); writer.mockRestore(); }
   });
   it('row 2 RED: withheld Run bar has one enabled confirm_reading, press → held card → Yes → saved/reloaded identity → NEXT Run wire', async () => {
@@ -290,6 +296,7 @@ const elicitAsks = () => table.flatMap(row => (row.pending_actions ?? []) as Rec
 
 describe('GOAL-REACH 3b set_current_level through the real doors', () => {
   it('RED: missing_goal_baseline → one enabled set_current_level; press → the ask, PERSISTED, 0 LLM; the typed figure then forces the existing card', async () => {
+    failNarration = true;
     setThresholdRefused('missing_goal_baseline');
     const asked = goalLevelAskOf(source.graph, source.analysis.analysis_result)!;
     expect(asked.question).toBe('To show each option\'s chance of reaching your MRR target, I first need today\u2019s level of \u2018MRR\u2019. What is it, in £/month?');
@@ -324,7 +331,7 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
         chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
       expect(response.statusCode, response.body).toBe(200);
       const body = response.json();
-      expect(body._diagnostic_trace?.fast_path).toBe('run');
+      expect(body._diagnostic_trace?.fast_path).toBeUndefined();
       return body as { assistant_text: string; _answer_shape?: AnswerShape };
     };
     setThresholdRefused('non_finite_conversion_input');
@@ -337,6 +344,7 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
     expect((await run()).assistant_text).not.toContain("because of a fault on Olumi's side");
   });
   it('Codex r1 P1-3: while a held change waits (the identity card), a set_current_level press persists NO ask', async () => {
+    failNarration = true;
     setThresholdRefused('missing_goal_baseline');
     const card = await press('act:confirm_reading', 'Check how Olumi works out the goal.');
     expect(card.suggested_actions.some((a: { id: string }) => a.id.startsWith('agent-approve-proposal:')), 'a live held card first').toBe(true);
@@ -349,6 +357,7 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
     expect(elicitAsks()).toEqual([]); expect(modelCalls).toBe(0);
   });
   it('CONTROL: another typed-reply press (frame_brief) on the same refused Run persists no ask', async () => {
+    failNarration = true;
     setThresholdRefused('missing_goal_baseline');
     await press('act:frame_brief', 'Help me frame my brief: what is missing from it?');
     expect(elicitAsks()).toEqual([]); expect(modelCalls).toBe(2);

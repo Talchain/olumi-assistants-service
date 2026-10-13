@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun, explanationContext } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ PAUL'S RULING, ON THE AGENT'S OWN PERMISSION (programme-docs#38 5576895511, 7 Sep: "caveat, not
@@ -64,6 +65,9 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
   let bodies: Record<string, unknown>[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const forced = runPressToolResponse(body);
+      if (forced) return forced;
       bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'Provisionally, on these estimates, A separates.' }] }] }), { status: 200 });
     }));
@@ -86,17 +90,17 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
   it('RED: the explicit Run\u2019s interpreting call carries the provisional wording rule', async () => {
     bodies = [];
     await explainRun(app, '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } }));
-    expect(bodies).toHaveLength(1);
-    expect(String(bodies[0]!['instructions'])).toContain(PROVISIONAL_RULE);
+    expect(bodies).toHaveLength(2);
+    expect(String(bodies.find((b) => b.tool_choice === 'none')!['instructions'])).toContain(PROVISIONAL_RULE);
     // …and the run it interprets carries the provisional permission, read from the run's own verdict.
-    const run = explanationContext(bodies[0]!['input']) as { canonical_state: { run_explanation: { claim_permissions?: { leader_may_be_named?: boolean; provisional?: true } } } };
+    const run = explanationContext(bodies.find((b) => b.tool_choice === 'none')!['input']) as { canonical_state: { run_explanation: { claim_permissions?: { leader_may_be_named?: boolean; provisional?: true } } } };
     expect(run.canonical_state.run_explanation.claim_permissions).toMatchObject({ leader_may_be_named: true, provisional: true });
   });
 
   it('AIE replace-once: the signed result rule retains qualifications and does not restore the superseded leader command', async () => {
     bodies = [];
     await explainRun(app, '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } }));
-    const sent = String(bodies[0]!['instructions']);
+    const sent = String(bodies.find((b) => b.tool_choice === 'none')!['instructions']);
     expect(sent.split(PROVISIONAL_RULE)).toHaveLength(2);
     expect(sent).not.toContain('Otherwise do not name, rank or hint at one');
     expect(sent).not.toContain('If a result that may be named also carries');

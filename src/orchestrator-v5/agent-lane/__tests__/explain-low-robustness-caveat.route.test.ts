@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * DL BUILD, HIGH — a licensed leader is not proof of a robust result. Press the real
  * bound Explain control with fixed narrator words, through the served-readback/store
@@ -16,7 +17,7 @@ import { NOT_ROBUST_SENTENCE as _NOT_ROBUST_SENTENCE, robustnessHonestySentence 
 import { collectFactorIdsSetByEveryOption as _collectFactorIdsSetByEveryOption } from '../../context/intervention-controlled-drivers.js';
 import { analysedOptionIds as _analysedOptionIds } from '../conditional-input-basis.js';
 import { decisionInputAsk as _decisionInputAsk, textAtRest as _textAtRest } from '../decision-input-ask.js';
-import { RUN_EXPLANATION_MESSAGE as _RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 import { sentencesOf as _sentencesOf } from '../reply/compose-reply.js';
 
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
@@ -93,7 +94,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', () => {
   let app: FastifyInstance;
   let narrator = NARRATOR;
-  let _providerCalls = 0;
+  let providerCalls = 0;
   let emptyNarration = false;
   let readbackState: Record<string, unknown>;
   let readbackReady: typeof FX.state.analysis_ready;
@@ -101,8 +102,14 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   let readbackGraph: typeof FX.state.draft_graph;
   let duringNarration: (() => void) | undefined;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
-      _providerCalls += 1;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
+      if (body.tool_choice !== 'none') return new Response(JSON.stringify({ output: [
+        { type: 'message', content: [{ type: 'output_text', text: 'The analysis result is available.' }] },
+      ] }), { status: 200 });
+      providerCalls += 1;
       duringNarration?.();
       return new Response(JSON.stringify({ output: emptyNarration ? [] : [
         { type: 'message', content: [{ type: 'output_text', text: narrator }] },
@@ -129,7 +136,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
   beforeEach(() => {
-    rows.clear(); narrator = NARRATOR; _providerCalls = 0; emptyNarration = false;
+    rows.clear(); narrator = NARRATOR; providerCalls = 0; emptyNarration = false;
     readbackGraph = structuredClone(FX.state.draft_graph); retainedScope = []; canonicalScopeRead = undefined; duringNarration = undefined;
     readbackState = { ...FX.state.analysis_state,
       run_state: { ...(FX.state.analysis_state.run_state as Record<string, unknown>), computed_at: '2026-10-01T12:00:00.000Z' },
@@ -141,14 +148,23 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   });
   type Body = { assistant_text: string; narration?: { status: string }; _answer_shape?: AnswerShape;
     analysis_state: { leader_claim: { permitted: boolean } }; _agent: { replayed?: boolean } };
-  const run = async () => ({
-    kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.',
-    chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
-  });
+  const run = async () => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run analysis.',
+      chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
+    } });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(providerCalls).toBe(0);
+    const first = r.json();
+    const chip = first.suggested_actions.find((c: { id: string }) => c.id.startsWith('agent-explain-run:'));
+    expect(chip, r.body).toBeDefined();
+    return { scenario_id: SCENARIO, agent_session_id: first._agent.session_id, turn_id: randomUUID(),
+      message: RUN_EXPLANATION_MESSAGE, chip: { id: chip.id } };
+  };
   const press = async (payload: Record<string, unknown>, replay = false) => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
     expect(r.statusCode, r.body).toBe(200);
-    if (!replay) expect(r.json()._diagnostic_trace.fast_path).toBe('run');
+    if (!replay) expect(r.json()._diagnostic_trace.fast_path).toBe('explain');
     return r.json() as Body;
   };
   const assertShapedCaveat = (b: Body, sentence = SENTENCE) => {

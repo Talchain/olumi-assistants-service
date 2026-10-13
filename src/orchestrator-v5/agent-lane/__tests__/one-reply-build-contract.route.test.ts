@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /** The real build route, with Paul's captured graph and narrator words; no provider is contacted. */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -43,6 +44,7 @@ let _withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['w
 let lastBuildPayload: Rec;
 let saved: Graph = { nodes: [], edges: [] };
 let askedToBuild = false;
+let awaitingRunReply = false;
 // COMPLETE retains final prose, not the provider's raw message. Include its captured goal-chance explanation
 // so the preservation row can prove it remains in detail. The paired producer row below leaves it to the host.
 const GOAL_CHANCE_CAPTURE = "This run doesn’t yet show each option’s chance of reaching £20,000. Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.";
@@ -107,8 +109,11 @@ describe('ONE reply contract through the build route', () => {
   beforeAll(async () => {
     vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
     info = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
       if (!String(url).includes('openai')) throw new Error('Unexpected external call');
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) { awaitingRunReply = true; return runCall; }
+      if (awaitingRunReply) { awaitingRunReply = false; return new Response(JSON.stringify(say('The model result is provisional.')), { status: 200 }); }
       if (!askedToBuild) {
         askedToBuild = true;
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'build_model_from_brief',

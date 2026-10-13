@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⛔ #2233's FOLLOW-UPS (DL verdict 5868852006, "next PR"; AIQ 5868909577), on the same seam (`run-outcome.ts`):
  *   1. `analysis_snapshot_diverged` is recoverable, but it still went to the model, which could blame readiness, and its
@@ -45,8 +46,10 @@ describe('⛔ #2233 follow-ups: a moved model, the Agent’s own Run, and the ar
   let mode: Mode = 'moved';
   let loop = false;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
       modelCalls += 1;
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       // The Agent's own loop: it first calls run_analysis, then answers.
       if (loop && modelCalls === 1) {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'run_analysis', call_id: 'c1', arguments: JSON.stringify({ reason: 'asked' }) }] }), { status: 200 });
@@ -77,10 +80,10 @@ describe('⛔ #2233 follow-ups: a moved model, the Agent’s own Run, and the ar
   };
   const runButton = () => turn({ message: 'Run analysis.', source: 'chip_click', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
 
-  it('RED (1): a model that moved while the Run was prepared is said in CEE’s words, with its Retry, and no model call', async () => {
+  it('RED (1): a model that moved while the Run was prepared is said in CEE’s words, with its Retry, after the loop reads the refusal', async () => {
     const b = await runButton();
-
-    expect(modelCalls).toBe(1);
+    expect(b.assistant_text.startsWith(MOVED_WORDS), b.assistant_text).toBe(true);
+    expect(modelCalls).toBe(2);
     expect(b.suggested_actions).toContainEqual(expect.objectContaining({ id: RETRY_CHIP.id, action_type: 'run_analysis' }));
     expect(b.suggested_actions.map((a) => a.id)).not.toContain('agent-suggest-what-it-needs');
   });

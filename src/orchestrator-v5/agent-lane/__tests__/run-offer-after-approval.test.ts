@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ THE EXPLICIT RUN AFTER AN OPENAI APPROVAL (RC #63; Codex 5805970015: "served Agent
@@ -89,6 +90,8 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelBodies.push(body);
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       if (body['tool_choice'] !== 'none' && script.length > 0) return new Response(JSON.stringify({ output: [script.shift()] }), { status: 200 });
       if (body['tool_choice'] !== 'none' && proposeNext) {
         proposeNext = false;
@@ -132,7 +135,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     expect(runs, 'the offer runs nothing').toBe(0);
   });
 
-  it('the offered chip, echoed as the UI sends it, takes fast path 3 — one run, one interpreting call', async () => {
+  it('the offered chip, echoed as the UI sends it, enters the loop — one run and same-turn interpretation', async () => {
     readiness = { status: 'ready', may_run: true };
     const b = await proposeThenApprove();
     const run = b.suggested_actions.find((c) => c.action_type === 'run_analysis')!;
@@ -140,9 +143,11 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: run.message, source: 'chip', chip: { id: run.id, action_type: run.action_type },
     } });
-    expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path).toBe('run');
+    expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path).toBeUndefined();
     expect(runs).toBe(1);
-    expect(modelBodies).toHaveLength(1);
+    expect(modelBodies).toHaveLength(2);
+    expect(modelBodies[0]?.tool_choice).toEqual({ type: 'function', name: 'run_analysis' });
+    modelBodies = [];
     await explainRun(app, SCENARIO, r);
     expect(runs).toBe(1);
     expect(modelBodies.map((m) => m['tool_choice'])).toEqual(['none']);
