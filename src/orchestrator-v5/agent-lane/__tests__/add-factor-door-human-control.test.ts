@@ -28,7 +28,7 @@ const CASES = JSON.parse(readFileSync(new URL('./fixtures/efig-door-probe-cases.
 const SID = '550e8400-e29b-41d4-a716-4466554400ab';
 const TARGET = E07.nodes.find((n) => n.kind === 'outcome')!.label;
 
-type Held = { label: string; basis?: string; quote?: string; raw: unknown }[];
+type Held = { label: string; basis?: string; quote?: string; raw: unknown; source?: unknown; reasoning?: unknown }[];
 const doorFor = () => {
   let held: Held | null = null;
   const d: InternalDispatch = async (path) => (path.endsWith('/graph')
@@ -36,16 +36,16 @@ const doorFor = () => {
     : { status: 404, json: {} });
   const caps = createAgentCapabilities(d, new ProposalStore(), undefined, 'full', undefined, {
     holdAddFactor: async (input: HoldAddFactorInput): Promise<HoldAddFactorResult> => {
-      held = input.factors.map((f) => ({ label: f.label, basis: f.basis, quote: f.quote, raw: (f.observed_state as { raw_value?: unknown }).raw_value }));
+      held = input.factors.map((f) => ({ label: f.label, basis: f.basis, quote: f.quote, raw: (f.observed_state as { raw_value?: unknown }).raw_value, source: f.observed_state?.source, reasoning: (f.observed_state as { reasoning?: unknown })?.reasoning }));
       const ids = input.factors.map((f) => f.id!);
       return { status: 'held', proposal_id: gmHeldProposalRef(SID, `node:${ids[0]!}`), factor_ids: ids, public_label: 'Add these factors', held_message: 'Yes, add them.' };
     },
   } as never) as unknown as { proposeNewFactor: (ctx: unknown, args: unknown) => Promise<Record<string, unknown>> };
   return {
-    async propose(msg: string, unit: string, factors: { label: string; value: number }[]) {
+    async propose(msg: string, unit: string, factors: { label: string; value: number }[], estimate?: { user_stated: boolean; basis: string }) {
       held = null;
       const ctx = { scenario_id: SID, authenticated_user_id: null, request_id: 'r', user_text: msg, user_turn_text: msg };
-      const args = { factors: factors.map((f) => ({ label: f.label, unit, today: { value: f.value }, affects: TARGET, direction: 'positive' })), rationale: 'probe' };
+      const args = { factors: factors.map((f) => ({ label: f.label, unit, today: { value: f.value, ...estimate }, affects: TARGET, direction: 'positive' })), rationale: 'probe' };
       const r = await caps.proposeNewFactor(ctx, args);
       return { r, held: held as Held | null };
     },
@@ -95,7 +95,7 @@ describe('DL ruling on #2235: on the reviewer\'s 32-message corpus, the door nev
     expect(confirmCalls).toBeGreaterThan(30);
   }, 120_000);
 
-  it('the served E04 message: the correct pairing AND the swap are both shown for confirmation — each with the user\'s whole sentence; the £400k it never wrote is labelled Olumi’s', async () => {
+  it('the served E04 message: the correct pairing AND the swap are both shown for confirmation — each with the user\'s whole sentence; the £400k it never wrote stays unknown', async () => {
     const door = doorFor();
     const e04 = CASES.find((c) => c.id === 'E04')!.msg;
     for (const pair of [[120000, 65000], [65000, 120000]] as const) {
@@ -108,7 +108,23 @@ describe('DL ruling on #2235: on the reviewer\'s 32-message corpus, the door nev
       ]);
     }
     const { r, held } = await door.propose(CASES.find((c) => c.id === 'E04k')!.msg, 'GBP/year per engineer', [{ label: 'Senior engineer salary', value: 400000 }]);
-    expect(r).toMatchObject({ ok: true, factors: [{ current_value: { stated_by: 'olumi_estimate' } }] });
-    expect(held![0]!.basis).toBe('olumi_estimate');
+    expect(r.ok).toBe(false);
+    expect(r.refusal).toBe('origin_unknown');
+    expect(held).toBeNull();
   }, 60_000);
+  it('a new today estimate requires an explicit false declaration and a nonempty basis', async () => {
+    const door = doorFor();
+    const factors = [{ label: 'Senior engineer salary', value: 400000 }];
+    for (const declaration of [{ user_stated: false, basis: ' ' }, { user_stated: true, basis: 'A planning estimate.' }]) {
+      const { r, held } = await door.propose('Consider salary assumptions.', 'GBP/year per engineer', factors, declaration);
+      expect(r.refusal).toBe('origin_unknown');
+      expect(held).toBeNull();
+    }
+    const { r, held } = await door.propose('Consider salary assumptions.', 'GBP/year per engineer', factors,
+      { user_stated: false, basis: 'A new planning estimate including specialist compensation.' });
+    expect(r.ok).toBe(true);
+    expect(held).toEqual([{ label: 'Senior engineer salary', raw: 400000, basis: 'olumi_estimate', quote: undefined,
+      source: 'cee_inference', reasoning: 'A new planning estimate including specialist compensation.' }]);
+  });
+
 });

@@ -62,7 +62,7 @@ describe('get_canonical_state: every link says who sized it (served 799d1a5d)', 
 
 describe('propose_link_strengths says when it replaces an estimate (served 799d1a5d)', () => {
   const propose = (keys: readonly string[]) => createAgentCapabilities(d, new ProposalStore()).proposeLinkStrengths!(ctx, {
-    links: keys.map((k) => { const [from, to] = k.split('->'); return { from_label: label(from!), to_label: label(to!), strength: 'very strong' }; }),
+    links: keys.map((k) => { const [from, to] = k.split('->'); return { from_label: label(from!), to_label: label(to!), strength: 'very strong', user_stated: false, basis: 'A new proposed link sizing for the scenario.' }; }),
     rationale: 'fix them all',
   }) as Promise<{ ok: boolean; links?: { was: { sizing?: string } }[]; note?: string; refusal?: string; detail?: string }>;
 
@@ -95,7 +95,7 @@ describe('the composed reply says when it replaces Olumi\'s estimate (served 799
   const composed = async (asked: readonly (readonly [string, InfluenceBand])[], graph: unknown = F.graph) => {
     const dg: InternalDispatch = async (path) => (path.endsWith('/graph') ? { status: 200, json: { graph, graph_hash: F.graph_hash } } : { status: 500, json: {} });
     const args = {
-      links: asked.map(([k, strength]) => { const [from, to] = k.split('->'); return { from_label: label(from!), to_label: label(to!), strength }; }),
+      links: asked.map(([k, strength]) => { const [from, to] = k.split('->'); return { from_label: label(from!), to_label: label(to!), strength, user_stated: false, basis: 'A new proposed link sizing for the scenario.' }; }),
       rationale: 'fix them all', whole_request: true,
     };
     const result = await createAgentCapabilities(dg, new ProposalStore()).proposeLinkStrengths!(ctx, args);
@@ -187,7 +187,7 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     const words = `${fromLabel} is strong`;
     const userText = named || singular ? words : 'Offer a strength for this link';
     const context = { ...ctx, user_text: userText, user_turn_text: userText };
-    const link = { from_label: fromLabel, to_label: toLabel, strength: 'strong' as const, rationale: userText,
+    const link = { from_label: fromLabel, to_label: toLabel, strength: 'strong' as const, rationale: userText, user_stated: false, basis: 'A new proposed link sizing for the scenario.',
       ...(named ? { from_words: words } : {}) };
     const args = singular ? link : { links: [link], whole_request: true };
     const result = singular ? await caps.proposeLinkStrength!(context, link)

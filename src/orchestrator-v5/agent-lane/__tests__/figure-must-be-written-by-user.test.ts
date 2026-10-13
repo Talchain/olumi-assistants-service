@@ -1,3 +1,4 @@
+import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 /**
  * ⛔ A FIGURE IS RECORDED AS THE USER'S ONLY WHEN THE USER WROTE IT (`stated-by-user.ts`).
  *
@@ -166,12 +167,11 @@ describe('propose_option_interventions: `user_stated` stands only on a figure th
   const authorOf = (store: ProposalStore, id: unknown) =>
     ((store.get(String(id))?.operations[0]?.value ?? {}) as { authored_by?: unknown }).authored_by;
 
-  it('RED: the Agent marks £62 as the user\'s, but the user wrote £59 → recorded as Olumi\'s, and said', async () => {
+  it('RED: the Agent marks £62 as the user\'s, but the user wrote £59 → refused as unknown', async () => {
     const { caps, store } = setup();
     const r = await caps.proposeOptionInterventions(ctxSaying('Raise to £59 at release.'), level(62) as never, undefined) as { ok?: boolean; proposal_id?: unknown; not_the_users_figure?: unknown[] };
-    expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(authorOf(store, r.proposal_id)).toBe('model_proposed');
-    expect(r.not_the_users_figure).toEqual([{ option: 'Raise to £59 at Release', factor: 'Pro plan price', value: 62 }]);
+    expect(r).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
+    expect(store.outstanding(ctxSaying('').scenario_id, null)).toEqual([]);
   });
 
   it('RED (B2): "Yes, let\'s make that one £62, it\'s what we\'ll charge." → the user\'s', async () => {
@@ -195,13 +195,11 @@ describe('propose_assumptions: a revision is the user\'s only when they wrote th
   const opAuthor = (store: ProposalStore, id: unknown) =>
     ((store.get(String(id))?.operations[0]?.value ?? {}) as { authored_by?: unknown }).authored_by;
 
-  it('RED: "churn is lower than that" → the Agent\'s 4% is a revision recorded as Olumi\'s, and said', async () => {
+  it('RED: "churn is lower than that" → the Agent\'s 4% is a revision refused as unknown', async () => {
     const { caps, store } = setup();
     const r = await caps.proposeAssumptions(ctxSaying('I think churn is lower than that.'), revise as never) as { ok?: boolean; proposal_id?: unknown; not_the_users_figure?: unknown[] };
-    expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(opAuthor(store, r.proposal_id)).toBe('model_proposed');
-    expect(store.get(String(r.proposal_id))?.provenance.authored_by).toBe('model_proposed');
-    expect(r.not_the_users_figure).toEqual([{ factor: 'Monthly churn', value: 4 }]);
+    expect(r).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
+    expect(store.outstanding(ctxSaying('').scenario_id, null)).toEqual([]);
   });
 
   it('RED (B2): "Yes, but it\'s closer to 4% now, that\'s from finance." → the user\'s revision', async () => {

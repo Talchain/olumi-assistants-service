@@ -89,8 +89,8 @@ describe('propose_starting_point says a level the user gave as theirs — the re
   };
   const ASSUMPTIONS = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
   const levels = (userSaid: boolean) => [
-    { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires', ...(userSaid ? { user_stated: true } : {}) },
-    { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire' },
+    { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires', user_stated: userSaid },
+    { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, user_stated: false, basis: 'five today plus one hire' },
   ];
   const OLD_NOTE = 'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
     'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
