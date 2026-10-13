@@ -4881,8 +4881,12 @@ export function createAgentCapabilities(
         // selected nodes identify no directed link). Earlier verified words count only when they name both ends,
         // and never outrank the model's explicit `user_stated: false` (its own estimate). History never supplies an end.
         const bound = ctx.grounded_selection?.unresolved === 'none' ? ctx.grounded_links ?? [] : [];
+        // Message by message (an "Olumi supplied these:" frame covers the rest of ITS message), only while they are
+        // exactly the words the route bound as `user_text`; a path that blanks or rewrites `user_text` keeps its text.
+        const messages = ctx.verified_user_messages !== undefined && ctx.verified_user_messages.join('\n') === ctx.user_text
+          ? ctx.verified_user_messages : ctx.user_text;
         const stated = latestLinkBands(ctx.user_turn_text, g.nodes, from.id, to.id, bound)
-          ?? (l.user_stated === false ? null : latestLinkBands(ctx.user_text, g.nodes, from.id, to.id));
+          ?? (l.user_stated === false ? null : latestLinkBands(messages, g.nodes, from.id, to.id));
         if (stated?.includes(band) === true) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)

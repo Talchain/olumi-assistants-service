@@ -97,6 +97,9 @@ describe('T2-A retained input_claim on the exact link through proposal, approval
     'Price has a weak effect on MRR. Is that right?',
     // Superseded: the latest statement for the pair wins.
     'Price has a weak effect on MRR. Actually, Price has a strong effect on MRR.',
+    // T2A3 buddy review: two bands in one clause name no band; a framing clause covers the rest of its message.
+    'Price has a weak effect on MRR, and our evidence is strong.',
+    'Olumi supplied these estimates. Price has a weak effect on MRR.',
   ])('no credit from another pair, clause or band: %s', text => {
     expect(linkBandTheUserStated('weak', text, nodes, 'price', 'mrr')).toBe(false);
   });
@@ -208,5 +211,40 @@ describe('T2A3: a later statement supersedes an earlier one for the same link', 
     const result = await journey('Price', { strength: 'weak' }, `${history}\nPrice is strong.`,
       { ...priceReview, user_turn_text: 'Price is strong.' });
     expect(author(result)).toBe('model_proposed');
+  });
+});
+
+describe('T2A3 buddy review (Codex, read-only): same-sentence bands, direction, framing and scope', () => {
+  it.each([
+    ['a second band in the same clause', 'Price has a weak effect on MRR, and our evidence is strong.', 'strong'],
+    ['the reversed direction, with the link selected', 'MRR has a weak effect on Price.', 'weak'],
+    ['a passive reading, with the link selected', 'Price is weakly affected by MRR.', 'weak'],
+  ] as const)('no credit for %s', async (_case, words, strength) => {
+    // The link sits in another band, so the proposal MOVES it (a set, never a no-change review).
+    const result = await journey('Price', { strength }, words, { ...priceReview, user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
+    expect(author(result)).toBe('model_proposed');
+    expect(result.edge.provenance.source).toBe('cee_hypothesis');
+  });
+  it('a framing clause ("Olumi supplied these estimates.") makes the rest of that message Olumi\u2019s, for EVERY link', async () => {
+    const words = 'Olumi supplied these estimates. Price has a weak effect on MRR. Quality has a weak effect on MRR.';
+    for (const from of ['Price', 'Quality']) {
+      const result = await journey(from, {}, words, { user_turn_text: 'Please prepare the links.' });
+      expect(author(result), from).toBe('model_proposed');
+      expect(result.edge.provenance.source, from).toBe('cee_hypothesis');
+    }
+  });
+  it('the frame stops at its own message: the user\u2019s next message is theirs', async () => {
+    const verified_user_messages = ['Olumi supplied these estimates.', 'Price has a weak effect on MRR.', 'Please prepare the link.'];
+    const result = await journey('Price', {}, verified_user_messages.join('\n'), { verified_user_messages });
+    expect(author(result)).toBe('user_stated');
+    expect(result.edge.provenance.source).toBe('user_specified');
+  });
+  it.each([
+    'Olumi says Quality is weak; my own estimate is that Price has a strong effect on MRR.',
+    'Price has a strong effect on MRR. I disagree with Olumi about Quality.',
+  ])('an attribution or dispute about something else never demotes the user\u2019s own statement: %s', async words => {
+    const result = await journey('Price', { strength: 'strong' }, words, { user_turn_text: words }, 0.3);
+    expect(author(result)).toBe('user_stated');
+    expect(result.edge.provenance.source).toBe('user_specified');
   });
 });
