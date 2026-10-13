@@ -2017,7 +2017,7 @@ export class SupabaseSessionStore implements SessionStore {
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
     const { data, error } = await this.client
       .from('v5_conversation_turns')
-      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance')
+      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance, suggested_actions_run_key')
       .eq('scenario_id', scenarioId)
       .eq('turn_id', turnId)
       .limit(1);
@@ -2040,6 +2040,9 @@ export class SupabaseSessionStore implements SessionStore {
       pending_actions: (Array.isArray(row.pending_actions) ? row.pending_actions : [])
         .map((pa) => parsePendingAction(pa))
         .filter((pa): pa is NonNullable<typeof pa> => pa !== null && pa.scenario_id === scenarioId),
+      // This exact row's Run, never another row's. Anything but the RPC's 16-hex key reads as unknown.
+      suggested_actions_run_key: typeof row.suggested_actions_run_key === 'string' && /^[0-9a-f]{16}$/.test(row.suggested_actions_run_key)
+        ? row.suggested_actions_run_key : null,
     };
   }
 

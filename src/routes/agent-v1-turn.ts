@@ -2417,7 +2417,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
           const reasonNow = thresholdReasonLine(state.graph, state.analysisResult);
           if (reasonNow !== null) owedNow.push(reasonNow);
-          const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
+          const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady, state.analysisResult);
           if (rootNow !== null) owedNow.push(rootNow);
           if (claimPermissionsFrom(state.analysisState, state.analysisReady, { requested: true }).leader_may_be_named) {
             const basis = conditionalInputBasis({ graph: state.graph,
@@ -2478,10 +2478,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && !legacyRunReceipt
         && replayText !== RUN_FAILED_TEXT
         && replayText !== 'The analysis did not run. Press Run to try again.';
-      // Original bound controls only: never borrow today's key to identify yesterday's answer.
+      // Original bound controls only: never borrow today's key to identify yesterday's answer. After a restart, the key
+      // persisted WITH this exact row names its Run (never the latest row's); a row without one leaves the Run unknown.
       const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length)
-        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey;
-      const replayLoopRunCurrent = replayLoopRun
+        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey || prior.suggested_actions_run_key || undefined;
+      // Currentness is a separate fact: only the controls and narration this process sent can be re-sent as current. A key
+      // alone (a cold replay) names the original Run on the historical receipt, even when that Run is still today's.
+      const replayLoopRunCurrent = replayLoopRun && rememberedControls !== undefined
         && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;
       const historicalLoopReplay = replayLoopRun && !replayLoopRunCurrent;
       if (replayLoopRunCurrent) {
@@ -4878,7 +4881,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // before the readback, a stale or missing result), the readback's roots are not the ones this Run treated as zero.
     const rootLine = runPress && resultFirstRunCompleted
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
-      ? treatedAsZeroReplyLine(readbackGraph, analysisReady) : null;
+      ? treatedAsZeroReplyLine(readbackGraph, analysisReady, analysisResult) : null;
     // GOAL-REACH 3b (DL CHANGES_REQUIRED #2816): an explicit Run says why the goal chance was refused (§(g)), on the same
     // binding as the root line; its replay says the same in the same place.
     const reasonLine = runPress && resultFirstRunCompleted
@@ -5643,7 +5646,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const issuedTurnIds = await proposalIssuers(heldRecords, [...reconciledPending, ...durablePending, ...liveHolds]);
     // Remember only the controls actually sent, after egress and held-proposal reconciliation.
-    // This bounded in-process cache changes no persistence; a cold replay has no original key.
+    // This bounded in-process cache changes no persistence; a cold replay has only the Run key persisted with its row.
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, {
       actions: wireBody.suggested_actions,
       ...(wireBody.narration !== undefined ? { narration: wireBody.narration as ReplayNarration } : {}),

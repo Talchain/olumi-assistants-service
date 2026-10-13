@@ -52,8 +52,11 @@ export function survivesReplyEditors(line: string, graph: unknown, analysisReady
  * editors and every label it quotes says something, else the label-free form with the same count; `null` when no root
  * is treated as zero. A blank label quoted as `""` names nothing and asks about nothing (Codex #2581 r3), so it takes the
  * label-free form too; only the first two labels are ever quoted ("and N more" counts the rest).
+ * `analysisResult` is the saved Run result the caller has bound (absent = unknown, never a substitute); this reader does
+ * not read it yet.
  */
-export function treatedAsZeroReplyLine(graph: unknown, analysisReady: unknown): string | null {
+export function treatedAsZeroReplyLine(graph: unknown, analysisReady: unknown, analysisResult?: unknown): string | null {
+  void analysisResult;
   const view = readinessViewOf(graph);
   const labelled = treatedAsZeroLine(view);
   if (labelled === null) return null;

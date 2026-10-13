@@ -327,6 +327,12 @@ export interface CommittedTurnRecord {
    * Tolerant: an unparseable entry is dropped; absent/non-array reads as `[]`.
    */
   readonly pending_actions?: readonly PendingAction[];
+  /**
+   * The Run this exact answer was bound to, as persisted WITH it (`SessionTurnWrite.suggested_actions_run_key`). A replay
+   * of this turn names that Run, whether or not it is still current. `null` when the row recorded none (an answer without
+   * durable offers, or a legacy row): the original Run is then unknown, never today's or the latest row's.
+   */
+  readonly suggested_actions_run_key?: string | null;
 }
 
 export interface AnswerOffersRead {
