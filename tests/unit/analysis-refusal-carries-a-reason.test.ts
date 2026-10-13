@@ -260,8 +260,8 @@ describe('run admission — the specific refusals are NOT overwritten', () => {
     // wrongly flip to the new sentence.
     const admission = resolveRunAdmission(zeroAlternativesControllable as never);
     expect(admission.willProceed).toBe(false);
-    expect(admission.blockedNextStep).not.toBe(NO_COMPARISON_NEXT_STEP);
-    expect((admission.blockedNextStep ?? '').length).toBeGreaterThan(0);
+    // R5: a held factor needs no option-mapping demand. With zero options the comparison itself is absent.
+    expect(admission.blockedNextStep).toBe('Name at least two different options you are weighing, then run analysis.');
   });
 
   it('TWIN: a run that PROCEEDS carries no next step at all', () => {

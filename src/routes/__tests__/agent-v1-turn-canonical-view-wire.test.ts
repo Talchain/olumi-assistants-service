@@ -235,18 +235,25 @@ describe('canonical view on the same-page turn wire', () => {
     const normalised = { ...rest, _agent: agent, _diagnostic_trace: { ...trace, timing: fixedTiming } };
     const hashes = Object.fromEntries(Object.entries(normalised).map(([key, value]) =>
       [key, createHash('sha256').update(JSON.stringify(value)).digest('hex')]));
-    // Captured with this SAME harness against the untouched base route before adding the wire field.
+    // Original wire fixture, still unknown: T4 K1 changes only readiness/state/actions. All other field hashes stay pinned.
+    expect(body.analysis_ready.status).toBe('needs_user_input');
+    expect(body.analysis_ready.may_run).toBe(false);
+    expect(body.analysis_ready.blockers).toEqual([{
+      factor_id: 'f', factor_label: 'Price', blocker_type: 'missing_value',
+      message: 'What is "Price" today, before any option changes it? Without a current level the analysis would treat it as zero.',
+      suggested_action: 'add_value',
+    }]);
     const legacyHashes = {
       "response_version": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
       "assistant_text": "ea302b607963c37f4a10715d61a863981104450a50ea248edaa6b4a3825913ec",
       "blocks": "c1a7d05ef1eb57e765cf8ff86b1864d848246594f7817f783021775555355be5",
-      "suggested_actions": "0c1babe2aa530086daba3e4346227fa61665979da615bc207a5aa7e7bb427f14",
+      "suggested_actions": "9076468c6f474959639e9bd02ed8d7088b6283738b2d31c974b1f87f49f80a0a",
       "insights": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "stage_indicator": "6403d742dd3b2c3057824808325fa33bf51bd2508d294e9d2204b12a7e0cf79f",
-      "analysis_state": "d812363987601da9e94e365714ecbfbee19927de7600d504fbb989e0244c5996",
+      "analysis_state": "454aa66dadcb0bdfaf3164ffc3c4c25d23337f6e82ecf074197d8d55eb5ff130",
       "narration": "7ef70f45e42695171732686a79b6e9f550486cd080f07877c4fbd7fbb3c123a9",
       "graph_hash": "912f94dbc24ee95f468d78bd45d466661919975ad99b90349205c103782cd933",
-      "analysis_ready": "1aa3cd34589ca9242ad3cb05154043ee7559a1765b5646282ffacab83f9fce34",
+      "analysis_ready": "6cde1496b47a0b7f7a21b9f8e77aee70dbeae02a56ff9d8a6f1a7486b0420d93",
       "draft_graph": "bad2923f6f0eabdecd4e44aa6905fbeb35343415facedcf40c953c7cb507fcd5",
       "_answer_shape": "42480035ce86ad4003eeace38ef517ee7ef4c930be0f5ca48c64e702f4b75b51",
       "action_bar": "0c1c0d9b61498c90fd27fed8d4d24d0e5851ef0747f3ecdaeedece34ee467603",

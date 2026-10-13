@@ -105,7 +105,14 @@ function harness(graph: Rec) {
   return { run, cold, sent };
 }
 
-const churn = (): Rec => structuredClone(served.captures.staging_91656b1b!.graph);
+const churn = (): Rec => {
+  const graph = structuredClone(served.captures.staging_91656b1b!.graph);
+  // Fixture-only AI held likelihood on the capture's existing 100-point frame.
+  graph.nodes.find((n: Rec) => n.id === 'churn_rate_after_over_a_day_wait').observed_state = {
+    value: 0.02, raw_value: 2, source: 'cee_inference', extractionType: 'inferred',
+  };
+  return graph;
+};
 
 describe('RT-10 — a saved Run the model now reads upside down is not served as current (cold read)', () => {
   it('J1 + J2: the pre-fix Run reads stale with no writes; the rerun sends minimise and reads current', async () => {
