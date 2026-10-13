@@ -1228,10 +1228,10 @@ function relationshipAsk(option: unknown): string | undefined {
  * instead (the goal, a compared option or a lever's target is excluded) it
  * withholds nothing, and neither does this reader.
  */
-function leftOutOfRun(graph: GraphV3T, payload: AnalysisReadyPayload): ReadonlySet<string> {
+function leftOutOfRun(graph: GraphV3T, payload: AnalysisReadyPayload, goalId: string): ReadonlySet<string> {
   const options = (payload.options ?? []) as ReadonlyArray<{ option_id?: unknown; interventions?: unknown }>;
   const refusing = new Set<string>([
-    payload.goal_node_id,
+    goalId,
     ...options.flatMap((option) => (typeof option.option_id === 'string' ? [option.option_id] : [])),
     ...options.flatMap((option) => (isPlainObject(option.interventions) ? Object.keys(option.interventions) : [])),
   ]);
@@ -1256,7 +1256,8 @@ function goalRootsWithoutStatusQuoLevel(
     const kind = kindOf.get(id);
     return kind === 'option' || kind === 'decision' || kind === 'constraint';
   };
-  const notSent = leftOutOfRun(graph, payload);
+  const goalId = payload.goal_node_id;
+  const notSent = leftOutOfRun(graph, payload, goalId);
   const parents = new Map<string, number>();
   const children = new Map<string, string[]>();
   for (const edge of graph.edges) {
@@ -1273,7 +1274,7 @@ function goalRootsWithoutStatusQuoLevel(
       for (const child of children.get(current) ?? []) {
         if (seen.has(child)) continue;
         seen.add(child);
-        if (child === payload.goal_node_id) return true;
+        if (child === goalId) return true;
         stack.push(child);
       }
     }
