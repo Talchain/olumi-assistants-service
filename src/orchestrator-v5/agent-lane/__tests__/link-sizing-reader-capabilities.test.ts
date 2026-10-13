@@ -20,7 +20,7 @@ const priceRevenue = (projected = true): Edge => ({ from: 'price', to: 'revenue'
   exists_probability: 1, effect_direction: 'positive',
   provenance: { source: 'user_specified', ...(projected ? { mean_projected: true } : {}) } });
 const labels = { from_label: 'Price', to_label: 'Revenue' };
-const proposalArgs = (strength: 'strong' | 'weak', fromWords?: string) => ({ links: [{ ...labels, strength,
+const proposalArgs = (strength: 'strong' | 'weak', fromWords?: string) => ({ links: [{ ...labels, strength, user_stated: false, basis: 'A new link estimate for review.',
   ...(fromWords === undefined ? {} : { from_words: fromWords }) }], rationale: 'identity-bound R7 reader row' });
 
 function world(initial = priceRevenue(), setProvenance?: Record<string, unknown>) {

@@ -187,8 +187,8 @@ describe('S-D slice 2 Agent proposals', () => {
   };
   const links = () => {
     script = [() => fnCall('propose_link_strengths', { links: [
-      { from_label: 'Hours', to_label: 'Revenue', strength: 'moderate' },
-      { from_label: 'Cost', to_label: 'Revenue', strength: 'moderate' },
+      { from_label: 'Hours', to_label: 'Revenue', strength: 'moderate', user_stated: false, basis: 'A new link estimate for review.' },
+      { from_label: 'Cost', to_label: 'Revenue', strength: 'moderate', user_stated: false, basis: 'A new link estimate for review.' },
     ] }), () => say('Here are estimates for these links.')];
     return turn({ message: 'Suggest estimates for these two links.' });
   };
@@ -626,7 +626,7 @@ describe('S-D slice 2 Agent proposals', () => {
 
   it('cold replay RED: a newer approval retains its own offered card beside both held envelopes', async () => {
     seed(); await assumptions(); const tid = randomUUID();
-    script = [() => fnCall('propose_link_strengths', { links: [{ from_label: 'Hours', to_label: 'Revenue', strength: 'moderate' }] }), () => say('Shall I record this link estimate?')];
+    script = [() => fnCall('propose_link_strengths', { links: [{ from_label: 'Hours', to_label: 'Revenue', strength: 'moderate', user_stated: false, basis: 'A new link estimate for review.' }] }), () => say('Shall I record this link estimate?')];
     const original = await turn({ turn_id: tid, message: 'Suggest an estimate for this link.' });
     const offered = approveChipOf(original)!;
     vi.resetModules(); const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');

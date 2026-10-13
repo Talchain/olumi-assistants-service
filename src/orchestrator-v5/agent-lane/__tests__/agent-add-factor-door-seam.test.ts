@@ -490,14 +490,14 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(output).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     expect(approveChipOf(result)).toBeUndefined();
     expect(bytes()).toBe(before);
-    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote: '', months: 6 }] }] }),
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote: '', months: 6, user_stated: false, basis: 'A new six-month hiring estimate for planning.' }] }] }),
       body => { output = toolOutputIn(body); return say(String(output.public_label)); }];
     const own = await turn({ message: 'Show a new Olumi timing estimate for review.', ...session });
     expect(own._agent.tool_calls.find(c => c.name === 'propose_hiring_times')).toMatchObject({ ok: true });
     const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
     const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
     expect(proposal.provenance.authored_by).toBe('model_proposed');
-    expect(proposal.operations[0].value.options[0].parts[0].statement).toEqual({ quote: 'in 6 months', form: 'about', source: 'model_proposed' });
+    expect(proposal.operations[0].value.options[0].parts[0].statement).toEqual({ quote: 'in 6 months', form: 'about', source: 'model_proposed', basis: 'A new six-month hiring estimate for planning.' });
     expect(bytes()).toBe(before);
   }, 120_000);
 

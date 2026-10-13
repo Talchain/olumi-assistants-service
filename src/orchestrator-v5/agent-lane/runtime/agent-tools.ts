@@ -420,25 +420,18 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_link_strength',
-    description:
-      'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
-      + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
-      + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' ' + THE_BAND_MUST_REACH_THE_OUTCOME + ' '
-      + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
-      + 'their review is recorded: it stays Olumi\u2019s estimate unless it was already theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
-      + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
-      + '("very high", "hardly at all"), give your reading in `strength` and their exact phrase in `from_words`: the user approves your reading. '
-      + 'Never use this for a strength the user did not state: if they said nothing about how strong it is, ask which band it is first '
-      + '\u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
+    description: 'Prepare one change to an existing causal link for approval. Use the canonical from and to labels and preserve the actual source statement, its subject and qualifications. True claims a figure or band supplied by a verified human source, including a verified retained statement. False is only a genuinely new Olumi proposal with its own basis, not a source miss, an unverified earlier claim or approval of an existing estimate. Approval does not change authorship. Retain any original statement, subject and qualifications separately from a proposed pairing or estimate; unresolved origin remains unknown. Show the complete replacement band, direction if changed, figure, original source and new rationale on the existing card; approval authorises only the shown change. When a verified human names the band the link already occupies, retain its current figure and authorship and record the review; agreement does not reauthor an Olumi estimate. A different band is a replacement, disclosed with the existing band mapping and figure, not a human numerical calibration. A figure for the factor itself is its level, not a link strength. Read the source to distinguish a node level from the causal link and retain the named cause and outcome; ambiguity remains a useful question. Keep the existing Slight-to-weak mapping. This prepares a proposal, saves nothing and grants no Run authority.'
+      + ' ' + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' ' + THE_BAND_MUST_REACH_THE_OUTCOME + ' ' + SLIGHT_IS_WEAK,
     parameters: obj({
+      basis: { type: 'string', description: 'The basis for your interpretation or genuinely new Olumi current-level proposal, distinguished from the original source and its author. A source miss alone is no estimate basis.' },
+      user_stated: { type: 'boolean', description: 'True claims a figure or band supplied by a verified human source, including a verified retained statement. False is only a genuinely new Olumi proposal with its own basis, not a source miss, an unverified earlier claim or approval of an existing estimate. Approval does not change authorship. Retain any original statement, subject and qualifications separately from a proposed pairing or estimate; unresolved origin remains unknown.' },
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
-      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated, or your reading of their own words, given with `from_words`.' },
-      from_words: FROM_WORDS,
-      direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way, with their words in `direction_from_words`. Leave it out otherwise: the link keeps its direction.' },
-      direction_from_words: { type: 'string', description: 'With `direction`: the user\u2019s exact words in THIS message saying the link runs the other way. A reversal without them is refused.' },
-      rationale: { type: 'string', description: 'What the user said, in their words.' },
+      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The verified source band or your explicitly disclosed interpretation of its words; for a genuinely new Olumi proposal, its proposed band with its own basis. Never choose a band because the source was missed.' },
+      from_words: { type: 'string', description: 'The actual source words for this statement, retaining its subject, uncertainty, negation, bounds and conditions. Use a verified retained human statement as well as this turn when applicable; assistant, chip and uncertain-origin text is not new human authority. Keep the complete relevant source separate from your interpretation and new estimate basis.' },
+      direction: { type: 'string', enum: ['positive', 'negative'], description: 'Supply only an actual supported change of direction. For a human change, include the verified direction statement in direction_from_words; otherwise retain the held direction. A new Olumi strength proposal does not invent a human reversal.' },
+      direction_from_words: { type: 'string', description: 'The exact verified human statement saying this link runs the other way, from this turn or a verified retained source. Keep its subject and qualifications. No invented or uncertain-origin reversal.' },
+      rationale: { type: 'string', description: 'The complete relevant original source, its verified or unknown origin, your interpretation and any genuinely new estimate basis, distinguished explicitly. Retain replaced values and conditions.' },
       whole_request: WHOLE_REQUEST,
     }, ['from_label', 'to_label', 'strength', 'rationale']),
   },
@@ -460,6 +453,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         type: 'array', minItems: 1, maxItems: 12,
         description: 'Every link in the set, each once.',
         items: obj({
+          user_stated: { type: 'boolean', description: 'True claims a figure or band supplied by a verified human source, including a verified retained statement. False is only a genuinely new Olumi proposal with its own basis, not a source miss, an unverified earlier claim or approval of an existing estimate. Approval does not change authorship. Retain any original statement, subject and qualifications separately from a proposed pairing or estimate; unresolved origin remains unknown.' }, basis: { type: 'string', description: 'The basis for your interpretation or genuinely new Olumi current-level proposal, distinguished from the original source and its author. A source miss alone is no estimate basis.' },
           from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
           to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
           strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The band the user named for this link, or Olumi\u2019s estimate when they did not.' },
@@ -473,36 +467,23 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_goal_target',
-    description:
-      'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
-      + '"keep churn under 5%"). For a quantity already in the model, this prepares one target change and returns its id for '
-      + 'authorise_change after the user approves the shown values. If a quantity is absent, Olumi may instead return a '
-      + 'revised-draft card: only the user pressing that card can replace the draft. Never call authorise_change for a '
-      + 'revised-draft replacement, and never show its id. Give the figure exactly as the user '
-      + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
-      + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
-      + 'a figure or direction they did not state is refused. If the user ALSO stated the goal’s level today (for example "we have secured '
-      + '£0 so far and need at least £1m"), pass it as current_level: both go on ONE card and are written on ONE approval. '
-      + 'Never promise to record today’s level later: without current_level nothing records it. '
-      + 'When the target is DERIVED from a figure the user gave ("we\u2019re at £100,000 … aiming to double that"), give the '
-      + 'result as value and pass derived_from {base, multiplier} (100000 and 2): the base must be a figure they wrote. '
-      + 'When the user did not say at least or at most, give your reading in constraint_type: the card offers it as a '
-      + 'decision with the other direction beside it, and the user chooses. '
-      + 'Give measures whenever the user names what the target is a figure of. Call this once per target the user stated; '
-      + 'never build the model yourself.',
+    description: 'Prepare a goal target in its actual native metric, physical unit, comparator and reference period, using this turn and verified retained source. True claims a figure or band supplied by a verified human source, including a verified retained statement. False is only a genuinely new Olumi proposal with its own basis, not a source miss, an unverified earlier claim or approval of an existing estimate. Approval does not change authorship. Retain any original statement, subject and qualifications separately from a proposed pairing or estimate; unresolved origin remains unknown. Show the original source and the proposed target, comparator, scope, conditions and basis distinctly on the complete existing card. Keep strict comparisons, full conjunctions, windows and hard conditions; a field that cannot represent them does not authorise silently weakening them or computing an unsupported dependent chance. A coordinate frame is not a factual cap or baseline, and a target gap is not an effect estimate. Give native quantities, for example 60000 in £ for £60k. A supported arithmetic reading of a human base and multiplier may use derived_from, preserving the actual base and requested operation; it is not a newly stated human result. Supply current_level when the source also states the current level of this same metric, retaining its separate source and time; do not promise it was included or saved unless the complete postimage and readback show that. For a revised-draft replacement, only the existing bound card action can replace the draft; do not call generic authorise_change for that replacement or expose its id. A proposal is not a saved change or permission to Run.',
     parameters: obj({
-      constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
-      value: { type: 'number', description: 'The figure the user stated, in their own units.' },
-      unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
-      measures: { type: 'string', description: 'What the figure is a figure OF, in the user\u2019s own words from this message (for example "conversion rate", "new customers").' },
-      rationale: { type: 'string', description: 'What the user said, in their words.' },
+      basis: { type: 'string', description: 'The basis for your interpretation or genuinely new Olumi current-level proposal, distinguished from the original source and its author. A source miss alone is no estimate basis.' },
+      source_quote: { type: 'string', description: 'The actual source words for this statement, retaining its subject, uncertainty, negation, bounds and conditions. Use a verified retained human statement as well as this turn when applicable; assistant, chip and uncertain-origin text is not new human authority. Keep the complete relevant source separate from your interpretation and new estimate basis.' },
+      user_stated: { type: 'boolean', description: 'True claims a figure or band supplied by a verified human source, including a verified retained statement. False is only a genuinely new Olumi proposal with its own basis, not a source miss, an unverified earlier claim or approval of an existing estimate. Approval does not change authorship. Retain any original statement, subject and qualifications separately from a proposed pairing or estimate; unresolved origin remains unknown.' },
+      constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'The supported proposed comparator: at_least or at_most. Distinguish a verified human comparator from Olumi\'s disclosed proposed reading. Retain a strict or otherwise unsupported comparison in the full source and conditions; never silently turn it into a weaker supported comparator.' },
+      value: { type: 'number', description: 'The target quantity in the actual metric and native physical unit: verified human source or a genuinely new disclosed Olumi proposal with its own basis. Preserve uncertainty and bounds; never invent an exact human figure.' },
+      unit: { type: 'string', description: 'The actual target\'s physical unit, metric/reference frame and period, using the supplied native unit rather than a coordinate scale.' },
+      measures: { type: 'string', description: 'What this target measures, grounded in this turn or verified retained source. A new Olumi pairing is separately proposed and labelled; it does not reauthor or change the subject of the original quotation.' },
+      rationale: { type: 'string', description: 'Complete original source, subject, scope, time/reference, qualifications and any omissions; distinguish the verified human statement, Olumi\'s interpretation and a genuinely new estimate with its own basis.' },
       derived_from: obj({
-        base: { type: 'number', description: 'The figure the user wrote that the target is derived from, in their units (100000 for "£100,000").' },
-        multiplier: { type: 'number', description: 'The multiple they asked for: 2 for "double that", 3 for "triple", 0.5 for "halve".' },
+        base: { type: 'number', description: 'The actual verified human base used for this supported derivation, in its native unit. An unknown or newly estimated base must not be credited as human.' },
+        multiplier: { type: 'number', description: 'The operation and multiplier actually requested by that verified human source, such as 2 for double; retain its scope and period.' },
       }, ['base', 'multiplier']),
       current_level: obj({
-        value: { type: 'number', description: 'The goal’s level TODAY, exactly as the user stated it in their units (0 for "we have secured £0 so far").' },
-        unit: { type: 'string', description: 'The unit the user gave it in (for example £).' },
+        value: { type: 'number', description: 'A separately supported current level of this same metric, in its native unit and time, retaining actual source and qualifications. A future baseline-option setting, target, coordinate frame or unknown level is not today\'s observed level.' },
+        unit: { type: 'string', description: 'The physical unit and reference period of that current level, compatible with the actual metric; do not silently change its frame.' },
       }, ['value', 'unit']),
     }, ['constraint_type', 'value', 'unit', 'rationale']),
   },
@@ -521,7 +502,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     parameters: obj({
       options: { type: 'array', minItems: 1, maxItems: 6, items: obj({
         option_id: { type: 'string' },
-        starts: { type: 'array', minItems: 1, maxItems: 2, items: obj({ quote: { type: 'string' }, months: { type: 'number', minimum: 0, maximum: 60, description: 'Optional proposed interpretation of this start in months. Keep the quote\'s bounds, uncertainty and relative order; do not turn a bound into an exact human figure. An inferred number remains Olumi\'s interpretation.' } }, ['quote']) },
+        starts: { type: 'array', minItems: 1, maxItems: 2, items: obj({ user_stated: { type: 'boolean', description: 'True claims a figure or band supplied by a verified human source, including a verified retained statement. False is only a genuinely new Olumi proposal with its own basis, not a source miss, an unverified earlier claim or approval of an existing estimate. Approval does not change authorship. Retain any original statement, subject and qualifications separately from a proposed pairing or estimate; unresolved origin remains unknown.' }, basis: { type: 'string', description: 'The basis for your interpretation or genuinely new Olumi current-level proposal, distinguished from the original source and its author. A source miss alone is no estimate basis.' }, quote: { type: 'string' }, months: { type: 'number', minimum: 0, maximum: 60, description: 'Optional proposed interpretation of this start in months. Keep the quote\'s bounds, uncertainty and relative order; do not turn a bound into an exact human figure. An inferred number remains Olumi\'s interpretation.' } }, ['quote']) },
       }, ['option_id', 'starts']) },
     }, ['options']),
   },
@@ -602,7 +583,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         items: obj({
           label: { type: 'string' },
           unit: { type: 'string', description: 'The actual known quantity\'s unit, from the model or verified source, for example GBP/year per engineer. Preserve its physical meaning; never invent a unit or silently change it.' },
-          today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' },
+          today: obj({ user_stated: { type: 'boolean', description: 'True claims a figure or band supplied by a verified human source, including a verified retained statement. False is only a genuinely new Olumi proposal with its own basis, not a source miss, an unverified earlier claim or approval of an existing estimate. Approval does not change authorship. Retain any original statement, subject and qualifications separately from a proposed pairing or estimate; unresolved origin remains unknown.' }, basis: { type: 'string', description: 'The basis for your interpretation or genuinely new Olumi current-level proposal, distinguished from the original source and its author. A source miss alone is no estimate basis.' }, value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' },
             range_low: { type: 'number', description: 'Only when the user also gave a range for this figure, both ends in one sentence of theirs ("between 20% and 30%"): its low end, in the same unit as value. value stays the one figure they chose; never a midpoint.' },
             range_high: { type: 'number', description: 'The high end of that same range. Send it with range_low.' } }, ['value']),
           affects: { type: 'string', description: 'ONE existing outcome, the goal, or a factor no option sets, that it drives, as the CURRENT MODEL STATE labels it.' },
@@ -753,24 +734,20 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_goal_current_level',
-    description:
-      'Record the CURRENT level of the model’s goal when the user has just stated it (for example "our MRR is ' +
-      '£12,000 today" when the goal is MRR). Without it the analysis cannot compare today with the goal’s ' +
-      'target. This does NOT change anything: it records an exact proposal and returns its id, which you keep for ' +
-      'authorise_change: show the user the figure, never the id, before asking them to approve. Only the user’s own ' +
-      'figure for the goal’s OWN metric: never your estimate, and never a figure they gave for something else (a ' +
-      'price, a subscriber count, a rate). Use the goal’s label exactly as get_canonical_state returned it.',
+    description: 'Prepare the current level of the canonical goal\'s own metric in its actual physical unit and time/reference, using this turn and verified retained source. True claims a figure or band supplied by a verified human source, including a verified retained statement. False is only a genuinely new Olumi proposal with its own basis, not a source miss, an unverified earlier claim or approval of an existing estimate. Approval does not change authorship. Retain any original statement, subject and qualifications separately from a proposed pairing or estimate; unresolved origin remains unknown. Preserve the full original source and show it separately from a proposed interpretation or genuinely new starting-level estimate with its own basis on the complete existing card. A price, count, rate, future forecast or reference-option setting is not automatically this goal\'s current level; retain the distinction and ask or propose a supported scoped reading when needed. Give native values, for example 12000 for £12,000, never a coordinate-scaled factual figure. Today\'s level can be recorded without a target or comparator. Preparing or approving this change does not grant Run authority; report a save only from the actual write and current readback.',
     parameters: obj({
+      source_quote: { type: 'string', description: 'The actual source words for this statement, retaining its subject, uncertainty, negation, bounds and conditions. Use a verified retained human statement as well as this turn when applicable; assistant, chip and uncertain-origin text is not new human authority. Keep the complete relevant source separate from your interpretation and new estimate basis.' },
+      basis: { type: 'string', description: 'The basis for your interpretation or genuinely new Olumi current-level proposal, distinguished from the original source and its author. A source miss alone is no estimate basis.' },
       goal_label: { type: 'string' },
-      value: { type: 'number', description: 'The figure the user stated, in their units (12000 for £12,000; never scaled).' },
-      unit: { type: 'string', maxLength: 40, description: 'The unit the user stated, if any (e.g. GBP); at most 40 characters, e.g. "small-update equivalents per sprint".' },
+      value: { type: 'number', description: 'The supported current-level quantity of this goal\'s own metric, in its native physical unit and current time/reference. Retain a verified human figure or disclose a genuinely new Olumi estimate with its own basis; unknown is not zero.' },
+      unit: { type: 'string', maxLength: 40, description: 'The native physical unit of this metric, including its applicable period/reference; do not substitute a normalised coordinate value. Keep the existing field length limit.' },
       goal_is: {
         type: 'string', enum: ['at_least', 'above', 'at_most', 'below'],
-        description: 'ONLY when the user has said how the goal’s target is put: reach at least it, get strictly above it, stay at most it, or stay strictly below it. Otherwise leave it out: today’s level is a fact about today and is recorded on its own, with or without a target, and you never ask for a target first. Never guess it.',
+        description: 'Only a supported verified statement of the target comparator; otherwise omit it. This current-level proposal does not require a target and does not invent one.',
       },
       user_stated: {
         type: 'boolean',
-        description: 'true ONLY when the USER gave this figure as the goal’s current level. Never set it for a figure you estimated.',
+        description: 'True claims a figure or band supplied by a verified human source, including a verified retained statement. False is only a genuinely new Olumi proposal with its own basis, not a source miss, an unverified earlier claim or approval of an existing estimate. Approval does not change authorship. Retain any original statement, subject and qualifications separately from a proposed pairing or estimate; unresolved origin remains unknown.',
       },
       whole_request: WHOLE_REQUEST,
     // ⭐ R3 F5 I1.1 (#85 5933250962, CEE `fe8c9ab0`): #2450 made the door take a level with NO comparator and NO target, but this
@@ -909,7 +886,7 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeLinkStrength?(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
-    direction?: 'positive' | 'negative'; rationale: string;
+    direction?: 'positive' | 'negative'; rationale: string; user_stated?: boolean; basis?: string;
     /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
     from_words?: string;
     /** With a `direction` that reverses the link: the user's own words THIS turn saying it runs the other way. */
@@ -923,12 +900,12 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {
-    links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string }[];
+    links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string; user_stated?: boolean; basis?: string }[];
     rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeGoalTarget?(ctx: AgentToolContext, args: {
-    constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
+    constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string; user_stated?: boolean; basis?: string; source_quote?: string;
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
     /** What the figure is a figure OF, in the user's words: a quantity the draft lacks may get a revised-draft card (B). */
@@ -937,7 +914,7 @@ export interface AgentCapabilities {
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months: number; high_months: number }): Promise<ToolResult>;
   /** E5: the user's hiring times per option, quoted, proposed on ONE card for approval. */
-  proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string; months?: number }[] }[] }): Promise<ToolResult>;
+  proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string; months?: number; user_stated?: boolean; basis?: string }[] }[] }): Promise<ToolResult>;
   /** S-E GOALS: the user's stated deadline as a date on the goal, proposed for approval. */
   proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string; reference_date?: string; deadline_date?: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
@@ -956,7 +933,7 @@ export interface AgentCapabilities {
   proposeNewFactor?(ctx: AgentToolContext, args: {
     rationale: string;
     factors: readonly {
-      label: string; unit: string; today: { value: number; unit?: string };
+      label: string; unit: string; today: { value: number; unit?: string; user_stated?: boolean; basis?: string };
       affects: string; direction: 'positive' | 'negative';
     }[];
   }): Promise<ToolResult>;
@@ -993,7 +970,7 @@ export interface AgentCapabilities {
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
   reconcileGoalScope?(ctx: AgentToolContext, args: ReconcileGoalScopeArgs): Promise<ToolResult>;
   proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
-    goal_label: string; value: number; unit: string; goal_is?: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
+    goal_label: string; value: number; unit: string; goal_is?: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean; basis?: string; source_quote?: string;
   }): Promise<ToolResult>;
   /** The user confirms Olumi's reading of their goal as a product (`../identity-card.ts`). Optional: absent ⇒ refused plainly. */
   proposeIdentity?(ctx: AgentToolContext, args?: { parts: readonly { part_label: string; value: number; unit: string }[] }): Promise<ToolResult>;

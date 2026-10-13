@@ -37,6 +37,17 @@ import {
 } from '@talchain/schemas';
 
 type Rec = Record<string, unknown>;
+
+/** Verified human evidence wins; completeness and approval never establish authorship.
+ * Unknown material stays unknown. Only a declared new estimate with its own basis
+ * (verified by the caller) supplies AI origin. The default source is incomplete.
+ */
+export function statementOrigin(
+  verified: boolean, unknown: boolean, _sourceComplete = false, ownEstimate = false,
+): 'human' | 'unknown' | 'ai' {
+  return verified ? 'human' : unknown || !ownEstimate ? 'unknown' : 'ai';
+}
+
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const rec = (v: unknown): Rec | undefined => (isRec(v) ? v : undefined);
 function asRecord(value: unknown): Record<string, unknown> | null {

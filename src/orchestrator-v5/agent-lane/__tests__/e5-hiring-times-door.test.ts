@@ -132,13 +132,13 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     const summary = projectModelContext({ nodes: after.nodes, edges: after.edges, raw: after, analysis_state: null, analysis_ready: null } as never) as Rec;
     const acc = (value: number, role: string, quote?: string) => ({ value, whose: 'olumi_accepted', role, ...(quote === undefined ? {} : { quote }) });
     expect(summary.hiring_times.options.find((o: Rec) => o.option_id === DEVS).starts).toEqual([
-      { statement: { quote: 'within 2 months', form: 'within' }, soonest_months: acc(2, 'olumi_estimate'),
+      { statement: { quote: 'within 2 months', form: 'within', source: 'user_stated' }, soonest_months: acc(2, 'olumi_estimate'),
         latest_months: { value: 2, whose: 'yours', role: 'stated', quote: 'within 2 months' }, pace_percent_per_month: acc(10, 'olumi_estimate') },
-      { statement: { quote: 'another a month or so later', form: 'after_previous' }, soonest_months: acc(3, 'derived', 'another a month or so later'),
+      { statement: { quote: 'another a month or so later', form: 'after_previous', source: 'user_stated' }, soonest_months: acc(3, 'derived', 'another a month or so later'),
         latest_months: acc(3, 'derived', 'another a month or so later'), pace_percent_per_month: acc(10, 'olumi_estimate') },
     ]);
     expect(summary.hiring_times.options.find((o: Rec) => o.option_id === TECH).starts).toEqual([
-      { statement: { quote: 'at least 3 months', form: 'at_least' }, soonest_months: { value: 3, whose: 'yours', role: 'stated', quote: 'at least 3 months' },
+      { statement: { quote: 'at least 3 months', form: 'at_least', source: 'user_stated' }, soonest_months: { value: 3, whose: 'yours', role: 'stated', quote: 'at least 3 months' },
         latest_months: acc(4, 'olumi_estimate'), pace_percent_per_month: acc(12, 'olumi_estimate') }]);
     // A retry of the same press applies nothing twice.
     expect(await press(w, r.proposal_id)).toMatchObject({ ok: true, applied: true, already_applied: true });
@@ -193,7 +193,7 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     // AIE bound science: a model-origin bound cannot clamp the held earliest start to a point.
     const before = w.graph(), pending = w.proposals.outstanding(SCENARIO, null), registers = [...w.registers];
     expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: DEVS,
-      starts: [{ quote: 'within 1 month' }, { quote: 'the second developer would join two months after the first' }] }] }), ctx(later) as never, w.caps))
+      starts: [{ quote: 'within 1 month', user_stated: false, basis: 'Proposed accelerated recruitment bound.' }, { quote: 'the second developer would join two months after the first' }] }] }), ctx(later) as never, w.caps))
       .toEqual({ ok: false, mutated: false, refusal: 'hiring_bound_conflict', calculation_supported: false,
         statement: { quote: 'within 1 month', source: 'model_proposed', bound: 'upper', value: 1 },
         detail: "Olumi proposed ‘within 1 month’. That gives a upper bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation." });
@@ -269,7 +269,7 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
 
   it('W12/W13 an unbound figure is labelled; "at least" past Olumi\'s latest refuses without a write', async () => {
     const w = world();
-    expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: 'at least 4 months' }] }] }),
+    expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH, starts: [{ quote: 'at least 4 months', user_stated: false, basis: 'A new lower bound allowing recruitment lead time.' }] }] }),
       ctx(PAUL) as never, w.caps)).toMatchObject({ ok: true, mutated: false, public_label: expect.stringContaining('Olumi proposed') });
     const later = 'For the tech lead it would be at least 6 months.';
     const before = w.graph(), pending = w.proposals.outstanding(SCENARIO, null);
@@ -304,13 +304,13 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     expect(unknown).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);
     const own = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
-      starts: [{ quote: '', months: 6 }] }] }), context as never, w.caps) as Rec;
+      starts: [{ quote: '', months: 6, user_stated: false, basis: 'A new six-month hiring estimate for planning.' }] }] }), context as never, w.caps) as Rec;
     expect(own).toMatchObject({ ok: true, mutated: false });
     expect(w.proposals.get(own.proposal_id)?.provenance.authored_by).toBe('model_proposed');
-    expect(own.public_label).toBe('Use these hiring assumptions? ‘Hire a Tech lead’: Olumi proposed “in 6 months”. Modelled timing: starts after 6 months, with an assumption that this start is exactly 6 months from the reference date, Olumi’s estimate of the soonest start (6 months), Olumi’s estimate of the latest start (6 months), and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month).');
+    expect(own.public_label).toBe('Use these hiring assumptions? ‘Hire a Tech lead’: Olumi proposed “in 6 months”. Modelled timing: starts after 6 months, with an assumption that this start is exactly 6 months from the reference date, Olumi’s estimate of the soonest start (6 months), Olumi’s estimate of the latest start (6 months), and Olumi’s estimate of the additional progress from the hires (12% of next feature launch per month). Basis: A new six-month hiring estimate for planning.');
     expect(await press(w, own.proposal_id)).toMatchObject({ ok: true, applied: true });
     const carrier = w.graph().nodes.find((n: Rec) => n.id === 'event_capacity_1').observed_state.extra_share_by_date;
-    expect(carrier.statement).toEqual({ quote: 'in 6 months', form: 'about', source: 'model_proposed' });
+    expect(carrier.statement).toEqual({ quote: 'in 6 months', form: 'about', source: 'model_proposed', basis: 'A new six-month hiring estimate for planning.' });
     expect(carrier.figures.lead_low).toEqual({ value: 6, role: 'olumi_estimate', source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } });
     expect(await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
       starts: [{ quote: 'in 6 months' }] }] }), context as never, w.caps))
@@ -321,7 +321,7 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
   it('W13 typed months travel through dispatch, approval, storage and provenance readback', async () => {
     const w = world();
     const out = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
-      starts: [{ quote: 'after onboarding', months: 5 }] }] }), ctx('Consider onboarding time.') as never, w.caps) as Rec;
+      starts: [{ quote: 'after onboarding', months: 5, user_stated: false, basis: 'Allow recruitment and onboarding before the start.' }] }] }), ctx('Consider onboarding time.') as never, w.caps) as Rec;
     expect(out).toMatchObject({ ok: true, public_label: expect.stringContaining('Olumi proposed') });
     expect(w.registers).toHaveLength(0);
     expect(await press(w, out.proposal_id)).toMatchObject({ applied: true });
@@ -330,7 +330,7 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
       figures: { lead_low: { role: 'olumi_estimate', source: 'user_assumption' }, lead_high: { role: 'olumi_estimate' } } });
     expect(shareOptionEstimateWords(w.graph(), TECH)).not.toContain('your hiring time');
     const follow = await dispatchTool('propose_hiring_times', JSON.stringify({ options: [{ option_id: TECH,
-      starts: [{ quote: 'after onboarding' }, { quote: 'another a month later' }] }] }), ctx('Add another start for the tech lead.') as never, w.caps) as Rec;
+      starts: [{ quote: 'after onboarding' }, { quote: 'another a month later', user_stated: false, basis: 'A new sequential onboarding estimate.' }] }] }), ctx('Add another start for the tech lead.') as never, w.caps) as Rec;
     expect(follow).toMatchObject({ ok: true, public_label: expect.stringContaining('one person after 5 months and another after 6 months') });
     expect(follow.public_label).toContain('Olumi proposed');
 
