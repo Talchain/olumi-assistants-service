@@ -124,6 +124,15 @@ export function comparedMembersOf(raw: unknown, goalId: string, requested: { rea
 
 /** The card's words, the AIE's AMEND byte for byte (`AIE-GOAL-READING-2995-TEXT-RULINGS-20261013.json` card.replacement). */
 export const CONFIRM_GOAL_READING_LABEL_TEMPLATE = 'Confirm this reading of your target: {reading}. Question being answered: {question}.';
+/**
+ * The card. The template's closing full stop is not doubled after a question that already ends a sentence ("…score?" not
+ * "…score?."; Codex buddy r3) — AIE_TEXT_PENDING for that one character. Function replacers: a "$" in the words is literal.
+ */
+export function confirmGoalReadingCard(reading: string, question: string): string {
+  const q = question.trim();
+  const card = CONFIRM_GOAL_READING_LABEL_TEMPLATE.replace('{reading}', () => reading).replace('{question}', () => q);
+  return /[.?!]$/.test(q) ? card.slice(0, -1) : card;
+}
 /** The Agent's note on the card, the AIE's AMEND byte for byte (same ruling, agent_note.replacement). */
 export const CONFIRM_GOAL_READING_NOTE = 'Nothing has changed yet. This card proposes confirming the saved target reading shown on it, as an answer to the '
   + 'stored question. Offer it only when the user\u2019s actual source or bound answer supports that complete reading, including its quantity, unit, '
@@ -177,7 +186,7 @@ export function heldChangeTargetAnswer(args: {
       expected_goal: goalMeaningOf(graph.raw, goalId), ...(answered ? { answer_words: turn } : {}) } }],
     provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
     validation: { admitted: true, loss_count: 0, refusals: [] },
-    public_label: CONFIRM_GOAL_READING_LABEL_TEMPLATE.replace('{reading}', reading).replace('{question}', basis.open_question),
+    public_label: confirmGoalReadingCard(reading, basis.open_question),
   });
   args.proposals.put(proposal);
   return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: graph.graph_hash,

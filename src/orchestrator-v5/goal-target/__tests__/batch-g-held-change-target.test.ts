@@ -42,8 +42,16 @@ const CLARIFIED = "I mean 10% relative to today's productivity, not percentage p
 const GOAL = 'productivity';
 const QUESTION = 'Does “increase productivity by at least 10%” mean 10% relative to today\'s productivity, or 10 percentage points on a productivity score?';
 /** The card's words, its button and the receipt, exactly (AIE_TEXT_PENDING templates, filled from the stored reading). */
-const READING = '‘productivity’ up at least 10% from today at three months, measured against today\'s development productivity';
-const CARD = `Confirm this reading of your target: ${READING}. Question being answered: ${QUESTION}.`;
+const READING = '‘productivity’ up at least 10% from today at three months, measured against today\'s development productivity'
+  + '; also required, not part of this target: maintaining code quality; launch readiness';
+/** The AIE's card; its closing full stop is not doubled after the question's own "?" (Codex buddy r3). */
+const CARD = `Confirm this reading of your target: ${READING}. Question being answered: ${QUESTION}`;
+/** The AIE's agent note, verbatim from the ruling (a literal, so reverting the constant turns this red; Codex buddy r3). */
+const NOTE = 'Nothing has changed yet. This card proposes confirming the saved target reading shown on it, as an answer to the stored question. '
+  + 'Offer it only when the user’s actual source or bound answer supports that complete reading, including its quantity, unit, comparator, reference, '
+  + 'denominator, period and conditions; matching a figure alone is insufficient. Show the full reading and question, never the proposal id. Use '
+  + 'authorise_change only when the user’s bound approval for this shown card permits this proposal_id. It confirms the reading only; it does not change '
+  + 'the underlying claim’s authorship or give permission to Run.';
 const BUTTON = { label: 'Yes, read it that way', message: 'Yes, read my target that way.' };
 const RECEIPT = `Confirmed the saved target reading: ${READING}. Your recorded answer was: “${CLARIFIED}”.`;
 /** At least 10 %: the reconstructed second turn-14 call, as the hook passes it (`TARGET_OPERATOR[type]`, value, unit). */
@@ -81,7 +89,8 @@ describe('G14: restating the saved change target is "already saved", never a ref
       reference: 'today', denominator: 'today’s productivity', effect_unit: '% of today’s productivity', period_months: 3, period_kind: 'at_end',
       also_required: ['maintaining code quality'],
     }, compared: ['target_frame', 'target_raw', 'unit', 'comparator'], not_compared: ['denominator', 'reference', 'period'],
-    saved_reading: '‘Productivity’ up at least 10% from today at three months, measured against today’s productivity', note: ALREADY_SAVED_NOTE });
+    saved_reading: '‘Productivity’ up at least 10% from today at three months, measured against today’s productivity; also required, not part of '
+      + 'this target: maintaining code quality', note: ALREADY_SAVED_NOTE });
     expect(proposals.outstanding(String(SAVED.scenario_id), null)).toEqual([]);
   });
 
@@ -126,7 +135,7 @@ describe('G: the user\'s answer to the goal\'s open question reaches the saved r
 
   it('RED→GREEN: the clarification over the asked draft → ONE confirm_goal_reading card with the user\'s verbatim answer; nothing written', () => {
     const { p, proposals } = answer(ASKED);
-    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, public_label: CARD });
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, public_label: CARD, note: NOTE });
     expect(proposals.outstanding(String(ASKED.scenario_id), null).map((x) => x.proposal_id)).toEqual([p!.proposal_id]);
     expect(proposals.get(String(p!.proposal_id))?.operations).toEqual([{ op: 'confirm_goal_reading', path: GOAL,
       value: { expected_basis: goalOf(ASKED).goal_target_basis, open_question: QUESTION,
@@ -144,6 +153,16 @@ describe('G: the user\'s answer to the goal\'s open question reaches the saved r
     expect(chips[0]).toEqual({ id: approvalChipIdFor(String(p!.proposal_id)), ...BUTTON, detail: CARD });
     expect(chips.map((c) => c.label)).not.toContain('Set this target');
     expect(approvalChipsFor([call], () => ({ proposal: proposals.get(String(p!.proposal_id)), result: { ...p!, public_label: 'other' } as never }))).toEqual([]);
+  });
+
+  it('EXACT (Codex buddy r3): the card says every digit of the saved figure — 0.125%, never "0.13%"', () => {
+    const g = structuredClone(ASKED) as Rec;
+    Object.assign(goalOf(g), { goal_threshold_raw: 0.125 });
+    goalOf(g).goal_target_basis.target_raw = 0.125;
+    const { p } = answer(g, { ...AT_LEAST_10, value: 0.125 }, "I mean 0.125% relative to today's productivity, not percentage points.");
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false });
+    expect(String(p!.public_label)).toContain('‘productivity’ up at least 0.125% from today at three months');
+    expect(String(p!.public_label)).not.toContain('0.13%');
   });
 
   it('an unrelated value elsewhere in the same sentence is never quoted as the answer (strict reading of THIS turn)', () => {
@@ -205,6 +224,7 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     });
     const commits: CommitOptionLevelsInput[] = [];
     let unconfirm: false | 'before' | 'after' = false;
+    let afterCommit: ((g: Rec) => void) | undefined;
     const commit = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
       commits.push(input);
       if (unconfirm === 'before') { unconfirm = false; return { status: 'unconfirmed' }; }
@@ -216,6 +236,8 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
       if (out.kind !== 'committed') return { status: 'unconfirmed' };
       // The write landed, but its confirmation was lost on the way back.
       if (unconfirm === 'after') { unconfirm = false; return { status: 'unconfirmed' }; }
+      // Another writer, after this commit and before the caller's read-back.
+      if (afterCommit !== undefined) { const g = graph(); afterCommit(g); bytes = JSON.stringify(g); afterCommit = undefined; }
       return { status: 'committed', graph_hash: out.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
     };
     const dispatch: InternalDispatch = async (p) => {
@@ -232,7 +254,8 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
       { proposal_id: pid } as never) as Promise<Rec>;
       return { proposals, caps, card, press };
     };
-    return { graph, rows, commits, store, open, setGraph: (g: Rec) => { bytes = JSON.stringify(g); }, unconfirmNext: (when: 'before' | 'after' = 'before') => { unconfirm = when; } };
+    return { graph, rows, commits, store, open, setGraph: (g: Rec) => { bytes = JSON.stringify(g); }, unconfirmNext: (when: 'before' | 'after' = 'before') => { unconfirm = when; },
+      afterCommitNext: (f: (g: Rec) => void) => { afterCommit = f; } };
   }
   /** The 13:18 graph with ONLY the question removed from the goal's reading: the one write's whole postimage. */
   const answered = (): Rec => { const g = structuredClone(ASKED.graph) as Rec; delete goalOf({ graph: g }).goal_target_basis.open_question; return g; };
@@ -283,6 +306,19 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     const retry = await press(pid);
     expect(retry, JSON.stringify(retry)).toMatchObject({ ok: true, mutated: true, applied: true });
     expect(w.commits).toHaveLength(2);
+    expect(w.rows).toHaveLength(1);
+  });
+
+  it('renamed after the commit (Codex buddy r3): the read-back holds another goal meaning → no receipt, never "confirmed" under new words', async () => {
+    const w = persisted(ASKED);
+    const { card, press, proposals } = w.open();
+    const pid = String(card().proposal_id);
+    w.afterCommitNext((g) => Object.assign(goalOf({ graph: g }), { label: 'Revenue', goal_direction: '<=' }));
+    const r = await press(pid);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' });
+    expect(r.follow_up).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('Confirmed the saved target reading');
+    expect(proposals.isApplied(pid)).toBe(false);
     expect(w.rows).toHaveLength(1);
   });
 

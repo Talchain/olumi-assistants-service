@@ -6,7 +6,7 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { answeredBasisOf, applyGoalReadingEdit, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
+import { answeredBasisOf, applyGoalReadingEdit, goalMeaningOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { CONFIRM_GOAL_READING_OP } from '../../goal-target/held-change-target.js';
 import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
@@ -3730,11 +3730,11 @@ export function createAgentCapabilities(
     const v = (op.value ?? {}) as { expected_basis?: unknown; answer_words?: unknown; expected_goal?: unknown };
     const expected = v.expected_basis;
     const answer = typeof v.answer_words === 'string' ? v.answer_words : undefined;
-    if (!isPlainRecord(expected) || opts.commitOptionLevels === undefined) {
+    if (!isPlainRecord(expected) || !isPlainRecord(v.expected_goal) || opts.commitOptionLevels === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
     }
     const approved = { goal_id: op.path, expected_basis: expected, ...(answer !== undefined ? { answer_words: answer } : {}),
-      ...(v.expected_goal !== undefined ? { expected_goal: v.expected_goal } : {}) };
+      expected_goal: v.expected_goal };
     const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
       turn_id: authorisationTurnId(pid), links: [], levels: [], goal_reading: approved });
     // A write that LANDED keeps this proposal's expected bytes, so a retry recovers through the writer's verified no-op instead
@@ -3758,8 +3758,11 @@ export function createAgentCapabilities(
     const check = await readGraph(ctx.scenario_id);
     const goal = check?.nodes.find((n) => n.id === op.path && n.kind === 'goal') as Record<string, unknown> | undefined;
     const basis = goalTargetBasisOf(goal);
+    // The receipt says the card's reading, so the read-back holds the card's goal too (its label and target): a goal renamed
+    // or re-targeted after the commit is never "confirmed" under the new words (Codex buddy r3).
     if (check === null || goal === undefined || basis === undefined || basis.open_question !== undefined
-      || !isDeepStrictEqual(goal.goal_target_basis, answeredBasisOf(expected))) return notConfirmed;
+      || !isDeepStrictEqual(goal.goal_target_basis, answeredBasisOf(expected))
+      || !isDeepStrictEqual(goalMeaningOf(check.raw, op.path), v.expected_goal)) return notConfirmed;
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(pid, receipts);
     const reading = goalReadingWords(check.raw, op.path, basis) ?? `the target for ‘${String(goal.label)}’ as the model states it`;

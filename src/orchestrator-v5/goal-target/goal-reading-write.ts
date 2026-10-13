@@ -28,7 +28,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { CONDITIONS_NOT_KEPT, goalTargetBasisOf, periodWords, type GoalTargetBasis } from './goal-target-basis.js';
 import { readGoalRecord } from './goal-record.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
-import { sayFigure } from '../agent-lane/say-figure.js';
+import { sayFigureWithoutRounding } from '../agent-lane/say-figure.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -80,10 +80,17 @@ export function goalReadingWords(graph: unknown, goalId: string, basis: GoalTarg
   const target = record?.target;
   const label = record?.label.trim() ?? '';
   if (target == null || target.raw === undefined || label === '' || /[\r\n]/.test(label)) return undefined;
-  const change = sayGoalChange(target.frame, target.raw, target.unit, (v, u) => sayFigure(v, u ?? ''), target.comparator);
-  if (change === undefined) return undefined;
-  return `‘${label}’ ${change} ${periodWords(basis)}${basis.denominator !== undefined ? `, measured against ${basis.denominator}` : ''}`;
+  // Every digit: this is what the user confirms (`sayFigureWithoutRounding`; a saved 0.125% was said "0.13%", Codex buddy r3).
+  const change = sayGoalChange(target.frame, target.raw, target.unit, (v, u) => sayFigureWithoutRounding(v, u ?? ''), target.comparator);
+  const also = basis.also_required ?? [];
+  if (change === undefined || also.some((c) => /[\r\n]/.test(c))) return undefined;
+  // The reading's retained conditions are part of what is confirmed (AIE: "preserve ... conditions"), said as outside the target.
+  return `‘${label}’ ${change} ${periodWords(basis)}${basis.denominator !== undefined ? `, measured against ${basis.denominator}` : ''}`
+    + (also.length > 0 ? GOAL_READING_CONDITIONS_TEMPLATE.replace('{conditions}', () => also.join('; ')) : '');
 }
+
+/** AIE_TEXT_PENDING (Codex buddy r3): the reading's `also_required`, appended to the card's and the receipt's reading. */
+export const GOAL_READING_CONDITIONS_TEMPLATE = '; also required, not part of this target: {conditions}';
 
 /**
  * The receipt, the AIE's AMEND byte for byte (`AIE-GOAL-READING-2995-TEXT-RULINGS-20261013.json` receipt): said only after the
@@ -97,9 +104,9 @@ const ANSWER_QUOTE_MAX = 300;
 /** The receipt: the confirmed reading, then the user's answer quoted whole (never cut) when it is held. */
 export function goalReadingRecordedWords(reading: string, answer: string | undefined): string {
   const words = answer?.trim() ?? '';
-  const base = GOAL_READING_CONFIRMED_TEMPLATE.replace('{reading}', reading);
+  const base = GOAL_READING_CONFIRMED_TEMPLATE.replace('{reading}', () => reading);
   return words !== '' && words.length <= ANSWER_QUOTE_MAX && !/[\r\n]/.test(words)
-    ? `${base} ${GOAL_READING_ANSWER_TEMPLATE.replace('{answer}', words)}` : base;
+    ? `${base} ${GOAL_READING_ANSWER_TEMPLATE.replace('{answer}', () => words)}` : base;
 }
 
 export function applyGoalReadingEdit(persistedGraph: unknown, approved: ApprovedGoalReading): GoalReadingEditResult {
