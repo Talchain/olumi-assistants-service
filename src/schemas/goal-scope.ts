@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { InputClaimSchema } from './assist.js';
 
 export const GOAL_SCOPE_UNRESOLVED_REASON = 'goal_scope_unresolved';
 
@@ -22,7 +23,11 @@ export const GoalScopeSchema = z.object({
     basis_source: Source.optional(),
   }).strict().optional(),
 }).strict();
+/** Proposal / sidecar only: never persist this under the legacy strict goal_scope key. */
+export const GoalScopeReadingSchema = GoalScopeSchema.extend({ stated_in_brief: z.boolean() });
 export type GoalScope = z.infer<typeof GoalScopeSchema>;
+export type GoalScopeReading = z.infer<typeof GoalScopeReadingSchema>;
+export const GoalScopeInputSchema = z.object({ scope: GoalScopeReadingSchema, claim: InputClaimSchema }).strict();
 
 export const GoalScopeReconciliationSchema = z.object({
   kind: z.literal('reconcile_goal_scope'),
@@ -41,7 +46,7 @@ export type GoalScopeReconciliation = z.infer<typeof GoalScopeReconciliationSche
 
 /** Quotes and source references warrant a reading, but do not change its numerical meaning. */
 export function goalScopeMeaning(scope: unknown): unknown {
-  const parsed = GoalScopeSchema.safeParse(scope);
+  const parsed = GoalScopeReadingSchema.safeParse(scope);
   if (!parsed.success) return undefined;
   const { source: _source, component, ...meaning } = parsed.data;
   return { ...meaning, ...(component ? { component: (({ source: _s, basis_source: _b, ...c }) => c)(component) } : {}) };
@@ -49,7 +54,7 @@ export function goalScopeMeaning(scope: unknown): unknown {
 
 /** Only the approved facts that affect input interpretation or claim permissions. */
 export function goalScopeAnalysisMeaning(scope: unknown): unknown {
-  const parsed = GoalScopeSchema.safeParse(scope);
+  const parsed = GoalScopeReadingSchema.safeParse(scope);
   if (!parsed.success) return undefined;
   const c = parsed.data.component;
   return { extent: parsed.data.extent, ...(c ? { component: { rate_id: c.rate_id, count_id: c.count_id,

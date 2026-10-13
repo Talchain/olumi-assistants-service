@@ -15,11 +15,9 @@
  *   · then ONE `add_edge` per factor, new factor → its target, Olumi's PLACEHOLDER (`hypothesisEdgeValue`: default
  *     strength, `defaulted`, `cee_hypothesis`) — never `user_specified`: nobody sized the link.
  *
- * ⛔ THE TARGET KINDS ARE DECIDED HERE. A new factor links to the goal, an outcome or a non-lever factor (one no option
- * sets: observable or external) — the add-option new-factor rule (`isAffectsTarget`) less risks — and NEVER an option, a
- * decision, a risk or a lever the options set (`INVALID_FACTOR_TO_CONTROLLABLE`). Any other target is refused with nothing
- * built. (Recovery Batch B, B1: the goal was refused here while the drafter wrote factor → goal itself and the add-option
- * door took it; Paul's hiring test, 11 Oct, was refused "a new factor directly to the goal".)
+ * Target kinds follow the shared factor-target rule, including risks. A disconnected
+ * target is still valid reasoning to retain. Options and decisions are invalid
+ * targets; option-set factors still require the science/validator contract (W17).
  *
  * THE USER'S FIGURE rides the hold, not the ops: a CEE-written member (`GM_HELD_USER_TODAY_KEY`) the confirm stamps into
  * each factor's `add_node` after the re-referee and before the apply (`stampNewUserTodayLevels`), exactly where the
@@ -34,7 +32,7 @@ import type { PatchOperation } from '../../orchestrator/types.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../graph-management/types.js';
 import { StoredInterventionRange } from '../intervention-range.js';
 import { rangePointEstimate } from '../../utils/amount-range.js';
-import { hypothesisEdgeValue, isAffectsTarget, isStatedTodayObservedState, reachesGoal, sameLabel, type AddOptionGraphView } from './add-option-transaction.js';
+import { hypothesisEdgeValue, isAffectsTarget, isStatedTodayObservedState, sameLabel, type AddOptionGraphView } from './add-option-transaction.js';
 
 /** At most this many new factors in ONE change (the ruling: 1..3). */
 export const MAX_FACTORS_PER_ADD = 3;
@@ -88,14 +86,10 @@ const fail = (reason: AddFactorSkipReason): AddFactorBuildResult => ({ matched: 
  * What a new factor may drive: the goal, an outcome or a non-lever factor (one no option sets). Never an option, decision,
  * risk or lever.
  *
- * ⭐ ONE RULE (Recovery Batch B, B1): DERIVED from the add-option new-factor rule (`isAffectsTarget`), never restated, so
- * the two doors that add a factor cannot disagree on a target again. The served drafter writes factor → goal itself
- * (`build-model.ts`: "straight to the goal metric"; `admit-model.ts` keeps it, its factor → goal repair having been removed
- * by ruling) and the analysis runs it. The one difference is kept and named: a risk, which this door has never taken
- * (Canonical #72's door rule; not in Batch B's scope).
+ * One target-kind rule, shared with add-option. W18 removes the risk exception;
+ * goal reachability is not an input admission rule (W19).
  */
 export function isNewFactorTarget(node: { kind: string; category?: string } | undefined): boolean {
-  if (node === undefined || node.kind === 'risk') return false;
   return isAffectsTarget(node);
 }
 
@@ -125,8 +119,7 @@ export function buildAddFactorTransaction(params: unknown, graph: AddOptionGraph
     const target = graph.nodes.find((n) => n.id === f.link.to_id);
     if (target === undefined) return fail('node_not_found');
     if (!isNewFactorTarget(target)) return fail('target_not_allowed');
-    // A factor whose target never reaches the goal cannot change the comparison.
-    if (!reachesGoal(graph, target.id)) return fail('new_factor_unreachable');
+    // Relevance to the current goal does not determine whether reasoning may be retained.
     factors.push({ id, label, to: target.id, effect_direction: f.link.effect_direction });
   }
   if (factors.length * 2 > TYPED_TRANSACTION_ENVELOPE_CAP) return fail('too_many_ops');
@@ -280,7 +273,7 @@ export function levelRangePointBasis(os: Readonly<Record<string, unknown>>): 'st
   // Unverified user material can carry an inference stamp; origin belongs to the provenance authority.
   if (provenanceOf({ value: os }).origin === 'human' && isStatedLevelRange(os.range, os)) return 'stated_figure';
   const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
-  const olumis = os.source === 'cee_inference' && os.user_material_unverified !== true;
+  const olumis = provenanceOf({ value: os }).origin === 'ai';
   return olumis && figure === rangePointEstimate({ min: parsed.data.low, max: parsed.data.high }) ? 'midpoint' : undefined;
 }
 

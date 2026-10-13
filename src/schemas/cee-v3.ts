@@ -15,7 +15,7 @@
 import { z } from "zod";
 import { GoalScopeSchema } from './goal-scope.js';
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
-import { GoalConstraintSchema } from "./assist.js";
+import { GoalConstraintSchema, SavedEffectsTimingSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS, GoalPeriod, GoalHorizonSchema, GoalStatedAsSchema, OptionStatus, CountNounSchema, InterventionRangeSchema, InterventionRangeMeaning } from "@talchain/schemas";
@@ -1126,6 +1126,8 @@ export type ValidationWarningV3T = z.infer<typeof ValidationWarningV3>;
  * Includes option nodes for connectivity (decision→option→factor).
  */
 export const GraphV3 = z.object({
+  /** Additive source/options/revision-bound timing; older readers strip this key. */
+  effects_timing_record: SavedEffectsTimingSchema.optional(),
   /** Graph nodes */
   nodes: z.array(NodeV3).transform((nodes): NodeV3T[] => nodes.map(node => {
     const identity = node.nonlinear_identity;

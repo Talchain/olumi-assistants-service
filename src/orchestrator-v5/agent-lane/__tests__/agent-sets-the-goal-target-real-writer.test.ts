@@ -79,6 +79,14 @@ const store = {
   hasPriorTurns: vi.fn(async (sid: string) => order.some((k) => rows.get(k)!.scenario_id === sid)),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
+// Exercise the real edge writer with the same enforced CAS feature as staging.
+vi.mock('../../../config/index.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../config/index.js')>();
+  return { ...original, config: new Proxy(original.config, { get(target, prop) {
+    if (prop === 'features') return { ...target.features, graphCas: { appMode: 'observe', rpcMode: 'enforce', rpcEnforce: true, requiresExpectedHash: true } };
+    return Reflect.get(target, prop);
+  } }) };
+});
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
@@ -581,4 +589,184 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(approveChipOf(t1)).toHaveLength(1);
   }, 180_000);
+  const toolOutput = (body: Record<string, unknown>): any => JSON.parse(String(
+    (body.input as { type?: string; output?: string }[]).filter(i => i.type === 'function_call_output').at(-1)?.output ?? '{}'));
+
+  it.each(['human', 'ai'] as const)('T2d target five-hop: %s value, unit, author, basis and complete original source', async origin => {
+    graphOf.set(SCENARIO, seedGraph());
+    const quote = origin === 'human' ? 'We need at least £60k MRR. ' + 'This is conditional on retaining our existing customers. '.repeat(6) : 'A new planning estimate, conditional on retention.';
+    const claim = { origin, basis: 'A planning target, subject to the retained qualification.', source_quote: quote };
+    let proposed: any;
+    script = [() => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 60000, unit: '£',
+      rationale: claim.basis, source_quote: quote, user_stated: origin === 'human' }), body => { proposed = toolOutput(body); return say(proposed.public_label); }];
+    const before = JSON.stringify(graphNow());
+    const t1 = await turn({ message: origin === 'human' ? quote : 'Suggest a planning target.' });
+    expect(proposed.input_claim).toEqual(claim);
+    expect(JSON.stringify(graphNow())).toBe(before);
+    expect(proposed.public_label).toBe(`Set the goal "MRR" to at least £60,000 · Author: ${origin === 'human' ? 'user' : 'Olumi'} · Basis: ${claim.basis} · Source: ${quote}`);
+    const chip = approveChipOf(t1)[0]!;
+    expect(chip).toBeDefined();
+    const approved = await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    expect(approved._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const saved = GraphV3.parse(JSON.parse(JSON.stringify(graphNow())));
+    const row = saved.goal_constraints!.find(c => c.node_id === 'goal_mrr')!;
+    expect({ value: row.value, unit: row.unit, input_claim: row.input_claim }).toEqual({ value: 60000, unit: '£', input_claim: claim });
+    expect(row.provenance).toBe(origin === 'human' ? 'explicit' : 'inferred');
+    let canonical: any;
+    script = [() => fnCall('get_canonical_state', {}), body => { canonical = toolOutput(body); return say('The retained target and its basis.'); }];
+    await turn({ message: 'Read the saved target.' });
+    expect(canonical.goal.target).toEqual({ value: 60000, unit: '£', frame: 'level', comparator: '>=', comparator_in_words: 'at least', input_claim: claim });
+  });
+
+  it.each(['human', 'ai'] as const)('T2d current level five-hop: %s retains approved value, unit and source', async origin => {
+    const seed = seedGraph();
+    Object.assign(seed.nodes.find(n => n.kind === 'goal')!, { goal_threshold_raw: 60000, goal_threshold_cap: 75000,
+      goal_threshold_unit: '£', goal_threshold_frame: 'level', goal_threshold: .8, goal_direction: '>=' });
+    graphOf.set(SCENARIO, seed);
+    // Source metadata belongs to the replaced value and must not reattribute the new estimate.
+    Object.assign(seed.nodes.find(n => n.kind === 'goal')!, { observed_state: {
+      value: .1, raw_value: 7500, unit: '£', cap: 75000, source: 'brief_extraction',
+      extractionType: 'explicit', source_quote: 'The old figure.', user_material_unverified: true,
+    } });
+    const quote = origin === 'human' ? 'Our current MRR is £12,000, subject to churn.' : 'A new estimate of current MRR, subject to churn.';
+    const claim = { origin, basis: 'Keep churn uncertainty visible.', source_quote: quote };
+    let proposed: any;
+    script = [() => fnCall('propose_goal_current_level', { goal_label: 'MRR', value: 12000, unit: '£',
+      basis: claim.basis, source_quote: quote, user_stated: origin === 'human' }), body => { proposed = toolOutput(body); return say(proposed.public_label); }];
+    const before = JSON.stringify(graphNow());
+    const t1 = await turn({ message: origin === 'human' ? quote : 'Suggest a current-level estimate.' });
+    expect(t1._agent.tool_calls[0]).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(JSON.stringify(graphNow())).toBe(before);
+    const chip = approveChipOf(t1)[0]!;
+    expect(chip).toBeDefined();
+    expect(proposed.public_label).toBe(`Record the current level of "MRR" as ${origin === 'human' ? 'your figure' : 'Olumi’s estimate'}: £7,500 → £12,000 (target £60,000) · Basis: ${claim.basis} · Source: ${quote}`);
+    const approved = await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    expect(approved._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const saved = GraphV3.parse(JSON.parse(JSON.stringify(graphNow())));
+    const os = saved.nodes.find(n => n.id === 'goal_mrr')!.observed_state!;
+    expect(os).toEqual({ value: .16, baseline: .16, raw_value: 12000, cap: 75000, unit: '£', source: origin === 'human' ? 'user_override' : 'cee_inference', input_claim: claim });
+    let canonical: any;
+    script = [() => fnCall('get_canonical_state', {}), body => { canonical = toolOutput(body); return say('The retained level and its basis.'); }];
+    await turn({ message: 'Read the saved current level.' });
+    const entity = canonical.entities.find((n: any) => n.id === 'goal_mrr');
+    expect({ value: entity.raw_value, unit: entity.unit, input_claim: entity.input_claim })
+      .toEqual({ value: 12000, unit: '£', input_claim: claim });
+  });
+
+  it.each(['human', 'ai'] as const)('T2d link five-hop: approved replacement keeps %s authorship and the original figure', async origin => {
+    const seed = seedGraph();
+    const old = seed.edges.find(e => e.from === 'fac_price' && e.to === 'goal_mrr')!;
+    Object.assign(old, { provenance: { source: 'user_specified', magnitude: 'user_stated', source_quote: 'Each £1 adds £400 MRR.',
+      natural_effect: { amount: 400, amount_unit: 'GBP', per_source_change: 1, per_source_change_unit: 'GBP', strength_mean: old.strength.mean, strength_mean_frame: 'edge_strength' } } });
+    graphOf.set(SCENARIO, seed);
+    const quote = origin === 'human' ? 'Price has a weak effect on MRR.' : 'A new estimate of the price effect.';
+    const claim = { origin, basis: 'Test the uncertain price relationship.', source_quote: quote };
+    let proposed: any;
+    script = [() => fnCall('propose_link_strength', { from_label: 'Price', to_label: 'MRR', strength: 'weak',
+      rationale: claim.basis, from_words: quote, user_stated: origin === 'human' }), body => { proposed = toolOutput(body); return say(proposed.public_label ?? proposed.detail); }];
+    const t1 = await turn({ message: origin === 'human' ? quote : 'Suggest a weaker price relationship.' });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(proposed.input_claim).toEqual(claim);
+    expect(proposed.public_label).toBe(`Replace your figure (‘Each £1 adds £400 MRR.’) on "Price" → "MRR" with slight, as ${origin === 'human' ? 'your own estimate' : 'Olumi’s estimate'} · Basis: ${claim.basis} · Source: ${quote}`);
+    expect(graphNow()).toEqual(seed);
+    const chip = approveChipOf(t1)[0]!;
+    expect(chip).toBeDefined();
+    const t2 = await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    expect(t2._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const saved = GraphV3.parse(JSON.parse(JSON.stringify(graphNow())));
+    const edge = saved.edges.find(e => e.from === 'fac_price' && e.to === 'goal_mrr')!;
+    expect(edge.strength.mean).toBe(0.1);
+    expect(edge.provenance!.input_claim).toEqual(claim);
+    expect(edge.provenance!.replaced_input).toEqual(old);
+    expect(edge.provenance!.source).toBe(origin === 'human' ? 'user_specified' : 'cee_hypothesis');
+    let canonical: any;
+    script = [() => fnCall('get_canonical_state', {}), body => { canonical = toolOutput(body); return say('The saved link.'); }];
+    await turn({ message: 'Read the saved link.' });
+    const link = canonical.links.find((e: any) => e.from === 'fac_price' && e.to === 'goal_mrr');
+    expect(link.input_claim).toEqual(claim);
+    expect(link.strength).toEqual(edge.strength);
+  });
+
+  it.each(['human', 'ai'] as const)('T2d scope five-hop: %s scope is retained outside the old strict payload', async origin => {
+    const seed = seedGraph();
+    Object.assign(seed.nodes.find(n => n.kind === 'goal')!, { goal_threshold_raw: 60000, goal_threshold_cap: 75000,
+      goal_threshold_unit: '£', goal_threshold_frame: 'level', goal_threshold: .8, goal_direction: '>=' });
+    graphOf.set(SCENARIO, seed);
+    const quote = 'MRR covers the whole business. Our current MRR is £12,000.';
+    const scope = { modelled: 'whole business MRR', alternative: 'one segment', extent: 'total', stated_in_brief: origin === 'human', source: { quote } };
+    let proposed: any;
+    script = [() => fnCall('reconcile_goal_scope', { goal_label: 'MRR', scope, user_stated: origin === 'human', basis: 'The scope of this working model.',
+      current_level: { value: 12000, unit: '£', quote } }), body => { proposed = toolOutput(body); return say(proposed.public_label ?? proposed.detail); }];
+    const t1 = await turn({ message: origin === 'human' ? quote : 'Propose a total scope and current-level estimate.' });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    const chip = (t1 as any)._proposal_fields.proposals[0].approve_action as Chip;
+    expect(chip, JSON.stringify(t1)).toBeDefined();
+    expect(graphNow()).toEqual(seed);
+    const t2 = await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    expect(t2._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const os = goalNow().observed_state as any;
+    expect(os.scope_input).toEqual(proposed.scope_input);
+    expect(os.scope_input.scope).toEqual(scope);
+    if (origin === 'ai') expect(goalNow().goal_scope).toBeUndefined();
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    expect(GraphV3.parse(JSON.parse(JSON.stringify(graphNow()))).nodes.find(n => n.kind === 'goal')!.observed_state!.scope_input).toEqual(os.scope_input);
+    let canonical: any;
+    script = [() => fnCall('get_canonical_state', {}), body => { canonical = toolOutput(body); return say('The saved scope.'); }];
+    await turn({ message: 'Read the saved scope.' });
+    expect(canonical.goal.scope_input).toEqual(os.scope_input);
+  });
+
+  it.each(['target', 'current', 'link'] as const)('T2d unknown %s: retained claim, no card or write', async kind => {
+    const seed = seedGraph();
+    Object.assign(seed.nodes.find(n => n.kind === 'goal')!, { goal_threshold_raw: 60000, goal_threshold_cap: 75000,
+      goal_threshold_unit: '£', goal_threshold_frame: 'level', goal_threshold: .8, goal_direction: '>=' });
+    graphOf.set(SCENARIO, seed);
+    const quote = 'An unattributed figure in prior material.';
+    const claim = { origin: 'unknown', basis: 'Retain the uncertain source.', source_quote: quote };
+    const tool = kind === 'target' ? 'propose_goal_target' : kind === 'current' ? 'propose_goal_current_level' : 'propose_link_strength';
+    const args = kind === 'target' ? { constraint_type: 'at_least', value: 65000, unit: '£', rationale: claim.basis, source_quote: quote, user_stated: true }
+      : kind === 'current' ? { goal_label: 'MRR', value: 13000, unit: '£', basis: claim.basis, source_quote: quote, user_stated: true }
+      : { from_label: 'Price', to_label: 'MRR', strength: 'weak', rationale: claim.basis, from_words: quote, user_stated: true };
+    let proposed: any;
+    script = [() => fnCall(tool, args), body => { proposed = toolOutput(body); return say(proposed.detail); }];
+    const t1 = await turn({ message: 'Review the retained source.' });
+    expect(proposed.ok).toBe(false);
+    expect(proposed.refusal).toBe('origin_unknown');
+    expect(proposed.input_claim).toEqual(claim);
+    expect(approveChipOf(t1)).toEqual([]);
+    expect(graphNow()).toEqual(seed);
+  });
+
+  it.each([
+    'in_place_by_period', // needs T1 new-session completeness (queued)
+    'later_or_partial', // needs T1 new-session completeness (queued)
+    'not_stated', // needs T1 new-session completeness (queued)
+  ])('T2d timing: %s → card → approval → saved current reader; stale revision and unknown source are null', async interpretation => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [() => say('The effects timing is distinct from a hiring start.')];
+    await turn({ message: 'Compare the effects at the end of the period. Hiring starts alone do not establish effectiveness.' });
+    let proposed: any;
+    script = [() => fnCall('propose_effects_timing', { interpretation, source_status: 'complete', basis: 'Read endpoint effectiveness separately from hiring starts.' }),
+      body => { proposed = toolOutput(body); return say(proposed.public_label ?? proposed.detail); }];
+    const before = JSON.stringify(graphNow());
+    const t1 = await turn({ message: 'Prepare that interpretation for approval.' });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(proposed.effects_timing_record.source_status).toBe('incomplete');
+    expect(JSON.stringify(graphNow())).toBe(before);
+    const chip = approveChipOf(t1)[0]!;
+    expect(chip).toBeDefined();
+    const t2 = await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    expect(t2._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const { currentSavedEffectsTiming } = await import('../../goal-target/saved-effects-timing.js');
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const saved = GraphV3.parse(JSON.parse(JSON.stringify(graphNow()))) as any;
+    expect(saved.effects_timing_record).toEqual(proposed.effects_timing_record);
+    expect(currentSavedEffectsTiming(saved, analysisHash(saved)!, 'goal_mrr')).toBeNull();
+    expect(currentSavedEffectsTiming(saved, 'stale-revision', 'goal_mrr')).toBeNull();
+    expect(currentSavedEffectsTiming({ ...saved, effects_timing_record: { ...saved.effects_timing_record, source_status: 'unknown' } }, analysisHash(saved)!, 'goal_mrr')).toBeNull();
+  });
+
 });

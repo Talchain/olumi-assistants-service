@@ -515,7 +515,7 @@ const NewFactorsSchema = z
 export function isAffectsTarget(node: { kind: string; category?: string } | undefined): boolean {
   if (node === undefined) return false;
   if (node.kind === 'goal' || node.kind === 'outcome' || node.kind === 'risk') return true;
-  return node.kind === 'factor' && (node.category === 'observable' || node.category === 'external');
+  return node.kind === 'factor';
 }
 
 /** Does a path from `start` reach a goal node over the view's directed edges? Shared with the add-risk builder. */

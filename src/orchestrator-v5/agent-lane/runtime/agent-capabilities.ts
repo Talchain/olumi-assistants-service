@@ -1,3 +1,8 @@
+import { withApprovedLinkInput } from '../../../cee/provenance/approved-link-input.js';
+import { SavedEffectsTimingSchema, currentSavedEffectsTiming } from '../../goal-target/saved-effects-timing.js';
+import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
+import { withApprovedTargetClaim } from '../../goal-target/input-claim-context.js';
+import type { InputClaim } from '../../../schemas/assist.js';
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
@@ -1005,7 +1010,7 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 /** One internal dispatch, so every path is the product's own. */
 import { reconcileGoalScope } from '../reconcile-goal-scope.js';
 import { noSuchLinkUserWords } from '../no-direct-link.js';
-import { goalScopeCheck, scopeIssueBlocks, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
+import { goalScopeCheck, scopeIssueBlocks, scopeOfGoal, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
 import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
@@ -1372,6 +1377,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
                 ...(!users && str(r.source_quote) ? { quote: r.source_quote } : {}),
                 ...(point === 'stated_figure' ? { point: 'user_figure' } : point === 'midpoint' ? { point: 'olumi_midpoint' } : {}) } };
             })(),
+            ...(os.input_claim !== undefined ? { input_claim: os.input_claim } : {}),
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
             ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
             ...(n.kind === 'option' && (n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded')
@@ -1421,10 +1427,12 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
         : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
-      ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
+      ...(scopeOfGoal(n) ? { scope: scopeOfGoal(n), scope_input: n.observed_state?.scope_input, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOfGoal(n)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
         target: {
           value: trio.goal_threshold_raw,
+          ...(() => { const row = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints : []).find((c: any) => c.node_id === n.id && c.value === trio.goal_threshold_raw);
+            return row?.input_claim ? { input_claim: row.input_claim } : {}; })(),
           ...(trio.goal_threshold_unit === undefined ? {} : { unit: trio.goal_threshold_unit }),
           ...(str(frame) ? { frame } : {}),
           ...(comparator === null ? {} : { comparator, comparator_in_words: LIMIT_OPERATOR_WORDS[comparator] }),
@@ -1459,6 +1467,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
         // Named as the run-turn limit card names it (#1935): the node the limit sits on, joined by id; the row's
         // own label only when that node is absent — so the card and the Agent say the same words for one limit.
         on: (str(c.node_id) ? labelOf.get(c.node_id) : undefined) ?? (str(c.label) ? c.label : 'the goal'),
+        ...(c.input_claim !== undefined ? { input_claim: c.input_claim } : {}),
         operator: c.operator,
         ...(stated !== undefined && stated !== c.operator ? { operator_as_stated: stated } : {}),
         value: c.value,
@@ -1525,6 +1534,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
        * two real placeholders. It is no longer projected; a link that holds by definition is arithmetic and carries none.
        */
       ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? {} : { sizing: linkSizing(e) }),
+      ...(isPlainRecord(e.provenance) && e.provenance.input_claim ? { input_claim: e.provenance.input_claim } : {}),
       ...(str(e.origin) ? { origin: e.origin } : {}),
     };
   });
@@ -2131,13 +2141,15 @@ const targetFigure = (value: number, unit: string): string =>
  * figure, for both directions; for at least it also stamps the goal's own `goal_threshold_raw` (what the Agent's
  * `target` and the UI read). Both must hold exactly what was approved.
  */
-function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: { constraint_type: TargetDirection; raw_value: number }): boolean {
+function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: { constraint_type: TargetDirection; raw_value: number; unit?: string; input_claim?: InputClaim }): boolean {
   const type = inclusiveTargetDirection(v.constraint_type);
   const operator = type === 'at_least' ? '>=' : '<=';
   const rows = (Array.isArray(raw.goal_constraints) ? raw.goal_constraints : [])
     .filter((c): c is { node_id?: unknown; operator?: unknown; value?: unknown } => c !== null && typeof c === 'object')
     .filter((c) => c.node_id === goalId && c.operator === operator);
   if (rows.length !== 1 || rows[0]!.value !== v.raw_value || statedOperatorOf(rows[0]!) !== TARGET_OPERATOR[v.constraint_type]) return false;
+  if (v.unit !== undefined && (rows[0] as Record<string, unknown>).unit !== v.unit) return false;
+  if (v.input_claim !== undefined && stableStringify((rows[0] as Record<string, unknown>).input_claim) !== stableStringify(v.input_claim)) return false;
   if (type === 'at_most') return true;
   const goal = (Array.isArray(raw.nodes) ? raw.nodes : []).find((n) => (n as { id?: unknown } | null)?.id === goalId) as { goal_threshold_raw?: unknown } | undefined;
   return goal?.goal_threshold_raw === v.raw_value;
@@ -4172,6 +4184,8 @@ export function createAgentCapabilities(
         ...(explanationSection === undefined ? {} : { run_explanation: explanationSection }),
         ...(permissions.total_goal_claims_allowed === false ? { claim_permissions: permissions } : {}),
         ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
+        ...(g.raw.effects_timing_record === undefined ? {} : { effects_timing_record: g.raw.effects_timing_record,
+          current_effects_timing: currentSavedEffectsTiming(g.raw, g.graph_hash, String(g.raw.goal_node_id ?? g.nodes.find(n => n.kind === 'goal')?.id)) }),
         graph_revision: g.graph_hash,
         ...(g.scenario_revision === undefined ? {} : { scenario_revision: g.scenario_revision }),
         empty: g.nodes.length === 0,
@@ -4227,12 +4241,11 @@ export function createAgentCapabilities(
       // ⛔ Recorded as the user's only when the user named the band, or approves Olumi's reading of their own words
       // (`bandGrounding`); the writer stamps it as theirs.
       const grounding = bandGrounding(band, args.from_words, ctx.user_turn_text);
-      if (grounding === null) {
-        return { ok: false, mutated: false, refusal: 'strength_not_stated',
-          detail: `The user has not called this link ${linkBandWord(band)} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
-            + 'Ask them how strong they think it is \u2014 slight, moderate, strong or very strong \u2014 and never offer a band as theirs.' };
-      }
-      const interpretation = grounding.kind === 'reading' ? grounding.interpretation : undefined;
+      const origin = statementOrigin(grounding !== null, bandTheUserWrote(band, ctx.unverified_user_text ?? ''), ctx.user_text_complete, args.user_stated === false);
+      const claim: InputClaim = { origin, basis: String(args.rationale ?? ''), source_quote: String(args.from_words ?? '') };
+      if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', input_claim: claim, proposed_link: { from: args.from_label, to: args.to_label, strength: band },
+        detail: UNKNOWN_ORIGIN_DETAIL + ' The link proposal and original words are retained here; identify their source or supply a new estimate.' };
+      const interpretation = grounding?.kind === 'reading' ? grounding.interpretation : undefined;
       const yourWords = interpretation === undefined ? '' : `, Olumi\u2019s reading of your "${interpretation.from_words}"`;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
@@ -4328,7 +4341,7 @@ export function createAgentCapabilities(
       const ownEnds = [from.label, to.label];
       const namesAnotherNode = replaceClause !== null && otherLabels.some((l) => mentionsLabel(replaceClause, l)
         && !ownEnds.some((end) => mentionsLabel(replaceClause, end) && mentionsLabel(end, l)));
-      const replacesFigure = replaceClause !== null && bandTheUserWrote(band, replaceClause) && !namesAnotherNode;
+      const replacesFigure = heldNow !== null && (currentBand !== band || replaceClause !== null && bandTheUserWrote(band, replaceClause) && !namesAnotherNode);
       if (replacesFigure && reverses) {
         return { ok: false, mutated: false, refusal: 'replace_keeps_direction',
           detail: `Nothing was prepared. Tell the user exactly this: "${REPLACE_KEEPS_DIRECTION_TEXT}"` };
@@ -4347,6 +4360,7 @@ export function createAgentCapabilities(
       }
       const magnitude = confirm ? Math.abs(mean) : bandMidpoint(band);
       const value = {
+        input_claim: claim, expected_edge: edge,
         magnitude,
         intent: confirm ? 'confirm_current' : 'set',
         direction_intent: confirm || args.direction === undefined ? 'preserve' : wanted,
@@ -4363,13 +4377,13 @@ export function createAgentCapabilities(
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'update_edge', path: `${from.id}::${to.id}`, value }],
-        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        provenance: { authored_by: origin === 'human' ? 'user_stated' : 'model_proposed', basis: claim.basis },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: replacesFigure && heldFigure !== null
-          ? `Replace your figure (\u2018${heldFigure.quote}\u2019) on "${from.label}" \u2192 "${to.label}" with ${linkBandWord(band)}, as your own estimate`
+        public_label: (replacesFigure && heldFigure !== null
+          ? `Replace your figure (\u2018${heldFigure.quote}\u2019) on "${from.label}" \u2192 "${to.label}" with ${linkBandWord(band)}, as ${origin === 'human' ? 'your own estimate' : 'Olumi’s estimate'}`
           : confirm
           ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}${keptIsTheirs ? ', as your own estimate' : ''} (its strength stays as it is)`
-          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`,
+          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as ${origin === 'human' ? 'your own estimate' : 'Olumi’s estimate'}${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`) + ` · Basis: ${claim.basis} · Source: ${claim.source_quote}`,
         ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
@@ -4377,6 +4391,7 @@ export function createAgentCapabilities(
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
+        input_claim: claim,
         base_revision: g.graph_hash,
         link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: edgeStrengthWords(edge) }), direction: current },
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
@@ -4387,7 +4402,7 @@ export function createAgentCapabilities(
             : `Nothing has changed yet. ${linkSizing(edge) === 'placeholder' ? 'Its numbers are kept exactly as they are' : 'The link already sits in that band, so its strength is kept exactly as it is'} and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
               ? 'nobody had sized this link; approving records review, never the user\u2019s authorship'
               : 'the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own'}. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
-          : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
+          : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as ${origin === 'human' ? 'their own estimate' : 'Olumi’s estimate'} — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },
 
@@ -5086,6 +5101,29 @@ export function createAgentCapabilities(
         note: 'Show the user exactly this change, never the id, and call authorise_change with this proposal_id once they agree.' };
     },
 
+    async proposeEffectsTiming(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (!g) return { ok: false, mutated: false, refusal: 'not_found' };
+      const goals = g.nodes.filter(n => n.kind === 'goal');
+      if (goals.length !== 1) return { ok: false, mutated: false, refusal: 'goal_not_resolved' };
+      const parsed = SavedEffectsTimingSchema.safeParse({ ...args, goal_id: goals[0]!.id,
+        // PL 6135017311 (11:16Z): only an explicit host attestation of complete, readable, non-empty source permits
+        // 'complete'; a missing/undefined flag never inherits the model's claim. Other statuses pass through unchanged.
+        source_status: args.source_status === 'complete' && !(ctx.user_text_complete === true && (ctx.user_text ?? '').trim() !== '')
+          ? 'incomplete' : args.source_status,
+        source: ctx.user_text ?? '', option_ids: g.nodes.filter(n => n.kind === 'option').map(n => n.id).sort(), graph_revision: g.graph_hash });
+      if (!parsed.success) return { ok: false, mutated: false, refusal: 'unreadable_timing', detail: 'Supply a typed interpretation, source status and basis. Nothing was prepared.' };
+      const record = parsed.data;
+      const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: 'update_node', path: goals[0]!.id, value: { effects_timing_record: record, previous: g.raw.effects_timing_record ?? null } }],
+        provenance: { authored_by: 'model_proposed', basis: record.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `Record Olumi’s timing interpretation: ${record.interpretation}; source ${record.source_status}. Basis: ${record.basis}. Source: ${record.source}` });
+      proposals.put(p);
+      return { ok: true, mutated: false, proposal_id: p.proposal_id, public_label: p.public_label, effects_timing_record: record };
+    },
+
     async proposeGoalTarget(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const typed = args?.constraint_type;
@@ -5096,15 +5134,7 @@ export function createAgentCapabilities(
           detail: 'A target needs the figure, its unit, and whether the goal must be at least or at most that figure. Nothing was prepared; ask the user for whichever is missing.' };
       }
       const figure = targetFigure(value, unit);
-      const targetNotStated: ToolResult = { ok: false, mutated: false, refusal: 'target_not_stated',
-        detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
-          + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
-      /**
-       * ⛔ The figure is recorded as the user's target, so it must be one the user wrote — or, TYPED by the Agent, one
-       * derived from a figure they wrote (`derived_from {base, multiplier}`: "double that" after "£100,000"; F5 D1, DL
-       * 380e54 on #2447). Code checks the base with the same door as any figure (and, below, its scope), and the value is
-       * exactly base × multiplier. No word list reads the user's wording (DL: a free-text door is banned).
-       */
+      // The AI supplies the target and any typed derivation; the shared source reader below decides authorship.
       const derivedArg = (args as { derived_from?: { base?: unknown; multiplier?: unknown } }).derived_from;
       /**
        * ⛔ AN EMPTY OR IDENTITY DERIVATION IS NO DERIVATION (marketing L20, served 11 Oct 22:29Z and A′: 4 of 4 calls
@@ -5127,9 +5157,7 @@ export function createAgentCapabilities(
           return { ok: false, mutated: false, refusal: 'derivation_mismatch',
             detail: `${figure} is not ${derived.multiplier} × ${targetFigure(derived.base, unit)}, so nothing was prepared. Recompute it, or ask the user.` };
         }
-        if (!figureTheUserWrote(derived.base, unit, ctx.user_text)) return { ...targetNotStated,
-          detail: `${targetFigure(derived.base, unit)} is not a figure the user wrote, so nothing was prepared: a target derived from it would be recorded as theirs. Ask them for the figure.` };
-      } else if (!figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
+      }
       /**
        * ⭐ WHICH WAY IT BINDS (DL 380e54 on #2447, the product ruling 5930770727 kept; follow-up 5931593767): NO REFUSAL ON
        * DIRECTION. The Agent's typed `constraint_type` is its READING; the user's own literal comparator words, when they
@@ -5202,7 +5230,15 @@ export function createAgentCapabilities(
             + 'Ask the user for the target in the goal’s own units, and never record a figure given for something else as this goal’s target.' };
       }
       // ⛔ …and written ABOUT this goal (DL #72 5862394804): "300 Pro paying subscribers" is never a £300 MRR target.
-      if (!figureTheUserWroteFor(derived?.base ?? value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
+      const origin = statementOrigin(
+        figureTheUserWroteFor(derived?.base ?? value, unit, ctx.user_text, scopeIn(g, goal.label)) && (args.source_quote === undefined || (ctx.user_text ?? '').includes(args.source_quote)),
+        figureTheUserWrote(derived?.base ?? value, unit, ctx.unverified_user_text)
+          || figureTheUserWrote(derived?.base ?? value, unit, g.brief_text), ctx.user_text_complete, args.user_stated === false);
+      const inputClaim: InputClaim = { origin, basis: String(args.rationale ?? ''),
+        source_quote: typeof args.source_quote === 'string' ? args.source_quote : quoteOfFigure(derived?.base ?? value, unit, ctx.user_text) ?? '' };
+      if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown',
+        input_claim: inputClaim, proposed_value: value, unit, goal: goal.label,
+        detail: UNKNOWN_ORIGIN_DETAIL + ' The proposed target and its source are retained in this reply; provide its original source or propose a new estimate.' };
       /**
        * ⭐ THE GOAL'S LEVEL TODAY, WHEN THE USER STATED IT BESIDE THE TARGET — on THIS card, written on THIS approval
        * (AIQ #75 5913873948 row G6, 5913897396, 5913952911; DL 5913935708). R3's run: "We have secured £0 so far and need
@@ -5269,13 +5305,13 @@ export function createAgentCapabilities(
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
-        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit, ...(currentLevel !== undefined ? { current_level: currentLevel } : {}) } }],
-        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit, input_claim: inputClaim, ...(currentLevel !== undefined ? { current_level: currentLevel } : {}) } }],
+        provenance: { authored_by: origin === 'human' ? 'user_stated' : 'model_proposed', basis: inputClaim.basis },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         // AIQ's words for the one card (5913952911): both figures, the user's own.
         public_label: (today === undefined
           ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}${derived === null ? '' : ` (${derived.multiplier} × your ${targetFigure(derived.base, unit)})`}`
-          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`) + replaces,
+          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`) + replaces + ` · Author: ${origin === 'human' ? 'user' : 'Olumi'} · Basis: ${inputClaim.basis} · Source: ${inputClaim.source_quote}`,
       });
       proposals.put(proposal);
       return {
@@ -5283,6 +5319,7 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
+        input_claim: inputClaim,
         goal: {
           label: goal.label,
           current_target: trio.goal_threshold_raw === undefined ? null : targetFigure(trio.goal_threshold_raw, trio.goal_threshold_unit ?? ''),
@@ -5293,7 +5330,7 @@ export function createAgentCapabilities(
         // ⭐ DL 380e54 (#2447): the user's words were silent on the direction, so the card is a DECISION — the Agent's
         // reading is the primary button, the other the alternative (`approval-chips.ts`); the user's click is the authorship.
         ...(directionIsADecision ? { direction_choice: { chosen: type, alternative: inclusiveType === 'at_least' ? 'at_most' : 'at_least' } } : {}),
-        note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
+        note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as ${origin === 'human' ? 'their own' : 'Olumi’s estimated'} target`
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
           + (levelLeftOut !== undefined ? ` Today’s level was left out of this card: ${levelLeftOut.reason} Never say it is or will be recorded`
@@ -6713,7 +6750,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'update_edge') {
         const op = ops[0]!;
         const [fromId, toId] = op.path.split('::') as [string, string];
-        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' }; band?: unknown; replaces_user_figure?: { quote?: unknown } };
+        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' }; band?: unknown; replaces_user_figure?: { quote?: unknown }; input_claim?: InputClaim; expected_edge?: unknown };
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
         const send = () => dispatch('/orchestrate/v2/turn', {
           kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
@@ -6722,17 +6759,22 @@ export function createAgentCapabilities(
         // ⭐ A6e — THE BAND THE USER NAMED rides this verified approval in-process (`stated-link-band-context.ts`), the
         // way an approved adoption does: only a proposal the user authored (`user_stated`) that stored a band. One
         // restored from before the band was stored sends none, and the writer keeps the link's spread (a figure).
-        const statedBand = decision.proposal.provenance.authored_by === 'user_stated' && isInfluenceBand(v.band) ? v.band : undefined;
+        const statedBand = (v.input_claim !== undefined || decision.proposal.provenance.authored_by === 'user_stated') && isInfluenceBand(v.band) ? v.band : undefined;
         // ⭐ F1: the user's explicit replace rides the same verified, in-process context — only on a user-authored proposal
         // that stored it. One prepared before F1 carries none, and the writer refuses to drop the figure.
         const replacedQuote = statedBand !== undefined && typeof v.replaces_user_figure?.quote === 'string' ? v.replaces_user_figure.quote : undefined;
-        const res = statedBand !== undefined
-          ? await runWithStatedLinkBand(
+        if (v.expected_edge !== undefined && !isDeepStrictEqual(v.expected_edge, before.edges.find(e => e.from === fromId && e.to === toId))) {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded' };
+        }
+        const sendBound = () => statedBand !== undefined
+          ? runWithStatedLinkBand(
             { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, from: fromId, to: toId, band: statedBand,
               ...(replacedQuote !== undefined ? { replacesUserFigure: true as const } : {}) },
             send,
           )
-          : await send();
+          : send();
+        const res = v.input_claim ? await withApprovedLinkInput({ scenario: ctx.scenario_id, turn: operationId,
+          from: fromId, to: toId, claim: v.input_claim, previous: v.expected_edge }, sendBound) : await sendBound();
         const after = await readGraph(ctx.scenario_id);
         const dir = v.direction_intent === 'preserve' ? v.expected.effect_direction : v.direction_intent;
         const want = dir === 'negative' ? -v.magnitude : v.magnitude;
@@ -6748,7 +6790,8 @@ export function createAgentCapabilities(
           const mean = x?.strength !== null && typeof x?.strength === 'object' ? (x.strength as { mean?: unknown }).mean : undefined;
           const p = x?.provenance !== null && typeof x?.provenance === 'object' ? x.provenance as { source?: unknown; reviewed_by_user?: unknown } : undefined;
           const review = p?.reviewed_by_user !== null && typeof p?.reviewed_by_user === 'object' ? p.reviewed_by_user as { intent?: unknown } : undefined;
-          const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : linkSizing(x) === 'user';
+          const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : v.input_claim?.origin === 'ai' ? provenanceOf({ link: x }).origin === 'ai' : linkSizing(x) === 'user';
+          if (v.intent !== 'confirm_current' && v.input_claim && !isDeepStrictEqual((x?.provenance as Record<string, unknown>)?.input_claim, v.input_claim)) return false;
           return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded
             // B1: a same-band confirm reviews the unchanged mean; it may still be an unsized placeholder.
             && (v.intent === 'confirm_current' || !approvalSizes(x));
@@ -6882,9 +6925,31 @@ export function createAgentCapabilities(
           note: 'The last analysis no longer reflects the options compared. Offer to run the analysis again.' };
       }
 
+      if (ops.length === 1 && ops[0]!.op === 'update_node' && isPlainRecord(ops[0]!.value) && 'effects_timing_record' in ops[0]!.value) {
+        const value = ops[0]!.value as Record<string, unknown>;
+        const parsed = SavedEffectsTimingSchema.safeParse(value.effects_timing_record);
+        if (!parsed.success || parsed.data.graph_revision !== before.graph_hash
+          || stableStringify(value.previous) !== stableStringify(before.raw.effects_timing_record ?? null)) {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded' };
+        }
+        const postimage = { ...before.raw, effects_timing_record: parsed.data };
+        const operationId = authorisationTurnId(decision.proposal.proposal_id);
+        const res = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+          graph: postimage, expected_graph_hash: before.graph_hash,
+          ...(before.graph_identity_hash ? { expected_graph_identity_hash: before.graph_identity_hash } : {}), operation_id: operationId,
+        });
+        if (res.status === 409) return { ok: false, mutated: false, applied: false, refusal: 'superseded' };
+        const after = await readGraph(ctx.scenario_id);
+        if (res.status !== 200 || !after || !isDeepStrictEqual(after.raw, postimage)) return {
+          ok: false, mutated: true, applied: false, refusal: 'not_confirmed', detail: 'The timing record could not be confirmed in saved state.' };
+        proposals.markApplied(decision.proposal.proposal_id, []);
+        return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id,
+          effects_timing_record: parsed.data, follow_up: 'The approved timing interpretation and its source are recorded.' };
+      }
+
       if (ops.length === 1 && ops[0]!.op === 'set_goal_target') {
         const op = ops[0]!;
-        const v = op.value as { constraint_type: TargetDirection; raw_value: number; unit: string };
+        const v = op.value as { constraint_type: TargetDirection; raw_value: number; unit: string; input_claim?: InputClaim };
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
         const write = () => dispatch('/orchestrate/v2/turn', {
           kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
@@ -6892,7 +6957,8 @@ export function createAgentCapabilities(
         });
         // The approved card's strict comparator rides only this exact in-process write, never a wire field.
         const res = await runWithStatedGoalOperator({ scenario_id: ctx.scenario_id, goal_node_id: op.path,
-          turn_id: operationId, operator: TARGET_OPERATOR[v.constraint_type] }, write);
+          turn_id: operationId, operator: TARGET_OPERATOR[v.constraint_type] }, () => v.input_claim
+            ? withApprovedTargetClaim({ scenario_id: ctx.scenario_id, goal_node_id: op.path, turn_id: operationId, claim: v.input_claim }, write) : write());
         // The writer's stale-base gate: the model moved between this approval's read and the write. Nothing written.
         if (res.status === 409) {
           return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,
@@ -6918,7 +6984,7 @@ export function createAgentCapabilities(
         const receipt = receiptSummaryOf(res.json);
         const receipts = receipt.summary !== null ? [receipt.summary] : [];
         const goalLabel = String(after!.nodes.find((x) => x.id === op.path)?.label ?? 'the goal');
-        const targetSaid = `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, as you stated it.`;
+        const targetSaid = `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, ${v.input_claim?.origin === 'ai' ? 'Olumi’s estimate, approved by you' : 'as you stated it'}.`;
         const applied = {
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
@@ -9729,16 +9795,11 @@ export function createAgentCapabilities(
         const asked = String(f.affects ?? '');
         const res = resolveNamed(g, asked, (n) => isNewFactorTarget({ kind: n.kind, ...(typeof n.category === 'string' ? { category: n.category } : {}) }));
         if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
-        if (res.kind === 'other' && res.node.kind === 'factor') {
-          return { ok: false, mutated: false, refusal: 'target_is_a_lever',
-            detail: `Nothing was prepared: "${res.node.label}" is set by the options, so nothing else may drive it. Link "${label}" to `
-              + 'the goal, the outcome or the non-lever factor (one no option sets) it affects instead, from the user’s words; if it is unclear, ask.' };
-        }
         if (res.kind !== 'one') {
           return { ok: false, mutated: false, refusal: res.kind === 'none' ? 'target_not_found' : 'target_not_allowed',
             detail: res.kind === 'none'
-              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives the goal, an outcome or a non-lever factor (one no option sets).`
-              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives the goal, an outcome or a non-lever factor (one no option sets) — never a risk, an option or a decision.` };
+              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives the goal, an outcome, a risk or a factor.`
+              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives the goal, an outcome, a risk or a factor — never an option or a decision.` };
         }
         const direction = f.direction === 'positive' || f.direction === 'negative' ? f.direction : null;
         if (direction === null) {
@@ -9869,7 +9930,7 @@ export function createAgentCapabilities(
       if (!heldOk || res.status !== 'held') {
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(res.status === 'refused' ? { reason: res.reason } : {}),
           detail: res.status === 'refused' && res.reason === 'target_not_allowed'
-            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives the goal, an outcome or a non-lever factor (one no option sets). Tell the user plainly.'
+            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives the goal, an outcome or a factor. Tell the user plainly.'
             : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);

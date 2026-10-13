@@ -228,6 +228,18 @@ describe('BLOCKING — a magnitude suffix on the goal\'s currency is scaled exac
     expect(goalOf(h.stored()).observed_state).toStrictEqual(levelOf(13000));
   });
 
+  it('T2e: a legacy human correction never inherits the replaced explicit claim', async () => {
+    const { h, applied } = await proposeAndApprove({ ...T2, basis: 'The current ledger.', source_quote: 'Our current MRR is £12,000.' });
+    expect(applied.applied).toBe(true);
+    expect(goalOf(h.stored()).observed_state?.input_claim).toEqual({
+      origin: 'human', basis: 'The current ledger.', source_quote: 'Our current MRR is £12,000.',
+    });
+    const revised = await h.call(TOOL, { ...T2, value: 13000 }) as Proposed;
+    expect(revised.ok).toBe(true);
+    expect((await h.call('authorise_change', { proposal_id: revised.proposal_id })).applied).toBe(true);
+    expect(goalOf(h.stored()).observed_state).toStrictEqual(levelOf(13000));
+  });
+
   it('CONTROL: the figure as a string ("£12k") is not a number the tool reads — refused, nothing prepared', async () => {
     const r = await refusedAndInert({ ...T2, value: '£12k', unit: 'GBP' });
     expect(r.refusal).toBe('unparsable_value');

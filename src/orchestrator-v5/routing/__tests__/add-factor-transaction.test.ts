@@ -147,8 +147,6 @@ describe('PJ-E-FIG — the builder (pure)', () => {
   it.each([
     ['an option', 'hire_two_senior_engineers'],
     ['the decision', 'decision_ship_the_new_platform'],
-    ['a risk', 'budget_cap_breach_risk'],
-    ['a lever the options set (controllable factor)', 'annual_salary_spend'],
   ])('B2: a link INTO %s is refused by the builder itself — nothing built', (_what, target) => {
     const r = buildAddFactorTransaction(params({ factors: [{ label: 'Senior engineer salary', link: { to_id: target, effect_direction: 'positive' } }] }), view);
     expect(r).toEqual({ matched: false, reason: 'target_not_allowed' });
@@ -165,7 +163,7 @@ describe('PJ-E-FIG — the builder (pure)', () => {
   it('B3: the goal, an outcome and an observable/external factor are the targets it takes; the goal link is ONE placeholder new factor → goal', () => {
     const withExternal = { nodes: [...STORED.nodes, { id: 'fac_market_rate', kind: 'factor', label: 'Market rate', category: 'external' }],
       edges: [...STORED.edges, { from: 'fac_market_rate', to: OUTCOME }] } as never;
-    for (const to of ['ship_the_new_platform', OUTCOME, 'fac_market_rate']) {
+    for (const to of ['ship_the_new_platform', OUTCOME, 'fac_market_rate', 'annual_salary_spend']) {
       const r = buildAddFactorTransaction(params({ factors: [{ label: 'Senior engineer salary', link: { to_id: to, effect_direction: 'positive' } }] }), withExternal);
       expect(r.matched, `${to}: ${JSON.stringify(r)}`).toBe(true);
     }
@@ -178,23 +176,22 @@ describe('PJ-E-FIG — the builder (pure)', () => {
     ]);
   });
 
-  it('B3′ (Batch B, ONE rule): the door takes exactly what the add-option new-factor rule takes, less a risk — the goal included', () => {
+  it('B3′ (Batch B, ONE rule): the door takes exactly what the add-option new-factor rule takes — risks and the goal included', () => {
     const shapes = [{ kind: 'goal' }, { kind: 'outcome' }, { kind: 'risk' }, { kind: 'option' }, { kind: 'decision' }, { kind: 'constraint' },
       { kind: 'factor', category: 'observable' }, { kind: 'factor', category: 'external' }, { kind: 'factor', category: 'controllable' }, { kind: 'factor' }];
     for (const node of shapes) {
-      expect(isNewFactorTarget(node), JSON.stringify(node)).toBe(node.kind !== 'risk' && isAffectsTarget(node));
+      expect(isNewFactorTarget(node), JSON.stringify(node)).toBe(isAffectsTarget(node));
     }
     expect(isNewFactorTarget({ kind: 'goal' })).toBe(true);
-    // A risk is a legal factor → risk link and the add-option rule takes it, but this door has never taken one (Canonical
-    // #72's door rule, outside Batch B's scope). Pinned so a change to either side is seen.
+    // W18: a risk is a legal factor target through both builders.
     expect(isAffectsTarget({ kind: 'risk' })).toBe(true);
-    expect(isNewFactorTarget({ kind: 'risk' })).toBe(false);
-    for (const node of [{ kind: 'option' }, { kind: 'decision' }, { kind: 'factor', category: 'controllable' }, { kind: 'factor' }, undefined]) {
+    expect(isNewFactorTarget({ kind: 'risk' })).toBe(true);
+    for (const node of [{ kind: 'option' }, { kind: 'decision' }, undefined]) {
       expect(isNewFactorTarget(node), JSON.stringify(node)).toBe(false);
     }
   });
 
-  it('B4: a label the model already has, a label repeated in the call, no factor, four factors, an unknown target and a dead end are refused', () => {
+  it('B4: a label the model already has, a label repeated in the call, no factor, four factors, and an unknown target are refused; a disconnected outcome is retained', () => {
     const one = (label: string, to = OUTCOME) => ({ label, link: { to_id: to, effect_direction: 'positive' } });
     expect(buildAddFactorTransaction({ factors: [one('Annual salary spend')] }, view)).toEqual({ matched: false, reason: 'factor_label_exists' });
     expect(buildAddFactorTransaction({ factors: [one('Salary'), one('salary')] }, view)).toEqual({ matched: false, reason: 'factor_label_repeated' });
@@ -202,7 +199,7 @@ describe('PJ-E-FIG — the builder (pure)', () => {
     expect(buildAddFactorTransaction({ factors: [one('A'), one('B'), one('C'), one('D')] }, view)).toEqual({ matched: false, reason: 'parameters_invalid' });
     expect(buildAddFactorTransaction({ factors: [one('A', 'nope')] }, view)).toEqual({ matched: false, reason: 'node_not_found' });
     const deadEnd = { nodes: [...STORED.nodes, { id: 'out_morale', kind: 'outcome', label: 'Morale' }], edges: STORED.edges } as never;
-    expect(buildAddFactorTransaction({ factors: [one('A', 'out_morale')] }, deadEnd)).toEqual({ matched: false, reason: 'new_factor_unreachable' });
+    expect(buildAddFactorTransaction({ factors: [one('A', 'out_morale')] }, deadEnd).matched).toBe(true);
   });
 });
 
