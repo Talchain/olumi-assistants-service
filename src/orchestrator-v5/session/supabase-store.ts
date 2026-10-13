@@ -2017,7 +2017,7 @@ export class SupabaseSessionStore implements SessionStore {
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
     const { data, error } = await this.client
       .from('v5_conversation_turns')
-      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance')
+      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance, suggested_actions_run_key')
       .eq('scenario_id', scenarioId)
       .eq('turn_id', turnId)
       .limit(1);
@@ -2033,6 +2033,7 @@ export class SupabaseSessionStore implements SessionStore {
       id: row.id,
       request_hash: String(row.request_hash ?? ''),
       assistant_message: typeof row.assistant_message === 'string' ? row.assistant_message : null,
+      suggested_actions_run_key: typeof row.suggested_actions_run_key === 'string' && /^[0-9a-f]{16}$/.test(row.suggested_actions_run_key) ? row.suggested_actions_run_key : null,
       user_message: typeof row.user_message === 'string' ? row.user_message : null,
       llm_calls_used: typeof row.llm_calls_used === 'number' ? row.llm_calls_used : 0,
       // The actions persisted WITH this exact turn, so a replay can re-offer them.

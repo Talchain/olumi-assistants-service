@@ -40,4 +40,11 @@ describe('readCommittedTurn carries the turn\'s own persisted actions', () => {
     const { store } = storeReturning({ data: null, error: { message: 'boom' } });
     await expect(store.readCommittedTurn(SCENARIO, 'turn-1')).rejects.toThrow(/readCommittedTurn failed/);
   });
+  it.each(['0123456789abcdef', null, 'bad-key'])('retains only the original valid Run binding (%s)', async key => {
+    const { store, selected } = storeReturning({ data: [{ id: 'row-1', suggested_actions_run_key: key }], error: null });
+    const row = await store.readCommittedTurn(SCENARIO, 'turn-1');
+    expect(selected[0]).toContain('suggested_actions_run_key');
+    expect(row?.suggested_actions_run_key).toBe(key === '0123456789abcdef' ? key : null);
+  });
+
 });

@@ -227,15 +227,15 @@ export const RUN_INTERPRETATION_FORMAT = Object.freeze({
 
 /** Appended to the interpreter's instructions ONLY when the run withholds its leader. */
 export const RUN_INTERPRETATION_VIEW_INSTRUCTION =
-  'On this call you have no tools, so give_provisional_view is not available. Answer as JSON. `answer` is your reply to the user, and every rule in these instructions applies to it: it never names, ranks or favours an option. '
+  'On this call you have no tools, so give_provisional_view is not available. Answer as JSON. `answer` is your reply to the user, and every rule in these instructions applies to it. '
   + '`provisional_view` is your own provisional view, the one give_provisional_view would carry: `view` (what to test or find out, at most two sentences), `reasoning` (why, from the model’s facts and the user’s own words, at most three sentences) and `confirm_step` (the ONE step that would let the analysis confirm or overturn it, one sentence). '
   + PROVISIONAL_VIEW_RULE + ' '
-  + 'Olumi shows it beneath your reply, labelled as your provisional view and never as the analysis result. '
+  + "Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions. "
   // Served 27 Sep (pj-timing-2104, pj-dispatch-2106r): the FIRST Run carried a view, and the RERUN after the user's
   // challenge carried none, 2/2 (its output was the answer alone). The user lost Olumi's view just when they had changed
   // the model. The call is made only when the analysis withholds the leader, which is when Paul's ruling wants the view.
   + 'This call is made only because the analysis cannot put an option forward, so give your view on every such run, including a rerun or after a view you gave earlier: say it again, updated for this run. '
-  + 'Set it to null only when the model and the user’s words give you no basis for any view. Never write the view in `answer`.';
+  + "Set it to null only when the model and the user’s words give you no basis for any view. Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions.";
 
 /**
  * The typed answer of that one call — or `null` when the text is not it (a plain-text interpretation stays the reply,

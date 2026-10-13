@@ -893,7 +893,7 @@ export function risksTurnFromSignals(s: TurnSignals, graph: unknown, userWords: 
   const risks = g.nodes.filter((n) => n.kind === 'risk' && labelOf(n) !== null).map((n) => labelOf(n)!);
   const favoured = favouredOptionOf(graph);
   const directive = [
-    'METHOD TURN: the user asked Olumi to suggest risks they have not considered. Do not write prose. Reply with ONLY '
+    "Write useful explanation in this role’s existing answer or text field. Keep any required structured artefact in its existing declared response schema; do not invent a new prose-plus-JSON response format or expose internal JSON to the user. Reply with ONLY "
       + `<${RISK_TAG}>JSON array</${RISK_TAG}>, nothing before or after it. The server writes every word the user sees.`,
     'METHOD: assumption-based planning. For each option below, find what it RELIES ON in the model (a factor it changes) and '
       + `how that could fail. Use the prompt list (${RISK_METHOD.categories.join(', ')}) for coverage, and keep up to ${RISK_MAX_ITEMS} `

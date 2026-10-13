@@ -42,7 +42,7 @@ const store = {
   readCommittedTurn: vi.fn(async (_scenario: string, id: string) => {
     const r = rows.find((x) => x.turn_id === id);
     return r === undefined ? null : { id: String(r.turn_id), request_hash: r.request_hash, assistant_message: r.assistantMessage ?? null,
-      user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [] };
+      user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [], suggested_actions_run_key: r.suggested_actions_run_key ?? null };
   }),
   append: vi.fn(async (row: Row) => { rows.push({ ...row }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => []),
@@ -98,157 +98,57 @@ describe('result-first on retry, lost response and failed explanation (live rout
 
   const post = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: SCENARIO, ...payload } });
   const runTurn = (turnId: string) => post({ turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
-  const explainTurn = (turnId: string, first: Body) => {
-    const chip = first.suggested_actions.find((c) => isRunExplanationChip(c.id));
-    expect(chip, JSON.stringify(first.suggested_actions)).toBeDefined();
-    return post({ turn_id: turnId, agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id } });
-  };
-  const explainIds = (b: Body) => b.suggested_actions.filter((c) => isRunExplanationChip(c.id)).map((c) => c.id);
 
-  for (const [version, storedText] of [
-    ['legacy', 'I can’t explain that result as current. Check the current results before asking again. Nothing in your model changed.'],
-    ['current', 'I can’t explain that result as current. Check the current results before asking again.'],
-  ] as const) {
-    it(`keeps a saved ${version} unavailable reply unavailable on the same Run, including after restart; a changed Run is stale`, async () => {
-      const first = (await runTurn(randomUUID())).json() as Body;
-      provider = 'empty';
-      const turnId = randomUUID();
-      const failed = (await explainTurn(turnId, first)).json() as Body;
-      expect(failed.narration?.status).toBe('unavailable');
-      // Seed the durable answer text, independently of the current constants, as an older process would have saved it.
-      const row = rows.find((x) => x.turn_id === turnId && typeof x.assistantMessage === 'string')!;
-      row.assistantMessage = storedText;
-      const savedRows = structuredClone(rows);
-      const calls = modelCalls;
-      const runCount = runs;
-      store.append.mockClear();
-      for (const restart of [false, true]) {
-        if (restart) { await app.close(); app = await freshApp(); }
-        const replay = (await explainTurn(turnId, first)).json() as Body;
-        expect(replay.narration, `restart=${restart}`).toEqual({ status: 'unavailable', run_key: first.narration!.run_key });
-        expect(replay.assistant_text).toBe('I can’t explain that result as current. Check the current results before asking again.');
-        expect(explainIds(replay)).toEqual(explainIds(first));
-      }
-      computedAt = RUN_B;
-      const stale = (await explainTurn(turnId, first)).json() as Body;
-      expect(stale.narration).toEqual({ status: 'stale', run_key: first.narration!.run_key });
-      expect(stale.assistant_text).toBe('I can’t explain that result as current. Check the current results before asking again.');
-      expect(explainIds(stale)).toEqual([]);
-      expect(modelCalls, 'replay calls no provider').toBe(calls);
-      expect(runs, 'replay makes no Run').toBe(runCount);
-      expect(store.append, 'replay writes no answer or claim').not.toHaveBeenCalled();
-      expect(rows, 'old stored words are not rewritten').toEqual(savedRows);
-    });
-  }
-
-  it('RED (P1): explain Run A, complete Run B, retry A\'s explanation turn → stale, never A\'s words beside B; CONTROL before B → the stored words', async () => {
-    const first = (await runTurn(randomUUID())).json() as Body;
-    const e1 = randomUUID();
-    const explained = (await explainTurn(e1, first)).json() as Body;
-    expect(explained.narration).toEqual({ status: 'ready', run_key: first.narration!.run_key });
-    expect(explained.assistant_text).toContain(PROSE);
+  it('Run dispatches once, interprets once, and replays the saved words and original binding after restart', async () => {
+    const id = randomUUID();
+    const first = (await runTurn(id)).json() as Body;
+    expect(first.assistant_text).toContain(PROSE);
+    expect(first.narration?.status).toBe('ready');
+    expect(first._answer_shape).toBeUndefined();
+    expect(first.suggested_actions.some(c => c.id === 'agent-run-analysis')).toBe(true);
+    expect(runs).toBe(1); expect(modelCalls).toBe(1);
+    for (const restart of [false, true]) {
+      if (restart) { await app.close(); app = await freshApp(); }
+      const replay = (await runTurn(id)).json() as Body;
+      expect(replay.assistant_text).toBe(first.assistant_text);
+      expect(replay.narration).toEqual(first.narration);
+      expect(replay._answer_shape).toBeUndefined();
+      expect(runs).toBe(1); expect(modelCalls).toBe(1);
+    }
+  });
+  it.each(['complete_current', 'stale'])('a newer or stale result never rebinds old narration (%s)', async kind => {
+    const id = randomUUID();
+    const first = (await runTurn(id)).json() as Body;
+    computedAt = RUN_B; runKind = kind;
+    const saved = structuredClone(rows);
+    store.append.mockClear();
+    await app.close(); app = await freshApp();
+    const replay = (await runTurn(id)).json() as Body;
+    expect(replay.assistant_text).toBe(first.assistant_text);
+    expect(replay.narration).toEqual({ status: 'stale', run_key: first.narration!.run_key });
+    expect(replay.blocks).toBeUndefined();
+    expect(store.append).not.toHaveBeenCalled();
+    expect(rows).toEqual(saved); expect(runs).toBe(1); expect(modelCalls).toBe(1);
+  });
+  it.each(['empty', 'fetch_failed'] as const)('failed interpretation stays unavailable without rerunning (%s)', async failure => {
+    provider = failure;
+    const id = randomUUID();
+    const first = (await runTurn(id)).json() as Body;
+    expect(first.narration?.status).toBe('unavailable');
+    expect(first.assistant_text).not.toContain(PROSE);
     const calls = modelCalls;
-    // CONTROL: the same retry while Run A is current replays the stored explanation.
-    const same = (await explainTurn(e1, first)).json() as Body;
-    expect(same.narration).toEqual({ status: 'ready', run_key: first.narration!.run_key });
-    expect(same.assistant_text).toContain(PROSE);
-    computedAt = RUN_B;
-    const retried = (await explainTurn(e1, first)).json() as Body;
-    expect(retried.narration).toEqual({ status: 'stale', run_key: first.narration!.run_key });
-    expect(retried.assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
-    expect(retried.assistant_text).not.toContain(PROSE);
-    expect(explainIds(retried)).toEqual([]);
-    expect(modelCalls, 'a replay calls no model').toBe(calls);
+    const replay = (await runTurn(id)).json() as Body;
+    expect(replay.assistant_text).toBe(first.assistant_text);
+    expect(replay.narration?.status).toBe('unavailable');
+    expect(modelCalls).toBe(calls); expect(runs).toBe(1);
   });
-
-  it('RED (P2 lost response): a retried Run turn replays the CURRENT result, its narration and the bound Explain control — across a restart too', async () => {
-    const r1 = randomUUID();
-    const first = (await runTurn(r1)).json() as Body;
-    expect(first.narration?.status).toBe('pending');
-    for (const restart of [false, true]) {
-      if (restart) { await app.close(); app = await freshApp(); }
-      const replay = (await runTurn(r1)).json() as Body;
-      expect(replay.narration, `restart=${restart}`).toEqual(first.narration);
-      expect(replay.blocks?.some((b) => b.type === 'analysis_result'), `restart=${restart}`).toBe(true);
-      expect(explainIds(replay), `restart=${restart}`).toEqual(explainIds(first));
-    }
-    // The replayed control works: it explains that same Run.
-    const replay = (await runTurn(r1)).json() as Body;
-    const explained = (await explainTurn(randomUUID(), replay)).json() as Body;
-    expect(explained.narration).toEqual({ status: 'ready', run_key: first.narration!.run_key });
-  });
-
-  it('CONTROL (P2 lost response): after a newer Run B, the replay is built on the CURRENT result — B\'s key and control, never A\'s', async () => {
-    const r1 = randomUUID();
-    const runA = (await runTurn(r1)).json() as Body;
-    computedAt = RUN_B;
-    const replay = (await runTurn(r1)).json() as Body;
-    const runB = (await runTurn(randomUUID())).json() as Body;
-    expect(runB.narration!.run_key).not.toBe(runA.narration!.run_key);
-    expect(replay.narration).toEqual({ status: 'pending', run_key: runB.narration!.run_key });
-    expect(explainIds(replay)).toEqual(explainIds(runB));
-  });
-
-  it('RED (P1 @b30759b2): retry Run A after the figures changed and Run B completed → the current withheld finding and ready detail, never A\'s stored figures — also after a restart', async () => {
-    const r1 = randomUUID();
-    const runA = (await runTurn(r1)).json() as Body;
-    // What request 1 stored can carry paragraphs built from ITS readback (the break-even arithmetic, the provisional
-    // view): A's figures, persisted with A's answer row.
-    const row = rows.find((x) => x.turn_id === r1 && typeof x.assistantMessage === 'string')!;
-    row.assistantMessage = `${String(row.assistantMessage)}\n\nIf MRR is £1,234,567 a month, the price covers it at 4,321 subscribers.`;
-    computedAt = RUN_B;
-    // What a live Run turn says on the CURRENT state: the replay must say the same, never A's paragraphs.
-    const live = (await runTurn(randomUUID())).json() as Body;
-    const finding = goalChanceWithheldForAgent(SERVED.block, GRAPH)!.say;
-    expect(finding).toBe('This run doesn’t yet show each option’s chance of meeting your goal.');
-    const ask = decisionInputAsk(GRAPH, { restingText: `${RUN_RESULT_READY_TEXT}\n\n${finding}`,
-      questionsToggle: false, awaitingApproval: false, builtOrRan: true });
-    expect(ask).toBe('What figure should "MRR" reach or stay under? I\'ll propose it as your target.');
-    expect(live._answer_shape).toEqual({ headline: 'Not shown yet; why is under More detail', bullets: ['What figure should "MRR" reach or stay under?'],
-      detail: `${RUN_RESULT_READY_TEXT}\n\nI'll propose it as your target.\n\n${finding}` });
-    expect([live._answer_shape!.headline, ...live._answer_shape!.bullets].join('\n')).not.toContain(finding);
-    expect(live._answer_shape!.detail.split(finding)).toHaveLength(2);
-    expect(live.assistant_text).toBe(deriveAnswerTextFromShape(live._answer_shape!));
-    expect(live.assistant_text.split(RUN_RESULT_READY_TEXT)).toHaveLength(2);
-    expect([live._answer_shape!.headline, ...live._answer_shape!.bullets].join('\n').match(/\?/g)).toHaveLength(1);
-    for (const sentence of sentencesOf(ask!)) expect(live.assistant_text.split(sentence)).toHaveLength(2);
-    for (const restart of [false, true]) {
-      if (restart) { await app.close(); app = await freshApp(); }
-      const replay = (await runTurn(r1)).json() as Body;
-      expect(replay.assistant_text, `restart=${restart}`).toBe(live.assistant_text);
-      // 2b-0 (DL: reload = same): the replay passes the same composer, so the layout is the live one, byte for byte.
-      expect((replay as { _answer_shape?: unknown })._answer_shape, `restart=${restart}`).toEqual((live as { _answer_shape?: unknown })._answer_shape);
-      expect(replay.assistant_text).not.toMatch(/1,234,567|4,321/);
-      expect(replay.narration?.run_key).not.toBe(runA.narration!.run_key);
-    }
-  });
-
-  it('CONTROL (P1 @b30759b2): no current Run to show → Olumi\'s "can\'t verify" line, no pending narration, no control, none of A\'s figures', async () => {
-    const r1 = randomUUID();
-    await runTurn(r1);
-    const row = rows.find((x) => x.turn_id === r1 && typeof x.assistantMessage === 'string')!;
-    row.assistantMessage = `${String(row.assistantMessage)}\n\nIf MRR is £1,234,567 a month, the price covers it at 4,321 subscribers.`;
-    runKind = 'complete_stale';
-    const replay = (await runTurn(r1)).json() as Body;
-    expect(replay.assistant_text).toBe(UNVERIFIED);
+  it('legacy rows without a durable binding cannot claim a current narration', async () => {
+    const id = randomUUID(); await runTurn(id);
+    for (const row of rows) delete row.suggested_actions_run_key;
+    const replay = (await runTurn(id)).json() as Body;
     expect(replay.narration).toBeUndefined();
-    expect(explainIds(replay)).toEqual([]);
+    expect(replay.blocks).toBeUndefined();
+    expect(replay.assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+    expect(runs).toBe(1); expect(modelCalls).toBe(1);
   });
-
-  for (const mode of ['empty', 'fetch_failed'] as const) {
-    it(`RED (P2 fallback): an ${mode} explanation on a current Run says so and offers the SAME bound control again — live and on replay`, async () => {
-      const first = (await runTurn(randomUUID())).json() as Body;
-      provider = mode;
-      const e1 = randomUUID();
-      const before = modelCalls;
-      const failed = (await explainTurn(e1, first)).json() as Body;
-      expect(failed.narration).toEqual({ status: 'unavailable', run_key: first.narration!.run_key });
-      expect(explainIds(failed)).toEqual(explainIds(first));
-      // P2-1: a deadlined interpret call is made ONCE, a `fetch failed` included (no fresh-deadline second attempt).
-      expect(modelCalls - before, 'one interpret attempt').toBe(1);
-      const replay = (await explainTurn(e1, first)).json() as Body;
-      expect(replay.narration).toEqual({ status: 'unavailable', run_key: first.narration!.run_key });
-      expect(explainIds(replay)).toEqual(explainIds(first));
-    });
-  }
 });

@@ -20,7 +20,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
 
-describe('fast path 3: a typed Run returns before its separate interpreting call', () => {
+describe('fast path 3: a typed Run dispatches once and returns its AI interpretation', () => {
   let app: FastifyInstance;
   let modelBodies: Record<string, unknown>[] = [];
   let runs = 0;
@@ -68,7 +68,7 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
     });
     // The goal carries a stated target, so D1's goal ask (`decision-input-ask.ts`, pinned there) stays out of these exact-text rows.
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity', goal_threshold_raw: 100 }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
+      graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity', goal_threshold_raw: 100 }, { id: 'f', kind: 'factor', label: 'Capacity' }, { id: 'hire', kind: 'option', label: 'Hire a tech lead' }], edges: [{ from: 'f', to: 'g' }] },
       graph_hash: 'h1',
       // The canonical verdict the interpreter must be GIVEN (Paul's case: a guardrail the engine could not score).
       analysis_state: failed
@@ -92,8 +92,8 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
-    expect(modelBodies, 'Run itself makes zero narration calls').toHaveLength(0);
-    const r = await explain(first);
+    expect(modelBodies, 'Run includes its one interpretation').toHaveLength(1);
+    const r = first;
     expect(r.statusCode).toBe(200);
     const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string }[] } };
     expect(runs, 'the analysis ran once').toBe(1);
@@ -101,9 +101,9 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
     expect(modelBodies[0]!['tool_choice'], 'it may interpret, never act').toBe('none');
     const input = JSON.stringify(modelBodies[0]!['input']);
     expect(input, 'the call sees the canonical selected Run').toContain('selected_run_reference');
-    expect(input, 'the call excludes raw analysis').not.toContain('analysis_result');
-    expect(b._diagnostic_trace.fast_path).toBe('explain');
-    expect(b._agent.tool_calls.map((c) => c.name)).toEqual([]);
+    expect(input, 'raw unprojected tool payload is absent').not.toContain('the-run');
+    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(b._agent.tool_calls.map((c) => c.name)).toEqual(['run_analysis']);
     expect(b.assistant_text).toBe('In the current model, the result turns on Capacity.');
     // C6: the served turn says where its time went (the loop's split + the whole route).
     const t = (b._diagnostic_trace as unknown as { timing?: Record<string, number> }).timing;
@@ -153,13 +153,13 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
-    expect(modelBodies, 'Run itself makes zero narration calls').toHaveLength(0);
-    const r = await explain(first);
+    expect(modelBodies, 'Run includes its one interpretation').toHaveLength(1);
+    const r = first;
     const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
-    expect(b._diagnostic_trace.fast_path).toBe('explain');
+    expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(b.assistant_text).not.toMatch(/\bleads\b/);
     expect(b.assistant_text).toContain('Your edit did not change the comparison.');
-    expect(b.assistant_text).toMatch(/No single option can be put forward yet/);
+    expect(b.assistant_text).not.toContain('No single option can be put forward yet');
   });
 
   it('CONTRAST: "Run the analysis" typed as words still goes to the Agent', async () => {
@@ -170,16 +170,16 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
   it('the ONE call carries Interpreter v0.2 verbatim (appended) and the canonical claim permissions', async () => {
     const { INTERPRETER_V02_BANKED } = await import('../../../routes/agent-v1-turn.js');
     const { createHash } = await import('node:crypto');
-    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (programme-docs blob 344896ef + the S2i clause)').toBe('d13dd401219ddcb7');
+    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (programme-docs blob 344896ef + the S2i clause)').toBe('5152ec6404745d79');
     // S2i (DL P6, 7 Oct): one clause differs from blob 344896ef ("say investigation priority is not established" → the DL's
     // words below); every other byte is the banked text (base hash 3d979e8406693be4 with that clause back).
-    expect(INTERPRETER_V02_BANKED).toContain("are absent, make no claim about investigation priority beyond the screen's own driver lines; if the screen shows no driver and no range, say it is not established yet.");
+    expect(INTERPRETER_V02_BANKED).toContain("Use the supplied current driver and sensitivity data to explain what the result rests on, with its source and uncertainty.");
     expect(INTERPRETER_V02_BANKED).not.toContain('say investigation priority is not established.');
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
-    expect(modelBodies, 'Run itself makes zero narration calls').toHaveLength(0);
-    await explain(first);
+    expect(modelBodies, 'Run includes its one interpretation').toHaveLength(1);
+
     expect(modelBodies).toHaveLength(1);
     const instructions = String(modelBodies[0]!['instructions']);
     expect(instructions.endsWith(INTERPRETER_V02_BANKED), 'appended, not replacing').toBe(true);
@@ -205,15 +205,15 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
       const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
         kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
       } });
-      expect(modelBodies, 'Run itself makes zero narration calls').toHaveLength(0);
-      const r = await explain(first);
+      expect(modelBodies, 'Run includes its one interpretation').toHaveLength(1);
+      const r = first;
       expect(r.statusCode).toBe(200);
       const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; ok: boolean }[] } };
       expect(runs, 'the analysis ran exactly once').toBe(1);
       expect(modelBodies.filter((m) => m['tool_choice'] !== 'none'), 'no tool-enabled call — the Agent never took the turn').toHaveLength(0);
       expect(modelBodies, 'only the one interpreting call').toHaveLength(1);
-      expect(b._diagnostic_trace.fast_path).toBe('explain');
-      expect(b._agent.tool_calls, 'the follow-up cannot act').toEqual([]);
+      expect(b._diagnostic_trace.fast_path).toBe('run');
+      expect(b._agent.tool_calls.map(c => c.name), 'only the bound Run acted').toEqual(['run_analysis']);
       const { interpretationUnavailableText } = await import('../../../routes/agent-v1-turn.js');
       expect(b.assistant_text, 'truthful: it ran, the interpretation is what is missing').toBe(interpretationUnavailableText({ ok: true, ran: true }));
       // The NEXT turn's history still carries the run — the pair was not dropped.
@@ -272,8 +272,8 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
     const b = r.json() as { suggested_actions: { id: string; label: string; message: string; action_type?: string }[]; _diagnostic_trace: { fast_path?: string } };
     expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(runs, 'one attempted run').toBe(1);
-    expect(b.suggested_actions).toEqual([expect.objectContaining({ id: 'agent-suggest-what-it-needs', label: 'Suggest what it still needs' })]);
-    expect(b.suggested_actions[0]!.action_type, 'a plain Agent turn, never another Run').toBeUndefined();
+    expect(b.suggested_actions.some(c => c.id === 'agent-suggest-what-it-needs')).toBe(false);
+    expect(JSON.stringify(modelBodies[0]?.input)).toContain(BLOCKED_WORDS);
   });
 
   it('CONTRAST: a COMPLETED Run offers no remedy chip', async () => {
@@ -302,22 +302,24 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
-    expect(modelBodies, 'Run itself makes zero narration calls').toHaveLength(0);
-    const r = await explain(first);
+    expect(modelBodies, 'Run includes its one interpretation').toHaveLength(1);
+    const r = first;
     const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
-    expect(b._diagnostic_trace.fast_path).toBe('explain');
+    expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(b.assistant_text).toContain(CLAIMING);
     expect(b.assistant_text).not.toContain('Nothing was saved this turn');
   });
 
   it('RED (served 319dde1, 01:42Z): the run itself FAILS → ONE plain, true sentence and NO model call — never an invented cause ("the saved graph has changed")', async () => {
     failed = true;
+    interp = 'empty';
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
     expect(r.statusCode).toBe(200);
     const b = r.json() as { assistant_text: string; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] } };
-    expect(modelBodies, 'a failed run is not interpreted by a model').toEqual([]);
+    expect(modelBodies, 'the interpreter sees the recorded failure without tools').toHaveLength(1);
+    expect(JSON.stringify(modelBodies[0]?.input)).toContain('run_failed');
     expect(b.assistant_text, b.assistant_text).toMatch(/couldn\u2019t run the analysis/);
     expect(b.assistant_text).toMatch(/Nothing in your model changed/);
     expect(b.assistant_text, 'no invented cause').not.toMatch(/graph has changed|historical|stale/i);
@@ -336,4 +338,14 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
     expect(res).toEqual(expect.objectContaining({ ok: false, ran: false, refusal: 'run_failed' }));
     expect(String(res.detail)).toMatch(/do not give any other reason/);
   });
+  it('approval authority never falls through into Run or a model-selected write', async () => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Approve this change',
+      chip: { id: 'agent-approve-proposal:prop_missing', action_type: 'run_analysis' },
+    } });
+    expect(r.statusCode).toBe(200);
+    expect(runs).toBe(0);
+    expect(modelBodies).toHaveLength(0);
+  });
+
 });

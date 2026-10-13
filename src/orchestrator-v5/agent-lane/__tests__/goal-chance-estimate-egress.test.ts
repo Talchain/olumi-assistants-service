@@ -16,10 +16,6 @@ const clean = (text: string): string => withEstimateGoalPointsAtEgress({ assista
 
 describe('r16 option and goal bound estimate points', () => {
   it.each([
-    '‘Raise to £59’: about 67% in this model.',
-    'The recorded chance for Raise to £59 is 67%.',
-    'The recorded figure for Raise to £59 is 67 per cent.',
-    'Monthly recurring revenue reaches its target in 67% of model runs.',
     'Raise to £59 has a 68% chance of reaching Monthly recurring revenue.',
     'Raise to £59 has a 68% chance of meeting your goal.',
     'raise has a 68% chance of meeting your goal.',
@@ -35,7 +31,7 @@ describe('r16 option and goal bound estimate points', () => {
     expect(out).toBe(line.chance);
   });
   it('removes a bare qualified point with added=0', () => {
-    const bare = '‘Raise to £59’: about 67% in this model.';
+    const bare = '‘Raise to £59’: about 68% in this model.';
     const owed = withScreenLinesOwed(`${bare}\n${line.chance}`, [line]);
     expect(owed.added).toBe(0);
     const out = clean(owed.text);
@@ -43,7 +39,7 @@ describe('r16 option and goal bound estimate points', () => {
     expect(out.split(line.chance)).toHaveLength(2);
   });
   it('a canonical sentence cannot shield the following lowercase bare sentence', () => {
-    const bare = 'the recorded chance for Raise to £59 is 67%.';
+    const bare = 'the recorded chance for Raise to £59 is 68%.';
     const unrelated = 'the chance of supplier failure is 10%.';
     const out = clean(`${line.chance} ${unrelated} ${bare}`);
     expect(out).not.toContain(bare);
@@ -52,13 +48,13 @@ describe('r16 option and goal bound estimate points', () => {
   });
   it('a lowercase bound sentence cannot consume the preceding unrelated sentence', () => {
     const unrelated = 'The chance of supplier failure is 10%.';
-    const bare = 'the recorded chance for Raise to £59 is 67%.';
+    const bare = 'the recorded chance for Raise to £59 is 68%.';
     expect(clean(`${unrelated}  ${bare}`)).toBe(`${unrelated}  ${line.chance}`);
   });
   it('punctuation inside the licence option label is not a sentence boundary', () => {
     const label = 'Raise. Price (UK)';
     const run = { enrichment: { inference_warnings: [{ ...licence, option_labels_by_option: { raise: label } }] } };
-    const bare = `‘${label}’: about 67% in this model.`;
+    const bare = `‘${label}’: about 68% in this model.`;
     const out = withEstimateGoalPointsAtEgress({ assistant_text: bare }, { analysisResult: run, graph, current: true });
     expect(out.assistant_text).not.toContain(bare);
     expect(out.assistant_text).toBe(line.chance.replace('Raise to £59', label));
@@ -120,13 +116,12 @@ describe('r11 option, scored goal and displayed value identity', () => {
   });
 
   it('uses the scored second goal from analysis_result, never graph order or selection', () => {
-    expect(apply('Monthly recurring revenue reaches its target in 67% of model runs.')).toBe(line.chance);
+    expect(apply('Monthly recurring revenue reaches its target in 67% of model runs.')).toBe('Monthly recurring revenue reaches its target in 67% of model runs.');
     const other = 'Supplier reliability reaches its target in 67% of model runs.';
     expect(apply(other)).toBe(other);
   });
   it.each([
     'Raise to £59 reaches Supplier reliability in 67% of model runs.',
-    'Excluded option reaches Monthly recurring revenue in 67% of model runs.',
     'The chance of supplier failure is 10%.',
   ])('preserves a sentence without its licensed tuple: %s', text => {
     expect(apply(text)).toBe(text);
@@ -139,8 +134,8 @@ describe('r11 option, scored goal and displayed value identity', () => {
   it('a tied goal percentage cannot invent an option identity', () => {
     const tied = run({ pct_by_option: { raise: 67, keep: 67 } });
     const text = 'Monthly recurring revenue reaches its target in 67% of model runs.';
-    expect(apply(text, tied)).toBe(text);
-    expect(apply('Raise to £59: 67%.', tied)).toBe(line.chance);
+    expect(apply(text, tied)).toBe('');
+    expect(apply('Raise to £59: 67%.', tied)).toBe('Raise to £59: 67%.');
   });
   it('duplicate option labels cannot invent an option identity', () => {
     const text = 'Raise to £59: 67%.';
@@ -151,9 +146,9 @@ describe('r11 option, scored goal and displayed value identity', () => {
     const noIdentity = source === 'enrichment'
       ? { enrichment: { inference_warnings: [historical] } } : { inference_warnings: [historical] };
     const text = 'Raise to £59: 67%.';
-    expect(apply(text, noIdentity, { ...graph, goal_node_id: 'mrr' })).toBe(line.chance);
+    expect(apply(text, noIdentity, { ...graph, goal_node_id: 'mrr' })).toBe(text);
     const risk = 'The chance of supplier failure is 67%.';
-    expect(apply(`${text}\n${risk}\n${line.chance}`, noIdentity)).toBe(`\n${risk}\n${line.chance}`);
+    expect(apply(`${text}\n${risk}\n${line.chance}`, noIdentity)).toBe(`${text}\n${risk}\n${line.chance}`);
     expect(apply('Raise to £59: 65%.', noIdentity)).toBe(line.chance);
     for (const unrelated of [risk, 'Monthly recurring revenue reaches its target in 67% of model runs.']) {
       expect(apply(unrelated, noIdentity)).toBe(unrelated);
@@ -162,7 +157,7 @@ describe('r11 option, scored goal and displayed value identity', () => {
   it('a legacy licence can bind a graph label when no label snapshot was stored', () => {
     const { goal_node_id: _id, goal_label: _label, option_labels_by_option: _labels, ...historical } = licence;
     const noIdentity = { enrichment: { inference_warnings: [historical] } };
-    expect(apply('Raise to £59: 67%.', noIdentity)).toBe(line.chance);
+    expect(apply('Raise to £59: 67%.', noIdentity)).toBe('Raise to £59: 67%.');
   });
   it('rejects conflicting scored goal identities on the same analysis_result', () => {
     const text = 'Raise to £59: 67%.';
@@ -171,8 +166,28 @@ describe('r11 option, scored goal and displayed value identity', () => {
   it('uses the exact licensed value at nearest-five rounding, never the raw probability', () => {
     const rounded = run({ pct_by_option: { raise: 65, keep: 30 }, display_rounding_by_option: { raise: 'nearest_5' } });
     const expected = goalChanceScreenLinesForAgent(rounded, multiGraph, true).find(l => l.option_id === 'raise')!.chance;
-    expect(apply('Raise to £59: about 65%.', rounded)).toBe(expected);
+    expect(apply('Raise to £59: about 65%.', rounded)).toBe('Raise to £59: about 65%.');
     // Narrator figures are replaced by the recorded rounded licence, never admitted because they differ from it.
     for (const text of ['Raise to £59: about 67%.', 'Raise to £59: about 66.7%.']) expect(apply(text, rounded)).toBe(expected);
   });
+});
+
+describe('B4 final numerical check without a prose composer', () => {
+  it.each([0, 1])('rejects 68 when the licence says 67, with %i Olumi relationships', count => {
+    const analysisResult = { enrichment: { inference_warnings: [{ ...licence, olumi_estimate_link_count: count }] } };
+    const text = 'Raise to £59 has a 68% chance of meeting your goal.';
+    const out = withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult, graph, current: true });
+    expect(out.assistant_text).not.toContain('68%');
+    expect(out.assistant_text).toContain('67%');
+  });
+  it.each(['Raise to £59 has a 67% chance of meeting your goal in this model.',
+    'The recorded chance for Raise to £59 is 67 per cent.'])('keeps correct AI words: %s', assistant_text => {
+    expect(clean(assistant_text)).toBe(assistant_text);
+  });
+});
+
+it('withheld and excluded options cannot borrow another licensed percentage', () => {
+  const assistant_text = 'Raise to £59 has a 67% chance of meeting your goal.';
+  const none = { enrichment: { inference_warnings: [{ ...licence, form: 'withheld', pct_by_option: {} }] } };
+  expect(withEstimateGoalPointsAtEgress({ assistant_text }, { analysisResult: none, graph, current: true }).assistant_text).not.toContain('67%');
 });

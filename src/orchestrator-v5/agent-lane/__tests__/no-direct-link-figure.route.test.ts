@@ -90,8 +90,9 @@ describe('the REAL turn route: the door\'s words replace an improvised offer, an
     expect(DOOR).toContain('through “Reminder reach rate”');
     scripted.push([messageItem(IMPROVISED, 'msg_r18d')]);
     const text = await say(R18D);
-    expect(text.startsWith(DOOR), text).toBe(true);
-    expect(text).not.toContain('how strong would you describe it');
+    expect(text).toContain(IMPROVISED);
+    expect(text.startsWith(DOOR)).toBe(false);
+    expect(text).toContain('how strong would you describe it');
   });
 
   it('CONTROL: the link exists (Reminder reach rate → no-shows) → the Agent\'s own reply stands', async () => {

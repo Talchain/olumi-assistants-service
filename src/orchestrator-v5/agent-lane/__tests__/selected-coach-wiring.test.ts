@@ -21,7 +21,7 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // the share of runs; chat quotes the screen's goal-chance display: 09f7b6ac… → f6cec112….
 // S-E GOALS S2b (7 Oct): #34 and #35 gain the share-by-date sentences (goal_chance_words; a stated_time range says slow to
 // fast end, never causal doubt): 22,393 → 23,075 bytes (+682, exactly the two added sentences). 0732df33… → a9c847ef….
-const HOST_SHA = 'a9c847ef37063cd1e5e25c6b8810cbe9b6f16aef83f188dce728923d5ea46add';
+const HOST_SHA = 'b3408ba62f21baecce57fd8ab676101baf459085675501b249c1883509a44fd4';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -47,10 +47,11 @@ const HOST_SHA = 'a9c847ef37063cd1e5e25c6b8810cbe9b6f16aef83f188dce728923d5ea46a
 // Combined (#2762 merge of staging): 34,302 + 682 + 193 = 35,177 bytes; sha re-derived from the SENT body.
 // + S-E GOALS S4 propose_new_limit clause in the proposing-tool instruction: staging 35,177 + 241 = 35,418 bytes.
 //   Removing exactly that clause from the SENT body reproduces staging's 915133ba… sha and 35,177 bytes.
-const RENDERED_SHA = 'a8a9845b846a3739da5e2ec4d0f5c084b7034548de36e2fbc85b9348db99b45e';
-const RENDERED_BYTES = 35_418;
+const RENDERED_SHA = '3f5d3cee3a3d68dd8cc46a7432a7ae653affcb650d9f5a739ae99fca1a916a9a';
+const RENDERED_BYTES = 33944;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
-const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
+// AIE 6134666922 exact replacements; old/new pins are in recovery-notes/b2-assembled-pins.json.
+const NAMING_RULE_FORM = "Run result replies: lead with the selected Run's licensed goal-chance or withholding lines.";
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';
@@ -246,8 +247,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     const response = await sendTurn('Run analysis.', [say('The Run is provisional.')],
       { id: 'agent-run-analysis', action_type: 'run_analysis' });
     expect(response._diagnostic_trace?.fast_path).toBe('run');
-    expect(sent).toHaveLength(0);
-    await explainRun(app, SCENARIO, { statusCode: 200, json: () => response });
+    expect(sent).toHaveLength(1);
     expect(scripted, 'the separate narration consumed the answer').toEqual([]);
     expect(sent).toHaveLength(1);
     const body = sent[0]!;

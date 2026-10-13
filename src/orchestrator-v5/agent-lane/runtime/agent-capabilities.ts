@@ -261,6 +261,11 @@ import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participat
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
 import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
 import { lastWeekdayNamedIn, readStatedDeadline, readStatedWeekdayDate, sayDate, sayDeadlineFromToday, todayInLondon, weekdayDatedIn, type Weekday } from '../../goal-target/deadline-date.js';
+import { breakEvenFor } from '../break-even.js';
+import { goalChanceScreenLinesForAgent, goalChanceNotesForAgent } from '../goal-chance-screen-lines.js';
+import { conditionalInputBasis, analysedOptionIds } from '../conditional-input-basis.js';
+import { treatedAsZeroReplyLine } from '../root-line.js';
+import { thresholdReasonLine } from '../break-even.js';
 import { draftReferenceDate } from '../../goal-target/draft-reference.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
@@ -1415,6 +1420,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
+      // Stored meaning, never inferred units, baselines or periods (PL condition 2).
+      ...pickKeys(n, ['goal_scope', 'goal_threshold_frame', 'goal_threshold_unit', 'goal_reference', 'goal_time_basis', 'goal_horizon', 'deadline', 'quantity', 'unit']),
       ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
         : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
@@ -1528,6 +1535,10 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   // ⭐ E5: each option's start times and pace as the model holds them, with whose each figure is (`hiring-times.ts`).
   const hiringTimes = goals.length === 1 && isEventShareForecast(g.raw) ? hiringTimesSummaryOf(g.raw, goals[0]!.id) : [];
   return {
+    // Preserve the existing source carriers for quantities, ranges, evidence and dissent.
+    // A coordinate frame is a scale, never evidence for a baseline.
+    reasoning_source: { nodes: g.nodes, edges: g.edges,
+      ...pickKeys(g.raw, ['goal_node_id', 'goal_constraints', 'goal_scope', 'goal_time_basis', 'goal_horizon', 'reference_date', 'not_modelled']) },
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
     ...(hiringTimes.length === 0 ? {} : { hiring_times: { use: HIRING_TIMES_USE, options: hiringTimes } }),
@@ -1854,6 +1865,16 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
     // ⭐ DL 0df0e1 ruling C (6 Oct): where each option's chance reaches the Agent, so does the Run's licence to compare them.
     ...goalFacts,
+    // Facts previously said only by reply appendices. No display author owns them now.
+    reply_facts: {
+      current,
+      screen_lines: goalChanceScreenLinesForAgent(g.analysis_result, g.raw, current),
+      chance_notes: goalChanceNotesForAgent(g.analysis_result, g.raw, current),
+      break_even: current && !(g.goal_scope_reconciliation?.length) ? breakEvenFor(g.raw, g.identity_evaluated) : null,
+      threshold_reason: current ? thresholdReasonLine(g.raw, g.analysis_result) : null,
+      root_condition: current ? treatedAsZeroReplyLine(g.raw, g.analysis_ready) : null,
+      conditional_basis: current ? conditionalInputBasis({ graph: g.raw, admission: g.analysis_admission, analysedOptionIds: analysedOptionIds(g.analysis_result) }) : null,
+    },
     ...(participation !== undefined ? { option_participation: participation } : {}),
   } };
 }
@@ -3601,9 +3622,7 @@ export function createAgentCapabilities(
       public_label: draft.proposal.public_label,
       base_revision: g.graph_hash,
       revised_draft: { replaces_goal: goal.label, holds_this_target: holds },
-      note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
-        + 'targets, limits, options and what is redrafted; do not repeat the full card or show its id. '
-        + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
+      note: "Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its targets, limits, options and what is redrafted; Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. Only the user pressing that card replaces the draft: never call authorise_change for it yourself."
         + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
     };
   };
@@ -4129,7 +4148,7 @@ export function createAgentCapabilities(
       const { run_delta: _wireDelta, ...readWithoutDelta } = g;
       const modelRead = { ...readWithoutDelta, ...(delta === undefined ? {} : { run_delta: delta }) };
       const scopeIssues = g.goal_scope_reconciliation ?? [];
-      const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission });
+      const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission, analysedOptionIds: analysedOptionIds(g.analysis_result) });
       const optionNames = optionNameAliasesForCurrentRun(g);
       // S7 (D4 lease #87 6005636960): a pair the model is NOT shown as licensed still gets Olumi's own leader-free record of
       // what changed, so a typed "what changed since the last run?" is answered from the record. `undefined` for a licensed
@@ -4149,7 +4168,7 @@ export function createAgentCapabilities(
         pairRead?.frameRefitLinks);
       // Opt-in interpreter section. The default state remains the ordinary Agent's assembly.
       let explanationSection: Record<string, unknown> | undefined;
-      if (options?.section === 'run_explanation') {
+      { // PL condition 2: live, Run and continuation all receive the selected science facts.
         const explanationRead = { ...modelRead, analysis_admission: g.analysis_admission ?? g.run_explanation_admission };
         const completed = withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, explanationRead);
         explanationSection = runExplanationContextFacts(ctx.scenario_id, explanationRead,
@@ -4740,7 +4759,7 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         card: { words: card.words, ...(card.one_off_words !== undefined ? { one_off_words: card.one_off_words } : {}) },
-        note: 'Nothing has changed yet. Ask the user `card.words` exactly as written, and tell them to confirm on the button. '
+        note: "Nothing has changed yet. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. "
           + (card.one_off_words !== undefined ? 'The second button records the one-off reading shown on this card. ' : 'If they say no, nothing is recorded: carry on without it. ')
           + 'Never run the analysis again yourself.',
       };
@@ -5179,7 +5198,7 @@ export function createAgentCapabilities(
       // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
       if (inclusiveType === 'at_least' && !(value > 0)) {
         return { ok: false, mutated: false, refusal: 'target_not_positive',
-          detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Tell the user that, in those words.` };
+          detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship.` };
       }
       // ⛔ A figure in another kind of unit is never this goal's target (the lane's one family check, `unit-conflict.ts`).
       // The writer would not refuse it: it re-denominates the goal and re-derives its scale, silently.
@@ -5286,7 +5305,7 @@ export function createAgentCapabilities(
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
           + (levelLeftOut !== undefined ? ` Today’s level was left out of this card: ${levelLeftOut.reason} Never say it is or will be recorded`
-            + (levelLeftOut.host_line !== undefined ? '; Olumi already tells the user it was not included, so do not repeat it.' : '.') : ''),
+            + (levelLeftOut.host_line !== undefined ? "; Explain any actual exclusion or unsupported part recorded by the tool, and its effect on the proposed change or analysis. Keep the original reasoning and source available; do not imply the complete goal or condition was included when it was not." : '.') : ''),
       };
     },
 
@@ -6826,7 +6845,7 @@ export function createAgentCapabilities(
         if (res.status >= 400 && res.status < 500) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
             follow_up: `${ADD_CONSTRAINT_USER_GUIDANCE} Nothing on your model changed.`,
-            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Tell the user plainly, in those words, and ask what target they would like instead.` };
+            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship.` };
         }
         const after = await readGraph(ctx.scenario_id);
         // Landed is what the model HOLDS (the rule #1995 sets for every writer): another writer moving the revision afterwards
@@ -10068,8 +10087,7 @@ export function createAgentCapabilities(
       }
       return {
         ok: true, mutated: false, provisional_view: checked.view,
-        detail: 'Olumi shows this beneath your reply as one paragraph, labelled as your provisional view, with why the analysis '
-          + 'cannot confirm it yet. Do not repeat it, and do not rank or favour an option in your reply text.',
+        detail: "Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions.",
       };
     },
 

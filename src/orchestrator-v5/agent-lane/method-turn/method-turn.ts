@@ -322,7 +322,7 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
   const plan = ctx.plan === null ? 'this decision' : quote(ctx.plan.label);
   const decision = ctx.decision_level === true;
   return [
-    'METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.',
+    "Use the selected method and its supplied facts to develop a useful answer for the actual question. Keep it concise without omitting relevant reasoning, evidence, dissent or uncertainty to fit an arbitrary word limit. Preserve this role’s required response schema.",
     `${decision ? 'Stress-test the whole decision' : `The plan to stress-test is ${plan}`}.${ctx.goal_label !== null ? ` The goal is ${quote(ctx.goal_label)}.` : ''}`,
     ...(decision ? [CONTRACT.decision_plan.rule,
       `The current option labels are: ${ctx.current_option_labels.map(quote).join(', ')}.`] : []),
@@ -348,7 +348,7 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
       + 'likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.',
     ...(storyOnlyDecision(ctx) ? ['Outside the model’s own labels, give no Run figures, leader or ranking claims; durations are allowed. This exercise prepares no model change or approval card.'] : []),
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
-    `At most ${POLICY.method_turns.shared.max_words} words.`,
+
   ].join('\n');
 }
 
@@ -551,23 +551,17 @@ function composedSettle(turn: RunMethodTurn, draft: string, failed: readonly str
 
 export function settleMethodTurn(turn: RunMethodTurn, draft: string): SettledMethodTurn {
   const items = turn.context.supplied_items;
-  const fallback = (failed: readonly string[]): SettledMethodTurn =>
-    ({ reply: fallbackReply(turn.context), passed: false, failed, target: items[0] });
   let check: ReturnType<typeof checkMethodTurn>;
   try {
     check = checkMethodTurn(METHOD, draft, turn.check_inputs, storyOnlyDecision(turn.context));
   } catch {
-    // The checker throws on contract drift; an unchecked draft is never sent.
-    return fallback(['CHECKER_UNAVAILABLE']);
+    return { reply: draft, passed: false, failed: ['CHECKER_UNAVAILABLE'], target: items[0] };
   }
-  const indices = check.targets.map((id) => items.findIndex((item) => item.id === id));
-  const failed = check.pass && (indices.length === 0 || indices.some((i) => i < 0)) ? ['PM-GROUNDED'] : check.failed;
-  if (failed.length === 0) return { reply: draft, passed: true, failed: [], target: items[Math.min(...indices)] };
-  try {
-    return composedSettle(turn, draft, failed) ?? fallback(failed);
-  } catch {
-    return fallback(failed);
-  }
+  const indices = check.targets.map(id => items.findIndex(item => item.id === id));
+  const failed = check.pass && (indices.length === 0 || indices.some(i => i < 0)) ? ['PM-GROUNDED'] : check.failed;
+  // The check licenses a structured artefact/card, never replaces the model's prose.
+  return { reply: draft, passed: failed.length === 0, failed,
+    target: failed.length === 0 ? items[Math.min(...indices)] : items[0] };
 }
 
 /** The pre-mortem card's basis (provenance, never shown as the user's words). */

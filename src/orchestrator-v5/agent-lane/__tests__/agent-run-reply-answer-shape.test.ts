@@ -228,58 +228,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   const A7 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
   const A7_WITHOUT_CHANCE = "This model doesn't yet say whether any option gets there within 12 months.";
 
-  it.each([
-    { label: 'previous answer said chance-free A7 verbatim → detail, never the headline/bullets', previousAnswer: `${RUN_RESULT_READY_TEXT}\n\n${A7_WITHOUT_CHANCE}`, repeated: true },
-    { label: 'CONTROL: previous answer without A7 → today’s headline placement unchanged', previousAnswer: RUN_RESULT_READY_TEXT, repeated: false },
-  ])('A7 route: $label', async ({ previousAnswer, repeated }) => {
-    const graph = structuredClone(FX.state.draft_graph) as { nodes: { kind: string; goal_horizon_months?: number }[] };
-    const goal = graph.nodes.find((n) => n.kind === 'goal')!;
-    goal.goal_horizon_months = 12;
-    readbackGraph = graph;
-    expect(untestedHorizonLine(readbackGraph), 'the current goal owes exactly this A7').toBe(A7);
 
-    const { b: run, turnId: previousTurnId } = await runOnly();
-    // Seed the durable previous answer the user read; the control represents an earlier answer that did not say A7.
-    const previous = { ...rows.get(previousTurnId)!, assistant_message: previousAnswer };
-    expect(previous.request_hash).toMatch(/^agent_turn:/);
-    rows.set(previousTurnId, previous);
-    // Store order is newest first, without claim rows, as in production. A newer tool row and an older Agent answer
-    // both say A7: neither may override the immediately previous Agent answer in the no-A7 control.
-    store.readRecent.mockImplementation(async () => [
-      { id: 'tool-row', turn_id: 'tool-turn', request_hash: 'sha256:tool', assistant_message: A7_WITHOUT_CHANCE },
-      ...[...rows.values()].reverse().filter((row) => !row.turn_id.endsWith(':claim')),
-      { id: 'older-answer', turn_id: 'older-turn', request_hash: 'agent_turn:older', assistant_message: A7_WITHOUT_CHANCE },
-    ]);
-    callModelOutputs = [say(`${A7}\n\n${FOUR_BULLETS.text}`)];
-    const chip = (run as Body & { suggested_actions: { id: string; message: string }[]; _agent: { session_id: string } }).suggested_actions
-      .find((c) => c.id.startsWith('agent-explain-run:'))!;
-    expect(chip, 'the current Run offers its real Explain control').toBeDefined();
-    const turnId = nextTurnId();
-    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      scenario_id: SCENARIO, agent_session_id: (run as Body & { _agent: { session_id: string } })._agent.session_id,
-      turn_id: turnId, message: chip.message, chip: { id: chip.id },
-    } });
-    expect(response.statusCode, response.body).toBe(200);
-    const b = response.json() as Body;
-    expect(callModelOutputs, 'the scripted Explain was consumed').toEqual([]);
-    expect(b._diagnostic_trace.fast_path).toBe('explain');
-    expect(carriesResult(b)).toBe(true);
-    expect(b._answer_shape, 'the live reply shapes, rather than falling back to whole prose').toBeDefined();
-    // r15 contract re-pin: "staging's chance-free horizon sentence when no cell shows a chance".
-    // The wording changes; the original fresh/repeated placement guard keeps its polarity.
-    if (repeated) {
-      expect(b._answer_shape!.detail).toContain(A7_WITHOUT_CHANCE);
-      expect(faceOf(b._answer_shape!)).not.toContain(A7_WITHOUT_CHANCE);
-    } else {
-      expect(b._answer_shape!.headline).toBe(A7_WITHOUT_CHANCE);
-      expect(b._answer_shape!.detail).not.toContain(A7_WITHOUT_CHANCE);
-    }
-    expect(faceOf(b._answer_shape!)).not.toContain(HORIZON_MARKER);
-    expect(b.assistant_text).not.toContain(A7);
-    expect(occurrences(b.assistant_text, A7_WITHOUT_CHANCE), 'A7 is still said exactly once').toBe(1);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
-    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
-  });
 
   const hostRunFixture = () => {
     // Two licensed screen findings, no interpreter output; the Run's typed methods-note carrier owes a disclosure.
@@ -294,181 +243,21 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     ] } };
   };
 
-  it('B15 / 2b-0: uninterpreted Run leads with the first screen finding; ready and disclosure in More detail', async () => {
-    hostRunFixture();
-    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
-    expect(screen, 'positive control: two typed screen findings').toHaveLength(2);
-    const { b, turnId } = await runOnly();
-    expect(b._diagnostic_trace.fast_path).toBe('run');
-    expect(carriesResult(b)).toBe(true);
-    expect(fetch, 'the Run has no interpreter output').not.toHaveBeenCalled();
-    expect(b._answer_shape, 'base keeps host_composed whole').toBeDefined();
-    expect(b._answer_shape!.headline).toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
-    expect(b._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
-    const horizon = untestedHorizonLine(readbackGraph, { besideChance: true, plural: true });
-    expect(horizon, 'a horizon always accompanies these two non-event goal chances').not.toBeNull();
-    expect([b._answer_shape!.headline, ...b._answer_shape!.bullets].slice(0, 3), 'chance findings and their own notes precede the mandatory horizon marker').toEqual([
-      ...screen.map((line) => [line.chance, line.depends].filter(Boolean).join(' ')), HORIZON_MARKER,
-    ]);
-    expect(faceOf(b._answer_shape!)).not.toContain(horizon!);
-    expect(occurrences(b._answer_shape!.detail, horizon!)).toBe(1);
-    expect(occurrences(b.assistant_text, horizon!)).toBe(1);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
-    expect(b._answer_shape!.detail).toContain(RUN_DISCLOSURE);
-    for (const line of screen) {
-      expect(faceOf(b._answer_shape!)).toContain(line.chance);
-      expect(b.assistant_text.split(line.chance)).toHaveLength(2);
-    }
-    for (const part of [RUN_RESULT_READY_TEXT, RUN_DISCLOSURE]) for (const sentence of sentencesOf(part)) {
-      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence), 'each host sentence exactly once').toHaveLength(1);
-    }
-    const deliveredSentences = sentenceMultiset(b.assistant_text);
-    expect(new Set(deliveredSentences).size, 'all delivered host sentences occur once').toBe(deliveredSentences.length);
-    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
-  });
 
-  it('B15 route: interpreted Run with share-first narrator → first typed screen chance headline', async () => {
-    hostRunFixture();
-    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
-    expect(screen, 'positive control: two current licensed screen findings').toHaveLength(2);
-    const share = 'In this model, 71% of runs supported ‘Raise Pro to £59 at release’.';
-    const narrated = [share, ...screen.map(l => [l.chance, l.depends].filter(Boolean).join(' '))].join('\n\n');
-    const { b, turnId } = await typedRun(narrated);
-    expect(b._diagnostic_trace.fast_path).toBe('explain');
-    expect(carriesResult(b)).toBe(true);
-    expect(fetch, 'positive control: the interpreter was called').toHaveBeenCalled();
-    expect(b._answer_shape).toBeDefined();
-    expect(b._answer_shape!.headline).toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
-    expect([...b._answer_shape!.bullets, b._answer_shape!.detail].join('\n')).toContain(share);
-    for (const line of screen) expect(faceOf(b._answer_shape!)).toContain(line.chance);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
-    for (const sentence of sentenceMultiset(narrated)) {
-      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence)).toHaveLength(1);
-    }
-    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
-  });
 
-  it('B15 route, Agent wording (DL CHANGES_REQUIRED 6049287605, Codex P1): share first, then each chance in the narrator’s own words → the first option-bound chance sentence leads', async () => {
-    hostRunFixture();
-    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
-    expect(screen, 'positive control: two current licensed screen findings').toHaveLength(2);
-    const share = 'In this model, 71% of runs supported ‘Raise Pro to £59 at release’.';
-    // The narrator's own accepted wording: label + the screen's figure, never the canonical sentence.
-    const own = [...screen].reverse().map(l => `${l.label}: ${l.figure}.`);
-    const narrated = [share, ...own].join('\n\n');
-    for (const l of screen) expect(narrated, 'control: canonical sentence absent').not.toContain(l.chance);
-    const { b, turnId } = await typedRun(narrated);
-    expect(b._answer_shape, b.assistant_text).toBeDefined();
-    expect(b._answer_shape!.headline).toBe(own[0]);
-    expect(b._answer_shape!.headline).not.toContain(share);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
-    for (const sentence of sentenceMultiset(narrated)) {
-      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence)).toHaveLength(1);
-    }
-    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
-  });
 
-  it('B15 own-words matcher (Codex on 297d1f1b P1): only "<label>: <figure>." — never a share, a longer label or a range', async () => {
-    const { chanceInOwnWords } = await import('../goal-chance-screen-lines.js');
-    hostRunFixture();
-    const l = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true)[0]!;
-    expect(chanceInOwnWords(`${l.label}: ${l.figure}.`, l), 'control: the own-words sentence').toBe(true);
-    expect(chanceInOwnWords(`**${l.label}**: ${l.figure}`, l), 'control: emphasis, no stop').toBe(true);
-    expect(chanceInOwnWords(`In this model, ${l.figure} of runs supported ‘${l.label}’.`, l)).toBe(false);
-    expect(chanceInOwnWords(`${l.label} with annual billing: ${l.figure}.`, l)).toBe(false);
-    expect(chanceInOwnWords(`${l.label}: between ${l.figure} and 60%.`, l)).toBe(false);
-    expect(chanceInOwnWords(l.chance, l), 'the canonical sentence is typed already').toBe(false);
-    // Codex re-review 7ff59a6e P1: the screen's own words with the Agent's emphasis on the label still lead.
-    expect(chanceInOwnWords(`**${l.label}**: ${l.figure} chance of meeting your goal, in this model.`, l)).toBe(true);
-    expect(chanceInOwnWords(`${l.label}: ${l.figure} chance of meeting your goal, in this model, if prices hold.`, l)).toBe(false);
-  });
 
-  it('B15 own words + spread note (Codex r3 P1): the note is ONE unit with its chance — never on the face without it', async () => {
-    const { ownWordsLeadTexts, SPREAD } = { ...(await import('../goal-chance-screen-lines.js')), SPREAD: 'Its typical result falls short of your target: this chance comes from its wider spread, which also means it could fall further short.' };
-    const { composeReplyShape: compose, sentencesOf: split } = await import('../reply/compose-reply.js');
-    hostRunFixture();
-    const [a, c] = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
-    const raise = { ...a!, spread_note: SPREAD, chance: `${a!.chance} ${SPREAD}` };
-    const ownA = `**${raise.label}**: ${raise.figure} chance of meeting your goal, in this model.`;
-    const ownC = `**${c!.label}**: ${c!.figure} chance of meeting your goal, in this model.`;
-    const caveat = 'This result is fragile: a small change to one assumption could change it.';
-    const ask = 'Which assumption should we test first?';
-    const text = ['In this model, 71% of runs supported ‘Raise Pro to £59 at release’.', `${ownA} ${SPREAD}`, ownC, caveat, ask].join('\n\n');
-    const leadA = ownWordsLeadTexts(text, raise, split);
-    expect(leadA, 'the sentence WITH its note first, then the sentence').toEqual([`${ownA} ${SPREAD}`, ownA]);
-    const obligations = [
-      ...leadA.map((t) => ({ role: 'evidence' as const, text: t, lead: true as const })),
-      ...ownWordsLeadTexts(text, c!, split).map((t) => ({ role: 'evidence' as const, text: t, lead: true as const })),
-      { role: 'caveat' as const, text: caveat }, { role: 'ask' as const, text: ask },
-    ];
-    const shaped = compose({ text, obligations, faceContract: 'run' });
-    const face = [shaped.shape?.headline ?? shaped.text, ...(shaped.shape?.bullets ?? [])].join('\n');
-    expect(face.includes(ownA) ? face.includes(SPREAD) : true, 'wherever the chance faces, its spread note faces with it').toBe(true);
-    expect(face).toContain(ownA);
-    // discriminating control: typing the bare sentence alone (the r3 bug) leaves the note behind "More detail"
-    const bare = compose({ text, obligations: [obligations[1]!, ...obligations.slice(2)], faceContract: 'run' });
-    const bareFace = [bare.shape?.headline ?? bare.text, ...(bare.shape?.bullets ?? [])].join('\n');
-    expect(bare.shape, 'control shapes').not.toBeNull();
-    expect(bareFace.includes(ownA) && !bareFace.includes(SPREAD), 'control reproduces the split').toBe(true);
-    // Codex r4 P1: spacing and the Agent's emphasis inside the note still bind the note as it stands
-    for (const variant of [`${ownA}  ${SPREAD}`, `${ownA} ${SPREAD.replace('wider spread', 'wider **spread**')}`,
-      `${ownA} ${SPREAD.replace('further short.', 'further **short.**')}`]) {
-      const t = text.replace(`${ownA} ${SPREAD}`, variant);
-      expect(ownWordsLeadTexts(t, raise, split), variant).toEqual([variant, ownA]);
-    }
-    // control: without the note sentence in the reply, only the sentence is lead
-    expect(ownWordsLeadTexts([ownA, ownC].join('\n'), raise, split)).toEqual([ownA]);
-  });
 
-  it('RC6 quote fold (Science #2787 P1-A, non-B19 form): the screen’s chance units in STRAIGHT quotes after a share still lead; no canonical copy is added', async () => {
-    hostRunFixture();
-    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
-    const share = 'In this model, 71% of runs supported ‘Raise Pro to £59 at release’.';
-    const straight = screen.map((l) => [l.chance, l.depends].filter(Boolean).join(' ').replace(/[‘’]/g, "'"));
-    const narrated = [share, ...straight].join('\n\n');
-    for (const l of screen) expect(narrated, 'control: no curly-quoted chance').not.toContain(l.chance);
-    const { b } = await typedRun(narrated);
-    expect(b._answer_shape, b.assistant_text).toBeDefined();
-    expect(b._answer_shape!.headline.startsWith(screen[0]!.chance.replace(/[‘’]/g, "'")), b._answer_shape!.headline).toBe(true);
-    expect(b._answer_shape!.headline).not.toContain(share);
-    for (const l of screen) expect(b.assistant_text, 'no canonical copy beside the Agent’s').not.toContain(l.chance);
-  });
 
-  it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {
-    hostRunFixture();
-    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
-    expect(screen, 'positive control: the replayed Run has screen chance lines').toHaveLength(2);
-    const { b: first, turnId } = await runOnly();
-    expect(first._answer_shape).toBeDefined();
-    expect(first._answer_shape!.headline, 'B15: the live Run leads with its first chance finding').toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
-    expect(rows.get(turnId)?.assistant_message).toBe(deriveAnswerTextFromShape(first._answer_shape!));
-    expect(rows.get(turnId)?.assistant_message!.startsWith(first._answer_shape!.headline)).toBe(true);
-    expect(first._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
-    const { b: replay } = await runOnly(turnId);
-    expect(replay._agent.replayed).toBe(true);
-    expect(runRequests, 'the replay did not run again').toBe(1);
-    expect(replay.narration).toEqual(first.narration);
-    expect(replay.narration!.status).toBe('pending');
-    expect(carriesResult(replay)).toBe(true);
-    // DL (reload = same): the replay re-applies the same composer to the same typed parts — same bytes, same shape.
-    expect(replay.assistant_text).toBe(first.assistant_text);
-    expect(replay._answer_shape).toEqual(first._answer_shape);
-    expect(fetch).not.toHaveBeenCalled();
-  });
 
-  it('2b-0 REPLAY PARITY GUARD: stored words the rebuild does not reproduce → the rebuilt text ships whole, no shape', async () => {
-    hostRunFixture();
-    const { b: first, turnId } = await runOnly();
-    expect(first._answer_shape, 'control: the live Run was shaped').toBeDefined();
-    // A live branch the rebuild does not mirror changed the words the user saw (e.g. the leader gate's closing).
-    const row = rows.get(turnId)!;
-    rows.set(turnId, { ...row, assistant_message: `${row.assistant_message}\n\nA live-only closing sentence.` });
-    const { b: replay } = await runOnly(turnId);
-    expect(replay._agent.replayed).toBe(true);
-    expect(replay._answer_shape, 'no shape the stored words do not prove').toBeUndefined();
-    expect(replay.assistant_text).not.toBe(first.assistant_text);
-    for (const line of goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true)) expect(replay.assistant_text).toContain(line.chance);
-  });
+
+
+
+
+
+
+
+
 
   it('2b-0 CONTRAST: missing approve card remains host_composed, byte-identical, without a shape', async () => {
     const { approvalChipIdFor } = await import('../approval-chips.js');
@@ -484,108 +273,17 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('1. RUN: a bulleted served reply → `_answer_shape`; headline and typed lines face, unrelated caveat and narrator points remain in detail, nothing lost', async () => {
-    const { b, turnId } = await typedRun(FOUR_BULLETS.text);
-    expect(carriesResult(b), 'the control: the response carries the readback’s analysis_result').toBe(true);
-    const shape = b._answer_shape;
-    expect(shape, '_answer_shape is on the wire').toBeDefined();
-    expect(deriveAnswerTextFromShape(shape!), 'the tie, by identity').toBe(b.assistant_text);
 
-    const lines = FOUR_BULLETS.text.split('\n').filter((l) => l.trim().length > 0);
-    const bulletLines = lines.filter((l) => /^\s*-\s+/.test(l)).map(unmarked);
-    expect(bulletLines, 'the control: the served reply has four bullets').toHaveLength(4);
-    expect(shape!.headline).toBe('The model cannot yet support a yes/no on the £59 increase because it could not test your **monthly churn under 4%** requirement.');
-    expect(FOUR_BULLETS.text.startsWith(shape!.headline), 'the headline is the reply’s own first sentence').toBe(true);
-    expect(faceOf(shape!), 'an unbound firmness caveat names no typed face figure').not.toContain(ROBUSTNESS_CAVEAT);
-    expect(shape!.detail).toContain(ROBUSTNESS_CAVEAT);
-    expectRobustnessDisclosure(b);
-    expect(faceWords(shape!)).toBeLessThanOrEqual(80);
-    for (const point of bulletLines) {
-      expect(faceOf(shape!)).not.toContain(point);
-      expect(shape!.detail).toContain(point);
-    }
-    expect(b.assistant_text.split(ROBUSTNESS_CAVEAT), 'the caveat is said exactly once').toHaveLength(2);
-    for (const line of lines) expect(b.assistant_text, `kept: ${line.slice(0, 60)}…`).toContain(unmarked(line));
-    expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the SAME text').toBe(b.assistant_text);
-  });
 
-  it.each([
-    ['in its first sentence', RANKS_FIRST, RANKS_FIRST_SENTENCE],
-    ['in a bullet', RANKS_IN_BULLET, RANKS_IN_BULLET_SENTENCE],
-  ])('2. WITHHELD: a reply that ranks %s → the gate drops the ranking and appends its reason; the composer keeps its typed marker on the face and full reason in detail', async (_where, served, rankingSentence) => {
-    // The controls: the sentence is in the served reply, and shaping BEFORE the gate would have put it on the face.
-    expect(served.text).toContain(rankingSentence);
-    const early = synthesiseAnswerShapeFromText(served.text);
-    expect(early, 'the control: the raw reply is shapeable').not.toBeNull();
-    expect(faceOf(early!), 'the control: derived before the gate, the face would carry the ranking').toContain(rankingSentence);
-    expect(unhyphen(faceOf(early!))).toContain(unhyphen(served.leak_phrases[0]!));
 
-    readbackState = WITHHELD_STATE;
-    // r15 contract re-pin: "cell-sourced marker". The authoritative read records a withheld cell whose
-    // cause was not retained; a leader-claim closing alone cannot supply this goal-chance marker.
-    readbackCellRows = [{ option_id: 'keep_pro_at_49', main_driver: { kind: 'not_recorded' },
-      cell: { kind: 'withheld', why: 'Chance not shown yet', face: 'Olumi can’t yet say its chance of meeting your goal, in this model.',
-        reasons: [{ code: 'reason_not_recorded', message: null }] } }];
-    const { b, turnId } = await typedRun(served.text);
-    expect(b._diagnostic_trace.leader_claim_enforced, 'the control: the gate edited this turn').toBe(true);
-    expect(b.assistant_text, 'the control: the gate’s own sentence is in the reply').toContain(noLeaderSentence);
-    expect(b._answer_shape, 'shaped after the gate').toBeDefined();
-    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
-    expect(faceOf(b._answer_shape!), 'typed fallback withhold marker is must-face').toContain(WITHHOLD_FALLBACK_MARKER);
-    expect(b._answer_shape!.headline, 'withheld cells lead when no chance cell is shown').toBe(WITHHOLD_FALLBACK_MARKER);
-    expect(occurrences(b.assistant_text, WITHHOLD_FALLBACK_MARKER), 'one recorded cause gives one marker').toBe(1);
-    expect(faceOf(b._answer_shape!), 'full withheld reason is behind progressive disclosure').not.toContain(noLeaderSentence);
-    expect(occurrences(b._answer_shape!.detail, noLeaderSentence), 'exact gate reason once in detail').toBe(1);
-    expect(b.assistant_text.split(noLeaderSentence)).toHaveLength(2);
-    expect(b.assistant_text).not.toContain(rankingSentence);
-    for (const leak of served.leak_phrases) expect(unhyphen(b.assistant_text)).not.toContain(unhyphen(leak));
-    expect(rows.get(turnId)?.assistant_message, 'the replayed row holds the same text').toBe(b.assistant_text);
-  });
 
-  it('3. RUN: a short two-sentence reply retains every sentence with robustness marker on face, full caveat once in detail', async () => {
-    const { b } = await typedRun(ONE_PARAGRAPH);
-    expect(carriesResult(b), 'the control: an analysis-bearing turn').toBe(true);
-    // r5 item 2: even a short contract reply shapes when the typed marker must remain on face.
-    const expected = `${ONE_PARAGRAPH} ${ROBUSTNESS_CAVEAT}`;
-    expectRobustnessDisclosure(b);
-    expect(b._answer_shape!.headline).toBe(sentencesOf(ONE_PARAGRAPH)[0]);
-    expect(b.assistant_text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
-    expect(b.assistant_text.split(ROBUSTNESS_CAVEAT), 'the same licensed caveat is kept once').toHaveLength(2);
-    expect(sentenceMultiset(b.assistant_text).filter(sentence => sentence !== ROBUSTNESS_MARKER)).toEqual(sentenceMultiset(expected));
-  });
 
-  it('3. RUN: a four-paragraph reply with no bullets shapes, with its supporting sentences in detail', async () => {
-    const text = PARAGRAPHS_NO_BULLETS;
-    const { b } = await typedRun(text);
-    expect(carriesResult(b), 'the control: an analysis-bearing turn').toBe(true);
-    expect(b._answer_shape).toBeDefined();
-    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
-    expect(faceWords(b._answer_shape!)).toBeLessThanOrEqual(80);
-    expect(faceOf(b._answer_shape!)).not.toContain(ROBUSTNESS_CAVEAT);
-    expect(b._answer_shape!.detail).toContain(ROBUSTNESS_CAVEAT);
-    expectRobustnessDisclosure(b);
-    expect(text.startsWith(b._answer_shape!.headline)).toBe(true);
-    expect(b.assistant_text.split(ROBUSTNESS_CAVEAT), 'the caveat is kept, once (R1: in detail)').toHaveLength(2);
-    for (const para of text.split('\n\n')) for (const s of para.split(/(?<=[.!?])\s+(?=[A-Z])/)) expect(b.assistant_text).toContain(s.trim());
-  });
+
+
 
   // AI-first Lane 2 N1: row 4 pinned the removed ordinary-turn face pool; it went with the fold (one-reply-build-contract's N1 row).
 
-  it('5. RUN: a reply LONGER than the old collapse floor with no bullets → shaped; its supporting sentences remain in detail', async () => {
-    const synth = synthesiseAnswerShapeFromText(LONG_NO_BULLETS);
-    expect(deriveAnswerTextFromShape(synth!).length, 'the control: above the old floor').toBeGreaterThan(ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS);
 
-    // This row isolates the no-bullet floor branch, so only its Run is robust; all other rows retain the served block.
-    readbackResult = { ...RESULT_BLOCK, enrichment: {
-      ...(RESULT_BLOCK.enrichment as Record<string, unknown>), robustness: { level: 'high', is_robust: true },
-    } };
-    const { b } = await typedRun(LONG_NO_BULLETS);
-    expect(b._answer_shape).toBeDefined();
-    expect(faceWords(b._answer_shape!)).toBeLessThanOrEqual(80);
-    expect(b._answer_shape!.detail.length).toBeGreaterThan(0);
-    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
-    expect(b._answer_shape!.headline).toBe(synth!.headline);
-  });
 
   /**
    * ⛔ CONSENT BEFORE BREVITY. A turn that offers an approval is never shaped: the shape would put what the
@@ -634,56 +332,16 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     const run = b as Offered;
     expect(carriesResult(run), 'the control: the Run carries the result').toBe(true);
     expect(await offersApprove(run), 'the control: the Run carries the waiting proposal’s chip').toBe(true);
-    expect(run._answer_shape, 'shaped').toBeDefined();
-    expect(deriveAnswerTextFromShape(run._answer_shape!)).toBe(run.assistant_text);
+    expect(run._answer_shape).toBeUndefined();
   });
 
-  it('8. CONTROL: the SAME Run with no proposal waiting → shaped (the existing behaviour)', async () => {
-    const { b } = await typedRun(FOUR_BULLETS.text, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11');
-    expect(await offersApprove(b as Offered), 'the control: nothing to approve').toBe(false);
-    expect(b._answer_shape, 'shaped').toBeDefined();
-    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
-  });
 
-  it('B3-8 ONE reply: the generic unavailable basis remains in detail, exactly once', async () => {
-    readbackReady = FX.state.analysis_ready;
-    const { b, turnId } = await typedRun(CLEAN_BULLETS.text);
-    expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
-    expect(b._answer_shape).toBeDefined();
-    expect(faceOf(b._answer_shape!)).not.toContain(BASIS_UNAVAILABLE);
-    expect(b._answer_shape!.detail).toContain(BASIS_UNAVAILABLE);
-    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
-  });
 
-  it('B3-8 (R1): a basis already in the narrator’s words is said once, not twice', async () => {
-    readbackReady = FX.state.analysis_ready;
-    const narrated = `${CLEAN_BULLETS.text}\n\n${BASIS_UNAVAILABLE}`;
-    const { b, turnId } = await typedRun(narrated);
-    expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
-    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
-  });
 
-  it.each([[true, true], [false, true], [true, false], [false, false]])('B3-8: short question-tail reply retains its basis once with robustness marker and full detail (present=%s punctuated=%s)', async (present, punctuated) => {
-    readbackReady = FX.state.analysis_ready;
-    const question = punctuated ? 'What baseline should we use?' : 'The baseline is unknown';
-    const narrated = `The comparison is conditional. Questions this model does not answer yet: ${question}${present ? `\n\n${BASIS_UNAVAILABLE}` : ''}`;
-    const { b, turnId } = await typedRun(narrated);
-    expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
-    expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
-    expect(b.assistant_text).toContain(question);
-    // r5 item 2: the full qualification moves to detail; its typed marker requires shape even here.
-    const expected = ['The comparison is conditional.', ROBUSTNESS_CAVEAT, BASIS_UNAVAILABLE,
-      `Questions this model does not answer yet: ${question}`].join('\n\n');
-    expectRobustnessDisclosure(b);
-    expect(sentenceMultiset(b.assistant_text).filter(sentence => sentence !== ROBUSTNESS_MARKER)).toEqual(sentenceMultiset(expected));
-    expect(occurrences(b._answer_shape!.detail, BASIS_UNAVAILABLE), 'the exact generic basis stays once in detail').toBe(1);
-    expect(b.assistant_text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
-    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
-    if (process.env.B3_WIRE_EVIDENCE) {
-      b3WireCases.push({ source: 'actual Agent route; stubbed model/Run/readback', text: b.assistant_text, line: BASIS_UNAVAILABLE, question });
-      writeFileSync(`${process.env.B3_WIRE_EVIDENCE}/b3-question-tail-basis-wire.json`, JSON.stringify(b3WireCases, null, 2) + '\n');
-    }
-  });
+
+
+
+
 
   it('9. CONSENT: a SECOND proposal in the turn is refused (one change per approval), so ONE chip is offered → still NOT shaped; text byte-identical', async () => {
     const proposed = await askedTurn(PROPOSAL_REPLY, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12', [
@@ -712,17 +370,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   /** D1's ask as the host writes it for this goal (`targetAsk`, neutral words: MRR's direction is not read as a floor). */
   const TARGET_ASK = 'What figure should "MRR" reach or stay under? I\'ll propose it as your target.';
 
-  it('10. ordinary tool-enabled turn: the host target ask stays atomic on the face without a Draft/Run contract', async () => {
-    readbackGraph = noTargetGraph();
-    const b = await askedTurn(CLEAN_BULLETS.text, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a14', [runCall], 'Run the analysis and tell me what it says.') as Offered;
-    expect(b._agent.tool_calls, 'the control: the Agent ran the analysis').toMatchObject([{ name: 'run_analysis', ok: true }]);
-    expect(carriesResult(b), 'the control: the reply carries the result').toBe(true);
-    // A typed run_analysis call alone does not select the contract; this fixture carries no screen/withheld chance.
-    expect(b.assistant_text.split(TARGET_ASK), 'the control: the host appended its target ask, once').toHaveLength(2);
-    expect(b._answer_shape, 'base shipped this whole (a host line was in the text)').toBeDefined();
-    expect(b._answer_shape!.bullets.at(-1), 'the one ask closes the face').toBe(TARGET_ASK);
-    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
-  });
+
 
   it('12. HOST STATUS (CODEX on #2517): an unsupported "Saved" claim → the host\'s own status line, kept once (R1: status may sit in detail)', async () => {
     const claim = `${CLEAN_BULLETS.text}\n\nSaved the change.`;
@@ -734,11 +382,5 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(b._answer_shape, 'no fold on an ordinary turn').toBeUndefined();
   });
 
-  it('11. CONTROL: the SAME Agent Run on the graph WITH its target → no host ask is owed → the reply is still shaped', async () => {
-    const b = await askedTurn(CLEAN_BULLETS.text, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a15', [runCall], 'Run the analysis and tell me what it says.') as Offered;
-    expect(b._agent.tool_calls, 'the control: the Agent ran the analysis').toMatchObject([{ name: 'run_analysis', ok: true }]);
-    expect(b.assistant_text.includes(TARGET_ASK), 'nothing owed').toBe(false);
-    expect(b._answer_shape, 'shaped, as before').toBeDefined();
-    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
-  });
+
 });

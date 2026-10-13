@@ -282,7 +282,7 @@ describe('the directive: RC\'s method, grounded items, no other option', () => {
 });
 
 describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared.runtime)', () => {
-  it('DECISION GATES: stories can name different options; every existing pre-mortem gate still replaces a failing draft', () => {
+  it('DECISION GATES: stories can name different options; every existing pre-mortem gate still refuses a card from a failing draft', () => {
     const out = turnFor(served('A-STRENGTHEN-PLACEHOLDER-P1'), PREMORTEM_PRESS_ID);
     if (out?.kind !== 'run') throw new Error('expected a decision-level run');
     const [a, b] = out.context.supplied_items;
@@ -317,18 +317,9 @@ describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared
     for (const [gate, draft] of mutants) {
       const failed = settleMethodTurn(out, draft);
       expect(failed.failed, gate).toContain(gate);
-      expect(failed.reply, gate).not.toBe(draft);
-      if (gate === 'PM-WATCH-MITIGATE') {
-        // No story stands alone: W9c's decision fallback keeps the two-story shape, with no one-link question.
-        expect(failed.passed, gate).toBe(false);
-        expect(failed.reply).toContain('Imagine this decision has gone badly. Two failure stories to test:');
-        expect(failed.target).toEqual(a);
-      } else {
-        // P02: the passing stories are kept whole in the server's frame; the refused part never reaches the wire.
-        expect(failed.passed, gate).toBe(true);
-        expect(failed.reply.split('\n')[0], gate).toBe('Imagine this decision has gone badly. Failure stories to test:');
-        expect(checkMethodTurn('RC-PREMORTEM', failed.reply, out.check_inputs, true).pass, gate).toBe(true);
-      }
+      expect(failed.reply, gate).toBe(draft);
+      expect(failed.passed, gate).toBe(false); // no card can act on a failed method artefact
+
     }
   });
 
@@ -357,15 +348,10 @@ describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared
         expect(out.target).toEqual(items[lowest]);
       } else {
         for (const id of f.failing_checks ?? []) expect(out.failed).toContain(id);
-        expect(out.reply).not.toBe(f.reply);
-        if (out.passed) {
-          // P02: a refused story is replaced by the server-built story; what is sent passes RC's checks as a whole.
-          expect(out.reply.split('\n')[0]).toBe(`Imagine ${q(f.inputs.plan_label)} has gone badly. Failure stories to test:`);
-          expect(checkMethodTurn('RC-PREMORTEM', out.reply, turn.check_inputs, false).pass).toBe(true);
-        } else {
-          expect(out.reply).toBe(`Imagine ${q(f.inputs.plan_label)} has gone badly. Start with how ${q(items[0].labels[0])} affects ${q(items[0].labels[1])}: how would you notice it early, and what would you do?`);
-          expect(out.target).toEqual(items[0]);
-        }
+        expect(out.reply).toBe(f.reply);
+        expect(out.passed).toBe(false);
+        expect(out.target).toEqual(items[0]);
+
       }
     });
   }
@@ -424,12 +410,12 @@ describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared
     expect(settleMethodTurn(unmasked, reply).failed).toContain('PM-NO-PROB');
   });
 
-  it('ROW M12: an empty or garbled draft is never sent', () => {
+  it('ROW M12: an empty or garbled draft never licenses a card', () => {
     const turn = turnOf(RC_REPLIES.find((f) => f.id === 'MT-PREMORTEM-GOOD')!);
     for (const draft of ['', '   ', 'Sure! Here is a pre-mortem.']) {
       const out = settleMethodTurn(turn, draft);
       expect(out.passed).toBe(false);
-      expect(out.reply.startsWith('Imagine ')).toBe(true);
+      expect(out.reply).toBe(draft);
     }
   });
 });

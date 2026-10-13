@@ -1,5 +1,5 @@
-import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
-import { goalChanceScreenLinesForAgent } from './goal-chance-screen-lines.js';
+import { agentLicenceRecordOf } from '../goal-target/goal-chance-licence.js';
+import { licensedGoalChanceLinesForAgent } from './goal-chance-screen-lines.js';
 import { foldQuotes } from './quote-normalisation.js';
 
 type Rec = Record<string, unknown>;
@@ -17,13 +17,8 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   /** Exact user-authored text from the turn/history, never a narration guess about whose words these are. */
   userAuthoredTexts?: readonly string[];
 }): T {
-  const licence = agentLicenceRecordOf(context.analysisResult);
-  // Amendment 7 (independent check r1 item 6): ANY Olumi input the Run recorded (relationships, starting values, an option's
-  // own settings) owes the labelled sentence; the validated reader decides which counts are well formed.
-  const counted = goalChanceLicenceForAgent(context.analysisResult);
-  const owed = counted !== undefined && ((counted.olumi_estimate_link_count ?? 0) + (counted.olumi_estimate_value_count ?? 0) > 0
-    || Object.keys(counted.olumi_estimate_settings_by_option ?? {}).length > 0);
-  if (!context.current || typeof body.assistant_text !== 'string' || licence === undefined || !owed) return body;
+  const licence = rec(agentLicenceRecordOf(context.analysisResult)) ?? {};
+  if (!context.current || typeof body.assistant_text !== 'string') return body;
   const nodes = rec(context.graph)?.nodes;
   const goals = (Array.isArray(nodes) ? nodes : []).map(rec).filter(n => n?.kind === 'goal');
   // Run identity comes ONLY from analysis_result: the producer captures snapshot.goal_node_id on the licence.
@@ -36,9 +31,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const [goalId] = goalIds;
   const goal = goals.find(n => n?.id === goalId);
   const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
-  const lines = goalChanceScreenLinesForAgent(context.analysisResult, context.graph, true)
-    .filter(l => l.olumi_estimate_link_count !== undefined);
-  if (lines.length === 0) return body;
+  const lines = licensedGoalChanceLinesForAgent(context.analysisResult, context.graph, true);
   // Specialized goals (for example launching by a recorded date) carry their own producer-owned predicate.
   // Match that goal wording rather than assuming every licence says 'meeting your goal'.
   const producerGoalPredicates = lines.flatMap(l => {
@@ -60,6 +53,12 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         && !/[\p{L}\p{N}]/u.test(sentence[at + needle.length] ?? '')) return true;
     }
     return false;
+  };
+  const figureParts = (value: string): string[] => [...plain(value).matchAll(/((?:(?:(?:no\s+)?(?:less|more|greater)\s+than|at\s+(?:least|most)|up\s+to|under|over|below|above|[<>]=?|[≤≥]|about|roughly|around|approximately|circa)\s*)*)([-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+))\s*(?:%|\bpercent\b|\bper\s+cent\b)/g)]
+    .map(p => `${p[1]!.replace(/\b(?:about|roughly|around|approximately|circa)\b/g, '').trim().replace('<', 'less than').replace('>', 'more than')}:${Number(p[2]!.replace(/,/g, ''))}`);
+  const exactFigure = (sentence: string, figure: string): boolean => {
+    const a = figureParts(sentence), b = figureParts(figure);
+    return a.length === b.length && a.every((part, i) => part === b[i]);
   };
   const text = body.assistant_text;
   const protectedSpans: { start: number; end: number }[] = [];
@@ -153,6 +152,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         if (namedOptions.length === 0 && bareChance) {
           if (lines.length === 1) {
             const [l] = lines;
+            if (exactFigure(figures, l!.figure)) continue;
             const replacement = said.has(l!.option_id) ? '' : l!.chance;
             said.add(l!.option_id);
             edits.push({ start, end, replacement });
@@ -195,7 +195,13 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
             : valueMatches && goalId !== undefined && namedGoalPoint;
         });
         // Goal-only narration still needs one exact (option_id, scored goal_id, displayed value), never a guessed tie.
-        if (matched.length !== 1) continue;
+        if (matched.length !== 1) {
+          // No licensed option/goal/figure tuple: suppress only this numerical claim,
+          // never substitute a share, another option's figure or an invented reason.
+          if (optionGoalPoint || genericGoalPoint || namedGoalPoint || producerGoalPoint) edits.push({ start, end, replacement: '' });
+          continue;
+        }
+        if (exactFigure(figures, matched[0]!.figure)) continue;
         const replacement = matched.filter(l => !said.has(l.option_id)).map(l => { said.add(l.option_id); return l.chance; }).join(' ');
         edits.push({ start, end, replacement });
       }
