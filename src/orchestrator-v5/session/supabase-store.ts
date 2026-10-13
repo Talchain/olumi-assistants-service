@@ -49,6 +49,7 @@ import {
   GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
+  answerRunNarrationOf,
   type AtomicCommittedModelVersionReceipt,
   type AnswerOffersRead,
   type CommittedTurnLedger,
@@ -296,6 +297,7 @@ const NOT_A_CLAIM_PATTERN = `%${TURN_CLAIM_SUFFIX}`;
 const isMissingAppendFunction = (error: unknown): boolean =>
   errCode(error) === 'PGRST202' || errCode(error) === '42883';
 let conditionalAppendMissingLogged = false;
+let narratedAppendMissingLogged = false;
 
 export interface AnalysisRunDrainResult {
   derived: number;
@@ -755,6 +757,12 @@ export class SupabaseSessionStore implements SessionStore {
     rpcMode: GraphCasRpcMode,
     options: ConditionalAppendOptions,
   ): Promise<ConditionalSessionAppendOutcome> {
+    if (write.run_narration !== undefined) {
+      const narrated = await this.appendNarratedAnswer(write, baseRpcArgs, options);
+      if (narrated !== undefined) return narrated;
+      const { run_narration: _narration, ...withoutNarration } = write;
+      return this.appendAgentAnswerIfLatest(withoutNarration, baseRpcArgs, rpcMode, options);
+    }
     const rpcName = 'append_agent_answer_if_latest';
     const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
     const { data, error } = await this.client.rpc(rpcName, {
@@ -781,6 +789,46 @@ export class SupabaseSessionStore implements SessionStore {
     }
     // JSONB preserves the delegate's receipt object, or its UUID string on v2.
     const outcome = this.decodeAnswerAppendResult(data, rpcName, withOffers || write.agent_guidance !== undefined);
+    this.cache.invalidateAll(write.scenario_id);
+    return outcome;
+  }
+
+  /**
+   * T1h: the final answer row WITH the narration it was sent with (migration 20261013230000), conditional when
+   * `options` is given. `undefined` when the RPC is absent: the caller then takes today's path without the narration.
+   */
+  private async appendNarratedAnswer(
+    write: SessionTurnWrite,
+    baseRpcArgs: Record<string, unknown>,
+    options: ConditionalAppendOptions | undefined,
+  ): Promise<ConditionalSessionAppendOutcome | undefined> {
+    const rpcName = options === undefined ? 'append_agent_answer_narrated' : 'append_agent_answer_if_latest_narrated';
+    const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
+    const { data, error } = await this.client.rpc(rpcName, {
+      ...(options === undefined ? {} : { p_expected_latest_row_id: options.expectedLatestRowId }),
+      ...baseRpcArgs,
+      p_agent_guidance: write.agent_guidance ?? null,
+      p_suggested_actions: withOffers ? write.suggested_actions : null,
+      p_suggested_actions_run_key: withOffers ? write.suggested_actions_run_key ?? null : null,
+      p_run_narration: write.run_narration,
+    });
+    if (error) {
+      if (isMissingAppendFunction(error)) {
+        if (!narratedAppendMissingLogged) {
+          narratedAppendMissingLogged = true;
+          log.warn({ event: 'v5.agent_answer.narrated_rpc_missing', rpc_code: errCode(error) },
+            'Narrated answer RPC is unavailable; recording the answer without its narration until migration 20261013230000 is applied');
+        }
+        return undefined;
+      }
+      throw new StateCommitFailedError(`${rpcName} RPC failed: ${errMsg(error)}`,
+        { cause: error, rpc_code: errCode(error) });
+    }
+    if (options !== undefined && data !== null && typeof data === 'object' && !Array.isArray(data)
+      && (data as { status?: unknown }).status === 'latest_moved') {
+      return { status: 'latest_moved' };
+    }
+    const outcome = this.decodeAnswerAppendResult(data, rpcName, true);
     this.cache.invalidateAll(write.scenario_id);
     return outcome;
   }
@@ -815,6 +863,13 @@ export class SupabaseSessionStore implements SessionStore {
   ): Promise<SessionAppendOutcome> {
     if (useAppendV6() && write.graph != null) {
       return this.appendAtomicFenced(write, baseRpcArgs, rpcMode, null);
+    }
+    if (write.run_narration !== undefined && write.graph == null) {
+      const narrated = await this.appendNarratedAnswer(write, baseRpcArgs, undefined);
+      if (narrated !== undefined && !('status' in narrated)) return narrated;
+      if (narrated !== undefined) throw new StateCommitFailedError('append_agent_answer_narrated returned a conditional outcome');
+      const { run_narration: _narration, ...withoutNarration } = write;
+      return this.dispatchCheckedAppend(withoutNarration, baseRpcArgs, rpcMode);
     }
     const useV3 = rpcMode !== 'off' && write.graph != null;
     const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
@@ -2015,12 +2070,12 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
-    const { data, error } = await this.client
-      .from('v5_conversation_turns')
-      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance, suggested_actions_run_key')
-      .eq('scenario_id', scenarioId)
-      .eq('turn_id', turnId)
-      .limit(1);
+    const columns = 'id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance, suggested_actions_run_key';
+    const read = (select: string) => this.client.from('v5_conversation_turns').select(select)
+      .eq('scenario_id', scenarioId).eq('turn_id', turnId).limit(1);
+    let { data, error } = await read(`${columns}, run_narration`);
+    // Order-safe: before migration 20261013230000 the column is absent; the row is read without it (narration unknown).
+    if (error && errCode(error) === '42703') ({ data, error } = await read(columns));
     // A failed read is an UNKNOWN and is thrown, never folded into "no row":
     // the caller would otherwise re-execute a turn that may already have run.
     if (error) throw new Error(`readCommittedTurn failed: ${error.message ?? String(error)}`);
@@ -2043,6 +2098,8 @@ export class SupabaseSessionStore implements SessionStore {
       // This exact row's Run, never another row's. Anything but the RPC's 16-hex key reads as unknown.
       suggested_actions_run_key: typeof row.suggested_actions_run_key === 'string' && /^[0-9a-f]{16}$/.test(row.suggested_actions_run_key)
         ? row.suggested_actions_run_key : null,
+      // The narration this exact answer was sent with; absent or malformed reads as unknown.
+      run_narration: answerRunNarrationOf(row.run_narration),
     };
   }
 

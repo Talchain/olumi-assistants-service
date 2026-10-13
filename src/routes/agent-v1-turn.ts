@@ -58,7 +58,7 @@ import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
+import { answerRunNarrationOf, type CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
@@ -2478,17 +2478,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && !legacyRunReceipt
         && replayText !== RUN_FAILED_TEXT
         && replayText !== 'The analysis did not run. Press Run to try again.';
-      // Original bound controls only: never borrow today's key to identify yesterday's answer. After a restart, the key
-      // persisted WITH this exact row names its Run (never the latest row's); a row without one leaves the Run unknown.
+      // Original bound controls only: never borrow today's key to identify yesterday's answer. After a restart, the
+      // narration (else the offers' key) persisted WITH this exact row names its Run, never the latest row's; a row
+      // without either leaves the Run unknown.
+      const durableNarration = prior.run_narration ?? undefined;
       const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length)
-        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey || prior.suggested_actions_run_key || undefined;
-      // Currentness is a separate fact: only the controls and narration this process sent can be re-sent as current. A key
-      // alone (a cold replay) names the original Run on the historical receipt, even when that Run is still today's.
-      const replayLoopRunCurrent = replayLoopRun && rememberedControls !== undefined
+        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey
+        || durableNarration?.run_key || prior.suggested_actions_run_key || undefined;
+      // Currentness is a separate fact: an answer is re-sent as current only with the narration it was sent with (this
+      // process's memory, else its row's). A key alone names the original Run on the historical receipt.
+      const replayLoopRunCurrent = replayLoopRun && (rememberedControls !== undefined || durableNarration !== undefined)
         && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;
       const historicalLoopReplay = replayLoopRun && !replayLoopRunCurrent;
       if (replayLoopRunCurrent) {
-        replayNarration = rememberedControls?.narration;
+        replayNarration = rememberedControls?.narration ?? durableNarration;
       }
       if (historicalLoopReplay) {
         replayText = prior.assistant_message ?? '';
@@ -2558,11 +2561,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (replayLoopRunCurrent) {
         // Preserve the sent controls and their order. Revalidate human approval independently,
         // but never manufacture Explain, sizing, or proposal controls on a verified warm resend.
+        // After a restart only this row's durable controls are known: those still valid, nothing else.
         const validDecisionIds = new Set(historicalDecisions.map(action => action.id));
-        replayActions.splice(0, replayActions.length, ...remembered.filter(action =>
+        replayActions.splice(0, replayActions.length, ...(rememberedControls === undefined ? stillValid : remembered.filter(action =>
           (typedApprovalOf({ chip: { id: action.id } }) === undefined
             && action.id !== AMEND_CHIP.id && declinedProposalOf(action.id) === undefined)
-          || validDecisionIds.has(action.id)));
+          || validDecisionIds.has(action.id))));
       }
       // The ordinary replay shape still requires parity with the stored answer. A withheld Run's current typed finding
       // owns the new face-first contract even when a newer Run replaced that answer; its rebuilt sentences stay intact.
@@ -5480,6 +5484,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
+    const answerNarration = answerRunNarrationOf(wireBody.narration);
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
@@ -5550,6 +5555,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             suggested_actions: answerOffers,
             suggested_actions_run_key: answerOffersRunKey,
           } : {}),
+          // The narration this answer is sent with, stored WITH its row so a replay after a restart names its Run.
+          ...(answerNarration !== null ? { run_narration: answerNarration } : {}),
           // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
           // approval that reaches a restarted process, can still find them.
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
@@ -5646,7 +5653,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const issuedTurnIds = await proposalIssuers(heldRecords, [...reconciledPending, ...durablePending, ...liveHolds]);
     // Remember only the controls actually sent, after egress and held-proposal reconciliation.
-    // This bounded in-process cache changes no persistence; a cold replay has only the Run key persisted with its row.
+    // This bounded in-process cache changes no persistence; a cold replay has only the narration persisted with its row.
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, {
       actions: wireBody.suggested_actions,
       ...(wireBody.narration !== undefined ? { narration: wireBody.narration as ReplayNarration } : {}),

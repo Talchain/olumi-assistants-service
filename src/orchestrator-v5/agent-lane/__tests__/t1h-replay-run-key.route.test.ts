@@ -1,13 +1,12 @@
 /**
- * T1h (PL #94 6135017311 item 4): a replay of an earlier Run answer names THAT answer's Run, read from the exact row
- * (`readCommittedTurn`), never today's Run or the latest row's. A row without a key leaves the Run unknown.
+ * T1h (PL #94 6135017311 item 4): a replay of an earlier Run answer names THAT answer's Run, after a restart too: the
+ * narration it was sent with is stored WITH its row (migration 20261013230000) and read back from the exact row
+ * (`readCommittedTurn`), never today's Run or the latest row's. A row without it leaves the Run unknown.
  *
- * Real route, real loop, real Run handler (the `run-press-loop.route.test.ts` harness). The committed-turn and latest-offers
- * reads are the real `SupabaseSessionStore` over a fake PostgREST transport; the append double writes the row exactly as the
- * real store does (the Run key only beside 1–8 durable offers, migration 20261006230000).
- *
- * ⚠ SEEDED: the route writes no Run key for a typed Run answer today (its only controls are Explain/Run, never durable
- * offers). Rows (a) and (b) set that one column on the stored row to the answer's own narration key, as a write side would.
+ * Real route, real loop, real Run handler (the `run-press-loop.route.test.ts` harness). Writes AND reads are the real
+ * `SupabaseSessionStore`; only the PostgREST transport is fake. Its RPCs transcribe the migrations' checks: the narrated
+ * appends (20261013230000), the offers/guidance wrappers (20261006230000 / 20261004142707) and the conditional append
+ * (20261007090000). `narratedMissing` makes the narrated RPCs absent (PGRST202), as before the migration is applied.
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -52,6 +51,14 @@ vi.mock('../root-line.js', async (original) => {
 
 /** `v5_conversation_turns`, newest first. */
 const table: Rec[] = [];
+const rpcCalls: string[] = [];
+let narratedMissing = false;
+let selectMissingColumn = false;
+const NARRATION_STATUSES = new Set(['pending', 'ready', 'unavailable', 'stale']);
+/** 20261013230000's narration check, transcribed. */
+const validNarration = (n: unknown): boolean => n !== null && typeof n === 'object' && !Array.isArray(n)
+  && Object.keys(n).every(k => k === 'status' || k === 'run_key') && NARRATION_STATUSES.has((n as Rec).status)
+  && typeof (n as Rec).run_key === 'string' && /^[0-9a-f]{16}$/.test((n as Rec).run_key);
 const client = {
   from: () => {
     let columns: string[] = []; let cap = Infinity;
@@ -66,32 +73,55 @@ const client = {
       order: (key: string, options: { ascending: boolean }) => { orders.push({ key, ...options }); return chain; },
       abortSignal: () => chain,
       limit: (n: number) => { cap = n; return chain; },
-      then: (resolve: (v: unknown) => void) => resolve({ data: table.filter(row => checks.every(check => check(row)))
-        .sort((a, b) => { for (const o of orders) { const c = String(a[o.key]).localeCompare(String(b[o.key])); if (c) return o.ascending ? c : -c; } return 0; })
-        .slice(0, cap).map(row => Object.fromEntries(columns.map(c => [c, row[c]]))), error: null }),
+      then: (resolve: (v: unknown) => void) => resolve(selectMissingColumn && columns.includes('run_narration')
+        ? { data: null, error: { code: '42703', message: 'column v5_conversation_turns.run_narration does not exist' } }
+        : { data: table.filter(row => checks.every(check => check(row)))
+          .sort((a, b) => { for (const o of orders) { const c = String(a[o.key]).localeCompare(String(b[o.key])); if (c) return o.ascending ? c : -c; } return 0; })
+          .slice(0, cap).map(row => Object.fromEntries(columns.map(c => [c, row[c]]))), error: null }),
     };
     return chain;
   },
+  rpc: async (name: string, args: Rec) => {
+    rpcCalls.push(name);
+    if (narratedMissing && name.endsWith('_narrated')) return { data: null, error: { code: 'PGRST202', message: `Could not find the function public.${name}` } };
+    const latest = () => table.find(r => r.scenario_id === args.p_scenario_id && !String(r.turn_id).endsWith(':claim'))?.id ?? null;
+    if ((name === 'append_agent_answer_if_latest' || name === 'append_agent_answer_if_latest_narrated') && latest() !== args.p_expected_latest_row_id) {
+      return { data: { status: 'latest_moved' }, error: null };
+    }
+    if (name.endsWith('_narrated') && !validNarration(args.p_run_narration)) return { data: null, error: { code: 'P0001', message: 'invalid answer Run narration' } };
+    const prior = table.find(r => r.scenario_id === args.p_scenario_id && r.turn_id === args.p_turn_id);
+    const id = prior?.id ?? randomUUID();
+    const withOffers = args.p_suggested_actions != null;
+    if (!prior) table.unshift({ id, scenario_id: args.p_scenario_id, turn_id: args.p_turn_id, turn_class: args.p_turn_class,
+      handler_id: args.p_handler_id, request_hash: args.p_request_hash, response_emitted: args.p_response_emitted,
+      llm_calls_used: args.p_llm_calls_used, created_at: new Date(Date.parse(AT) + table.length * 1000).toISOString(),
+      user_message: args.p_user_message, assistant_message: args.p_assistant_message, pending_actions: args.p_pending_actions,
+      agent_guidance: args.p_agent_guidance ?? null, suggested_actions: withOffers ? args.p_suggested_actions : null,
+      suggested_actions_run_key: withOffers ? args.p_suggested_actions_run_key ?? null : null,
+      // Only the narrated appends write it, and only on a new row (a retry never replaces the first answer's).
+      run_narration: name.endsWith('_narrated') ? args.p_run_narration : null });
+    const receipt = { id, replayed_prior_turn: !!prior && prior.request_hash === args.p_request_hash,
+      prior_turn_conflict: !!prior && prior.request_hash !== args.p_request_hash };
+    if (name.endsWith('_narrated') || name === 'append_agent_answer_with_offers' || name === 'append_agent_answer_with_guidance') return { data: receipt, error: null };
+    if (name === 'append_agent_answer_if_latest') return { data: withOffers || args.p_agent_guidance != null ? receipt : id, error: null };
+    return { data: id, error: null };
+  },
 };
-let realStore = new SupabaseSessionStore(client as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 50 }), { defaultReadLimit: 20 });
+const newStore = () => new SupabaseSessionStore(client as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 50 }), { defaultReadLimit: 20 });
+let realStore = newStore();
 const rows: Rec[] = [];
-const store = {
+let conditional = false;
+const store: Rec = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn((s: string, id: string) => realStore.readCommittedTurn(s, id)),
   readLatestAnswerOffers: vi.fn((s: string) => realStore.readLatestAnswerOffers(s)),
-  append: vi.fn(async (w: Rec) => {
-    rows.push({ ...w, assistant_message: w.assistantMessage, user_message: w.userMessage });
-    const withOffers = Array.isArray(w.suggested_actions) && w.suggested_actions.length > 0;
-    table.unshift({ id: randomUUID(), scenario_id: w.scenario_id, turn_id: w.turn_id, turn_class: w.turn_class,
-      handler_id: w.handler_id ?? null, request_hash: w.request_hash, response_emitted: w.response_emitted,
-      llm_calls_used: w.llm_calls_used, created_at: new Date(Date.parse(AT) + table.length * 1000).toISOString(),
-      user_message: w.userMessage ?? null, assistant_message: w.assistantMessage ?? null, pending_actions: w.pending_actions ?? null,
-      agent_guidance: w.agent_guidance ?? null, suggested_actions: withOffers ? w.suggested_actions : null,
-      suggested_actions_run_key: withOffers ? w.suggested_actions_run_key ?? null : null });
-    return { id: w.turn_id };
-  }),
+  append: vi.fn(async (w: Rec) => { rows.push({ ...w, assistant_message: w.assistantMessage, user_message: w.userMessage }); return realStore.append(w as never); }),
   readRecent: vi.fn(async () => [...rows].reverse()),
-  readMostRecentPendingActions: vi.fn(async () => []),
+  // The floor's conditional door (S-D.1b) reads the latest non-claim row id here.
+  readMostRecentPendingActions: vi.fn(async (sid: string, o?: { onLatestRowId?: (id: string | null) => void }) => {
+    if (conditional) o?.onLatestRowId?.(table.find(r => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim'))?.id ?? null);
+    return [];
+  }),
   loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: FX.brief })),
   loadGraph: vi.fn(async () => graph),
 };
@@ -102,7 +132,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 const call = (name: string, args: Rec, id: string) => ({ type: 'function_call', name, call_id: id, arguments: JSON.stringify(args) });
 const answer = (text: string) => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 
-describe('T1h: a replay names its own answer’s Run (real route, real committed-turn read)', () => {
+describe('T1h: a replay names its own answer’s Run (real route, real write → read → replay)', () => {
   let app: FastifyInstance;
   async function freshApp() {
     process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
@@ -132,7 +162,7 @@ describe('T1h: a replay names its own answer’s Run (real route, real committed
   /** A restart: a fresh route module (no in-process controls) and a fresh store (no hot cache). */
   async function restart() {
     await app.close(); vi.resetModules();
-    realStore = new SupabaseSessionStore(client as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 50 }), { defaultReadLimit: 20 });
+    realStore = newStore();
     await freshApp();
   }
   beforeAll(async () => {
@@ -147,13 +177,14 @@ describe('T1h: a replay names its own answer’s Run (real route, real committed
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; rows.length = 0; table.length = 0;
-    STATE.run_state.computed_at = AT; originalLoop = true; rootLineCalls.length = 0; });
+    rpcCalls.length = 0; STATE.run_state.computed_at = AT; originalLoop = true; rootLineCalls.length = 0;
+    narratedMissing = false; selectMissingColumn = false; conditional = false; store.appendIfLatest = undefined; });
 
   const press = (extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, ...extra,
   } });
-  /** Run A, answered by the AI loop (a historical receipt on replay). */
+  /** Run A, answered by the AI loop (its replay re-sends the committed words). */
   async function runA() {
     const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
     const first = await press(request);
@@ -165,20 +196,16 @@ describe('T1h: a replay names its own answer’s Run (real route, real committed
     expect(row.assistant_message).toBe(live.assistant_text);
     return { request, live, row };
   }
-  /** Run B on a later computed_at, then Explain B: the Explain answer carries next-step offers, so the real write keys it. */
-  async function runBExplained(keyA: string) {
+  /** Run B on a later computed_at, answered by the AI loop: the LATEST answer row carries Run B's narration. */
+  async function runB(keyA: string) {
     STATE.run_state.computed_at = LATER;
     const ran = await press();
     expect(ran.statusCode, ran.body).toBe(200);
     expect(runs).toHaveLength(2);
-    const keyB = ran.json().narration?.run_key as string;
-    expect(keyB).toMatch(/^[0-9a-f]{16}$/); expect(keyB).not.toBe(keyA);
-    originalLoop = false;
-    const explained = await press({ message: 'Explain this result', chip: { id: `agent-explain-run:${keyB}` } });
-    expect(explained.statusCode, explained.body).toBe(200);
-    const latest = await realStore.readLatestAnswerOffers(SCENARIO);
-    expect(latest?.run_key, 'precondition: the LATEST answer row carries Run B, written by the real route').toBe(keyB);
-    return keyB;
+    const narrationB = ran.json().narration;
+    expect(narrationB?.run_key).toMatch(/^[0-9a-f]{16}$/); expect(narrationB.run_key).not.toBe(keyA);
+    expect(table.find(r => !String(r.turn_id).endsWith(':claim'))?.run_narration, 'precondition: the latest row is Run B').toEqual(narrationB);
+    return narrationB.run_key as string;
   }
 
   it('hook (a): the Run turn and its replay hand the treated-as-zero reader the readback’s bound saved result', async () => {
@@ -201,39 +228,48 @@ describe('T1h: a replay names its own answer’s Run (real route, real committed
     expect(runs).toHaveLength(1);
   });
 
-  it('store: readCommittedTurn returns THIS row’s Run key; another row’s never; a malformed key reads as unknown', async () => {
+  it('store: readCommittedTurn returns THIS row’s narration and key; another row’s never; malformed or absent reads as unknown', async () => {
     const base = { scenario_id: SCENARIO, request_hash: 'agent_turn:h', assistant_message: 'a', user_message: 'u', llm_calls_used: 0, pending_actions: [] };
-    table.push({ ...base, id: 'r2', turn_id: 'later', suggested_actions_run_key: 'bbbbbbbbbbbbbbbb' },
-      { ...base, id: 'r1', turn_id: 'earlier', suggested_actions_run_key: 'aaaaaaaaaaaaaaaa' },
-      { ...base, id: 'r0', turn_id: 'legacy', suggested_actions_run_key: null },
-      { ...base, id: 'rx', turn_id: 'malformed', suggested_actions_run_key: 'AAAAAAAAAAAAAAAA' });
-    expect((await realStore.readCommittedTurn(SCENARIO, 'earlier'))?.suggested_actions_run_key).toBe('aaaaaaaaaaaaaaaa');
-    expect((await realStore.readCommittedTurn(SCENARIO, 'later'))?.suggested_actions_run_key).toBe('bbbbbbbbbbbbbbbb');
-    expect((await realStore.readCommittedTurn(SCENARIO, 'legacy'))?.suggested_actions_run_key).toBeNull();
-    expect((await realStore.readCommittedTurn(SCENARIO, 'malformed'))?.suggested_actions_run_key).toBeNull();
+    table.push({ ...base, id: 'r2', turn_id: 'later', suggested_actions_run_key: 'bbbbbbbbbbbbbbbb', run_narration: { status: 'pending', run_key: 'bbbbbbbbbbbbbbbb' } },
+      { ...base, id: 'r1', turn_id: 'earlier', suggested_actions_run_key: null, run_narration: { status: 'ready', run_key: 'aaaaaaaaaaaaaaaa' } },
+      { ...base, id: 'r0', turn_id: 'legacy', suggested_actions_run_key: null, run_narration: null },
+      { ...base, id: 'rx', turn_id: 'malformed', suggested_actions_run_key: 'AAAAAAAAAAAAAAAA', run_narration: { status: 'ready', run_key: 'aaaaaaaaaaaaaaaa', extra: 1 } });
+    const read = async (id: string) => { const r = await realStore.readCommittedTurn(SCENARIO, id);
+      return { key: r?.suggested_actions_run_key, narration: r?.run_narration }; };
+    expect(await read('earlier')).toEqual({ key: null, narration: { status: 'ready', run_key: 'aaaaaaaaaaaaaaaa' } });
+    expect(await read('later')).toEqual({ key: 'bbbbbbbbbbbbbbbb', narration: { status: 'pending', run_key: 'bbbbbbbbbbbbbbbb' } });
+    expect(await read('legacy')).toEqual({ key: null, narration: null });
+    expect(await read('malformed')).toEqual({ key: null, narration: null });
+    // Before the migration the column is absent: the same row is still read, its narration unknown (never a 503).
+    selectMissingColumn = true;
+    expect(await read('earlier')).toEqual({ key: null, narration: null });
+    expect((await realStore.readCommittedTurn(SCENARIO, 'earlier'))?.assistant_message).toBe('a');
   });
 
-  it('(a) SEEDED key K → cold replay names K on the historical receipt, with the committed words byte for byte', async () => {
-    const { request, live, row } = await runA();
-    expect(row.suggested_actions_run_key, 'precondition: the route wrote no key for a Run answer (the blocked write side)').toBeNull();
-    row.suggested_actions_run_key = live.narration.run_key;
-    const callCount = bodies.length;
-    await restart();
-    store.append.mockClear();
-    const body = (await press(request)).json();
-    expect(body._agent.replayed).toBe(true);
-    expect(body.assistant_text).toBe(live.assistant_text);
-    expect(body.narration).toEqual({ status: 'stale', run_key: live.narration.run_key });
-    expect(body.blocks ?? []).toEqual([]);
-    expect(body.suggested_actions.map((a: Rec) => a.id)).toEqual(['agent-run-analysis']);
-    expect(runs).toHaveLength(1); expect(bodies).toHaveLength(callCount);
-    expect(store.append).not.toHaveBeenCalled();
-  });
+  it.each([['checked', false], ['conditional', true]] as const)(
+    '(a) %s write: a cold replay of a current Run answer returns its narration, words and shape byte for byte', async (_n, viaConditional) => {
+      conditional = viaConditional;
+      store.appendIfLatest = viaConditional ? (w: Rec, o: Rec) => realStore.appendIfLatest(w as never, o as never) : undefined;
+      const { request, live, row } = await runA();
+      expect(row.run_narration, 'the real route wrote the narration it sent').toEqual(live.narration);
+      expect(rpcCalls).toContain(viaConditional ? 'append_agent_answer_if_latest_narrated' : 'append_agent_answer_narrated');
+      const callCount = bodies.length;
+      await restart();
+      store.append.mockClear();
+      const body = (await press(request)).json();
+      expect(body._agent.replayed).toBe(true);
+      expect(body.narration).toEqual(live.narration);
+      expect(body.assistant_text).toBe(live.assistant_text);
+      expect(body._answer_shape).toEqual(live._answer_shape);
+      expect(body.blocks).toEqual(live.blocks);
+      expect(body.suggested_actions.some((a: Rec) => a.id === 'agent-run-analysis' || a.id.startsWith('agent-explain-run:')), 'no manufactured Run or Explain control').toBe(false);
+      expect(runs).toHaveLength(1); expect(bodies).toHaveLength(callCount);
+      expect(store.append).not.toHaveBeenCalled();
+    });
 
-  it('(b) SEEDED key K, then a later Run K2 on the latest row → cold replay still names K, never K2', async () => {
-    const { request, live, row } = await runA();
-    row.suggested_actions_run_key = live.narration.run_key;
-    const keyB = await runBExplained(live.narration.run_key);
+  it('(b) a later Run K2 on the latest row → a cold replay of the Run A answer names K, never K2', async () => {
+    const { request, live } = await runA();
+    const keyB = await runB(live.narration.run_key);
     await restart();
     originalLoop = true;
     const body = (await press(request)).json();
@@ -241,13 +277,18 @@ describe('T1h: a replay names its own answer’s Run (real route, real committed
     expect(body.assistant_text).toBe(live.assistant_text);
     expect(body.narration).toEqual({ status: 'stale', run_key: live.narration.run_key });
     expect(body.narration.run_key).not.toBe(keyB);
+    expect(body.blocks ?? []).toEqual([]);
     expect(runs).toHaveLength(2);
   });
 
-  it('(c) a row with no key (as the route writes a Run answer today) → cold replay names no Run, never K2 or today’s', async () => {
+  it('(c) written before the migration (narrated RPC absent) → the answer is still recorded; its cold replay names no Run, never K2', async () => {
+    narratedMissing = true;
     const { request, live, row } = await runA();
-    expect(row.suggested_actions_run_key).toBeNull();
-    await runBExplained(live.narration.run_key);
+    expect(row.run_narration, 'recorded through the existing path, without narration').toBeNull();
+    expect(rpcCalls).toContain('append_agent_answer_narrated');
+    expect(rpcCalls).toContain('append_turn_atomic_v2');
+    narratedMissing = false;
+    await runB(live.narration.run_key);
     await restart();
     originalLoop = true;
     const body = (await press(request)).json();

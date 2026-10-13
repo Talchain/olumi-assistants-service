@@ -249,6 +249,11 @@ export interface SessionTurnWrite {
   readonly suggested_actions?: readonly SuggestedAction[];
   readonly suggested_actions_run_key?: string | null;
   /**
+   * The narration this final answer was sent with (`{status, run_key}`), stored WITH its row whatever offers it carried
+   * (`append_agent_answer_narrated`, migration 20261013230000), so a replay after a restart names the same Run.
+   */
+  readonly run_narration?: AnswerRunNarration;
+  /**
    * V5 Conversation Context Reliability: the user's verbatim turn message
    * (boundary `payload.message`), persisted to
    * `v5_conversation_turns.user_message` via `append_turn_atomic_v2`
@@ -333,6 +338,28 @@ export interface CommittedTurnRecord {
    * durable offers, or a legacy row): the original Run is then unknown, never today's or the latest row's.
    */
   readonly suggested_actions_run_key?: string | null;
+  /**
+   * The narration this exact answer was sent with, as persisted WITH it (`SessionTurnWrite.run_narration`). `null` when
+   * the row recorded none (a legacy row, or a store without the migration): the original narration is then unknown.
+   */
+  readonly run_narration?: AnswerRunNarration | null;
+}
+
+/** A final answer's narration: which Run it was about (16-hex key) and where its explanation stood. */
+export interface AnswerRunNarration {
+  readonly status: 'pending' | 'ready' | 'unavailable' | 'stale';
+  readonly run_key: string;
+}
+
+const ANSWER_NARRATION_STATUSES: ReadonlySet<unknown> = new Set(['pending', 'ready', 'unavailable', 'stale']);
+
+/** Exactly `{status, run_key}` with a known status and a 16-hex key (the migration's own check), else `null`. */
+export function answerRunNarrationOf(value: unknown): AnswerRunNarration | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { status, run_key: runKey, ...rest } = value as Record<string, unknown>;
+  if (Object.keys(rest).length > 0 || !ANSWER_NARRATION_STATUSES.has(status)
+    || typeof runKey !== 'string' || !/^[0-9a-f]{16}$/.test(runKey)) return null;
+  return { status: status as AnswerRunNarration['status'], run_key: runKey };
 }
 
 export interface AnswerOffersRead {
