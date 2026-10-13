@@ -1,31 +1,65 @@
 /**
- * T2A3 (#2993 independent check, blocking 1 and 2) on the REAL path: DGAI sends the selected link as
- * `selected_elements: [{ id: 'from→to', kind: 'edge' }]`; `/agent/v1/turn` resolves it to `grounded_links`
- * (`agent-v1-turn.ts`, the runAgentTurn ctx) and the earlier typed turns to `user_text`. The stubbed model calls
- * `propose_link_strengths`; the real capability decides whose band each link holds. Served bytes: the W3 cold read
- * (`520aab46`, CEE `f074916`). 0 LLM calls.
+ * T2A3 (#2993 independent check, blocking 1 and 2; PL 22:07Z) on the REAL path, end to end:
+ * DGAI's `selected_elements: [{ id: 'from→to', kind: 'edge' }]` → `/agent/v1/turn` resolves it to `grounded_links` →
+ * the stubbed model calls `propose_link_strengths` → the real door prepares the card → the user presses the card's own
+ * approve chip through the same route → the production writer (`commitOptionLevelsInProcess`, fenced in the route) →
+ * the stored graph is read back. Served bytes: the W3 cold read (`520aab46`, CEE `f074916`). 0 LLM calls.
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 type Json = Record<string, any>;
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url), 'utf8')) as Json;
-const SCENARIO = '6a7c2f0e-1b3d-4e5f-8a9b-0c1d2e3f4a5c';
 const LATER = 'OK, record your estimates for the links.';
 
-const rows: Json[] = [];
+type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null;
+  user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; created_at: string };
+const rows = new Map<string, Row>();
+const order: string[] = [];
+const graphOf = new Map<string, unknown>();
+const latestRow = (sid: string): Row | undefined => [...order].reverse().map((k) => rows.get(k)!).find((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'));
+const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown[]> => {
+  const { parsePendingAction } = await import('../../session/pending-action.js');
+  return (row ? JSON.parse(JSON.stringify(row.pending_actions)) as unknown[] : []).map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
+};
+let tick = 0;
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
-  readCommittedTurn: vi.fn(async (_s: string, id: string) => rows.find((r) => r.turn_id === id) ?? null),
-  append: vi.fn(async (row: Json) => { rows.push({ ...row, id: row.turn_id }); return { id: String(row.turn_id) }; }),
-  readRecent: vi.fn(async () => [...rows].reverse()),
+  getScenarioOwner: vi.fn(async () => null),
+  readCommittedTurn: vi.fn(async (sid: string, turnId: string) => {
+    const row = rows.get(`${sid}:${turnId}`);
+    return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
+  }),
+  readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
+  append: vi.fn(async (w: Json) => {
+    const k = `${w.scenario_id}:${w.turn_id}`;
+    if (!rows.has(k)) {
+      tick += 1;
+      rows.set(k, { id: `row-${rows.size + 1}`, scenario_id: w.scenario_id, turn_id: w.turn_id, request_hash: w.request_hash,
+        assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
+        turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
+        pending_actions: JSON.parse(JSON.stringify(w.pending_actions ?? [])) as unknown[],
+        created_at: new Date(Date.UTC(2026, 9, 13, 0, 0, tick)).toISOString() });
+      order.push(k);
+      if (w.graph !== undefined && w.graph !== null) graphOf.set(w.scenario_id, JSON.parse(JSON.stringify(w.graph)));
+    }
+    return { id: rows.get(k)!.id };
+  }),
+  readRecent: vi.fn(async (sid: string) => [...order].reverse().map((k) => rows.get(k)!).filter((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'))),
   readFactsFor: vi.fn(async () => []),
+  readFactsWithTurnFor: vi.fn(async () => []),
+  readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: [], total_count: 0 })),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
-  readMostRecentPendingActions: vi.fn(async () => []),
+  invalidateScoped: vi.fn(async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] })),
+  invalidateAll: vi.fn(async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] })),
+  loadGraph: vi.fn(async (sid: string) => graphOf.get(sid) ?? null),
+  loadGraphAndBriefText: vi.fn(async (sid: string) => ({ graph: graphOf.get(sid) ?? null, briefText: null })),
+  hasPriorTurns: vi.fn(async (sid: string) => order.some((k) => rows.get(k)!.scenario_id === sid)),
 };
-vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
+vi.mock('../../session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
@@ -50,8 +84,9 @@ let proposeOn: { message: string; links: Json[] } | null = null;
 const lastUserText = (body: Json): string => String((body.input as Json[]).filter((i) => i.role === 'user').pop()?.content?.[0]?.text ?? '');
 const reply = (output: Json[]) => new Response(JSON.stringify({ output }), { status: 200 });
 
-describe('T2A3 on /agent/v1/turn: whose band a proposed link strength is', () => {
+describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the selection to the saved graph', () => {
   let app: FastifyInstance;
+  let scenario = '';
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       const body = JSON.parse(String(init?.body)) as Json;
@@ -69,49 +104,79 @@ describe('T2A3 on /agent/v1/turn: whose band a proposed link strength is', () =>
     vi.resetModules();
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => SERVED);
+    app.post('/assist/v1/scenarios/:id/graph', async (req) => {
+      const g = graphOf.get((req.params as { id: string }).id) ?? null;
+      return { ...SERVED, graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never) };
+    });
     await app.register(agentV1TurnRoute);
     await app.ready();
+  }, 600_000);
+  beforeEach(() => {
+    doors.length = 0; proposeOn = null;
+    scenario = randomUUID();
+    graphOf.set(scenario, structuredClone(SERVED.graph));
   });
-  beforeEach(() => { doors.length = 0; proposeOn = null; });
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-  const send = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/turn',
-    payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
-  /** The ONE operation the door prepared for this directed link. */
-  const opFor = (path: string): Json => {
+  const send = async (payload: Json): Promise<Json> => {
+    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn',
+      payload: { kind: 'message', scenario_id: scenario, turn_id: randomUUID(), ...payload } });
+    expect(res.statusCode, res.body.slice(0, 400)).toBe(200);
+    return res.json() as Json;
+  };
+  const edgeNow = (from: string, to: string): Json => (graphOf.get(scenario) as Json).edges.find((e: Json) => e.from === from && e.to === to);
+  /** The ONE prepared operation for this link, the card's own approve chip pressed, and the saved edge read back. */
+  const proposeAndApprove = async (session: string, message: string, extra: Json, link: Json, path: string) => {
+    proposeOn = { message, links: [link] };
+    const body = await send({ agent_session_id: session, message, ...extra });
     expect(doors, 'the stubbed model reached the real link-set door once').toHaveLength(1);
     const ops = doors[0]!.operations.filter((op) => op.path === path);
     expect(ops, path).toHaveLength(1);
-    return ops[0]!;
+    const chips = (body.suggested_actions as Json[]).filter((c) => String(c.id).startsWith('agent-approve-proposal:'));
+    expect(chips, JSON.stringify(body.suggested_actions)).toHaveLength(1);
+    proposeOn = null;
+    await send({ agent_session_id: session, message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
+    return { op: ops[0]!, label: String(doors[0]!.public_label), ctx: doors[0]!.ctx };
+  };
+  const CHURN = ['monthly_churn', 'paying_subscribers'] as const;
+  const CHURN_EDGE = { id: 'monthly_churn→paying_subscribers', kind: 'edge' };
+  const NEW_EDGE = { id: 'monthly_new_paying_subscribers→paying_subscribers', kind: 'edge' };
+  const churnLink = (strength: string) => ({ from_label: 'Monthly churn', to_label: 'Paying subscribers', strength });
+  const expectSaved = (author: 'user_stated' | 'model_proposed', magnitude: number) => {
+    const saved = edgeNow(...CHURN);
+    expect(Math.abs(saved.strength.mean), 'the approved band was written').toBe(magnitude);
+    if (author === 'user_stated') expect(saved.provenance.source).toBe('user_specified');
+    else expect(saved.provenance.source, 'Olumi’s estimate, never the user’s').not.toBe('user_specified');
   };
 
-  // Not MRR's own links: MRR = Pro plan price × Paying subscribers defines those, and the door leaves them out.
-  const CHURN_SUBSCRIBERS = { id: 'monthly_churn→paying_subscribers', kind: 'edge' };
   it.each([
-    ['Pro plan price is strong.', 'model_proposed'],
-    ['Monthly churn is strong.', 'user_stated'],
-  ] as const)('blocking 1: Monthly churn → Paying subscribers selected, "%s" → %s', async (message, author) => {
-    proposeOn = { message, links: [{ from_label: 'Monthly churn', to_label: 'Paying subscribers', strength: 'strong' }] };
-    const res = await send({ agent_session_id: `t2a3-${randomUUID()}`, message, selected_elements: [CHURN_SUBSCRIBERS] });
-    expect(res.statusCode).toBe(200);
-    expect(doors[0]?.ctx.grounded_links, 'the UI selection reaches the door as the host-resolved link').toEqual([{ from: 'monthly_churn', to: 'paying_subscribers' }]);
-    expect(opFor('monthly_churn::paying_subscribers').value).toMatchObject({ band: 'strong', author });
-    expect(String(doors[0]!.public_label).includes('your estimate')).toBe(author === 'user_stated');
+    ['Pro plan price is strong.', [CHURN_EDGE], 'model_proposed'],
+    ['Monthly churn is strong.', [CHURN_EDGE], 'user_stated'],
+    // PL 22:07Z: two selected links are an ambiguous selection: no link is credited, even the one whose end is named.
+    ['Monthly churn is strong.', [CHURN_EDGE, NEW_EDGE], 'model_proposed'],
+  ] as const)('blocking 1: "%s" with %j selected → %s, on the card and in the saved graph', async (message, selected, author) => {
+    expect(edgeNow(...CHURN).provenance.source, 'precondition: Olumi’s placeholder').toBe('cee_hypothesis');
+    const { op, label, ctx } = await proposeAndApprove(`t2a3-${randomUUID()}`, message, { selected_elements: selected },
+      churnLink('strong'), CHURN.join('::'));
+    expect(ctx.grounded_links, 'the UI selection reaches the door as the host-resolved links')
+      .toEqual(selected.map((s) => ({ from: s.id.split('→')[0], to: s.id.split('→')[1] })));
+    expect(op.value).toMatchObject({ band: 'strong', author });
+    expect(label.includes('your estimate')).toBe(author === 'user_stated');
+    expectSaved(author, 0.55);
   });
 
   it.each([
     ['Olumi says Monthly churn has a weak effect on Paying subscribers. Is that right?', 'model_proposed'],
     ['You suggested Monthly churn has a weak effect on Paying subscribers; I disagree.', 'model_proposed'],
     ['Monthly churn has a weak effect on Paying subscribers.', 'user_stated'],
-  ] as const)('blocking 2: earlier "%s", then a weak estimate → %s', async (earlier, author) => {
+  ] as const)('blocking 2: earlier "%s", then a weak estimate → %s, on the card and in the saved graph', async (earlier, author) => {
     const session = `t2a3-${randomUUID()}`;
-    expect((await send({ agent_session_id: session, message: earlier })).statusCode).toBe(200);
+    await send({ agent_session_id: session, message: earlier });
     expect(doors, 'turn 1 proposes nothing').toHaveLength(0);
-    proposeOn = { message: LATER, links: [{ from_label: 'Monthly churn', to_label: 'Paying subscribers', strength: 'weak' }] };
-    expect((await send({ agent_session_id: session, message: LATER })).statusCode).toBe(200);
-    expect(String(doors[0]?.ctx.user_text), 'the earlier turn is retained, verified history').toContain(earlier);
-    expect(opFor('monthly_churn::paying_subscribers').value).toMatchObject({ band: 'weak', author });
-    expect(String(doors[0]!.public_label).includes('your estimate')).toBe(author === 'user_stated');
+    const { op, label, ctx } = await proposeAndApprove(session, LATER, {}, churnLink('weak'), CHURN.join('::'));
+    expect(String(ctx.user_text), 'the earlier turn is retained, verified history').toContain(earlier);
+    expect(op.value).toMatchObject({ band: 'weak', author });
+    expect(label.includes('your estimate')).toBe(author === 'user_stated');
+    expectSaved(author, 0.1);
   });
 });

@@ -42,7 +42,11 @@ async function journey(from: string, overrides: Record<string, unknown> = {}, ve
     commitOptionLevels: async input => {
       const result = await executeOptionInterventionBatch({ scenarioId: scenario, turnId: input.turn_id,
         requestId: 't2a', requestHash: 't2a-approved', stage: 'frame', freshness: 'none', hasExistingAnalysis: false,
-        expectedGraphHash: input.base_graph_hash, targets: [], linkStrengths: input.link_strengths?.map(link => ({ ...link, adopted: link.author === 'model_proposed' })) }, store);
+        expectedGraphHash: input.base_graph_hash, targets: [],
+        // The production mapping (`dispatch.ts` commitOptionLevelsInProcess): adoption only for a `set`; a kept band is a review.
+        linkStrengths: input.link_strengths?.map(l => ({ from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent,
+          expected: l.expected, band: l.band, adopted: l.author === 'model_proposed' && l.intent === 'set',
+          ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) }, store);
       expect(result.kind, JSON.stringify(result)).toBe('committed');
       if (result.kind !== 'committed') throw new Error(JSON.stringify(result));
       return { status: 'committed', graph_hash: result.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [] };
@@ -61,19 +65,12 @@ async function journey(from: string, overrides: Record<string, unknown> = {}, ve
 }
 
 describe('T2-A retained input_claim on the exact link through proposal, approval, canonical writer and JSON readback', () => {
-  it('(a) earlier verified words naming both ends credit the exact link', async () => {
-    const result = await journey('Price');
+  // PL 22:07Z: the model's `user_stated` is not source authority; verified affirmative words credit whatever it says.
+  it.each([{}, { user_stated: false, basis: 'Model estimate' }])('(a) earlier verified words naming both ends credit the exact link: %j', async overrides => {
+    const result = await journey('Price', overrides);
     expect((result.op.value as { author: string }).author).toBe('user_stated');
     expect(result.edge.provenance.source).toBe('user_specified');
     expect(result.edge.strength.mean).toBe(0.1);
-  });
-  // T2A3 (DL, #2993 check blocking 2): history credit never overrides the model's explicit "not the user's" flag.
-  it('(a) earlier words never outrank the model\u2019s explicit user_stated:false', async () => {
-    const result = await journey('Price', { user_stated: false, basis: 'Model estimate' });
-    expect((result.op.value as { author: string }).author).toBe('model_proposed');
-    expect(result.edge.provenance.source).toBe('cee_hypothesis');
-    expect(result.edge.provenance.magnitude).toBe('olumi_estimate');
-    expect(result.proposal.public_label).toBe('Record this link strength: "Price" \u2192 "MRR" as slight, Olumi\u2019s estimate');
   });
   it.each([{}, { user_stated: false, basis: 'Model estimate' }, { from_words: history }])('(b) a different existing link stays Olumi’s: %j', async overrides => {
     const result = await journey('Quality', overrides);
@@ -162,8 +159,9 @@ describe('T2A3 (#2993 check): a bound link still needs the user’s words to nam
     expect(result.edge.provenance.source).toBe('cee_hypothesis');
     expect(result.proposal.public_label).toBe('Record this link strength: "Price" → "MRR" as strong, Olumi’s estimate');
   });
-  it('blocking 1, two links selected: "Quality is strong." credits Quality → MRR only', async () => {
-    for (const [from, want] of [['Price', 'model_proposed'], ['Quality', 'user_stated']] as const) {
+  // PL 22:07Z: an ambiguous selection (two links selected) credits NO link, even the one whose end is named.
+  it('blocking 1, two links selected: "Quality is strong." credits neither link', async () => {
+    for (const [from, want] of [['Price', 'model_proposed'], ['Quality', 'model_proposed']] as const) {
       const result = await journey(from, { strength: 'strong' }, 'Quality is strong.',
         { ...bothReview, user_turn_text: 'Quality is strong.' }, 0.3);
       expect(author(result), from).toBe(want);
@@ -246,5 +244,24 @@ describe('T2A3 buddy review (Codex, read-only): same-sentence bands, direction, 
     const result = await journey('Price', { strength: 'strong' }, words, { user_turn_text: words }, 0.3);
     expect(author(result)).toBe('user_stated');
     expect(result.edge.provenance.source).toBe('user_specified');
+  });
+});
+
+describe('T2A3 (DL, PL 22:07Z): first-person claims after an attribution, and "<X> effects" in this message', () => {
+  it('"Olumi says Quality is weak, but I think Price has a strong effect on MRR." credits the user\u2019s own clause', async () => {
+    const words = 'Olumi says Quality is weak, but I think Price has a strong effect on MRR.';
+    const result = await journey('Price', { strength: 'strong' }, words, { user_turn_text: words }, 0.3);
+    expect(author(result)).toBe('user_stated');
+    expect(result.edge.provenance.source).toBe('user_specified');
+  });
+  it.each([
+    ['this message: "Price effects are weak." credits the link leaving Price', 'Price effects are weak.', 'Price effects are weak.', 'user_stated'],
+    ['earlier history never supplies the target of a plural', 'Price effects are weak.', 'Please prepare the link.', 'model_proposed'],
+    ['"Olumi says Price effects are weak." is Olumi\u2019s', 'Olumi says Price effects are weak.', 'Olumi says Price effects are weak.', 'model_proposed'],
+    ['a second entity named beside the plural gives no blanket credit', 'Quality matters, and Price effects are weak.', 'Quality matters, and Price effects are weak.', 'model_proposed'],
+  ] as const)('%s', async (_case, verified, turn, want) => {
+    const result = await journey('Price', {}, verified, { user_turn_text: turn });
+    expect(author(result)).toBe(want);
+    expect(result.edge.provenance.source).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
   });
 });
