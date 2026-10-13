@@ -17,8 +17,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAgentCapabilities, draftGateDetail, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { humanMaterialAfterTheDraft } from '../runtime/draft-replacement.js';
 import { isAllowedRunAnalysisAssistantText } from '../../coaching/analysis-result-headline.js';
+import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
-import { retainedLimitOnlyNodeIds } from '../../../graph/retained-limit.js';
+import { retainedLimitOnlyNodeIds, RETAINED_LIMIT_QUANTITY_WITHHELD } from '../../../graph/retained-limit.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
@@ -44,6 +45,7 @@ const FX = JSON.parse(readFileSync(new URL('./fixtures/marketing-020148Z-draft-b
   scenario_id: string; brief_text: string; graph_hash: string; graph_identity_hash: string; graph: Rec;
   l1: { turn_id: string; message: string }; l20: { turn_id: string; message: string }; construction_commit_turn_id: string;
 };
+const CAPTURE_1318 = JSON.parse(readFileSync(new URL('./fixtures/marketing-131858Z-run-state.json', import.meta.url), 'utf8')) as Rec;
 const SID = FX.scenario_id;
 const L20 = FX.l20.message;
 
@@ -165,9 +167,9 @@ const pressed = (proposalId: string) => ({ scenario_id: SID, authenticated_user_
   turn_id: 'approve-turn-0001', user_turn_text: '', user_text: `${FX.l1.message}\n${L20}`, typed_approval_of: proposalId });
 
 /** The production Run loader and handler over the stored bytes: the exact PLoT request and its Run-input record. */
-async function runFromStore(bytes: string, complete = false): Promise<{ payload: Rec; snapshot: Rec; outcome: Rec }> {
+async function runFromStore(bytes: string, complete = false, recorded?: Rec): Promise<{ payload: Rec; snapshot: Rec; outcome: Rec }> {
   const port = {
-    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: FX.brief_text, revision: 2 })),
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: recorded?.brief_text ?? FX.brief_text, revision: 2 })),
     readMostRecentPendingActions: vi.fn(async () => []),
   };
   const snap = await loadScenarioSnapshotForRunAnalysis(SID, 'req-run', port as never);
@@ -176,6 +178,7 @@ async function runFromStore(bytes: string, complete = false): Promise<{ payload:
   const handler = createRunAnalysisHandler({
     plotClient: { run: vi.fn(async (sent: Rec) => {
       payload = structuredClone(sent);
+      if (recorded !== undefined) return { ...structuredClone(recorded.enrichment), analysis_status: 'computed', response_hash: 'captured-131858Z', meta: { seed_used: 42, n_samples: 1000 } };
       const results = sent.options.map((o: Rec, i: number) => ({ option_id: o.id, option_label: o.label,
         win_probability: i === 0 ? 0.7 : 0.3, probability_of_goal: 0.8, probability_of_joint_goal: 0.7,
         probability_of_joint_goal_precision: { n: 1000, standard_error: 0.01 },
@@ -255,9 +258,10 @@ const marketingCandidate = (): Rec => {
 const marketingCard = 'Replace the early draft with a revised one built from your brief and the goal you just gave: '
   + '‘conversion rate’ above 15% and ‘New customers in first 3 months’ at least 20 customers over the first 3 months after launch '
   + '(the draft modelled ‘product feature launch’). '
-  + 'Limits in the revised draft: ‘Annual campaign spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%; ‘Founder time on campaign’ at most 25%. '
+  + 'Limits in the revised draft: ‘Annual campaign spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
   + 'Previous: ‘Founder time on campaign’ at most 25%; proposed: ‘Founder marketing time’ at most 25%. '
   + 'Do these describe the same limit? Both are retained unless you explicitly ask to remove one. '
+  + 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded. '
   + 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
   + 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
   + 'Check the targets, limits and options on this card before choosing.';
@@ -269,12 +273,13 @@ const carriedCardEnd = 'Options: ‘Hire a marketing manager’, ‘AI planning 
   + 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
   + 'Check the targets, limits and options on this card before choosing.';
 const omissionCard = cardStart
-  + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
+  + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year. '
   + 'Carried forward unchanged because the draft omitted it: ‘Founder marketing time’ at most 25%. ' + carriedCardEnd;
 const uncertainCard = cardStart
-  + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year; ‘Advertising time’ at most 25%; ‘Founder marketing time’ at most 25%. '
+  + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year; ‘Advertising time’ at most 25%. '
   + 'Previous: ‘Founder marketing time’ at most 25%; proposed: ‘Advertising time’ at most 25%. '
-  + 'Do these describe the same limit? Both are retained unless you explicitly ask to remove one. ' + carriedCardEnd;
+  + 'Do these describe the same limit? Both are retained unless you explicitly ask to remove one. '
+  + 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded. ' + carriedCardEnd;
 
 const pendingLimit = (previous: Rec, proposedId: string): Rec => ({ ...previous, retained_unresolved_limit: {
   state: 'unscored', role: 'original', reason: 'retained_limit_equivalence_unresolved', previous_constraint_id: previous.constraint_id,
@@ -283,13 +288,15 @@ const pendingLimit = (previous: Rec, proposedId: string): Rec => ({ ...previous,
 
 const withheldReason = 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded.';
 function assertUnresolvedRun(outcome: Rec, rows: Rec[]) {
-  expect(outcome.assistant_text).toBe(withheldReason);
+  const reason = rows.some((r) => r.retained_unresolved_limit?.reason === 'retained_limit_quantity_unresolved')
+    ? RETAINED_LIMIT_QUANTITY_WITHHELD : withheldReason;
+  expect(outcome.assistant_text).toBe(reason);
   const fact = outcome.handler_facts[0];
-  expect(fact.result.summary).toBe(withheldReason);
+  expect(fact.result.summary).toBe(reason);
   expect(fact.result.constraint_verdict.may_name_leading_option).toBe(false);
   expect(fact.result.constraint_verdict.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored',
     constraint_ids: expect.arrayContaining(rows.filter((r) => r.retained_unresolved_limit).map((r) => r.constraint_id)) });
-  expect(buildAnalysisResultBlock(fact).summary).toBe(withheldReason);
+  expect(buildAnalysisResultBlock(fact).summary).toBe(reason);
   const enrichment = fact.result.enrichment;
   expect(enrichment.constraint_analysis?.joint_probability).toBeUndefined();
   expect(enrichment.joint_withheld).toEqual({ reason: 'limit_unscored',
@@ -315,7 +322,16 @@ async function expectStoredRunAndReopen(s: ReturnType<typeof server>, rows: Rec[
   const complete = rows.some((r) => r.retained_unresolved_limit !== undefined);
   const { payload, outcome } = await runFromStore(s.bytes(), complete);
   expect(payload.goal_constraints).toEqual(wire);
-  if (complete) assertUnresolvedRun(outcome, rows);
+  if (complete) {
+    assertUnresolvedRun(outcome, rows);
+    const licence = goalChanceLicenceForAgent(outcome.handler_facts[0].result);
+    expect(agentLicenceRecordOf(outcome.handler_facts[0].result)?.pct_by_option).toEqual({});
+    expect(licence?.targets?.conditions.map((c) => c.constraint_id)).toEqual(rows.map((r) => r.constraint_id));
+    expect(licence?.targets?.joint.status).toBe('withheld');
+    expect(JSON.stringify(licence)).not.toMatch(/Run the analysis again|Run again/);
+    expect(licence?.targets?.conditions.filter((c) => c.role === 'target').every((c) => c.clause.endsWith('over the first three months after launch'))).toBe(true);
+    expect(licence?.notes?.some((n) => n.includes('retained') || n.includes('limits'))).toBe(true);
+  }
   if (complete && rows.some((r) => r.node_id === 'founder_time_on_campaign') && process.env.M1B_EVIDENCE_DIR) {
     writeFileSync(`${process.env.M1B_EVIDENCE_DIR}/marketing-run.json`, JSON.stringify({ constraints: payload.goal_constraints, outcome }, null, 2));
   }
@@ -326,6 +342,17 @@ async function expectStoredRunAndReopen(s: ReturnType<typeof server>, rows: Rec[
   expect(next.payload.goal_constraints).toEqual(wire);
   if (complete) assertUnresolvedRun(next.outcome, rows);
 }
+
+describe('MA2 original 13:18Z evidence, kept separate from the scripted revised-draft continuation', () => {
+  it('replays the captured saved old model through Run: both exact unscored-limit reasons persist, and no absent AND target is invented', async () => {
+    const { payload, outcome } = await runFromStore(JSON.stringify(CAPTURE_1318.graph), true, CAPTURE_1318);
+    expect(payload.goal_constraints).toEqual(CAPTURE_1318.graph.goal_constraints);
+    expect(outcome.handler_facts[0].result.constraint_verdict.per_limit).toEqual(CAPTURE_1318.limit_verdicts.per_limit);
+    expect(goalChanceLicenceForAgent(outcome.handler_facts[0].result)).toBeUndefined();
+    expect(CAPTURE_1318.graph.nodes.filter((n: Rec) => n.kind === 'goal').map((n: Rec) => n.label)).toEqual(['Product feature launch']);
+    expect(CAPTURE_1318.graph.goal_constraints.filter((c: Rec) => c.role === 'goal_target')).toEqual([]);
+  });
+});
 
 describe('M1 captured marketing limit spellings through revised-draft offer and approval', () => {
   it('offers both captured targets and limits through approval, saved postimage, Run and cold reopen', async () => {
@@ -564,6 +591,35 @@ describe('the gates refuse, and nothing is drafted or written', () => {
         value: 100000, label: 'Annual marketing spend', unit: 'GBP/year', provenance: 'explicit', value_frame: 'level' },
       original,
     ]);
+  });
+
+  it('a limit omitted WITH its node is retained unscored through approval, production Run and reopen', async () => {
+    const s = server();
+    const draft = () => {
+      const c = candidate();
+      c.constraints = c.constraints.filter((x: Rec) => x.metric !== 'Founder marketing time');
+      c.factors = c.factors.filter((x: Rec) => x.label !== 'Founder marketing time');
+      c.links = c.links.filter((x: Rec) => x.from !== 'Founder marketing time' && x.to !== 'Founder marketing time');
+      return c;
+    };
+    const { caps, proposals } = lane(s, new ProposalStore(), draft);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offer.ok).toBe(true);
+    const prepared = (proposals.get(offer.proposal_id as string)!.operations[0]!.value as Rec).candidate;
+    const original = FX.graph.goal_constraints.find((r: Rec) => r.node_id === 'founder_marketing_time');
+    const retained = { ...original, retained_unresolved_limit: { state: 'unscored', role: 'original',
+      reason: 'retained_limit_quantity_unresolved', previous_constraint_id: original.constraint_id,
+      proposed_constraint_ids: [], question: 'What forecast and basis should be used to evaluate this retained limit?' } };
+    expect(prepared.goal_constraints.find((r: Rec) => r.constraint_id === original.constraint_id)).toEqual(retained);
+    expect(prepared.nodes.find((n: Rec) => n.id === original.node_id)).toEqual(FX.graph.nodes.find((n: Rec) => n.id === original.node_id));
+    expect(prepared.edges.filter((e: Rec) => e.from === original.node_id || e.to === original.node_id)).toEqual([]);
+    expect(offer.public_label).toBe(omissionCard.replace(carriedCardEnd, RETAINED_LIMIT_QUANTITY_WITHHELD + ' ' + carriedCardEnd));
+    expect(isAllowedRunAnalysisAssistantText(RETAINED_LIMIT_QUANTITY_WITHHELD)).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(RETAINED_LIMIT_QUANTITY_WITHHELD + ' All conditions passed.')).toBe(false);
+    s.said(FX.l20.turn_id);
+    expect(await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never))
+      .toMatchObject({ ok: true, mutated: true, applied: true });
+    await expectStoredRunAndReopen(s, prepared.goal_constraints);
   });
 
   it('a revised draft with no target is still refused', async () => {

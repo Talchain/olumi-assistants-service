@@ -35,7 +35,7 @@ import {
   GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
-import { withholdOptionGoalFigures, withholdStatusQuoIntervals } from '../../orchestrator/context/constraint-feasibility.js';
+import { withholdOptionGoalFigures, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
@@ -229,6 +229,7 @@ export interface GoalChanceLicence {
 
 /** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
 export interface GoalChanceConstraintInputs {
+  readonly perLimit?: readonly PerLimitVerdict[];
   readonly storedConstraints?: unknown;
   readonly sentConstraints?: unknown;
   /** What CEE sent PLoT for this Run: binds a deadline goal's engine-read chance (`goal-own-constraint-chance.ts`). */
@@ -376,6 +377,39 @@ export function displayedGoalPct(p: number): number {
  * only where the Run's own goal certainty earned it (`earned`; 0.63.0): the transport strips an unearned one, so a licence
  * over it would quote a figure the user is never shown. No certainty decision ⇒ unearned (fail closed).
  */
+function licenceGoalIdentity(goalId: unknown, goal: Rec | undefined) {
+  return { ...(typeof goalId === 'string' ? { goal_node_id: goalId } : {}),
+    ...(typeof goal?.label === 'string' ? { goal_label: goal.label } : {}) };
+}
+
+/** Target-state survives a primary-goal refusal, without reviving any refused percentages. */
+function goalTargetStateOf(
+  envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
+  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
+): GoalChanceLicence | null {
+  const primary = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
+  if (primary !== null || !isRec(envelope)) return primary;
+  const nodes = isRec(horizonGraph) && Array.isArray(horizonGraph.nodes) ? horizonGraph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId);
+  const optionIds = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
+  const block = goalTargetsBlockOf({ envelope, graph: horizonGraph, optionIds,
+    storedConstraints: constraints.storedConstraints, sentConstraints: constraints.sentConstraints,
+    basis: goalTargetBasisOf(goal), perLimit: constraints.perLimit, primaryGoalId: goalId, primaryRefused: true });
+  const target = block?.conditions.find((c) => c.role === 'target');
+  if (block === null || target === undefined || optionIds.length === 0) return null;
+  // The primary percentage remains empty; secondary targets use the existing per-target guards and attribution.
+  const seed: GoalChanceLicence = { code: GOAL_CHANCE_LICENSED, severity: 'info', message: '', form: 'each', option_ids: optionIds,
+    pct_by_option: {}, withheld_option_ids: optionIds,
+    target: { comparator: COMPARATOR[target.operator]!, value: target.value, unit: target.unit },
+    ...licenceGoalIdentity(goalId, goal),
+    notes: [], targets: block };
+  return withSeveralTargets(seed, { envelope, graph: horizonGraph, goal, basis: goalTargetBasisOf(goal),
+    statusQuoId: nodes.find((n) => n.kind === 'option' && n.is_baseline === true)?.id as string | undefined,
+    constraints, option_ids: optionIds, alsoRequired: goalTargetBasisOf(goal)?.also_required ?? [],
+    sqReading: 'unknown', timingOrdinary: ordinaryTimingOf(horizonGraph, envelope).ordinary,
+    estimates: NO_ESTIMATES, estimateOnly: false, jointEstimates: undefined, primaryRefused: true });
+}
+
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
@@ -600,8 +634,7 @@ export function goalChanceLicenceOf(
     form,
     option_ids,
     pct_by_option: pct,
-    ...(typeof goalId === 'string' ? { goal_node_id: goalId } : {}),
-    ...(typeof goal?.label === 'string' ? { goal_label: goal.label } : {}),
+    ...licenceGoalIdentity(goalId, goal),
     option_labels_by_option: Object.fromEntries(option_ids.flatMap(id => {
       const label = nodes.find(n => n.id === id && n.kind === 'option')?.label;
       return typeof label === 'string' && label.trim() !== '' ? [[id, label]] : [];
@@ -819,6 +852,7 @@ function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs): 
  */
 function withSeveralTargets(l: GoalChanceLicence, c: {
   readonly envelope: unknown; readonly graph: unknown; readonly basis: GoalTargetBasis | undefined;
+  readonly primaryRefused?: boolean;
   readonly statusQuoId: string | undefined; readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
   /** The drafter's retained conditions (`goal_target_basis.also_required`), whatever the basis' timing (AIE C clause 3). */
   readonly alsoRequired: readonly string[];
@@ -864,6 +898,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   let block = goalTargetsBlockOf({
     envelope: c.envelope, graph: c.graph, storedConstraints: c.constraints.storedConstraints,
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
+    perLimit: c.constraints.perLimit, primaryGoalId: c.goal?.id, primaryRefused: c.primaryRefused,
     ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint: allAssumed || jointMovedIds.size > 0, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
     ...(c.basis !== undefined ? { basis: c.basis } : {}),
   });
@@ -896,7 +931,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   // R5-3: a moved LIMIT is named too — it is why the status quo's joint is withheld.
   const movedNames = [...namedWhere(movedIds, 'moved'),
     ...block.conditions.filter((x) => x.role === 'limit' && jointMovedIds.has(x.constraint_id)).map((x) => x.label)];
-  const notes: string[] = [];
+  const notes: string[] = [...(block.notes ?? [])];
   let assumptionSaid = false;
   for (const n of l.notes ?? []) {
     if (n.startsWith('This chance covers ') || n === UNVERIFIED_SOURCES_NOTE) continue;
@@ -1217,7 +1252,7 @@ export function withGoalChanceLicence<E>(
 ): E {
   // B2 (check BLOCKING 3): a deadline goal's Run that did not test the HELD target withholds every option's chance, with words.
   const checked = withSentTargetWithheld(envelope, graph, goalId, constraints.sentRun);
-  const licence = goalChanceLicenceOf(checked, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
+  const licence = goalTargetStateOf(checked, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
   if (licence === null || !isRec(checked)) return checked;
   // Recovery Batch C, amendment 1 (DL contract ruling 3): a status quo the licence records as BY ASSUMPTION carries no
   // precision and no Monte Carlo interval on any surface (its standard error is 0 by construction: never "±0").

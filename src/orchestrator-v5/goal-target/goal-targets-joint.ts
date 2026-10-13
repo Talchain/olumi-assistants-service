@@ -18,10 +18,12 @@
  * Pure and total; reads only the Run's own records and the rows it sent.
  */
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
-import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import { goalFiguresWithheldWarnings, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { comparatorWords, periodWords, type GoalTargetBasis } from './goal-target-basis.js';
 import { readGoalRecord } from './goal-record.js';
 import { displayedPctAt, displayRoundingFor, wilsonHalfWidthPoints, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
+import { unresolvedRetainedLimits, retainedLimitWithheldLine } from '../../graph/retained-limit.js';
+import type { PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { isOlumiEstimateValue } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, unknown>;
@@ -33,7 +35,7 @@ const unit01 = (v: unknown): v is number => finite(v) && v >= 0 && v <= 1;
 export const GOAL_TARGET_ROLE = 'goal_target';
 
 export type JointWithholdReason = 'not_returned' | 'precision_missing' | 'strict_not_preserved' | 'condition_not_named' | 'olumi_base' | 'no_option'
-  | 'target_not_supported' | 'figure_not_preserved';
+  | 'target_not_supported' | 'figure_not_preserved' | 'condition_unscored';
 
 export interface GoalCondition {
   readonly constraint_id: string;
@@ -63,6 +65,8 @@ export type GoalJoint =
 
 export interface GoalTargetsBlock {
   readonly conditions: readonly GoalCondition[];
+  /** Disclosures copied to the existing licence notes; no figure is licensed by a note. */
+  readonly notes?: readonly string[];
   /**
    * AIE C clause 3 (12 Oct): the labels of the goal's targets this analysis cannot yet combine (a target stated as a
    * change, including the goal's own). They are kept and named; the joint is withheld with `target_not_supported`.
@@ -106,6 +110,7 @@ export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupp
       : `, and nor is the chance of ${listWords(strictLost)} on ${strictLost.length === 1 ? 'its' : 'their'} own`;
     return `The chance of meeting ${all} together isn’t shown${own}: this analysis did not use every stated target as specified.`;
   }
+  if (reason === 'condition_unscored') return `The chance of meeting ${all} together isn’t shown: one or more conditions could not be evaluated. The condition notes explain why.`;
   if (reason === 'condition_not_named') return `The chance of meeting ${all} together isn’t shown: one of its conditions can’t be said in your units.`;
   if (reason === 'olumi_base') return `The chance of meeting ${all} together isn’t shown yet: it rests on Olumi’s own assumed starting value for a target, which you haven’t given.`;
   // Independent check r1 item 7: a joint figure that came back WITHOUT its precision was calculated; say what is missing.
@@ -130,7 +135,7 @@ function precisionOf(v: unknown): { n: number; se: number } | null {
 const optionIdOf = (r: Rec): string | undefined => typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
 
 /**
- * The several-targets block for a Run that SENT at least one `goal_target` row, else `null` (one target: nothing changes).
+ * The several-targets block for a model that STORED at least one `goal_target` row, else `null` (one target: nothing changes).
  * `optionIds` are the scored options in the model's order. The status quo is given no figure only where its own reference
  * says so (AIE status-quo disposition, 12 Oct): `fromTargets` names each target whose marginal it is left out of (that
  * target's reference is the same-draw one, or its share disagrees with it), and `fromJoint` whether it is left out of the
@@ -144,11 +149,14 @@ export function goalTargetsBlockOf(args: {
   readonly optionIds: readonly string[];
   readonly statusQuo?: { readonly id: string; readonly fromJoint: boolean; readonly fromTargets: ReadonlySet<string> };
   readonly basis?: GoalTargetBasis;
+  readonly perLimit?: readonly PerLimitVerdict[];
+  readonly primaryGoalId?: unknown;
+  readonly primaryRefused?: boolean;
 }): GoalTargetsBlock | null {
   const stored = Array.isArray(args.storedConstraints) ? args.storedConstraints.filter(isRec) : [];
   const sent = Array.isArray(args.sentConstraints) ? args.sentConstraints.filter(isRec) : [];
   const targetIds = new Set(stored.filter((r) => r.role === GOAL_TARGET_ROLE && typeof r.constraint_id === 'string').map((r) => r.constraint_id as string));
-  if (!sent.some((r) => typeof r.constraint_id === 'string' && targetIds.has(r.constraint_id))) return null;
+  if (targetIds.size === 0) return null;
   const nodes = isRec(args.graph) && Array.isArray(args.graph.nodes) ? args.graph.nodes.filter(isRec) : [];
   const labelOf = (id: unknown): string | undefined => {
     const label = nodes.find((n) => n.id === id)?.label;
@@ -156,7 +164,7 @@ export function goalTargetsBlockOf(args: {
   };
   const period = args.basis === undefined ? '' : ` ${periodWords(args.basis)}`;
 
-  // Every condition the engine was sent, in the words the user stated it (strict kept). A row we cannot say is fatal to the joint.
+  // Every stored or sent condition, in the words the user stated it (strict kept). A row we cannot say is fatal to the joint.
   let unnamed = false;
   let strictLost = false;
   const strictLostIds = new Set<string>();
@@ -166,7 +174,9 @@ export function goalTargetsBlockOf(args: {
   const conditions: GoalCondition[] = [];
   // AIE C clause 3: a target kept in its own (change) frame is named here, never forced into a level clause.
   const unsupported: string[] = [];
-  for (const row of sent) {
+  // Stored conditions remain visible even when admission refused to send one.
+  const inventory = [...sent, ...stored.filter((r) => !sent.some((x) => x.constraint_id === r.constraint_id))];
+  for (const row of inventory) {
     const id = row.constraint_id;
     const node = row.node_id;
     const storedRow = stored.find((r) => r.constraint_id === id);
@@ -174,14 +184,14 @@ export function goalTargetsBlockOf(args: {
     if (typeof id !== 'string' || typeof node !== 'string' || op === undefined) { unnamed = true; continue; }
     // ⛔ Ruling 16: "above 15%" must have been SENT as ">" — never scored as "at least 15%" and called "above". The joint
     // waits, and so does THIS condition's own chance (independent check r1 item 4): its marginal was scored on the sent bound.
-    if (row.operator !== op) { strictLost = true; strictLostIds.add(id); }
+    if (sent.includes(row) && row.operator !== op) { strictLost = true; strictLostIds.add(id); }
     // ⛔ RE-SCOPE 2 (R5-4; AIE open 2): EXACT finite agreement, in the same unit and frame, from the same caller snapshot —
     // never a unit-dependent tolerance (`1e-9 × max(1, |v|)` was not an attested representation equality: 15 + 1e-12 is
     // another figure). A row whose sent unit or frame differs from the stored one was scored on another quantity reading.
     const differs = (k: 'unit' | 'value_frame'): boolean => typeof row[k] === 'string' && typeof storedRow?.[k] === 'string' && row[k] !== storedRow[k];
     if (storedRow !== undefined && finite(storedRow.value)
       && (!(finite(row.value) && row.value === storedRow.value) || differs('unit') || differs('value_frame'))) figureLostIds.add(id);
-    const label = labelOf(node);
+    const label = labelOf(node) ?? (typeof storedRow?.label === 'string' && storedRow.label.trim() !== '' && !/[\r\n]/.test(storedRow.label) ? storedRow.label.trim() : undefined);
     const unit = typeof row.unit === 'string' && row.unit.trim() !== '' ? row.unit.trim()
       : typeof storedRow?.unit === 'string' && storedRow.unit.trim() !== '' ? storedRow.unit.trim() : undefined;
     const value = finite(storedRow?.value) ? storedRow!.value : row.value;
@@ -195,7 +205,7 @@ export function goalTargetsBlockOf(args: {
     const role = targetIds.has(id) ? 'target' as const : 'limit' as const;
     conditions.push({
       constraint_id: id, node_id: node, role, operator: op as GoalCondition['operator'],
-      value, unit, label, clause: `‘${label}’ ${role === 'target' ? 'being' : 'is'} ${bound} ${sayFigureAsWritten(value, unit)}`,
+      value, unit, label, clause: `‘${label}’ ${role === 'target' ? 'being' : 'is'} ${bound} ${sayFigureAsWritten(value, unit)}${role === 'target' ? period : ''}`,
     });
   }
   const ordered = [...conditions.filter((c) => c.role === 'target'), ...conditions.filter((c) => c.role === 'limit')];
@@ -231,12 +241,41 @@ export function goalTargetsBlockOf(args: {
   const compared = args.optionIds.filter((id) => !(sq?.fromJoint === true && id === sq.id));
   const comparedFor = (constraintId: string): string[] => args.optionIds.filter((id) => !(sq?.fromTargets.has(constraintId) === true && id === sq.id));
 
+  const upstream = isRec(args.envelope) ? goalFiguresWithheldWarnings(args.envelope) : [];
+  const notes: string[] = [];
+  const limitNotes = new Set<string>();
+  const retainedIds = new Set(unresolvedRetainedLimits(args.graph).map((r) => r.constraint_id));
+  const targetWarnings = (t: GoalCondition) => upstream.filter((w) =>
+    (Array.isArray(w.constraint_ids) && w.constraint_ids.includes(t.constraint_id))
+    || (t.node_id === args.primaryGoalId));
+  const refusedTargets = new Set(targets.filter((t) => (args.primaryRefused && t.node_id === args.primaryGoalId)
+    || !sent.some((r) => r.constraint_id === t.constraint_id)).map((t) => t.constraint_id));
+  for (const c of ordered) {
+    const verdict = args.perLimit?.find((v) => v.constraint_id === c.constraint_id);
+    if (verdict?.state === 'unscored') {
+      const reason = retainedIds.has(c.constraint_id) ? retainedLimitWithheldLine(args.graph) : verdict.reason === 'parts_links_placeholder'
+        ? 'The contributing quantities have links whose sizes are not yet specified. Define those contributions or supply a forecast for this quantity.'
+        : verdict.reason === 'limit_rests_on_olumi_guess'
+          ? 'The calculation still rests on Olumi’s estimated quantities. Review their basis and uncertainty; the limit or target itself is not a forecast.'
+          : 'This Run did not return a usable evaluation for this condition; the reason needs to be checked.';
+      const note = `${c.clause}: ${reason}`;
+      notes.push(note);
+      limitNotes.add(note);
+    }
+    if (c.role === 'target' && olumiBase.has(c.constraint_id)) notes.push(`${c.clause}: ${jointWithheldLine(2, 'olumi_base')}`);
+    if (c.role === 'target' && (refusedTargets.has(c.constraint_id) || targetWarnings(c).length > 0)) {
+      const messages = targetWarnings(c).flatMap((w) => typeof w.message === 'string' ? [w.message] : []);
+      notes.push(`${c.clause}: ${messages.length > 0 ? [...new Set(messages)].join(' ') : 'This Run did not test the stated target. Its quantity and scoring frame need to be resolved.'}`);
+    }
+  }
+
   // Each target's own chance, per option, from the same Run (never re-derived).
   const perTarget: GoalTargetChance[] = targets.flatMap((t) => {
-    if (olumiBase.has(t.constraint_id) || strictLostIds.has(t.constraint_id) || figureLostIds.has(t.constraint_id)) return [];
+    if (refusedTargets.has(t.constraint_id) || olumiBase.has(t.constraint_id) || strictLostIds.has(t.constraint_id) || figureLostIds.has(t.constraint_id)) return [];
     const pct: Record<string, number> = {};
     const rounding: Record<string, GoalChanceDisplayRounding> = {};
     for (const id of comparedFor(t.constraint_id)) {
+      if (targetWarnings(t).some((w) => !Array.isArray(w.option_ids) || w.option_ids.includes(id))) continue;
       const r = recordOf.get(id);
       const cp = r === undefined ? undefined : r.constraint_probabilities;
       const p = isRec(cp) ? cp[t.constraint_id] : Array.isArray(cp)
@@ -247,16 +286,18 @@ export function goalTargetsBlockOf(args: {
       pct[id] = displayedPctAt(p, step);
       if (pr !== null) rounding[id] = step;
     }
+    const absent = comparedFor(t.constraint_id).filter((id) => !Object.hasOwn(pct, id));
+    if (absent.length > 0) notes.push(`${t.clause}: This Run did not return a usable chance for ${listWords(absent.map((id) => `‘${labelOf(id) ?? id}’`))}.`);
     if (Object.keys(pct).length === 0) return [];
-    return [{ constraint_id: t.constraint_id, words: `${t.clause}${period}`, pct_by_option: pct,
+    return [{ constraint_id: t.constraint_id, words: t.clause, pct_by_option: pct,
       ...(Object.keys(rounding).length > 0 ? { display_rounding_by_option: rounding } : {}) }];
   });
 
-  const n = Math.max(ordered.length + unsupported.length + unsentTargets.length + (unnamed ? 1 : 0), 2);
+  const n = Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2);
   const withheld = (reason: JointWithholdReason): GoalJoint => ({
     status: 'withheld', reason,
     line: jointWithheldLine(n, reason, unsupported, targets.filter((t) => (reason === 'figure_not_preserved' ? figureLostIds : strictLostIds)
-      .has(t.constraint_id)).map((t) => t.clause)),
+      .has(t.constraint_id)).map((t) => period === '' ? t.clause : t.clause.slice(0, -period.length))),
     // Amendment 6: the bound needs each named target's own chance on the screen, for every compared option.
     ...(perTarget.length >= 2 && perTarget.length === targets.length && !unnamed && unsupported.length === 0 && unsentTargets.length === 0
       && ordered.length === targets.length
@@ -268,6 +309,7 @@ export function goalTargetsBlockOf(args: {
   else if (strictLost) joint = withheld('strict_not_preserved');
   else if (figureLostIds.size > 0 || unsentTargets.length > 0) joint = withheld('figure_not_preserved');
   else if (olumiBase.size > 0) joint = withheld('olumi_base');
+  else if (args.primaryRefused) joint = withheld('condition_unscored');
   else {
     const pct: Record<string, number> = {};
     const rounding: Record<string, GoalChanceDisplayRounding> = {};
@@ -288,19 +330,22 @@ export function goalTargetsBlockOf(args: {
       rounding[id] = step;
     }
     if (compared.length === 0) joint = withheld('no_option');
-    else if (Object.keys(pct).length === 0) joint = withheld(anyFigure && anyPrecisionMissing ? 'precision_missing' : 'not_returned');
+    else if (Object.keys(pct).length === 0) joint = withheld(notes.length > 0 ? 'condition_unscored' : anyFigure && anyPrecisionMissing ? 'precision_missing' : 'not_returned');
     else {
       // Amendment 5 / ruling 22: the targets share the stated period; a limit keeps its own (annual budget) and is said after
       // "while", so the period is never read as the limit's.
       const limits = ordered.filter((c) => c.role === 'limit').map((c) => c.clause);
-      const words = `${listWords(targets.map((c) => c.clause))}${period}${limits.length > 0 ? `, while ${listWords(limits)}` : ''}`;
+      const words = `${listWords(targets.map((c) => period === '' ? c.clause : c.clause.slice(0, -period.length)))}${period}${limits.length > 0 ? `, while ${listWords(limits)}` : ''}`;
       joint = {
         status: 'licensed', words, pct_by_option: pct,
         display_rounding_by_option: rounding, ...(missing.length > 0 ? { withheld_option_ids: missing } : {}),
       };
     }
   }
-  return { conditions: ordered, per_target: perTarget, joint, ...(unsupported.length > 0 ? { unsupported_targets: unsupported } : {}) };
+  // A missing marginal or legacy per-limit certificate does not revoke a joint the existing gates licensed.
+  // Phase a explains withheld results; full event testability is the separately scoped positive-path work.
+  const shownNotes = joint.status === 'withheld' ? notes : notes.filter((note) => !limitNotes.has(note));
+  return { conditions: ordered, ...(shownNotes.length > 0 ? { notes: shownNotes } : {}), per_target: perTarget, joint, ...(unsupported.length > 0 ? { unsupported_targets: unsupported } : {}) };
 }
 
 /** The stored block as a reader may use it, or `undefined` when it is malformed (a record at odds with itself speaks for nothing). */

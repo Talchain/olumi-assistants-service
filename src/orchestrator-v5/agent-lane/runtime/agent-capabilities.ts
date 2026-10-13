@@ -3562,6 +3562,7 @@ export function createAgentCapabilities(
       + (limits.uncertain.length > 0 ? limits.uncertain.map(({ previous, proposed }) =>
         `Previous: ${sayRow(g.raw, previous)}; proposed: ${proposed.map((r) => sayRow(candidate, r)).join('; ')}. `).join('')
         + 'Do these describe the same limit? Both are retained unless you explicitly ask to remove one. ' : '')
+      + (limits.withheld === undefined ? '' : `${limits.withheld} `)
       + (options.length > 0 ? `Options: ${options.join(', ')}. ` : '')
       + (limits.dropped.length > 0 ? 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
         : 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. ')

@@ -1542,3 +1542,59 @@ describe('R5 at the producer — the licence target carries the validated readin
     expect(l!.target).not.toHaveProperty('frame');
   });
 });
+
+
+describe('MA2 complete condition inventory when the primary target cannot be licensed', () => {
+  const conditionGraph = () => {
+    const g = marketingGraph();
+    (g.nodes as Rec[]).push({ id: 'founder_time', kind: 'factor', label: 'Founder time' });
+    (g.goal_constraints as Rec[]).push(
+      { constraint_id: 'limit:budget', node_id: 'annual_spend', operator: '<=', value: 100000, unit: 'GBP/year', value_frame: 'level' },
+      { constraint_id: 'limit:time', node_id: 'founder_time', operator: '<=', value: 25, unit: '%', value_frame: 'level' });
+    return g;
+  };
+  it('keeps all four conditions and their actual refusals, with the launch window, through stored licence and screen notes', () => {
+    const g = conditionGraph();
+    // Independent numeric refusal: no primary threshold reached the engine. Stored target/basis remain intact.
+    const scored = structuredClone(g);
+    delete (scored.nodes as Rec[])[0]!.goal_threshold;
+    const run = marketingRun({ probability_of_goal: undefined, probability_of_joint_goal: undefined, constraint_probabilities: {} });
+    run.inference_warnings = [{ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', severity: 'warning', node_ids: ['new_customers'],
+      option_ids: ['hire_manager', 'ai_plus_ads'], message: 'Not shown. The customer forecast has no supported scoring frame.' }];
+    const sent = wireGoalConstraints(g.goal_constraints);
+    const envelope = withGoalChanceLicence(run, scored, 'new_customers', undefined, undefined, g, {
+      storedConstraints: g.goal_constraints, sentConstraints: sent, perLimit: [
+        { constraint_id: 'limit:budget', state: 'unscored', reason: 'parts_links_placeholder' },
+        { constraint_id: 'limit:time', state: 'unscored', reason: 'limit_rests_on_olumi_guess' },
+      ] });
+    const licence = goalChanceLicenceForAgent(JSON.parse(JSON.stringify({ enrichment: envelope })))!;
+    expect(licence).toBeDefined();
+    expect(licence.targets!.conditions.map((c) => [c.constraint_id, c.clause])).toEqual([
+      ['target:new_customers', '‘New customers’ being at least 20 customers over the first three months after launch'],
+      ['target:conversion_rate', '‘Conversion rate’ being above 15% over the first three months after launch'],
+      ['limit:budget', '‘Annual spend’ is at most £100,000 / year'],
+      ['limit:time', '‘Founder time’ is at most 25%'],
+    ]);
+    expect(licence.notes).toEqual([
+      '‘New customers’ being at least 20 customers over the first three months after launch: Not shown. The customer forecast has no supported scoring frame.',
+      '‘Annual spend’ is at most £100,000 / year: The contributing quantities have links whose sizes are not yet specified. Define those contributions or supply a forecast for this quantity.',
+      '‘Founder time’ is at most 25%: The calculation still rests on Olumi’s estimated quantities. Review their basis and uncertainty; the limit or target itself is not a forecast.',
+      '‘Conversion rate’ being above 15% over the first three months after launch: This Run did not return a usable chance for ‘Hire a marketing manager’ and ‘AI planning plus advertising’.',
+    ]);
+    expect(licence.targets!.joint).toEqual({ status: 'withheld', reason: 'condition_unscored',
+      line: 'The chance of meeting all of them together isn’t shown: one or more conditions could not be evaluated. The condition notes explain why.' });
+    expect(JSON.stringify(licence)).not.toMatch(/Run the analysis again|Run again/);
+    const screen = goalChanceNotesForAgent({ type: 'analysis_result', enrichment: envelope }, g, true);
+    expect(JSON.stringify(screen)).toContain('The customer forecast has no supported scoring frame.');
+    expect(JSON.stringify(screen)).toContain('The calculation still rests on Olumi’s estimated quantities.');
+  });
+  it('a stored target missing from the request remains in the inventory and notes without a marginal', () => {
+    const g = marketingGraph();
+    const sent = (wireGoalConstraints(g.goal_constraints) as Rec[]).filter((r) => r.node_id !== 'conversion_rate');
+    const licence = licenceFor(marketingRun(), g, sent)!;
+    expect(licence.targets!.conditions.map((c) => c.constraint_id)).toEqual(['target:new_customers', 'target:conversion_rate']);
+    expect(licence.targets!.per_target.map((t) => t.constraint_id)).toEqual(['target:new_customers']);
+    expect(licence.notes).toContain('‘Conversion rate’ being above 15% over the first three months after launch: This Run did not test the stated target. Its quantity and scoring frame need to be resolved.');
+    expect(licence.targets!.joint.status).toBe('withheld');
+  });
+});

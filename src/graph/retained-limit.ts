@@ -8,6 +8,8 @@ const limitRows = (graph: unknown): Rec[] => records(record(graph).goal_constrai
 
 export const RETAINED_LIMIT_QUESTION = 'Do these describe the same limit?';
 export const RETAINED_LIMIT_WITHHELD = 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded.';
+export const RETAINED_LIMIT_QUANTITY_QUESTION = 'What forecast and basis should be used to evaluate this retained limit?';
+export const RETAINED_LIMIT_QUANTITY_WITHHELD = 'The result for the full goal, including the joint chance with its limits, is withheld because a carried limit has no supported quantity in the revised model. The limit remains recorded; a forecast and its basis are needed to evaluate it.';
 export const RETAINED_LIMIT_WITHHOLD_CODE = 'GOAL_FIGURES_RETAINED_LIMIT_UNRESOLVED';
 
 /** Only the carry-forward's bound, still-pending question licenses this state. A dangling marker licenses nothing. */
@@ -18,7 +20,12 @@ export function unresolvedRetainedLimits(graph: unknown) {
     if (!parsed.success || parsed.data.role === 'goal_target') return [];
     const c = parsed.data;
     const m = c.retained_unresolved_limit;
-    if (m === undefined || m.question !== RETAINED_LIMIT_QUESTION) return [];
+    if (m === undefined) return [];
+    if (m.reason === 'retained_limit_quantity_unresolved') {
+      return m.role === 'original' && m.previous_constraint_id === c.constraint_id
+        && m.proposed_constraint_ids.length === 0 && m.question === RETAINED_LIMIT_QUANTITY_QUESTION ? [c] : [];
+    }
+    if (m.question !== RETAINED_LIMIT_QUESTION) return [];
     const previous = rows.find((r) => r.constraint_id === m.previous_constraint_id);
     const origin = record(previous?.retained_unresolved_limit);
     if (previous === undefined || previous.role === 'goal_target' || origin.previous_constraint_id !== previous.constraint_id
@@ -59,4 +66,10 @@ export function withholdRetainedLimitFrames<C>(graph: unknown, constraints: C): 
     const { value_frame: _frame, ...unscored } = row;
     return unscored;
   }) as C;
+}
+
+/** The limitation actually bound to the retained rows; equivalence alone never supplies a forecast. */
+export function retainedLimitWithheldLine(graph: unknown): string {
+  return unresolvedRetainedLimits(graph).some((c) => c.retained_unresolved_limit?.reason === 'retained_limit_quantity_unresolved')
+    ? RETAINED_LIMIT_QUANTITY_WITHHELD : RETAINED_LIMIT_WITHHELD;
 }
