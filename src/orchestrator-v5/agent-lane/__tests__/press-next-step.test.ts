@@ -1,16 +1,22 @@
 /**
- * ⭐ COACH (DL coaching-on-press): each withheld-Run blocker is typed by its own producer, from that producer's facts. A missing
- * input is asked; a missing implementation is said plainly and never asked; an existing card owns its own step; a stale result
- * says its own line. Real inputs where they exist: the served s4b capture's graph and verdict (unseen-1).
+ * ⭐ COACH (DL coaching-on-press; PL #94 6135017311): each withheld-Run blocker is typed by its own producer, from that
+ * producer's facts. A missing input is asked only where the answer unlocks the next stage; "can't calculate yet" only where
+ * no writer, card or input can unlock it; a card or control is its own step; a stale result says its own line while it can
+ * be run again. Real inputs: the served s4b capture (unseen-1), the target verdict's own graphs, the admitted event model.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { targetBlockerOf, targetTestabilityOf, untestableTargetParts, type UntestableTargetParts } from '../../admission/target-testability.js';
-import { jointBlockerOf, jointWithheldLine, type JointWithholdReason } from '../../goal-target/goal-targets-joint.js';
-import { chanceGoalBlockerOf, chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
+import { jointBlockerOf, jointWithheldLine, olumiBaseTargetsOf, type GoalCondition, type JointWithholdReason } from '../../goal-target/goal-targets-joint.js';
+import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
+import { chanceGoalBlockerOf, eventModelAsk, withEventShareDate } from '../../goal-target/event-by-date-model.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { unreadGoalProductBlockerOf, type UnreadGoalProduct } from '../unread-goal-product.js';
 import { staleBlockerOf, staleResultLine } from '../write-outcome.js';
-import { AIE_TEXT_PENDING_CANNOT_CALCULATE_YET, AIE_TEXT_PENDING_STARTING_VALUE_ASK, oneNextStep, unownedNextStep, type PressBlocker } from '../press-next-step.js';
+import { AIE_TEXT_PENDING_CANNOT_CALCULATE_YET, oneNextStep, unownedNextStep, type NextStepOwners, type PressBlocker } from '../press-next-step.js';
 
 type Rec = Record<string, any>;
 const read = (name: string): Rec => JSON.parse(readFileSync(new URL(`../../goal-target/__tests__/fixtures/s4b/${name}.json`, import.meta.url), 'utf8'));
@@ -18,30 +24,58 @@ const graph = read('unseen-1-read').j.graph;
 const envelope = (read('unseen-1-run').blocks as Rec[]).find((b) => b.type === 'analysis_result')!.enrichment as Rec;
 const verdict = targetTestabilityOf(graph, envelope.identity_evaluations);
 if (verdict.kind !== 'not_testable') throw new Error('the capture must have target failures');
-const CASE_B = { precondition: 'P3' as const, case: 'b' as const, code: 'comparator_unscorable' as const };
+
+/** "Average wait below 400 minutes", a LEVEL target: the `<` on the row only, or held on the goal as the approved target write holds it. */
+const strictLevel = (heldOnGoal: boolean): Rec => ({ nodes: [{ id: 'wait', kind: 'goal', label: 'Average wait', goal_threshold_frame: 'level',
+  goal_threshold_raw: 400, goal_threshold_unit: 'minutes', goal_threshold: 0.5, goal_threshold_cap: 800, ...(heldOnGoal ? { goal_direction: '<' } : {}) },
+{ id: 'o1', kind: 'option', label: 'A' }], edges: [],
+goal_constraints: [{ node_id: 'wait', value: 400, value_frame: 'level', operator: '<=', operator_as_stated: '<', unit: 'minutes', constraint_id: 'c1' }] });
+/** "productivity down more than 5% from today", a CHANGE target, today's level held: (b) is its only failing case. */
+const strictChange = (withToday: boolean): Rec => ({ nodes: [{ id: 'productivity', kind: 'goal', label: 'productivity', goal_threshold_frame: 'level',
+  goal_threshold: 0, ...(withToday ? { observed_state: { baseline: 0.5 } } : {}) }], edges: [],
+goal_constraints: [{ node_id: 'productivity', value: -0.05, value_frame: 'change_rel', operator: '<' }] });
+const partsOf = (g: Rec): UntestableTargetParts => {
+  const v = targetTestabilityOf(g);
+  if (v.kind !== 'not_testable') throw new Error('expected a failing target');
+  return untestableTargetParts(g, v)!;
+};
 
 describe('target: the failing cases type the ONE step', () => {
   it('served capture: the target\'s own question is the step, byte for byte', () => {
     const parts = untestableTargetParts(graph, verdict)!;
     expect(parts.question).not.toBeNull();
+    expect(parts.untestableComparatorSettable).toBe(false);
     expect(targetBlockerOf(parts)).toEqual({ kind: 'missing_input', ask: parts.question });
   });
 
-  it('case b alone is a capability gap: said plainly, never asked', () => {
-    const parts = untestableTargetParts(graph, { ...verdict, failures: [CASE_B] })!;
-    expect(parts.question).toBeNull();
-    expect(parts.untestableComparator).not.toBeNull();
+  it('a strict LEVEL target held only on its row: the goal\'s target control is the step, never "can\'t"', () => {
+    const parts = partsOf(strictLevel(false));
+    expect(targetTestabilityOf(strictLevel(false))).toMatchObject({ failures: expect.arrayContaining([expect.objectContaining({ case: 'b' })]) });
+    expect([parts.untestableComparator, parts.untestableComparatorSettable]).toEqual(["'< 400 minutes'", true]);
+    expect(parts.question).not.toBeNull();
+    expect(targetBlockerOf(parts)).toEqual({ kind: 'confirm', by: 'goal_target' });
+  });
+
+  it('the same `<` held on the goal (what that control writes) is scored: (b) is gone and the question is the step alone', () => {
+    const parts = partsOf(strictLevel(true));
+    expect(targetTestabilityOf(strictLevel(true))).not.toMatchObject({ failures: expect.arrayContaining([expect.objectContaining({ case: 'b' })]) });
+    expect(parts.untestableComparator).toBeNull();
+    expect(targetBlockerOf(parts)).toEqual({ kind: 'missing_input', ask: parts.question });
+  });
+
+  it('a strict CHANGE target: no writer holds it, so it is a capability gap, said and never asked', () => {
+    const parts = partsOf(strictChange(true));
+    expect([parts.question, parts.untestableComparatorSettable]).toEqual([null, false]);
     const blocker = targetBlockerOf(parts);
-    expect(blocker).toEqual({ kind: 'missing_implementation', what: `a chance for a ${parts.untestableComparator} target on ‘${parts.name}’` });
-    expect(blocker).not.toHaveProperty('ask');
+    expect(blocker).toEqual({ kind: 'missing_implementation', what: "a chance for a 'down more than 5% from today' target on ‘productivity’" });
     expect(AIE_TEXT_PENDING_CANNOT_CALCULATE_YET((blocker as { what: string }).what)).toContain('answering a question won\'t change it');
   });
 
-  it('case b beside an answerable case: the ask keeps the gap beside it, so an answer is never promised to unlock it', () => {
-    const parts = untestableTargetParts(graph, { ...verdict, failures: [...verdict.failures, CASE_B] })!;
-    expect(parts.question).not.toBeNull();
+  it('a strict CHANGE target beside a missing level: the ask keeps the gap beside it, so the answer is never promised to unlock it', () => {
+    const parts = partsOf(strictChange(false));
+    expect(parts.question).toBe("What's today's level of productivity?");
     expect(targetBlockerOf(parts)).toEqual({ kind: 'missing_input', ask: parts.question,
-      also_unbuilt: `a chance for a ${parts.untestableComparator} target on ‘${parts.name}’` });
+      also_unbuilt: "a chance for a 'down more than 5% from today' target on ‘productivity’" });
   });
 
   it('no question and no comparator: only an offered identity card owns the step; none is invented', () => {
@@ -52,14 +86,18 @@ describe('target: the failing cases type the ONE step', () => {
 });
 
 describe('joint: the same reason the withheld line says types the step', () => {
+  const conversion: GoalCondition = { constraint_id: 'c2', node_id: 'conversion_rate', role: 'target', operator: '>', value: 15, unit: '%',
+    label: 'Conversion rate', clause: '‘Conversion rate’ being above 15%' };
+  const customers: GoalCondition = { constraint_id: 'c1', node_id: 'new_customers', role: 'target', operator: '>=', value: 400, unit: 'customers',
+    label: 'New customers', clause: '‘New customers’ being at least 400' };
   const kinds: Record<JointWithholdReason, PressBlocker['kind'] | null> = {
     target_not_supported: 'missing_implementation', strict_not_preserved: 'missing_implementation',
-    olumi_base: 'missing_input', no_option: 'missing_input', precision_missing: 'run_again', not_returned: 'run_again',
+    olumi_base: 'missing_input', precision_missing: 'run_again', not_returned: 'run_again',
     // No typed cause: an input might or might not unlock it, so no step is invented (PL 6135017311).
-    figure_not_preserved: null, condition_not_named: null,
+    figure_not_preserved: null, condition_not_named: null, no_option: null,
   };
   it.each(Object.entries(kinds))('%s → %s', (reason, kind) => {
-    const blocker = jointBlockerOf(2, reason as JointWithholdReason, ['Churn']);
+    const blocker = jointBlockerOf(2, reason as JointWithholdReason, ['Churn'], [conversion]);
     if (kind === null) expect(blocker).toBeNull();
     else expect(blocker).toHaveProperty('kind', kind);
   });
@@ -71,8 +109,18 @@ describe('joint: the same reason the withheld line says types the step', () => {
     expect(jointWithheldLine(2, 'target_not_supported', ['Revenue'])).toContain('can’t yet be combined');
   });
 
-  it('only the user can give Olumi\'s assumed starting value; a repeated Run is the line\'s own step', () => {
-    expect(jointBlockerOf(3, 'olumi_base')).toEqual({ kind: 'missing_input', ask: AIE_TEXT_PENDING_STARTING_VALUE_ASK });
+  it('Olumi\'s assumed starting value is asked for THAT target, in its unit, from the joint\'s own predicate', () => {
+    const g = { nodes: [{ id: 'goal', kind: 'goal', label: 'Growth' },
+      { id: 'new_customers', kind: 'factor', label: 'New customers', observed_state: { value: 0.4, raw_value: 400, unit: 'customers', source: 'brief_extraction' } },
+      { id: 'conversion_rate', kind: 'factor', label: 'Conversion rate', observed_state: { value: 0.1, raw_value: 10, unit: '%', source: 'cee_inference' } }] };
+    const olumiBase = olumiBaseTargetsOf(g, [customers, conversion]);
+    expect(olumiBase).toEqual([conversion]);
+    expect(jointBlockerOf(2, 'olumi_base', [], olumiBase)).toEqual({ kind: 'missing_input', ask: "What's today's level of Conversion rate, in %?" });
+    // The target is not identified: no generic ask is invented.
+    expect(jointBlockerOf(2, 'olumi_base')).toBeNull();
+  });
+
+  it('a repeated Run is the line\'s own step', () => {
     for (const reason of ['precision_missing', 'not_returned'] as const) {
       expect(jointBlockerOf(2, reason)).toEqual({ kind: 'run_again', why: reason });
       expect(jointWithheldLine(2, reason)).toContain('Run the analysis again');
@@ -81,11 +129,33 @@ describe('joint: the same reason the withheld line says types the step', () => {
 });
 
 describe('chance goal, unread product and stale', () => {
-  it('a chance goal with no date asks the date a writer takes; with the date held nothing is asked', () => {
-    expect(chanceGoalBlockerOf('Ship the release', undefined)).toEqual({ kind: 'missing_input', ask: chanceGoalDeadlineAsk('Ship the release') });
-    const held = chanceGoalBlockerOf('Ship the release', '9 April 2027');
-    expect(held.kind).toBe('missing_implementation');
-    expect(held).not.toHaveProperty('ask');
+  const chanceGoal = (deadline?: string): Rec => ({ nodes: [{ id: 'g', kind: 'goal', label: 'Ship the release', goal_threshold_unit: '%',
+    observed_state: { unit: '% likely' }, ...(deadline === undefined ? {} : { goal_horizon: { deadline } }) }] });
+  const unbuilt = 'a chance for ‘Ship the release’ until the model says what must be done by the deadline';
+  it('a chance goal: the date is asked with the gap that survives it; with the date held, the gap alone', () => {
+    expect(chanceGoalBlockerOf(chanceGoal())).toEqual({ kind: 'missing_input', ask: chanceGoalDeadlineAsk('Ship the release'), also_unbuilt: unbuilt });
+    const held = chanceGoalBlockerOf(chanceGoal('2027-04-09'));
+    expect(held).toEqual({ kind: 'missing_implementation', what: unbuilt });
+    expect(chanceGoalBlockerOf({ nodes: [{ id: 'g', kind: 'goal', label: 'Revenue', goal_threshold_unit: '£' }] })).toBeNull();
+  });
+
+  it('an admitted event model: its own question chain (date, then the team\'s time) is the step, each answer unlocking the next', () => {
+    const candidate: CandidateModel = {
+      goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'Next feature launch', operator: '>=', unit: '% of next feature launch',
+        value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [
+        { label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null },
+      ], factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [],
+    } as CandidateModel;
+    const plain = (g: unknown): Rec => assignEntityRefs(projectGraphForPersistence(GraphV3.parse(g)), { nodes: [], edges: [] }).graph as Rec;
+    const admitted = admitCandidateModel(candidate, {}, 'Hire a tech lead to meet our next feature-launch deadline?', undefined, undefined,
+      undefined, undefined, undefined, { event_by_date_prompted: true });
+    const drafted = plain({ nodes: admitted.nodes, edges: admitted.edges });
+    const dated = plain(withEventShareDate(drafted, '2027-04-12', '2026-10-12'));
+    expect(chanceGoalBlockerOf(drafted)).toEqual({ kind: 'missing_input', ask: chanceGoalDeadlineAsk('next feature launch') });
+    expect(chanceGoalBlockerOf(dated)).toEqual({ kind: 'missing_input', ask: eventModelAsk(dated) });
+    expect(eventModelAsk(dated)).toBe('How long would next feature launch take with the team you have now?');
   });
 
   it('an unread product: the writable reading card is the step; another owner keeps it; "can\'t" only with no writer', () => {
@@ -101,7 +171,10 @@ describe('chance goal, unread product and stale', () => {
     const stale = { run_state: { kind: 'complete_stale', cause: 'graph_changed' }, requires_rerun: true };
     expect(staleBlockerOf(stale, { may_run: true })).toEqual({ kind: 'stale', say: staleResultLine(stale, { may_run: true }) });
     expect(staleBlockerOf(stale, { may_run: true })).toHaveProperty('say', expect.stringContaining('run it again'));
-    expect(staleBlockerOf(stale, { may_run: false })).toHaveProperty('say', expect.not.stringContaining('run it again'));
+    // A Run that may not run: the line has no step, so the blocker that holds the Run keeps it.
+    expect(staleBlockerOf(stale, { may_run: false })).toBeNull();
+    const ask: PressBlocker = { kind: 'missing_input', ask: 'What\'s today\'s level of churn?' };
+    expect(oneNextStep([staleBlockerOf(stale, { may_run: false }), ask])).toBe(ask);
     expect(staleBlockerOf({ run_state: { kind: 'complete_current' } }, { may_run: true })).toBeNull();
   });
 });
@@ -111,8 +184,10 @@ describe('ONE step when several stand', () => {
   const unbuilt: PressBlocker = { kind: 'missing_implementation', what: 'x' };
   it('stale, then run again, then a card, then an input, then a missing implementation; nothing → none', () => {
     const stale: PressBlocker = { kind: 'stale', say: 's' };
+    const again: PressBlocker = { kind: 'run_again', why: 'not_returned' };
     const card: PressBlocker = { kind: 'confirm', by: 'confirm_reading' };
-    expect(oneNextStep([unbuilt, input, card, stale])).toBe(stale);
+    expect(oneNextStep([unbuilt, input, card, again, stale])).toBe(stale);
+    expect(oneNextStep([unbuilt, input, card, again])).toBe(again);
     expect(oneNextStep([unbuilt, input, card])).toBe(card);
     expect(oneNextStep([unbuilt, null, input])).toBe(input);
     expect(oneNextStep([undefined, unbuilt])).toBe(unbuilt);
@@ -120,14 +195,29 @@ describe('ONE step when several stand', () => {
   });
 });
 
-describe('one step, one owner: an existing owner keeps the step', () => {
-  const step: PressBlocker = { kind: 'missing_implementation', what: 'x' };
-  const none = { guidedRunFinding: false, typedControlQuestion: false, specificOffer: false };
-  it('no owner → the typed step stands; any one owner → nothing is added', () => {
-    expect(unownedNextStep(step, none)).toBe(step);
-    expect(unownedNextStep(step, { ...none, guidedRunFinding: true })).toBeNull();
-    expect(unownedNextStep(step, { ...none, typedControlQuestion: true })).toBeNull();
-    expect(unownedNextStep(step, { ...none, specificOffer: true })).toBeNull();
+describe('one step, one owner: only an owner of THAT step keeps it', () => {
+  const none: NextStepOwners = { guidedRunFinding: false, said: [], pressed: [] };
+  const ask: PressBlocker = { kind: 'missing_input', ask: 'What\'s today\'s level of Conversion rate, in %?' };
+  const unbuilt: PressBlocker = { kind: 'missing_implementation', what: 'x' };
+  const card: PressBlocker = { kind: 'confirm', by: 'goal_target' };
+  const again: PressBlocker = { kind: 'run_again', why: 'not_returned' };
+  const stale: PressBlocker = { kind: 'stale', say: 'The analysis on screen was computed before this change; run it again to see the comparison with this change.' };
+  it('no owner → every typed step stands', () => {
+    for (const step of [ask, unbuilt, card, again, stale]) expect(unownedNextStep(step, none)).toBe(step);
     expect(unownedNextStep(null, none)).toBeNull();
+  });
+  it('an unrelated offer or line owns nothing (a research press, another question, another card)', () => {
+    const unrelated: NextStepOwners = { guidedRunFinding: false, said: ['What is the deadline for "X"?'], pressed: ['identity_card'] };
+    for (const step of [ask, unbuilt, card, again, stale]) expect(unownedNextStep(step, unrelated)).toBe(step);
+  });
+  it('the same ask or stale line already said, the step\'s own press, or the guided finding for an input step → nothing added', () => {
+    expect(unownedNextStep(ask, { ...none, said: [ask.ask] })).toBeNull();
+    expect(unownedNextStep(stale, { ...none, said: [stale.say] })).toBeNull();
+    expect(unownedNextStep(card, { ...none, pressed: ['goal_target'] })).toBeNull();
+    expect(unownedNextStep(again, { ...none, pressed: ['run'] })).toBeNull();
+    expect(unownedNextStep(ask, { ...none, guidedRunFinding: true })).toBeNull();
+    expect(unownedNextStep(unbuilt, { ...none, guidedRunFinding: true })).toBeNull();
+    // The guided finding is an input step: it never owns a stale result, a repeat Run or a card.
+    for (const step of [stale, again, card]) expect(unownedNextStep(step, { ...none, guidedRunFinding: true })).toBe(step);
   });
 });

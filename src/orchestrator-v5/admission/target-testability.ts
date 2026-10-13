@@ -452,6 +452,13 @@ export interface UntestableTargetParts {
    * never in "I need …"; the tail names it in its own sentence (AIQ: named, never asked).
    */
   readonly untestableComparator: string | null;
+  /**
+   * ⭐ COACH (Codex buddy r1): (b) on a LEVEL target is unlocked by the goal's own target control. The approved target write
+   * holds the stated `<` on the goal (`add-constraint.ts` `cardIsAGoalCeiling` → `goal_direction`, paired threshold), which
+   * `resolveGoalThresholdStrict` scores strictly. A CHANGE target is not: that write is a level (`goal-target-edit.ts`, the
+   * contract's `raw_value`), and a change row stays independent of it (`add-constraint.ts` `ownTarget`). False without (b).
+   */
+  readonly untestableComparatorSettable: boolean;
   readonly question: string | null;
   /**
    * ⭐ Near tie (red team 19; DL #87, 6 Oct): the link `question` asks, when it IS the (c) link question (the failing case's
@@ -540,6 +547,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     clauses: cases.map((c) => said(c)[0]),
     needs: cases.map((c) => said(c)[1]).filter((n): n is string => n !== null),
     untestableComparator: cases.includes('b') ? `'${comparatorTarget}'` : null,
+    untestableComparatorSettable: cases.includes('b') && (stated.frame ?? 'level') === 'level',
     question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
     asked: askingCase === 'c' && failingLink?.link !== undefined ? { from: failingLink.link.from, to: failingLink.link.to } : null,
     askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
@@ -549,12 +557,15 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
 }
 
 /**
- * ⭐ COACH (DL coaching-on-press): the ONE next step these parts support, typed by the failing cases themselves.
- * A question the user can answer is the step (case a/c/d); a comparator the model cannot test (case b) is a CAPABILITY gap,
- * said as such and never asked, and when both stand the ask keeps the gap beside it so an answer is never promised to unlock
- * it. A case (c) whose link is a pending identity has no question because its card owns the step. Otherwise: no step.
+ * ⭐ COACH (DL coaching-on-press; PL #94 6135017311): the ONE next step these parts support, typed by the failing cases.
+ * A strict comparator on a LEVEL target (case b, settable) is the goal's target control: it outranks a question, as a card
+ * does (`oneNextStep`). A question the user can answer is the step (case a/c/d). A strict comparator on a CHANGE target is
+ * a CAPABILITY gap (no writer holds it): said as such, never asked, and beside a question it travels with the ask so an
+ * answer is never promised to unlock it. A case (c) whose link is a pending identity has no question: its card owns the
+ * step. Otherwise: no step.
  */
 export function targetBlockerOf(parts: UntestableTargetParts, identityCardOffered = false): PressBlocker | null {
+  if (parts.untestableComparatorSettable) return { kind: 'confirm', by: 'goal_target' };
   const unbuilt = parts.untestableComparator === null ? undefined : `a chance for a ${parts.untestableComparator} target on ‘${parts.name}’`;
   if (parts.question !== null) return { kind: 'missing_input', ask: parts.question, ...(unbuilt === undefined ? {} : { also_unbuilt: unbuilt }) };
   if (unbuilt !== undefined) return { kind: 'missing_implementation', what: unbuilt };

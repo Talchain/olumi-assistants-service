@@ -658,9 +658,11 @@ export function staleResultLine(analysisState: unknown, analysisReady: unknown):
     : 'The analysis on screen was computed before this change.';
 }
 
-/** ⭐ COACH (DL coaching-on-press): a stale result's ONE next step is this same line (its "run it again" follows the Run
- * control's own verdict). Typed only from `run_state`, never from a Run whose current result merely could not be bound. */
+/** ⭐ COACH (DL coaching-on-press): a stale result's ONE next step is this same line while it says "run it again" (the Run
+ * control's own verdict). Where the Run may not run, the line has no step to take: another blocker holds the Run and owns
+ * the step (Codex buddy r1), so nothing is typed here. Only from `run_state`, never from a result that could not be bound. */
 export function staleBlockerOf(analysisState: unknown, analysisReady: unknown): PressBlocker | null {
+  if ((analysisReady as { may_run?: unknown } | undefined)?.may_run !== true) return null;
   const say = staleResultLine(analysisState, analysisReady);
   return say === null ? null : { kind: 'stale', say };
 }
