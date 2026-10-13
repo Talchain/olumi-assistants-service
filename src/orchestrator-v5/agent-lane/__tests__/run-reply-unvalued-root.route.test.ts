@@ -101,7 +101,10 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 
-const state = () => ({ ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: '2026-10-05T03:48:55.163Z' } });
+const RUN_A_AT = '2026-10-05T03:48:55.163Z';
+/** When the current Run completed: a later Run B moves it. */
+let runAt = RUN_A_AT;
+const state = () => ({ ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: runAt } });
 /** Run A completed; an edit then gave graph B (with the unvalued root) before the readback: the readback is stale. */
 const staleState = () => ({ ...SERVED.analysis_state, run_state: { kind: 'complete_stale', computed_at: '2026-10-05T03:48:55.163Z', cause: 'graph_changed' } });
 
@@ -171,7 +174,7 @@ describe('a native Run with an unvalued risk root carries the numerical withhold
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; historicalZero = false; historicalWarning = false; riskValued = false; riskLabel = 'Demand shortfall'; readback = 'current'; });
+  beforeEach(() => { rows.length = 0; historicalZero = false; historicalWarning = false; riskValued = false; riskLabel = 'Demand shortfall'; readback = 'current'; runAt = RUN_A_AT; });
 
   const runTurn = (turnId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
     payload: { scenario_id: SCENARIO, turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
@@ -206,6 +209,12 @@ describe('a native Run with an unvalued risk root carries the numerical withhold
       expect(replay._answer_shape).toEqual(first._answer_shape);
       expect(replay.narration).toEqual(first.narration);
     }
+    // A later Run B: the old Run that assumed zero is still replayed as THAT Run, with its own words, never re-answered on B.
+    runAt = '2026-10-05T04:10:00.000Z';
+    await app.close(); app = await freshApp();
+    const moved = (await runTurn(turnId)).json() as Body;
+    expect(moved.assistant_text).toBe(first.assistant_text);
+    expect(moved.narration).toEqual({ status: 'stale', run_key: first.narration!.run_key });
     expect(SERVED.block.computed_against_hash).toBe(HASH);
   });
 
