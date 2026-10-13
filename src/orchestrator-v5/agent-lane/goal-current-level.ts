@@ -53,6 +53,8 @@
  *     on a `scale_frame`; the apply below retires it exactly as the target writer does, so the user's own sizes into the
  *     goal are re-derived onto the level's frame, never left on a frame the goal no longer has.
  */
+import type { InputClaim } from '../../schemas/assist.js';
+import { statementOrigin } from '../../cee/provenance/provenance-of.js';
 import { isEventShareForecast } from '../goal-target/event-by-date-model.js';
 import { goalKindOf } from '../goal-target/goal-kind.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
@@ -79,9 +81,9 @@ import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshol
 import { isPercentageLevelUnit } from '../../cee/magnitude/link-effect.js';
 import { goalCeilingRow, holdsPairableCeiling, pairGoalCeiling } from '../goal-target/goal-ceiling-pair.js';
 import { isUnnamedCurrencyUnit, unitAlreadyOnGoal, unitNamingCurrency } from './unnamed-currency.js';
-import { scopeOf, identityConflictsWithScope, scopeSourcesAreUserWords, goalScopeCheck, scopeCanRecord, SCOPE_APPROVE_PREFIX } from './goal-scope.js';
+import { scopeOf, scopeOfGoal, identityConflictsWithScope, scopeSourcesAreUserWords, goalScopeCheck, scopeCanRecord, SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWithdrawalReading } from '../system-events/identity-confirm-edit.js';
-import { goalScopeMeaning } from '../../schemas/goal-scope.js';
+import { GoalScopeInputSchema, goalScopeMeaning } from '../../schemas/goal-scope.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { hasUserStatedSize, heldFigureOwnerOf } from '../../cee/provenance/provenance-of.js';
@@ -94,12 +96,15 @@ const OPERATOR_OF: Readonly<Record<string, string>> = { at_least: '>=', above: '
 
 export interface GoalCurrentLevelArgs {
   readonly goal_scope?: unknown;
+  readonly scope_claim?: InputClaim;
   readonly reconciliation_key?: string;
   readonly goal_label?: unknown;
   readonly value?: unknown;
   readonly unit?: unknown;
   readonly goal_is?: unknown;
   readonly user_stated?: unknown;
+  readonly basis?: string;
+  readonly source_quote?: string;
 }
 
 /** The slice of a graph read this module needs — `agent-capabilities.ts`'s `GraphRead` satisfies it. */
@@ -129,6 +134,8 @@ interface UnitNormalised {
 
 /** The goal's own observed_state carried on the proposal — what `authorise_change` writes, byte for byte. */
 interface GoalObservedState {
+  readonly input_claim?: InputClaim;
+  readonly scope_input?: unknown;
   readonly value: number;
   readonly baseline: number;
   readonly unit?: string;
@@ -750,14 +757,6 @@ export async function proposeGoalCurrentLevel(
       `"${goal.label}" is measured as a chance of an event, which Olumi works out, so it has no level to record. Nothing was prepared. `
       + 'Never ask the user for it. If they stated a deadline, call propose_goal_deadline with their words.');
   }
-  // ── IS IT THE USER'S?
-  if (args?.user_stated !== true) {
-    return refuse(
-      'not_the_users_figure',
-      `Only a current level the user stated for "${goal.label}" can be recorded: an estimate would set the chance of ` +
-      'reaching their target on a guess. Nothing was prepared. Ask the user for their own figure.',
-    );
-  }
   const value = args?.value;
   if (!num(value)) return refuse('unparsable_value', 'No usable number was given. Nothing was prepared.');
 
@@ -810,10 +809,20 @@ export async function proposeGoalCurrentLevel(
 
   // ── IN THE GOAL'S OWN UNIT, AND IN THE USER'S OWN WORDS? One rule, shared with the target card (`statedGoalLevelInUsersWords`).
   const inWords = statedGoalLevelInUsersWords(value, args?.unit, { label: goal.label, unit: goalUnit }, ctx.user_text);
-  if (!inWords.ok) return refuse(inWords.refusal, inWords.detail);
-  const stated = inWords;
-  const raw = inWords.raw;
-  const statedUnit = inWords.statedUnit;
+  const structural = readStatedGoalLevel(value, args?.unit, { label: goal.label, unit: goalUnit });
+  if (!structural.ok) return refuse(structural.refusal, structural.detail);
+  const original = args.source_quote ?? (inWords.ok ? inWords.quote ?? '' : '');
+  const origin = statementOrigin(inWords.ok && (args.source_quote === undefined || (ctx.user_text ?? '').includes(args.source_quote)),
+    figureTheUserWrote(structural.raw, goalUnit ?? args.unit, ctx.unverified_user_text), ctx.user_text_complete, args.user_stated === false);
+  const claim: InputClaim = { origin, basis: args.basis ?? '', source_quote: original };
+  // The claim extension is optional for legacy verified-human calls. Preserve their
+  // exact record/card shape; explicit claim metadata and every AI estimate retain it.
+  const carriesClaim = origin !== 'human' || args.basis !== undefined || args.source_quote !== undefined;
+  if (origin === 'unknown') return refuse('origin_unknown', 'The current-level source is unknown. Its words are retained; supply the original source or propose a new Olumi estimate.',
+    { input_claim: claim, proposed_value: value, unit: args.unit, goal: goal.label });
+  const stated = { ...structural, statedUnit: String(args.unit ?? ''), quote: inWords.ok ? inWords.quote : null };
+  const raw = structural.raw;
+  const statedUnit = stated.statedUnit;
   if (isChange && args.goal_scope !== undefined) return refuse('scope_frame_unresolved', 'Clarify the level of the total goal before recording its scope. Nothing was prepared.');
   // ⛔ An adopted unit is Olumi's reading of the user's figure, quoted from their sentence: none found, nothing is prepared.
   if (forChange.adopted !== undefined && stated.quote === null) {
@@ -822,7 +831,7 @@ export async function proposeGoalCurrentLevel(
   }
   if (isChange) {
     return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit, adoptedUnit, storedUnit,
-      forChange.adopted !== undefined ? { quote: stated.quote as string } : undefined);
+      forChange.adopted !== undefined ? { quote: stated.quote as string } : undefined, claim, carriesClaim);
   }
 
 
@@ -901,7 +910,9 @@ export async function proposeGoalCurrentLevel(
     value: normalisedLevel,
     baseline: normalisedLevel,
     ...(goalUnit !== undefined ? { unit: goalUnit } : {}),
-    source: USER_EDIT_SOURCE,
+    source: claim.origin === 'ai' ? 'cee_inference' : USER_EDIT_SOURCE,
+    ...(carriesClaim ? { input_claim: claim } : {}),
+    ...(existing?.scope_input === undefined ? {} : { scope_input: existing.scope_input }),
     raw_value: raw,
     cap: levelCap,
     ...(stated.normalised !== undefined ? { provenance_unit_normalised: stated.normalised } : {}),
@@ -920,9 +931,10 @@ export async function proposeGoalCurrentLevel(
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   // Carried INSIDE the goal's one op, so this stays one goal-level proposal with one write.
   const scope = args.goal_scope === undefined ? undefined : scopeOf(args.goal_scope);
-  if (args.goal_scope !== undefined && (!scope || !scopeSourcesAreUserWords(scope, ctx.user_text ?? '', scopeOf((goal as Record<string, unknown>).goal_scope)))) {
+  if (args.goal_scope !== undefined && (!scope || (args.scope_claim === undefined && !scopeSourcesAreUserWords(scope, ctx.user_text ?? '', scopeOfGoal(goal))))) {
     return refuse('scope_not_grounded', 'The scope is not bound to the user’s stated words. Nothing was prepared.');
   }
+  if (scope && args.scope_claim) (observed as { scope_input?: unknown }).scope_input = GoalScopeInputSchema.parse({ scope, claim: args.scope_claim });
   if (scope && !scopeCanRecord(scope, goalScopeCheck(g.raw, goal.id, scope, { value: raw, unit: goalUnit ?? '', source: scope.source }))) return refuse('goal_scope_unresolved', 'Resolve the goal scope and its factor references before approving this reading. Nothing was prepared.');
   const withdrawal = scope ? identityWithdrawalFor(goal as Record<string, unknown>, scope) : undefined;
   if (!scope && identityConflictsWithScope(goal as Record<string, unknown>)) return refuse('goal_scope_unresolved', 'Resolve the goal’s scope before changing its current level. Nothing was prepared.');
@@ -939,6 +951,7 @@ export async function proposeGoalCurrentLevel(
       op: GOAL_CURRENT_LEVEL_OP, path: goal.id,
       value: {
         goal_current_level: observed, against: targetOf(node),
+        previous_observed_state: goal.observed_state ?? null, previous_scope: scopeOfGoal(goal) ?? null,
         ...(scope ? { goal_scope: scope, reconciliation_key: args.reconciliation_key } : {}),
         ...(withdrawal ? { identity_withdrawal: withdrawal } : {}),
         ...(rederived !== null ? { rederived_part: rederived } : {}),
@@ -946,19 +959,19 @@ export async function proposeGoalCurrentLevel(
         ...(unitReading !== undefined ? { unit_reading: unitReading } : {}),
       },
     }],
-    provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
+    provenance: { authored_by: claim.origin === 'human' ? 'user_stated' : 'model_proposed', basis: claim.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     // ⭐ With no target yet, the card says today's level only (DL #85 5930770727): there is no target to name.
     public_label:
-      (noTargetYet ? `Record today's level of "${goal.label}" as your figure: ` : `Record the current level of "${goal.label}" as your figure: `) +
+      (noTargetYet ? `Record today's level of "${goal.label}" as ${claim.origin === 'human' ? 'your figure' : 'Olumi’s estimate'}: ` : `Record the current level of "${goal.label}" as ${claim.origin === 'human' ? 'your figure' : 'Olumi’s estimate'}: `) +
       (replaces !== undefined ? `${sayFigureRead(replaces, storedUnit ?? '')} → ${figure}` : figure) +
       (num(target) ? ` (target ${withUnit(target)})` : '') +
       sayAdoptedUnit(goal.label, adoptedUnit) +
       (unitReading !== undefined ? `, read as ${unitReading.unit}, as you wrote it` : '') +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
       (earlierHeld !== null ? earlierHeld.label : '') +
-      (scope ? `. Goal scope: ${scope.modelled}${scope.component?.share !== undefined ? `; ${scope.component.label} contributes ${scope.component.share * 100}%` : ''}${scope.component?.count_basis ? `; count means ${scope.component.count_basis}` : ''}${scope.component ? (scope.component.basis === 'unknown' ? '; the count population and billing basis remain unresolved' : `; revenue share and rate/count are on ${scope.component.basis === 'different' ? 'different' : 'the same'} billing bases`) : ''}.` : '') +
-      (withdrawal ? ` ${withdrawal.words}` : ''),
+      (scope ? `. ${args.scope_claim?.origin === 'ai' ? 'Olumi’s scope reading' : 'Goal scope'}: ${scope.modelled}${scope.component?.share !== undefined ? `; ${scope.component.label} contributes ${scope.component.share * 100}%` : ''}${scope.component?.count_basis ? `; count means ${scope.component.count_basis}` : ''}${scope.component ? (scope.component.basis === 'unknown' ? '; the count population and billing basis remain unresolved' : `; revenue share and rate/count are on ${scope.component.basis === 'different' ? 'different' : 'the same'} billing bases`) : ''}.` : '') +
+      (withdrawal ? ` ${withdrawal.words}` : '') + (args.scope_claim ? ` · Scope basis: ${args.scope_claim.basis} · Scope source: ${args.scope_claim.source_quote}` : '') + (carriesClaim ? ` · Basis: ${claim.basis} · Source: ${claim.source_quote}` : ''),
   });
   deps.proposals.put(proposal);
   return {
@@ -1106,7 +1119,9 @@ function changeGoalLevel(
   adoptedUnit: string | undefined,
   storedUnit: string | undefined,
   /** A1: the unit is adopted from the stated level (`levelUnitForChangeGoal`), with the user's sentence it was read from. */
-  fromChange?: { readonly quote: string },
+  fromChange: { readonly quote: string } | undefined,
+  claim: InputClaim,
+  carriesClaim: boolean,
 ): ToolResult {
   const cap = node.goal_threshold_cap;
   // Construction's own rule for a change goal (`admit-model.ts`, the brief's level): the frame holds both today's level
@@ -1144,7 +1159,9 @@ function changeGoalLevel(
     value: raw / frameCap,
     baseline: raw / frameCap,
     ...(goalUnit !== undefined ? { unit: goalUnit } : {}),
-    source: USER_EDIT_SOURCE,
+    source: claim.origin === 'ai' ? 'cee_inference' : USER_EDIT_SOURCE,
+    ...(carriesClaim ? { input_claim: claim } : {}),
+    ...(existing?.scope_input === undefined ? {} : { scope_input: existing.scope_input }),
     raw_value: raw,
     cap: frameCap,
     ...(normalised !== undefined ? { provenance_unit_normalised: normalised } : {}),
@@ -1194,6 +1211,7 @@ function changeGoalLevel(
       op: GOAL_CURRENT_LEVEL_OP, path: goal.id,
       value: {
         goal_current_level: observed, against: targetOf(node),
+        previous_observed_state: goal.observed_state ?? null, previous_scope: scopeOfGoal(goal) ?? null,
         ...(reframed !== null && reframed.cap !== cap ? { reframed_cap: reframed.cap } : {}),
         ...(prior !== undefined ? { level_reading: levelReading } : {}),
         ...(rederived !== null ? { rederived_part: rederived } : {}),
@@ -1207,16 +1225,16 @@ function changeGoalLevel(
           : {}),
       },
     }],
-    provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
+    provenance: { authored_by: claim.origin === 'human' ? 'user_stated' : 'model_proposed', basis: claim.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label:
-      `Record today's level of "${goal.label}" as your figure: ` +
+      `Record today's level of "${goal.label}" as ${claim.origin === 'human' ? 'your figure' : 'Olumi’s estimate'}: ` +
       (replaces !== undefined ? `${sayFigureRead(replaces, storedUnit ?? '')} → ${figure}` : figure) +
       (change !== '' ? ` (your target: ${change})` : '') +
       sayAdoptedUnit(goal.label, adoptedUnit, fromChange) +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
       (productSaid !== '' ? `. ${productSaid}` : '') +
-      (earlierHeld !== null ? earlierHeld.label : ''),
+      (earlierHeld !== null ? earlierHeld.label : '') + (carriesClaim ? ` · Basis: ${claim.basis} · Source: ${claim.source_quote}` : ''),
   });
   deps.proposals.put(proposal);
   return {
@@ -1264,6 +1282,12 @@ export async function applyGoalCurrentLevel(
   const notApplied = (detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'not_applied', detail });
   const goal = approved.nodes.find((n) => n.id === op.path);
   if (goal === undefined || goal.kind !== 'goal') return notApplied('The goal is no longer in the model, so nothing was written.');
+  const carriedState = op.value as { previous_observed_state?: unknown; previous_scope?: unknown };
+  if (Object.hasOwn(carriedState, 'previous_observed_state') &&
+    (stableStringify(carriedState.previous_observed_state) !== stableStringify(goal.observed_state ?? null)
+      || stableStringify(carriedState.previous_scope) !== stableStringify(scopeOfGoal(goal) ?? null))) {
+    return { ok: false, mutated: false, applied: false, refusal: 'superseded', detail: 'The current level or its retained source changed after this card was prepared. Nothing was written.' };
+  }
   // ⛔ RE-VALIDATED AT APPLY TIME: the level frame, and the same unit, figure and cap the proposal was prepared against.
   const against = (op.value as { against?: GoalTarget } | undefined)?.against;
   const now = targetOf(goal);
@@ -1358,7 +1382,8 @@ export async function applyGoalCurrentLevel(
 
   const operationId = deps.operationId(`${proposal.proposal_id}#goal_current_level`);
   // A rescale stamp describes the figure it came with: a new figure without one never inherits the previous one's.
-  const { provenance_unit_normalised: _previousStamp, ...kept } = (goal.observed_state ?? {}) as Record<string, unknown>;
+  const { input_claim: _previousClaim, provenance_unit_normalised: _previousStamp, extractionType: _previousExtraction,
+    user_material_unverified: _previousUnverified, source_quote: _previousQuote, reviewed_by_user: _previousReview, ...kept } = (goal.observed_state ?? {}) as Record<string, unknown>;
   // A change goal (`changeGoalLevel`): the re-derived cap travels with the level, and Olumi's reading of the brief's
   // figure goes, since the user has corrected it.
   const carriedOp = op.value as { reframed_cap?: unknown; level_reading?: unknown } | undefined;
@@ -1367,7 +1392,7 @@ export async function applyGoalCurrentLevel(
     if (n.id !== op.path) return part !== null && n.id === part.node_id ? { ...n, observed_state: part.observed_state } : n;
     const written: Record<string, unknown> = {
       ...(scope && withdrawal ? applyIdentityWithdrawalToGoal(n as Record<string, unknown>, scope, withdrawal)! : n), observed_state: { ...kept, ...os },
-      ...(scope ? { goal_scope: scope } : {}),
+      ...(scope?.stated_in_brief ? { goal_scope: scope } : {}),
       ...(reframedCap !== undefined ? { goal_threshold_cap: reframedCap } : {}),
       // A1: a change goal measured for the first time is framed, as construction frames it, in the same registration.
       ...(firstFrame !== undefined ? firstFrame : {}),
@@ -1376,6 +1401,7 @@ export async function applyGoalCurrentLevel(
       ...(readingToWrite !== undefined ? { unit_reading: readingToWrite } : {}),
       ...(changeReadingToWrite !== undefined ? { unit_reading: changeReadingToWrite } : {}),
     };
+    if (scope && !scope.stated_in_brief) delete written.goal_scope;
     // Olumi's reading of the replaced figure is refreshed from the user's words, or goes when they could not be read.
     if (carriedOp !== undefined && 'level_reading' in carriedOp) {
       if (carriedOp.level_reading === null) delete written.goal_level_reading;
@@ -1449,7 +1475,7 @@ export async function applyGoalCurrentLevel(
   const afterGoal = after?.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined;
   const changeHeld = (firstFrame === undefined || (Object.keys(firstFrame) as (keyof typeof firstFrame)[]).every((k) => afterGoal?.[k] === firstFrame[k]))
     && (changeReadingToWrite === undefined || stableStringify(afterGoal?.unit_reading) === stableStringify(changeReadingToWrite));
-  const scopeHeld = !scope || (after !== null && stableStringify(goalScopeMeaning((after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.goal_scope)) === stableStringify(goalScopeMeaning(scope))
+  const scopeHeld = !scope || (after !== null && stableStringify(goalScopeMeaning(scopeOfGoal(after?.nodes.find(n => n.id === op.path)))) === stableStringify(goalScopeMeaning(scope))
     && (!withdrawal || !(after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.nonlinear_identity));
   // The ceiling's pair is read back too: its figure, its cap and its threshold, exactly as this write carried them.
   // Its comparator and frame too (Codex buddy r1 F6 on #2618): the same figures under a floor are not this pair.
@@ -1458,7 +1484,7 @@ export async function applyGoalCurrentLevel(
   const pairWritten = writtenGoal as Pair | undefined;
   const pairHeld = !ceilingPaired || (pairNow !== undefined && pairWritten !== undefined
     && (['goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold', 'goal_direction', 'goal_threshold_frame'] as const).every((k) => pairNow[k] === pairWritten[k]));
-  const landed = readingHeld && changeHeld && scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
+  const landed = stableStringify(held?.scope_input) === stableStringify(os.scope_input) && stableStringify(held?.input_claim) === stableStringify(os.input_claim) && readingHeld && changeHeld && scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {

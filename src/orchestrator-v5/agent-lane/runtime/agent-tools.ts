@@ -420,18 +420,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_link_strength',
-    description:
-      'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
-      + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
-      + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' ' + THE_BAND_MUST_REACH_THE_OUTCOME + ' '
-      + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
-      + 'their review is recorded: it stays Olumi\u2019s estimate unless it was already theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
-      + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
-      + '("very high", "hardly at all"), give your reading in `strength` and their exact phrase in `from_words`: the user approves your reading. '
-      + 'Never use this for a strength the user did not state: if they said nothing about how strong it is, ask which band it is first '
-      + '\u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
+    description: 'Propose a link band and original source words with a separate rationale. The host verifies authorship; a new Olumi estimate uses user_stated: false. The card shows any replaced figure. Approval authorises exactly that replacement and retains its original source. Unknown origin cannot be written as the user’s or Olumi’s.',
     parameters: obj({
+      user_stated: { type: 'boolean' },
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
       strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated, or your reading of their own words, given with `from_words`.' },
@@ -471,26 +462,18 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     }, ['links', 'rationale']),
   },
   {
+    type: 'function', name: 'propose_effects_timing',
+    description: 'Offer an interpretation of when all option effects are effective for approval. A hiring start is not endpoint effectiveness. Read the complete retained source, preserve later/partial effects, and use unknown, conflicting, unread or incomplete whenever that is the source state. not_stated means complete-source absence only. This saves no analysis and grants no Run authority.',
+    parameters: obj({ interpretation: { type: 'string', enum: ['in_place_by_period', 'later_or_partial', 'not_stated'] },
+      source_status: { type: 'string', enum: ['complete', 'incomplete', 'unread', 'unknown', 'conflicting'] }, basis: { type: 'string' } }, ['interpretation', 'source_status', 'basis']),
+  },
+  {
     type: 'function',
     name: 'propose_goal_target',
-    description:
-      'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
-      + '"keep churn under 5%"). For a quantity already in the model, this prepares one target change and returns its id for '
-      + 'authorise_change after the user approves the shown values. If a quantity is absent, Olumi may instead return a '
-      + 'revised-draft card: only the user pressing that card can replace the draft. Never call authorise_change for a '
-      + 'revised-draft replacement, and never show its id. Give the figure exactly as the user '
-      + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
-      + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
-      + 'a figure or direction they did not state is refused. If the user ALSO stated the goal’s level today (for example "we have secured '
-      + '£0 so far and need at least £1m"), pass it as current_level: both go on ONE card and are written on ONE approval. '
-      + 'Never promise to record today’s level later: without current_level nothing records it. '
-      + 'When the target is DERIVED from a figure the user gave ("we\u2019re at £100,000 … aiming to double that"), give the '
-      + 'result as value and pass derived_from {base, multiplier} (100000 and 2): the base must be a figure they wrote. '
-      + 'When the user did not say at least or at most, give your reading in constraint_type: the card offers it as a '
-      + 'decision with the other direction beside it, and the user chooses. '
-      + 'Give measures whenever the user names what the target is a figure of. Call this once per target the user stated; '
-      + 'never build the model yourself.',
+    description: 'Propose a target in its physical unit with its comparator, basis and original source words. The host verifies whether it is the user’s figure, a new Olumi estimate or unknown. A new estimate uses user_stated: false. Approval never changes authorship. Unknown source is retained but cannot be written as the user’s or Olumi’s. A current level may accompany the target.',
     parameters: obj({
+      user_stated: { type: 'boolean', description: 'False only for a new Olumi estimate; true claims verified user material.' },
+      source_quote: { type: 'string', description: 'Original source words, complete and separate from rationale.' },
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
       unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
@@ -740,9 +723,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function', name: 'reconcile_goal_scope',
     description: 'Retain the user’s goal scope or component share, and reconcile it with the existing rate and count. Use when they correct a whole/component reading or answer its share question (including “30% currently”). This retains one durable question; it never writes a derived number. Supply the exact user quote and existing operand ids. If a current_level is supplied, the ordinary baseline writer prepares ONE approval for the scope, baseline and withdrawal of any incompatible product identity. Never use propose_goal_current_level alone to force a total onto a component product.',
     parameters: obj({
+      user_stated: { type: 'boolean' }, basis: { type: 'string' },
       goal_label: { type: 'string' },
       scope: obj({ modelled: { type: 'string' }, alternative: { type: 'string' }, extent: { type: 'string', enum: ['total', 'component'] },
-        stated_in_brief: { type: 'boolean', enum: [true] }, source: obj({ quote: { type: 'string' } }, ['quote']),
+        stated_in_brief: { type: 'boolean' }, source: obj({ quote: { type: 'string' } }, ['quote']),
         component: obj({ label: { type: 'string' }, rate_id: { type: 'string' }, count_id: { type: 'string' }, share: { type: 'number' },
           basis: { type: 'string', enum: ['unknown', 'same', 'different'] }, count_basis: { type: 'string' }, basis_source: obj({ quote: { type: 'string' } }, ['quote']), source: obj({ quote: { type: 'string' } }, ['quote']) }, ['label', 'rate_id', 'count_id', 'basis', 'source']) }, ['modelled', 'alternative', 'extent', 'stated_in_brief', 'source']),
       current_level: obj({ value: { type: 'number' }, unit: { type: 'string', description: 'Their native currency and the goal’s stated period, e.g. GBP/month for MRR; never a normalized value.' }, quote: { type: 'string' } }, ['value', 'unit', 'quote']),
@@ -753,14 +737,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_goal_current_level',
-    description:
-      'Record the CURRENT level of the model’s goal when the user has just stated it (for example "our MRR is ' +
-      '£12,000 today" when the goal is MRR). Without it the analysis cannot compare today with the goal’s ' +
-      'target. This does NOT change anything: it records an exact proposal and returns its id, which you keep for ' +
-      'authorise_change: show the user the figure, never the id, before asking them to approve. Only the user’s own ' +
-      'figure for the goal’s OWN metric: never your estimate, and never a figure they gave for something else (a ' +
-      'price, a subscriber count, a rate). Use the goal’s label exactly as get_canonical_state returned it.',
+    description: 'Propose the goal’s current level with value, physical unit, basis and original source words. The host verifies the source; new Olumi estimates must use user_stated: false. The approved record retains its author. Unknown source cannot be recorded as the user’s or Olumi’s.',
     parameters: obj({
+      basis: { type: 'string' }, source_quote: { type: 'string' },
       goal_label: { type: 'string' },
       value: { type: 'number', description: 'The figure the user stated, in their units (12000 for £12,000; never scaled).' },
       unit: { type: 'string', maxLength: 40, description: 'The unit the user stated, if any (e.g. GBP); at most 40 characters, e.g. "small-update equivalents per sprint".' },
@@ -855,7 +834,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_effects_timing', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -911,7 +890,7 @@ export interface AgentCapabilities {
     from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
     direction?: 'positive' | 'negative'; rationale: string;
     /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
-    from_words?: string;
+    from_words?: string; user_stated?: boolean;
     /** With a `direction` that reverses the link: the user's own words THIS turn saying it runs the other way. */
     direction_from_words?: string;
   }): Promise<ToolResult>;
@@ -927,8 +906,9 @@ export interface AgentCapabilities {
     rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
+  proposeEffectsTiming?(ctx: AgentToolContext, args: { interpretation: string; source_status: string; basis: string }): Promise<ToolResult>;
   proposeGoalTarget?(ctx: AgentToolContext, args: {
-    constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
+    constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string; user_stated?: boolean; source_quote?: string;
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
     /** What the figure is a figure OF, in the user's words: a quantity the draft lacks may get a revised-draft card (B). */
@@ -993,7 +973,7 @@ export interface AgentCapabilities {
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
   reconcileGoalScope?(ctx: AgentToolContext, args: ReconcileGoalScopeArgs): Promise<ToolResult>;
   proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
-    goal_label: string; value: number; unit: string; goal_is?: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
+    goal_label: string; value: number; unit: string; goal_is?: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean; basis?: string; source_quote?: string;
   }): Promise<ToolResult>;
   /** The user confirms Olumi's reading of their goal as a product (`../identity-card.ts`). Optional: absent ⇒ refused plainly. */
   proposeIdentity?(ctx: AgentToolContext, args?: { parts: readonly { part_label: string; value: number; unit: string }[] }): Promise<ToolResult>;
@@ -1065,6 +1045,8 @@ export async function dispatchTool(
       return caps.proposeLinkStrengths !== undefined
         ? caps.proposeLinkStrengths(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'Link strengths cannot be recorded here. Nothing was changed.' };
+    case 'propose_effects_timing':
+      return caps.proposeEffectsTiming ? caps.proposeEffectsTiming(ctx, args as never) : { ok: false, mutated: false, refusal: 'unknown_tool' };
     case 'propose_goal_target':
       return caps.proposeGoalTarget !== undefined
         ? caps.proposeGoalTarget(ctx, args as never)

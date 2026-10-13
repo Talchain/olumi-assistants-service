@@ -327,17 +327,9 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(routerCalls).toEqual([]);
   }, 180_000);
 
-  it('(a′) RED on journey E\'s SERVED graph: "Annual salary spend" is a lever the options set → refused, byte-identical; linked to the outcome → both figures committed as the user\'s', async () => {
+  it('(a′) W17: factors can target the option-set salary spend while the original figures remain intact', async () => {
     graphOf.set(SCENARIO, journeyE());
-    const before = bytes();
-    let out: Record<string, unknown> = {};
-    const t0 = await propose(factorArgs(), FIG_MSG, (o) => { out = o; });
-    expect(callOf(t0), JSON.stringify(t0._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'target_is_a_lever' }));
-    expect(String(out['detail']), JSON.stringify(out)).toContain('"Annual salary spend" is set by the options');
-    expect(await heldOnLatestRow()).toEqual([]);
-    expect(bytes()).toBe(before);
-
-    const t1 = await propose(factorArgs([], 'Incremental platform delivery…'));
+    const t1 = await propose(factorArgs(), FIG_MSG);
     expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     const approve = approveChipOf(t1)!;
     expect(approve, JSON.stringify(t1.suggested_actions)).toBeDefined();
@@ -878,7 +870,6 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
 
   it.each([
     ['an option', 'Hire two developers', 'is an option'],
-    ['a risk', 'Onboarding capacity strain', 'is a risk'],
     ['the decision', 'Hire a Tech lead or two developers', 'is a decision'],
   ])('(q′) CONTRAST (Batch B): on the same hiring model a link INTO %s is still refused — nothing held, byte-identical', async (_what, target, said) => {
     graphOf.set(SCENARIO, hiringGraph());
@@ -892,13 +883,48 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(bytes()).toBe(before);
   }, 120_000);
 
-  it('(q″) CONTRAST (Batch B): a lever the options set is still refused as a target on the hiring model', async () => {
-    graphOf.set(SCENARIO, hiringGraph());
+  it.each([false, true])('T2c W18/W19: a factor affecting a risk is retained, disconnected=%s, through approval and saved read', async (disconnected) => {
+    const seed = hiringGraph();
+    if (disconnected) seed.edges = seed.edges.filter(e => e.from !== 'risk_onboarding');
+    graphOf.set(SCENARIO, seed);
     const before = bytes();
-    const t1 = await propose(capacityArgs('Additional developers hired'), HIRING_MSG);
-    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'target_is_a_lever' }));
-    expect(await heldOnLatestRow()).toEqual([]);
+    const proposed = await propose(capacityArgs('Onboarding capacity strain'), HIRING_MSG);
+    expect(callOf(proposed)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(bytes()).toBe(before);
+    const held = (await heldOnLatestRow())[0]!;
+    const id = held.action.inline_patch!.operations![0]!.path;
+    const approvedState = (held.action.inline_patch![GM_HELD_USER_TODAY] as { observed_state: unknown }[])[0]!.observed_state;
+    const chip = approveChipOf(proposed)!;
+    expect(chip).toBeDefined();
+    const applied = await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    expect(applied._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    expect(graphNow().nodes.find(n => n.id === id)!.observed_state).toEqual(approvedState);
+    expect(graphNow().edges.filter(e => e.from === id).map(e => e.to)).toEqual(['risk_onboarding']);
+    expect(await heldOnLatestRow()).toEqual([]);
+    let canonical: Record<string, unknown> = {};
+    script = [() => fnCall('get_canonical_state', {}), body => {
+      canonical = toolOutputIn(body); return say('Here is the retained factor.');
+    }];
+    await turn({ message: 'What does the saved model hold?' });
+    const entity = (canonical.entities as Record<string, unknown>[]).find(n => n.id === id)!;
+    const os = approvedState as Record<string, unknown>;
+    expect({ value: entity.raw_value, unit: entity.unit, source: (entity.value_provenance as Record<string, unknown>).source })
+      .toEqual({ value: os.raw_value, unit: os.unit, source: os.source });
+
+  }, 180_000);
+
+  it('T2d W17: a cause of an option-set factor is retained through the real route', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    const t1 = await propose(capacityArgs('Additional developers hired'), HIRING_MSG);
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const chip = approveChipOf(t1)!;
+    expect(chip).toBeDefined();
+    const held = (await heldOnLatestRow())[0]!;
+    const factorId = held.action.inline_patch!.operations![0]!.path;
+    const t2 = await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    expect(t2._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const added = graphNow().edges.filter(e => e.from === factorId);
+    expect(added.map(e => e.to)).toEqual([hiringGraph().nodes.find(n => n.label === 'Additional developers hired')!.id]);
   }, 120_000);
 
   /**

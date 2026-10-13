@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { hasUserStatedSize } from '../../cee/provenance/provenance-of.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
-import { GOAL_SCOPE_UNRESOLVED_REASON, GoalScopeSchema, goalScopeMeaning, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
+import { GOAL_SCOPE_UNRESOLVED_REASON, GoalScopeSchema, GoalScopeReadingSchema, GoalScopeInputSchema, goalScopeMeaning, type GoalScopeReading as GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose, sameUnit, readMoneyTotal } from './reconciling-product.js';
 import { figureTheUserWrote } from './stated-by-user.js';
 import type { AdmittedModel, CandidateModel } from './admit-model.js';
@@ -12,16 +12,22 @@ import { isPendingActionExpired, PENDING_KIND_CLAIMS_BARE_NUMBER } from '../sess
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const nodesOf = (g: unknown): Rec[] => rec(g) && Array.isArray(g.nodes) ? g.nodes.filter(rec) : [];
-export const scopeOf = (v: unknown): GoalScope | undefined => { const p = GoalScopeSchema.safeParse(v); return p.success ? p.data : undefined; };
+export const scopeOf = (v: unknown): GoalScope | undefined => { const p = GoalScopeReadingSchema.safeParse(v); return p.success ? p.data : undefined; };
+/** New authorship travels in observed_state's additive sidecar, never inside strict Source. */
+export function scopeOfGoal(goal: unknown): GoalScope | undefined {
+  if (!rec(goal)) return undefined;
+  const input = GoalScopeInputSchema.safeParse(rec(goal.observed_state) ? goal.observed_state.scope_input : undefined);
+  return input.success ? input.data.scope : scopeOf(goal.goal_scope);
+}
 const native = (n: Rec | undefined): { value: number; unit: string; source: string } | undefined => {
   const os = rec(n?.observed_state) ? n.observed_state : undefined;
   if (!os || typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value) || typeof os.unit !== 'string'
-    || valueClassOf(os) !== 'user_stated') return undefined;
+    || !['user_stated', 'user_ratified', 'ai_drafted'].includes(valueClassOf(os))) return undefined;
   return { value: os.raw_value, unit: os.unit, source: String(os.source) };
 };
 
 /** A component product is not the whole metric. No labels or quotations are parsed to infer that relationship. */
-export function identityConflictsWithScope(goal: Rec, scope = scopeOf(goal.goal_scope)): boolean {
+export function identityConflictsWithScope(goal: Rec, scope = scopeOfGoal(goal)): boolean {
   const c = scope?.component; const identity = rec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
   return c !== undefined && ((scope?.extent === 'total' && (c.share === undefined || c.share < 1)) || c.basis === 'different')
     && identity?.operation === 'product' && Array.isArray(identity.factor_ids) && identity.factor_ids.length === 2
@@ -32,7 +38,7 @@ export function identityConflictsWithScope(goal: Rec, scope = scopeOf(goal.goal_
 export function goalScopeCheck(graph: unknown, goalId: string, scope: GoalScope,
   current?: GoalScopeReconciliation['current_level']): Pick<GoalScopeReconciliation, 'operands' | 'derivations'> & { contradiction: boolean; comparable: boolean; referencesValid: boolean } {
   const ns = nodesOf(graph), goal = ns.find(n => n.id === goalId);
-  const total = current ? { value: current.value, unit: current.unit, source: 'user_stated_claim' } : native(goal);
+  const total = current ? { value: current.value, unit: current.unit, source: 'proposed_current_level' } : native(goal);
   const c = scope.component; const rateNode = ns.find(n => n.id === c?.rate_id), countNode = ns.find(n => n.id === c?.count_id);
   const referencesValid = !c || c.rate_id !== c.count_id && rateNode?.kind === 'factor' && countNode?.kind === 'factor';
   const rate = native(rateNode), count = native(countNode);
@@ -93,7 +99,7 @@ export function scopePendingResolved(action: GoalScopeReconciliation, graph: unk
   if (!rec(graph) || !Array.isArray(graph.nodes)) return false;
   const goal = nodesOf(graph).find(n => n.id === action.goal_id);
   if (!goal) return true; // The referent was explicitly removed; never bind an answer to another node.
-  if (!action.scope || !scopeOf(goal.goal_scope) || stableStringify(goalScopeMeaning(goal.goal_scope)) !== stableStringify(goalScopeMeaning(action.scope))) return false;
+  if (!action.scope || !scopeOfGoal(goal) || stableStringify(goalScopeMeaning(scopeOfGoal(goal))) !== stableStringify(goalScopeMeaning(action.scope))) return false;
   if (identityConflictsWithScope(goal, action.scope)) return false;
   if (action.current_level) {
     const recorded = native(goal), claimed = action.current_level;
@@ -246,9 +252,9 @@ export const scopeWithdrawalWords = (goalId: string): string => `Withdraw this u
 export function scopeIssuesAfterWrite(prior: readonly PendingAction[], graph: unknown, scenarioId: string): PendingAction[] {
   const kept = prior.flatMap(p => { const r = refreshScopePending(p, graph); return r ? [r] : []; });
   for (const goal of nodesOf(graph).filter(n => n.kind === 'goal')) {
-    const scope = scopeOf(goal.goal_scope);
+    const scope = scopeOfGoal(goal);
     // Only a BLOCKING issue already held for this goal stands in for the typed one (`scopeIssueBlocks`).
-    if (!scope || kept.some(p => p.action.kind === 'reconcile_goal_scope' && p.action.goal_id === goal.id && scopeIssueBlocks(p.action))) continue;
+    if (!scope || !scope.stated_in_brief || kept.some(p => p.action.kind === 'reconcile_goal_scope' && p.action.goal_id === goal.id && scopeIssueBlocks(p.action))) continue;
     const check = goalScopeCheck(graph, String(goal.id), scope);
     if (scopeReadyToApprove(scope, check)) continue;
     // A typed scope that cannot be recorded supersedes the drafter's untyped question for the same goal (Codex buddy r1 P1):
@@ -258,7 +264,7 @@ export function scopeIssuesAfterWrite(prior: readonly PendingAction[], graph: un
       if (a.kind === 'reconcile_goal_scope' && a.goal_id === goal.id) kept.splice(i, 1);
     }
     kept.unshift(reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope', goal_id: String(goal.id), goal_label: String(goal.label),
-      scope, expected: 'billing_basis', question: scopeQuestion(String(goal.label), scope, check), operands: check.operands, derivations: check.derivations }));
+      scope: GoalScopeSchema.parse(scope), expected: 'billing_basis', question: scopeQuestion(String(goal.label), scope, check), operands: check.operands, derivations: check.derivations }));
   }
   return kept;
 }

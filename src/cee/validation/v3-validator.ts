@@ -235,15 +235,6 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const nodeKindMap = new Map(response.nodes.map((n) => [n.id, n.kind]));
   const stage = "edge_validation";
 
-  // Track which factors are controllable (targeted by interventions in options[])
-  // In V3, options are in a separate array (as well as in nodes[] for graph connectivity)
-  const controllableFactors = new Set<string>();
-  for (const option of response.options) {
-    for (const intervention of Object.values(option.interventions ?? {})) {
-      controllableFactors.add(intervention.target_match.node_id);
-    }
-  }
-
   // Track incoming/outgoing edges for topology validation (v6.0.2 rules)
   const incomingEdges = new Map<string, string[]>();
   const outgoingEdges = new Map<string, string[]>();
@@ -401,20 +392,11 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         });
       }
 
-      // Additional check: factor→factor only allowed if target is exogenous (not controllable)
-      if (fromKind === "factor" && toKind === "factor") {
-        if (controllableFactors.has(edge.to)) {
-          // Always ERROR per spec - topology violations must block execution
-          warnings.push({
-            code: "INVALID_FACTOR_TO_CONTROLLABLE",
-            severity: "error",
-            message: `Edge ${edge.from} → ${edge.to}: factor cannot target controllable factor (targeted by option interventions)`,
-            affected_edge_id: edgeId,
-            suggestion: "Controllable factors should only be set by option interventions, not influenced by other factors",
-            stage,
-          });
-        }
-      }
+      // W17: an incoming cause may be retained for an option-set factor. The
+      // intervention replaces its structural equation for that option (do(X)),
+      // rather than adding the cause to the intervened value. Other options may
+      // still use that causal relationship. Kind/id/cycle checks remain.
+
     }
 
     // Check effect_direction matches strength.mean sign.

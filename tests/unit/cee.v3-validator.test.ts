@@ -73,6 +73,15 @@ function makeV3Response(
 }
 
 describe("V3 Validator - Graph Structure Validation", () => {
+  it('W17 retains an incoming causal edge to an option-set factor', () => {
+    const response = makeV3Response({});
+    response.nodes.push({ id: 'cause', kind: 'factor', label: 'Incoming cause' });
+    response.edges.push({ from: 'cause', to: 'factor_1', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+    const result = validateV3Response(response);
+    expect(result.errors).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
   describe("Cycle Detection", () => {
     it("detects simple cycle and returns GRAPH_CONTAINS_CYCLE error", () => {
       const response = makeV3Response({

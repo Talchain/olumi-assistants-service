@@ -1,6 +1,7 @@
-import { GoalScopeSchema, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
-import { figureTheUserWrote, figureTheUserWroteFor } from './stated-by-user.js';
-import { goalScopeCheck, scopeQuestion, reconciliationPending, scopeOf, scopeShareAnswerCanBind, scopeSourcesAreUserWords, scopeReconciliationKey, scopeReadyToApprove, scopeCanRecord, nodesOf } from './goal-scope.js';
+import { statementOrigin } from '../../cee/provenance/provenance-of.js';
+import type { InputClaim } from '../../schemas/assist.js';
+import { GoalScopeReadingSchema, GoalScopeSchema, type GoalScopeReading as GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
+import { goalScopeCheck, scopeQuestion, reconciliationPending, scopeOf, scopeOfGoal, scopeSourcesAreUserWords, scopeReconciliationKey, scopeReadyToApprove, scopeCanRecord, nodesOf } from './goal-scope.js';
 import { proposeGoalCurrentLevel, type GoalLevelRead } from './goal-current-level.js';
 import type { ProposalStore } from './proposal.js';
 import type { PendingAction } from '../session/pending-action.js';
@@ -8,6 +9,8 @@ import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
 
 export interface ReconcileGoalScopeArgs {
   goal_label: string;
+  user_stated?: boolean;
+  basis?: string;
   scope?: unknown;
   current_level?: { value: number; unit: string; quote: string };
   component_share?: number;
@@ -26,45 +29,40 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   const previous = pendings.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.goal_id === goal.id);
   const prior = previous?.action.kind === 'reconcile_goal_scope' ? previous.action : undefined;
   const words = ctx.user_turn_text ?? ctx.user_text ?? '';
-  let scope: GoalScope | undefined = args.scope === undefined ? prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope) : scopeOf(args.scope);
+  let scope: GoalScope | undefined = args.scope === undefined ? prior?.scope ?? scopeOfGoal(goal) : scopeOf(args.scope);
   if (!scope) return fail('scope_unresolved', prior?.question ?? 'State whether this goal covers the whole metric or a component. Nothing was recorded.');
   if (args.component_share !== undefined || args.component_basis !== undefined || args.count_basis !== undefined) {
-    if (!scope.component || !args.source_quote || !words.includes(args.source_quote)) return fail('source_not_stated', 'Use the user’s exact words for this component. Nothing was recorded.');
-    const explicitlyNamed = figureTheUserWroteFor(args.component_share ?? 0, '%', args.source_quote, { target: [scope.component.label], others: [goal.label], strict: true, requireNamed: true });
-    if (args.component_share !== undefined && (!explicitlyNamed && !scopeShareAnswerCanBind(pendings, goal.id)
-      || !figureTheUserWrote(args.component_share, '%', args.source_quote))) {
-      if (!prior) return fail('share_not_bound', 'Name the component this share describes.');
-      const action = { ...prior, expected: 'component_share' as const, question: `What share of the current ${goal.label} comes from ${scope.component.label}?` };
-      return { ok: true, mutated: false, refusal: 'share_not_bound', pending_action: reconciliationPending(ctx.scenario_id, action), reconciliation: action, detail: action.question };
-    }
+    if (!scope.component) return fail('scope_operand_missing', 'Name the component before supplying its share or basis.');
+    if (args.component_share !== undefined && (!Number.isFinite(args.component_share) || args.component_share < 0 || args.component_share > 1)) return fail('invalid_share', 'A component share must be a finite fraction from zero to one.');
     scope = { ...scope, component: { ...scope.component,
       ...(args.component_share !== undefined ? { share: args.component_share } : {}),
       ...(args.component_basis !== undefined ? { basis: args.component_basis } : {}),
       ...(args.count_basis !== undefined ? { count_basis: args.count_basis } : {}),
-      ...(args.component_share !== undefined ? { source: { quote: args.source_quote } } : {}),
-      ...(args.component_basis !== undefined || args.count_basis !== undefined ? { basis_source: { quote: args.source_quote } } : {}) } };
+      ...(args.component_share !== undefined ? { source: { quote: args.source_quote ?? args.basis ?? '' } } : {}),
+      ...(args.component_basis !== undefined || args.count_basis !== undefined ? { basis_source: { quote: args.source_quote ?? args.basis ?? '' } } : {}) } };
   }
-  if (!GoalScopeSchema.safeParse(scope).success || !scopeSourcesAreUserWords(scope, words, prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope))) {
-    return fail('scope_not_grounded', 'The scope or share is not bound to the user’s own words. Nothing was recorded.');
-  }
-  if (scope.component?.share !== undefined && scope.component.share !== (prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope))?.component?.share && args.component_share === undefined) {
-    const quote = scope.component.source.quote;
-    const explicitlyNamed = figureTheUserWroteFor(scope.component.share, '%', quote, { target: [scope.component.label], others: [goal.label], strict: true, requireNamed: true });
-    if (!explicitlyNamed && !scopeShareAnswerCanBind(pendings, goal.id)) return fail('share_not_bound', 'Name which component this share describes, or answer its fresh scoped question. Nothing was recorded.');
-  }
+  if (!GoalScopeReadingSchema.safeParse(scope).success) return fail('invalid_scope', 'The scope must have valid ids, kinds and a finite share from zero to one.');
+  const previousScope = prior?.scope ?? scopeOfGoal(goal);
+  const wordsVerified = scopeSourcesAreUserWords(scope, ctx.user_text ?? words, previousScope?.stated_in_brief ? previousScope : undefined);
+  const origin = statementOrigin(wordsVerified, [scope.source.quote, scope.component?.source.quote, scope.component?.basis_source?.quote]
+    .some(q => !!q && (ctx.unverified_user_text ?? '').includes(q)), ctx.user_text_complete, args.user_stated === false || scope.stated_in_brief === false);
+  const claim: InputClaim = { origin, basis: args.basis ?? '', source_quote: [scope.source.quote, scope.component?.source.quote, scope.component?.basis_source?.quote].filter(Boolean).join('\n') };
+  if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', input_claim: claim, scope,
+    detail: 'The scope source is unknown. Its words and proposed reading are retained here; provide the original source or a new Olumi reading.' };
+  scope = { ...scope, stated_in_brief: origin === 'human' };
   if (scope.component && (scope.component.rate_id === scope.component.count_id || ![scope.component.rate_id, scope.component.count_id].every(id => nodesOf(graph.raw).some(n => n.id === id && n.kind === 'factor')))) {
     return fail('scope_operand_missing', 'The scoped rate and count must refer to existing model factors. Nothing was recorded.');
   }
   let current = prior?.current_level;
   if (args.current_level) {
     const c = args.current_level;
-    if (!words.includes(c.quote) || !figureTheUserWrote(c.value, c.unit, c.quote)) return fail('level_not_stated', 'The current level must be the user’s stated figure in their units. Nothing was recorded.');
+    if (!Number.isFinite(c.value) || !c.unit.trim()) return fail('invalid_current_level', 'The current level needs a finite value and its physical unit.');
     current = { value: c.value, unit: c.unit, source: { quote: c.quote } };
   }
   if (scope.extent === 'total' && !scope.component && (goal.nonlinear_identity as {operation?: string} | undefined)?.operation === 'product') return fail('scope_operand_missing', 'Identify the modelled component’s rate and count before reconciling this total goal. Nothing was prepared.');
   const check = goalScopeCheck(graph.raw, goal.id, scope, current);
   const expected = scope.extent === 'total' && scope.component && scope.component.share === undefined ? 'component_share' : !scopeReadyToApprove(scope, check) ? 'billing_basis' : 'approval';
-  const action: GoalScopeReconciliation = { kind: 'reconcile_goal_scope', goal_id: goal.id, goal_label: goal.label, scope,
+  const action: GoalScopeReconciliation = { kind: 'reconcile_goal_scope', goal_id: goal.id, goal_label: goal.label, ...(scope.stated_in_brief ? { scope: GoalScopeSchema.parse(scope) } : {}),
     ...(current ? { current_level: current } : {}), expected, question: scopeQuestion(goal.label, scope, check),
     operands: check.operands, derivations: check.derivations };
   const pending = reconciliationPending(ctx.scenario_id, action);
@@ -72,10 +70,10 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   if (!scopeCanRecord(scope, check)) return { ok: true, mutated: false, pending_action: pending, reconciliation: action, conditional_derivations: check.derivations, detail: action.question };
   if (!current) return { ok: true, mutated: false, pending_action: pending, reconciliation: action,
     detail: 'The scope question is retained. State the goal’s current level to prepare its existing baseline card.' };
-  const groundedWords = [words, current.source.quote, scope.source.quote, scope.component?.source.quote ?? '', scope.component?.basis_source?.quote ?? ''].join('\n');
+
   const proposal = await proposeGoalCurrentLevel({ readGraph: async () => graph, proposals: deps.proposals },
-    { ...ctx, user_text: groundedWords }, { goal_label: goal.label, value: current.value, unit: current.unit, user_stated: true, goal_scope: scope, reconciliation_key: scopeReconciliationKey(action) });
-  return { ...proposal, pending_action: pending, reconciliation: action, conditional_derivations: check.derivations,
+    ctx, { goal_label: goal.label, value: current.value, unit: current.unit, user_stated: args.user_stated !== false, source_quote: current.source.quote, basis: args.basis, goal_scope: scope, scope_claim: claim, ...(scope.stated_in_brief ? { reconciliation_key: scopeReconciliationKey(action) } : {}) });
+  return { ...proposal, ...(scope.stated_in_brief ? { pending_action: pending } : {}), reconciliation: action, scope_input: { scope, claim }, conditional_derivations: check.derivations,
     note: 'These operands are retained claims until approved, and the arithmetic is conditional and derived. Never replace the stated count with the implied count. '
       + (check.contradiction ? action.question : 'Approve only the exact scope and baseline reading on the card.') };
 }

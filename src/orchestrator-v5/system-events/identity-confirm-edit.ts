@@ -40,7 +40,7 @@ import { normaliseAbsenceOnly } from '../persisted-graph-projection.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { identityConflictsWithScope } from '../agent-lane/goal-scope.js';
-import type { GoalScope } from '../../schemas/goal-scope.js';
+import type { GoalScopeReading } from '../../schemas/goal-scope.js';
 import { ceilingStockPostimage, ceilingStockWords, proposeCeilingStock, type CeilingStockPending } from '../agent-lane/ceiling-stock.js';
 import { ceilingStockPendingOfferable } from '../agent-lane/ceiling-stock-carrier.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
@@ -52,7 +52,7 @@ export interface IdentityWithdrawalReading {
   words: string;
   reading_token: string;
 }
-export function identityWithdrawalFor(goal: Record<string, unknown>, scope: GoalScope): IdentityWithdrawalReading | undefined {
+export function identityWithdrawalFor(goal: Record<string, unknown>, scope: GoalScopeReading): IdentityWithdrawalReading | undefined {
   if (!identityConflictsWithScope(goal, scope)) return undefined;
   const held = goal.nonlinear_identity as { factor_ids: string[]; stated_in_brief: boolean };
   const reading = { outcome_id: String(goal.id), factor_ids: [...held.factor_ids], stated_in_brief: held.stated_in_brief,
@@ -60,7 +60,7 @@ export function identityWithdrawalFor(goal: Record<string, unknown>, scope: Goal
   return { ...reading, reading_token: createHash('sha256').update(stableStringify(reading)).digest('hex') };
 }
 /** Used inside the existing approved atomic writer. No graph append and no numerical repair here. */
-export function applyIdentityWithdrawalToGoal(goal: Record<string, unknown>, scope: GoalScope, approved: IdentityWithdrawalReading): Record<string, unknown> | null {
+export function applyIdentityWithdrawalToGoal(goal: Record<string, unknown>, scope: GoalScopeReading, approved: IdentityWithdrawalReading): Record<string, unknown> | null {
   const now = identityWithdrawalFor(goal, scope);
   if (!now || now.reading_token !== approved.reading_token || !isDeepStrictEqual(now, approved)) return null;
   const { nonlinear_identity: _identity, ...without } = goal;

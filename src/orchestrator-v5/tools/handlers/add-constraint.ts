@@ -38,6 +38,7 @@
  *     asks for the unit (see the emit guard below).
  */
 
+import { approvedTargetClaimFor } from '../../goal-target/input-claim-context.js';
 import { randomUUID } from 'node:crypto';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 
@@ -467,6 +468,7 @@ export function createAddConstraintHandler(): HandlerFn {
       const graph = graphParse.data;
 
       const targetId = proposal.entity.id;
+      const inputClaim = approvedTargetClaimFor(invocation.payload.scenario_id, targetId, invocation.payload.turn_id);
       const targetNode = graph.nodes.find((n) => n.id === targetId);
       if (!targetNode) {
         throw new D1HandlerError(
@@ -889,10 +891,11 @@ export function createAddConstraintHandler(): HandlerFn {
         ...(operatorAsStated !== undefined ? { operator_as_stated: operatorAsStated } : {}),
         value: params.value, // user units, no normalisation
         label: constraintLabel,
-        provenance: 'explicit',
+        provenance: inputClaim?.origin === 'ai' ? 'inferred' : 'explicit',
+        ...(inputClaim ? { input_claim: inputClaim } : {}),
         ...(invocation.confirmedConstraintSourceQuote !== undefined
           ? { source_quote: invocation.confirmedConstraintSourceQuote }
-          : existing?.source_quote !== undefined ? { source_quote: existing.source_quote } : {}),
+          : inputClaim ? {} : existing?.source_quote !== undefined ? { source_quote: existing.source_quote } : {}),
         // BY-PRESENCE, never defaulted: an absent frame must stay absent on the
         // row, because `undefined` and "unattested" are the same fact here and
         // the contract forbids manufacturing the difference. This turn's own
@@ -1452,7 +1455,7 @@ export function createAddConstraintHandler(): HandlerFn {
             // target from that stamp first — so moving the raw target without it left a stale figure on
             // screen after a reload. This row is `provenance: 'explicit'` (the user stated it): the pair is theirs.
             goalNode.success_threshold = params.value;
-            goalNode.threshold_source = 'user';
+            goalNode.threshold_source = inputClaim?.origin === 'ai' ? 'cee_inference' : 'user';
             // ⭐ DR row 1 (DL #75 5918381864; AIQ 5918365996; R3 5918409192 C1–C4): the user's APPROVED card states the
             // target AND its comparator in one statement, so the goal node holds both, in this same write (C1), replacing
             // any comparator held before (C3; the analysis hash moves). Only the card sets the side-band, and this block

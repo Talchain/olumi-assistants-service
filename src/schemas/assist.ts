@@ -398,7 +398,28 @@ export const CorrectionsSummarySchema = z.object({
  * PLoT merges explicit goal_constraints[] with compiled constraint nodes.
  */
 // CIL Phase 1: all known fields declared — unknown fields stripped
+/** Optional, additive source record; older constraint readers strip it. */
+/** Outside goal_target_basis: no keys are added to an older strict payload. */
+export const SavedEffectsTimingSchema = z.object({
+  interpretation: z.enum(['in_place_by_period', 'later_or_partial', 'not_stated']),
+  source_status: z.enum(['complete', 'incomplete', 'unread', 'unknown', 'conflicting']),
+  source: z.string(),
+  basis: z.string(),
+  goal_id: z.string().min(1),
+  option_ids: z.array(z.string().min(1)).refine(ids => new Set(ids).size === ids.length),
+  graph_revision: z.string().min(1),
+}).strict();
+export type SavedEffectsTiming = z.infer<typeof SavedEffectsTimingSchema>;
+
+export const InputClaimSchema = z.object({
+  origin: z.enum(['human', 'ai', 'unknown']),
+  basis: z.string(),
+  source_quote: z.string(),
+}).strict();
+export type InputClaim = z.infer<typeof InputClaimSchema>;
+
 export const GoalConstraintSchema = z.object({
+  input_claim: InputClaimSchema.optional(),
   /** Unique constraint identifier */
   constraint_id: z.string().min(1),
   /** ID of the target node (factor/outcome) this constraint applies to */
