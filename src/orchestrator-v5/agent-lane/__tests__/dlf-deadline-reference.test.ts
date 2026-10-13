@@ -89,7 +89,7 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
     expect(proposal.provenance.authored_by).toBe('user_stated');
     expect(card.public_label).toBe(`Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: “${WORDS}”.`);
     if (reference_date !== undefined) expect(trace).toHaveBeenCalledWith(expect.objectContaining({
-      event: 'v5.agent.deadline_reference_ignored', request_id: 'DLf', reference_date: '2026-10-13',
+      event: 'v5.agent.deadline_reference_ignored', request_id: 'DLf', reference_date: '2026-10-13', ignored_reference_date: reference_date,
     }), expect.any(String));
     expect(w.read()).toEqual(before); expect(w.rows).toHaveLength(0);
   });
@@ -121,6 +121,38 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
       forecast_words: QUOTE, range_origin: 'olumi_estimate', range_rule: 'low_confidence',
       selection: { by: 'user_press', interpretation: 'olumi', source: TEAM, quote: QUOTE } });
     expect(resolveRunAdmission(w.read()).willProceed).toBe(true);
+  });
+  it.each([
+    ['unrelated revenue date', 'Revenue was 2m as of 2026-09-01. Our launch deadline is 6 months from today.', undefined],
+    ['unrelated revenue date with correct host echo', 'Revenue was 2m as of 2026-09-01. Our launch deadline is 6 months from today.', '2026-10-13'],
+    ['old report date before deadline dating', 'as of 2026-09-01 for the old report; our launch deadline is 6 months from today as of 2026-10-13', undefined],
+  ])('DLf3 %s never becomes the saved deadline reference', async (_name, text, reference_date) => {
+    const w = world();
+    const card = await w.offer(reference_date === undefined ? {} : { reference_date }, text);
+    expect(card.ok, JSON.stringify(card)).toBe(true);
+    expect(await w.approve(String(card.proposal_id))).toMatchObject({ ok: true, applied: true });
+    expect(tuple(w.read())).toEqual(EXPECTED);
+    const proposal = w.proposals.get(String(card.proposal_id))!;
+    expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: 'event_goal', value: {
+      deadline: '2027-04-13', expected_deadline: null, words: WORDS, reference: '2026-10-13', stated_months: 6,
+    } }]);
+    expect(proposal.provenance).toEqual({ authored_by: 'user_stated', basis: '' });
+    expect(card.public_label).toBe(`Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: “${WORDS}”.`);
+    expect(w.rows.filter(r => r.write.graph !== undefined)).toHaveLength(1);
+  });
+  it('DLf3 a clause-attached prefix dates the deadline without a model echo', async () => {
+    const w = world();
+    const card = await w.offer({ deadline_words: 'six months' }, 'as of 2026-11-01 our deadline is six months');
+    expect(card.ok, JSON.stringify(card)).toBe(true);
+    expect(card.public_label).toBe('Is your deadline 1 May 2027 (6 months from 1 November 2026)? Your words: “six months”.');
+    const proposal = w.proposals.get(String(card.proposal_id))!;
+    expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: 'event_goal', value: {
+      deadline: '2027-05-01', expected_deadline: null, words: 'six months', reference: '2026-11-01', stated_months: 6,
+    } }]);
+    expect(proposal.provenance).toEqual({ authored_by: 'user_stated', basis: '' });
+    expect(w.rows).toEqual([]);
+    expect(await w.approve(String(card.proposal_id))).toMatchObject({ ok: true, applied: true });
+    expect(tuple(w.read())).toEqual({ ...EXPECTED, deadline: '2027-05-01', reference: '2026-11-01' });
   });
   it('(d) an unverified model reference never overrides the host reference', async () => {
     const w = world(); await saveDeadline(w, { reference_date: '2026-11-01' });
