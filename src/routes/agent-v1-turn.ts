@@ -2321,6 +2321,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * the stored reply being Olumi's own fixed line, never from the user's words.
        */
       const replayChip = runExplanationChip(scenarioId, state);
+      // What this exact answer was sent with: this process's memory of its controls, else the narration stored WITH its row.
+      const rememberedControls = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) : undefined;
+      const durableNarration = prior.run_narration ?? undefined;
+      // Set when a result-first Run receipt's own Run has since moved: it is answered as that historical Run below.
+      let movedReceiptKey: string | undefined;
       const unavailableExplanation = new Set([interpretationUnavailableText({ ok: true, ran: true }), RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT]);
       let replayText = prior.assistant_message ?? 'That request was already completed.';
       // Legacy host receipts retain the existing current-state reconstruction below. This is
@@ -2390,7 +2395,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
       } else if (approvedProposal === undefined && typedRunOf(body) && replayText.includes(RUN_RESULT_READY_TEXT)) {
         // B15: the atomic ready part may follow the typed chance headline in the stored derivation.
-        if (replayChip !== null) {
+        // A receipt whose own Run is no longer the current one is never re-answered on today's Run (PL #94 6135017311
+        // item 4, DL ruling 14 Oct, superseding #2470's "built on the CURRENT result" for a moved Run): it is replayed
+        // below as that historical Run. No sent narration known (a legacy row) keeps the rebuild.
+        const sentRunKey = (rememberedControls?.narration ?? durableNarration)?.run_key;
+        if (replayChip !== null && sentRunKey !== undefined && sentRunKey !== ''
+          && replayChip.id !== `${RUN_EXPLANATION_PREFIX}${sentRunKey}`) {
+          movedReceiptKey = sentRunKey;
+        } else if (replayChip !== null) {
           // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
@@ -2470,7 +2482,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           replayText = RUN_RESULT_UNVERIFIED_TEXT;
         }
       }
-      const rememberedControls = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) : undefined;
       const remembered = rememberedControls?.actions ?? [];
       // AI-written loop answers need their ORIGINAL bound identity. Legacy host receipts
       // are regenerated from current state; receipts saying nothing ran are not analysis answers.
@@ -2481,7 +2492,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Original bound controls only: never borrow today's key to identify yesterday's answer. After a restart, the
       // narration persisted WITH this exact row names its Run, never the latest row's; a row without it leaves the Run
       // unknown.
-      const durableNarration = prior.run_narration ?? undefined;
       const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length)
         || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey
         || durableNarration?.run_key || undefined;
@@ -2489,19 +2499,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // process's memory, else its row's). A key alone names the original Run on the historical receipt.
       const replayLoopRunCurrent = replayLoopRun && (rememberedControls !== undefined || durableNarration !== undefined)
         && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;
-      const historicalLoopReplay = replayLoopRun && !replayLoopRunCurrent;
+      const historicalLoopReplay = (replayLoopRun && !replayLoopRunCurrent) || movedReceiptKey !== undefined;
       if (replayLoopRunCurrent) {
         replayNarration = rememberedControls?.narration ?? durableNarration;
       }
       if (historicalLoopReplay) {
         replayText = prior.assistant_message ?? '';
         // Empty means unknown original identity, never the current Run's identity.
-        replayNarration = { status: 'stale', run_key: replayLoopRunKey
+        replayNarration = { status: 'stale', run_key: movedReceiptKey ?? replayLoopRunKey
           ?? (isRunExplanationChip(explanationId) ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : '') };
         boundControl.length = 0;
         // A warm answer with no original bound analysis controls must not gain a Run
         // control just from being resent. Cold/moved bound answers keep the historical exit.
-        if (rememberedControls === undefined || replayLoopRunKey !== undefined
+        if (movedReceiptKey !== undefined || rememberedControls === undefined || replayLoopRunKey !== undefined
           || remembered.some(action => action.id === RUN_OFFER_CHIP.id)) boundControl.push(RUN_OFFER_CHIP);
       }
       const resultFirstReplay = !historicalLoopReplay && (replayNarration !== undefined || replayLoopRunCurrent);
@@ -2656,7 +2666,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
-        current: !replayLoopRun && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
+        current: !replayLoopRun && movedReceiptKey === undefined && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
         userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedByUser(body) ? [prior.user_message ?? message] : [])], recentRowsForEgress),
       });
@@ -2664,7 +2674,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
       // K2: committed loop prose already crossed the live gates. Preserve those exact bytes;
       // currentness belongs to typed controls/narration, not a new sentence in the saved answer.
-      if (replayLoopRun) gatedReplay.assistant_text = prior.assistant_message ?? '';
+      if (replayLoopRun || movedReceiptKey !== undefined) gatedReplay.assistant_text = prior.assistant_message ?? '';
       return withShapeOnlyIfItDerives(gatedReplay);
     };
     /**

@@ -354,4 +354,22 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     expect(runs).toHaveLength(1);
   });
 
+  it('default result-first Run press, MOVED (DL ruling 14 Oct): a cold replay is Run A\'s historical receipt — {stale, K}, its words, no current result', async () => {
+    originalLoop = false;
+    const turnId = randomUUID();
+    const first = await press(turnId);
+    expect(first.statusCode, first.body).toBe(200);
+    const live = first.json();
+    expect(live.narration?.status).toBe('pending');
+    const keyB = await runB(live.narration.run_key);
+    await restart();
+    const body = (await resend(turnId)).json();
+    expect(body._agent.replayed).toBe(true);
+    expect(body.narration).toEqual({ status: 'stale', run_key: live.narration.run_key });
+    expect(body.narration.run_key).not.toBe(keyB);
+    expect(body.assistant_text).toBe(live.assistant_text);
+    expect(body.blocks ?? []).toEqual([]);
+    expect(body.suggested_actions.map((a: Rec) => a.id)).toEqual(['agent-run-analysis']);
+    expect(runs).toHaveLength(2);
+  });
 });
