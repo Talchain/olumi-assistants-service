@@ -1,8 +1,10 @@
 /**
- * DLf5 on the REAL route: the served 22:19Z deadline shape (CEE ffe10d51, 12 `unreadable_deadline` refusals). Paul types
- * his deadline; the stubbed model calls `propose_goal_deadline` with his phrase and BLANK optional fields
- * (`deadline_date: ""`, `reference_date: ""`), as the served model did → the card → its approve chip through the route →
- * the production writer → the saved goal read back → his team-time forecast is no longer `deadline_not_held`.
+ * DLf5 on the REAL route, for the 22:19Z served FAIL (CEE ffe10d51, 12 `unreadable_deadline` refusals). Paul types his
+ * deadline; the stubbed model calls `propose_goal_deadline` with his phrase and BLANK optional fields (`deadline_date: ""`,
+ * `reference_date: ""`). The served arguments were NOT retained (Render logged `proposed: '{}'`), so this blank shape is
+ * INFERRED from the pre-fix door, which refused only on the model's date. Flow: the card → its approve chip through the
+ * route → the production writer (exactly one deadline change) → the saved goal read back → his team-time forecast is no
+ * longer `deadline_not_held`.
  * Retained graph/brief/creation: `fixtures/dlf-turn13-deadline.json`. 0 LLM calls.
  */
 import { randomUUID } from 'node:crypto';
@@ -21,6 +23,8 @@ type Row = { id: string; scenario_id: string; turn_id: string; request_hash: str
 const rows = new Map<string, Row>();
 const order: string[] = [];
 const graphOf = new Map<string, unknown>();
+const deadlineOf = (g: unknown): unknown => (g as Json | undefined)?.nodes?.find((n: Json) => n.kind === 'goal')?.goal_horizon?.deadline;
+const deadlineChanges = new Map<string, number>();
 const latestRow = (sid: string): Row | undefined => [...order].reverse().map((k) => rows.get(k)!).find((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'));
 const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown[]> => {
   const { parsePendingAction } = await import('../../session/pending-action.js');
@@ -45,7 +49,11 @@ const store = {
         pending_actions: JSON.parse(JSON.stringify(w.pending_actions ?? [])) as unknown[],
         created_at: new Date(Date.UTC(2026, 9, 13, 0, 0, tick)).toISOString() });
       order.push(k);
-      if (w.graph !== undefined && w.graph !== null) graphOf.set(w.scenario_id, JSON.parse(JSON.stringify(w.graph)));
+      if (w.graph !== undefined && w.graph !== null) {
+        const next = JSON.parse(JSON.stringify(w.graph)) as unknown;
+        if (deadlineOf(next) !== deadlineOf(graphOf.get(w.scenario_id))) deadlineChanges.set(w.scenario_id, (deadlineChanges.get(w.scenario_id) ?? 0) + 1);
+        graphOf.set(w.scenario_id, next);
+      }
     }
     return { id: rows.get(k)!.id };
   }),
@@ -116,14 +124,17 @@ describe('DLf5 on /agent/v1/turn: a blank model date never vetoes the user\u2019
     const chips = (offered.suggested_actions as Json[]).filter((c) => String(c.id).startsWith('agent-approve-proposal:'));
     expect(chips, JSON.stringify(offered.suggested_actions)).toHaveLength(1);
     expect(goalNow().goal_horizon?.deadline, 'nothing saved before the approval').toBeUndefined();
+    expect(deadlineChanges.get(scenario) ?? 0).toBe(0);
     await send({ agent_session_id: session, message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
     expect({ deadline: goalNow().goal_horizon?.deadline, reference: goalNow().goal_horizon_reference_date, stated: goalNow().goal_horizon_stated_months })
       .toEqual({ deadline: '2027-04-13', reference: '2026-10-13', stated: 6 });
+    expect(deadlineChanges.get(scenario), 'the approval writes the deadline once').toBe(1);
     script[TEAM] = { name: 'propose_team_time', args: { quote: QUOTE, low_months: 7, high_months: 7 } };
     const team = await send({ agent_session_id: session, message: TEAM });
     const teamCall = callOf(team, 'propose_team_time');
     expect(teamCall, JSON.stringify(team._agent?.tool_calls)).toBeDefined();
     expect(teamCall!.refusal, 'the deadline is held, so the forecast is offered').not.toBe('deadline_not_held');
     expect(teamCall).toMatchObject({ ok: true });
+    expect(deadlineChanges.get(scenario), 'the team turn leaves the saved deadline alone').toBe(1);
   });
 });
