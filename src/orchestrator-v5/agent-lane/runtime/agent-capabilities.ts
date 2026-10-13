@@ -3538,13 +3538,13 @@ export function createAgentCapabilities(
       const n = ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []).find((x) => x?.id === id);
       return typeof n?.label === 'string' ? n.label : id;
     };
-    const limits = limitsKeptBy(g.raw, candidate);
+    const limits = limitsKeptBy(g.raw, candidate, targetFigure);
     const sayRow = (raw: unknown, r: { node_id: string; operator: string; value: number; unit: string }): string =>
       `\u2018${labelIn(raw, r.node_id)}\u2019 ${TARGET_COMPARATOR_WORDS[r.operator] ?? r.operator} ${targetFigure(r.value, r.unit)}`;
-    if (limits.dropped.length > 0) {
-      return notOffered('revised_draft_dropped_a_limit', `The revised draft did not keep ${limits.dropped.map((r) => sayRow(g.raw, r)).join(' and ')}, `
-        + 'so it was not offered and the model is unchanged. Tell the user plainly; never offer a draft that loses their limit.');
+    if (limits.conflict) {
+      return notOffered('revised_draft_not_prepared', 'An earlier limit could not be carried forward unchanged because its saved identity conflicts with the revised draft. Nothing was offered or changed.');
     }
+    Object.assign(candidate, limits.replacement);
     const held = targetsHeldBy(candidate);
     if (held.length === 0) {
       return notOffered('revised_draft_has_no_target', 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
@@ -3557,9 +3557,15 @@ export function createAgentCapabilities(
     const options = nodesOf(candidate).filter((n) => n?.kind === 'option' && typeof n.label === 'string').map((n) => `\u2018${n.label as string}\u2019`);
     const card = `Replace the early draft with a revised one built from your brief and the goal you just gave: `
       + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
-      + (limits.kept.length > 0 ? `Kept from your brief: ${limits.kept.map((r) => sayRow(g.raw, r)).join('; ')}. ` : '')
+      + (limits.limits.length > 0 ? `Limits in the revised draft: ${limits.limits.map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
+      + limits.carried.map((r) => `Carried forward unchanged because the draft omitted it: ${sayRow(g.raw, r)}. `).join('')
+      + (limits.uncertain.length > 0 ? limits.uncertain.map(({ previous, proposed }) =>
+        `Previous: ${sayRow(g.raw, previous)}; proposed: ${proposed.map((r) => sayRow(candidate, r)).join('; ')}. `).join('')
+        + 'Do these describe the same limit? Both are retained unless you explicitly ask to remove one. ' : '')
       + (options.length > 0 ? `Options: ${options.join(', ')}. ` : '')
-      + 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.';
+      + (limits.dropped.length > 0 ? 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
+        : 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. ')
+      + 'Check the targets, limits and options on this card before choosing.';
     const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
     const proposal = createProposal({
       scenario_id: sid,
@@ -3657,7 +3663,6 @@ export function createAgentCapabilities(
     // …and the acknowledged graph IS the approved candidate, whole (AIE B34): every component it carries held unchanged.
     const landed = after !== null && acknowledged !== '' && after.graph_identity_hash === acknowledged
       && approvedGraphHeld(v.candidate, after.raw)
-      && limitsKeptBy(before.raw, after.raw).dropped.length === 0
       && targetsHeldBy(v.candidate).every((t) => heldTargets.some((h) => h.node_id === t.node_id && h.comparator === t.comparator && h.value === t.value && h.unit === t.unit));
     if (!landed) {
       return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
@@ -3672,7 +3677,7 @@ export function createAgentCapabilities(
       : [];
     proposals.markApplied(pid, receipts);
     return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
-      follow_up: 'Your model is now the revised draft, with your goal as its targets and your limits kept. The earlier analysis was of the old draft; run the analysis again.' };
+      follow_up: 'Your model is now the revised draft, with the targets and limits shown on the card you approved. The earlier analysis was of the old draft; run the analysis again.' };
   };
 
   /** Consume the exact held card through the approved batch, then read back through the door's verdict on its committed bytes. */

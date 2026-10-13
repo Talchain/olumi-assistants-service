@@ -151,25 +151,51 @@ const numeric = (c: Rec): c is Rec & { value: number } => typeof c.value === 'nu
 const unitOf = (c: Rec): string => (typeof c.unit === 'string' ? c.unit.trim() : '');
 
 /**
- * The draft's limits (rows that are not the goal's targets), and whether the candidate keeps each: the SAME quantity (its
- * node's canonical label; AIE 0452 AMEND 2: "<= 25%" on another node is not the founder-time limit), comparator, figure,
- * unit and frame. A limit whose quantity cannot be named is dropped (unresolved identity refuses).
+ * Match quantity, stated comparator, figure and frame; the caller supplies the existing figure formatter to
+ * recognise unit spelling. Never infer quantity equivalence from a shared figure. Unmatched rows are carried
+ * verbatim, together with their node if absent. The result is prepared before the card and its hash are built.
+ * A conflicting node/row identity cannot safely carry an unchanged row and is reported, never overwritten.
  */
-export function limitsKeptBy(base: unknown, candidate: unknown): { kept: HeldRow[]; dropped: HeldRow[] } {
-  const isLimit = (c: Rec) => c.role !== 'goal_target' && numeric(c) && (c.operator === '<=' || c.operator === '>=') && c.deadline_metadata == null;
+export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value: number, unit: string) => `${value} ${unit}`) {
   const goalIds = (raw: unknown) => new Set(recs(rec(raw)?.nodes).filter((n) => n.kind === 'goal').map((n) => n.id));
-  const baseGoals = goalIds(base);
-  const theirs = rowsOf(candidate).filter(isLimit);
+  const limitsOf = (raw: unknown) => rowsOf(raw).filter((c) => c.role !== 'goal_target' && !goalIds(raw).has(c.node_id)
+    && numeric(c) && ['<=', '>=', '<', '>'].includes(String(c.operator)) && c.deadline_metadata == null);
+  const rowOf = (c: Rec): HeldRow => ({ node_id: String(c.node_id), operator: String(c.operator_as_stated ?? c.operator),
+    value: c.value as number, unit: unitOf(c) });
+  const theirs = limitsOf(candidate);
   const kept: HeldRow[] = [];
   const dropped: HeldRow[] = [];
-  for (const c of rowsOf(base).filter((r) => isLimit(r) && !baseGoals.has(r.node_id))) {
-    const row = { node_id: String(c.node_id), operator: String(c.operator), value: c.value as number, unit: unitOf(c) };
+  const carried: HeldRow[] = [];
+  const uncertain: { previous: HeldRow; proposed: HeldRow[] }[] = [];
+  const nodes = [...recs(rec(candidate)?.nodes)];
+  const rows = [...rowsOf(candidate)];
+  let conflict = false;
+  for (const c of limitsOf(base)) {
+    const row = rowOf(c);
     const quantity = quantityOf(base, c);
-    const same = (t: Rec) => quantity !== null && quantityOf(candidate, t) === quantity && t.operator === row.operator
-      && t.value === row.value && unitOf(t) === row.unit && (t.value_frame ?? 'level') === (c.value_frame ?? 'level');
-    (theirs.some(same) ? kept : dropped).push(row);
+    const sameFigure = (t: Rec) => String(t.operator_as_stated ?? t.operator) === row.operator
+      && t.value === row.value && figure(row.value, unitOf(t)) === figure(row.value, row.unit)
+      && (t.value_frame ?? 'level') === (c.value_frame ?? 'level');
+    if (theirs.some((t) => quantity !== null && quantityOf(candidate, t) === quantity && sameFigure(t))) {
+      kept.push(row);
+      continue;
+    }
+    dropped.push(row);
+    const proposed = theirs.filter(sameFigure).map(rowOf);
+    if (proposed.length > 0) uncertain.push({ previous: row, proposed });
+    else carried.push(row);
+    const node = recs(rec(base)?.nodes).find((n) => n.id === c.node_id);
+    const existing = nodes.find((n) => n.id === c.node_id);
+    if (node === undefined || (existing !== undefined && quantityOf(candidate, c) !== quantity)
+      || rows.some((r) => r.constraint_id === c.constraint_id)) {
+      conflict = true;
+      continue;
+    }
+    if (existing === undefined) nodes.push(structuredClone(node));
+    rows.push(structuredClone(c));
   }
-  return { kept, dropped };
+  return { kept, dropped, carried, uncertain, conflict, limits: [...theirs.map(rowOf), ...dropped],
+    replacement: { ...rec(candidate), nodes, goal_constraints: rows } };
 }
 
 /** The candidate's targets for the goal: each `goal_target` row and the goal's own row, with the comparator as stated. */
