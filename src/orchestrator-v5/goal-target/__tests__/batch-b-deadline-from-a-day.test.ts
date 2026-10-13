@@ -9,8 +9,8 @@
  *           Could you state the full deadline as “six months from 9 October”, including the year?"
  *
  * The one calendar (`deadline-date.ts`) read only "N months from now/today". The rule (DL ruling, 12 Oct): read
- * "N months/weeks/days from <date or last <weekday>>"; anchor "last <weekday>" with the existing reference-date resolver;
- * never roll a past start date into next year; ask whenever the result would be guessed.
+ * "N months/weeks/days from <date or last <weekday>>". Paul's A2g ruling supersedes host weekday selection:
+ * the host never chooses a weekday date; retain explicit dating or an AI-proposed date on an approval card.
  */
 import { describe, expect, it } from 'vitest';
 import { constructionOperationId } from '../../agent-lane/runtime/build-model.js';
@@ -49,14 +49,11 @@ describe('the one calendar reads a count from a STATED day', () => {
     expect(readStatedDeadline(A_WORDS, SUNDAY, { lastWeekday: dated! })?.date).toBe('2027-04-09');
   });
 
-  it('"last Friday" counted back from the reference day only where no reading is a guess', () => {
-    // Monday 12 Oct: this week's Friday is still ahead, so last Friday can only be 9 Oct.
-    expect(readStatedDeadline(A_WORDS, MONDAY)).toEqual(expect.objectContaining({ date: '2027-04-09', anchor: { date: '2026-10-09', count: { value: 6, unit: 'months' } } }));
-    // On a Friday, a week ago.
-    expect(readStatedDeadline('2 weeks from last friday', '2026-10-16')?.date).toBe('2026-10-23');
-    // Sunday 11 Oct: two days ago, or nine? Asked, never chosen.
-    expect(readStatedDeadline(A_WORDS, SUNDAY)).toBeNull();
-    // No recorded reference day to count from: never counted (the door's clock fallback), asked.
+  it('the host never selects a date for an undated "last Friday", on any reference weekday', () => {
+    for (const reference of [SUNDAY, MONDAY, '2026-10-16']) {
+      expect(readStatedDeadline(A_WORDS, reference)).toBeNull();
+      expect(readStatedDeadline('2 weeks from last friday', reference)).toBeNull();
+    }
     expect(readStatedDeadline(A_WORDS, MONDAY, { relativeWeekdays: false })).toBeNull();
     // The user's dating of a DIFFERENT weekday is not this one's.
     expect(readStatedDeadline(A_WORDS, SUNDAY, { lastWeekday: { weekday: 'monday', date: '2026-10-05' } })).toBeNull();
@@ -132,7 +129,10 @@ describe('the deadline door on Paul\'s marketing turns', () => {
   it('RED (Paul\'s second turn): "Last Friday was the 9th of October." places his first turn\'s deadline — the card "Is your deadline 9 April 2027 (6 months from 9 October 2026)?"', async () => {
     const d = door();
     const r = await d.caps.proposeGoalDeadline!(saying(TURN_B, [TURN_A]), { deadline_words: A_WORDS, rationale: TURN_B }) as Rec;
-    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)?' }));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “6 months to launch our new features from last Friday”. Basis supplied for this interpretation: ' + TURN_B }));
+    expect(d.proposals.get(String(r.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: TURN_B });
+    expect(r.deadline.words).toBe(A_WORDS);
+    expect(d.graph.nodes.find((n: Rec) => n.id === GOAL_ID).goal_horizon).toBeUndefined();
     const op = d.proposals.get(String(r.proposal_id))!.operations[0]!;
     // The horizon is measured from the recorded draft day (11 Oct), so the count from 9 Oct is NOT its length.
     expect(op).toEqual({ op: 'set_goal_deadline', path: GOAL_ID, value: { deadline: '2027-04-09', expected_deadline: null, words: A_WORDS, reference: SUNDAY } });
@@ -146,7 +146,10 @@ describe('the deadline door on Paul\'s marketing turns', () => {
     const d = door();
     const said = "Let's say six months from 9 October.";
     const r = await d.caps.proposeGoalDeadline!(saying(said, [TURN_A, TURN_B]), { deadline_words: SIX_FROM_9_OCT, rationale: said }) as Rec;
-    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)?' }));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “six months from 9 October”. Basis supplied for this interpretation: ' + said }));
+    expect(d.proposals.get(String(r.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: said });
+    expect(r.deadline.words).toBe(SIX_FROM_9_OCT);
+    expect(d.graph.nodes.find((n: Rec) => n.id === GOAL_ID).goal_horizon).toBeUndefined();
   });
 
   it('Paul\'s first turn, on a Sunday draft: "last Friday" is asked about — with the words to call again with — never chosen', async () => {
@@ -155,16 +158,42 @@ describe('the deadline door on Paul\'s marketing turns', () => {
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'deadline_not_placed' }));
     expect(String(r.detail)).toContain('which date "last friday"');
     expect(String(r.detail)).toContain('Ask which date the user means. Once they explicitly date that weekday, call propose_goal_deadline with the original deadline_words. Never invent or offer a start date.');
-    // CONTROL: the same turn on a Monday draft places it directly (this week's Friday is still ahead).
+    expect(d.proposals.outstanding(SCENARIO, null)).toHaveLength(0);
+    expect(d.graph.nodes.find((n: Rec) => n.id === GOAL_ID).goal_horizon).toBeUndefined();
+    // Same words, no AI date/reference: Monday must also ask, never choose a weekday.
     const monday = door('2026-10-12T10:00:00Z');
     const m = await monday.caps.proposeGoalDeadline!(saying(TURN_A), { deadline_words: A_WORDS, rationale: TURN_A }) as Rec;
-    expect(m, JSON.stringify(m)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)?' }));
+    expect(m, JSON.stringify(m)).toEqual(expect.objectContaining({ ok: false, refusal: 'deadline_not_placed' }));
+    expect(monday.proposals.outstanding(SCENARIO, null)).toHaveLength(0);
+    expect(monday.graph.nodes.find((n: Rec) => n.id === GOAL_ID).goal_horizon).toBeUndefined();
+  });
+
+  it('an explicit AI interpretation shows the source, proposed date and references without writing or becoming human-authored', async () => {
+    const d = door();
+    const before = JSON.stringify(d.graph);
+    const basis = `${TURN_A} Olumi interprets last Friday as 9 October 2026, using the recorded reference 11 October 2026; six months from that start is 9 April 2027.`;
+    const r = await d.caps.proposeGoalDeadline!(saying(TURN_A), {
+      deadline_words: A_WORDS, deadline_date: '2027-04-09', rationale: basis,
+    }) as Rec;
+    expect(r).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(r.public_label).toBe('Is your deadline 9 April 2027 (about 5.9 months from 11 October 2026)? Your words: “6 months to launch our new features from last Friday”. Olumi’s interpretation; check the date and reference before approving. Basis supplied for this interpretation: ' + basis);
+    const proposal = d.proposals.get(String(r.proposal_id))!;
+    expect(proposal.provenance).toEqual({ authored_by: 'model_proposed', basis });
+    expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: GOAL_ID,
+      value: { deadline: '2027-04-09', expected_deadline: null, words: A_WORDS, reference: SUNDAY } }]);
+    expect(JSON.stringify(d.graph)).toBe(before);
+    // Removing the AI-supplied date and interpretation leaves the same human words unresolved.
+    const without = door();
+    const refused = await without.caps.proposeGoalDeadline!(saying(TURN_A), { deadline_words: A_WORDS, rationale: TURN_A }) as Rec;
+    expect(refused).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'deadline_not_placed' }));
+    expect(without.proposals.outstanding(SCENARIO, null)).toHaveLength(0);
+    expect(JSON.stringify(without.graph)).toBe(before);
   });
 
   it.each([
-    ['an earlier phrase this message does not date (Codex r1 kept)', 'Yes, add the AI tool option.', 'deadline_not_stated'],
+    ['an earlier ambiguous weekday this message does not date', 'Yes, add the AI tool option.', 'deadline_not_placed'],
     ['a dating that is not that weekday', 'Last Friday was the 8th of October.', 'deadline_not_placed'],
-    ['a dating of another weekday', 'Last Monday was the 5th of October.', 'deadline_not_stated'],
+    ['a dating of another weekday', 'Last Monday was the 5th of October.', 'deadline_not_placed'],
   ])('refused, nothing prepared: %s', async (_what, thisMessage, refusal) => {
     const d = door();
     const r = await d.caps.proposeGoalDeadline!(saying(thisMessage, [TURN_A]), { deadline_words: A_WORDS, rationale: thisMessage }) as Rec;

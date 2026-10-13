@@ -193,7 +193,7 @@ function newRiskReply(r: Rec): string | null {
 }
 
 /**
- * ⭐ NEW FACTORS WITH THE USER'S FIGURES (PJ-E-FIG): each figure is the user's (`stated_by: 'user'`), what it affects is the
+ * NEW FACTORS: each figure keeps the source returned by the capability; what it affects is the
  * capability's own typed phrase, and how strongly is its one fixed disclosure. The figures are named here because the
  * consent subject is minted from the ops, which never carry them. Anything else keeps the second call.
  */
@@ -218,6 +218,8 @@ function newFactorReply(r: Rec): string | null {
       // ⛔ DL ruling on #2235: the PAIRING is Olumi's until the user approves it, so the card shows it with their own words.
       toConfirm = true;
       lines.push(`${q(f.label)}: ${proposalFigure(cv.value, cv.unit)}, from your message “${cv.quote.trim()}”${within}; it affects ${f.affects.trim()}.`);
+    } else if (cv.stated_by === 'olumi_estimate') {
+      lines.push(`${q(f.label)}: ${proposalFigure(cv.value, cv.unit)}, Olumi’s estimate${within}; it affects ${f.affects.trim()}.`);
     } else {
       return null;
     }

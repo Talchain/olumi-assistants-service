@@ -101,11 +101,20 @@ function card(body: Rec) {
   const calls = body._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline');
   expect(calls).toHaveLength(1); expect(calls[0].ok).toBe(true);
   const yes = body.suggested_actions.find((c: Rec) => c.id === approvalChipIdFor(calls[0].proposal_id));
-  expect(yes).toMatchObject({ label: 'Yes', detail: 'Is your deadline 10 August 2027 (10 months from 10 October 2026)?' });
+  expect(yes).toMatchObject({ label: 'Yes', detail: 'Is your deadline 10 August 2027 (10 months from 10 October 2026)? Your words: “ten months”.' });
   expect(body.suggested_actions).toContainEqual(DEADLINE_CHANGE_CHIP);
   return { call: calls[0], yes };
 }
 describe('deterministic deadline card on the first Agent turn', () => {
+  it('A2 keeps full source, qualifiers and interpretation in the existing rationale on the approval card', async () => {
+    const w = world();
+    const source = 'We hope to launch within ten months, provided the evidence supports it; this is not a firm commitment and hiring completion is a separate milestone.';
+    const rationale = `${source} The source is the current human message; Olumi interprets ten months from the known draft reference.`;
+    const out = await w.caps.proposeGoalDeadline!(w.ctx(source), { deadline_words: 'ten months', rationale }) as Rec;
+    expect(out).toMatchObject({ ok: true, mutated: false });
+    expect(out.public_label).toContain(rationale);
+    expect(out.deadline.words).toBe('ten months');
+  });
   it('R1 Run-chip offers exactly one bound card using draft R; no graph change', async () => {
     const w = world(), before = w.read(), turn = await route(w), body = await turn(), { call, yes } = card(body);
     expect(body.assistant_text).toBe(yes.detail); expect(w.read()).toEqual(before);
@@ -113,11 +122,43 @@ describe('deterministic deadline card on the first Agent turn', () => {
     expect(carrier.action.inline_patch.agent_proposal).toMatchObject({ proposal_id: call.proposal_id,
       operations: [{ op: 'set_goal_deadline', path: goal(before).id, value: { deadline: '2027-08-10', words: 'ten months', reference: R, expected_deadline: null, stated_months: 10 } }] });
   });
-  it('R5 stored brief never satisfies the model-facing THIS typed-turn gate', async () => {
+  it('A2h words found only in the unverified stored brief stay unknown', async () => {
     const w = world();
-    expect(await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'ten months', rationale: '' }), w.ctx('Run the analysis.'), w.caps, 'full'))
-      .toMatchObject({ ok: false, mutated: false, refusal: 'deadline_not_stated' });
-    expect(w.proposals.outstanding(w.sid, null)).toHaveLength(0);
+    const out = await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'ten months', rationale: '' }), w.ctx('Run the analysis.'), w.caps, 'full');
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(out.proposal_id).toBeUndefined();
+    expect(w.writes).toHaveLength(0);
+  });
+  it('W3 unbound deadline words prepare an Olumi-labelled card without writing', async () => {
+    const w = world(); w.setBrief('Plan the launch.'); // These words occur nowhere in retained user material.
+    const out = await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'ten months', rationale: '' }), w.ctx('Run the analysis.'), w.caps, 'full');
+    expect(out).toMatchObject({ ok: true, mutated: false });
+    expect(w.proposals.get(String(out.proposal_id))?.provenance.authored_by).toBe('model_proposed');
+    expect(out.public_label).toBe('Is your deadline 10 August 2027 (10 months from 10 October 2026)? Olumi’s wording: “ten months”. Olumi’s interpretation; check the date and reference before approving.');
+  });
+  it('A2h a verified pending deadline retains human words when history is unknown', async () => {
+    const w = world();
+    const first = await w.caps.proposeGoalDeadline!(w.ctx('My deadline is ten months'), { deadline_words: 'ten months', rationale: '' });
+    expect(first.ok).toBe(true);
+    const second = await w.caps.proposeGoalDeadline!({ ...w.ctx('Show that card again.'), unverified_user_text: 'My deadline is ten months' },
+      { deadline_words: 'ten months', rationale: '' });
+    expect(second.ok).toBe(true);
+    expect(w.proposals.get(String(second.proposal_id))?.provenance.authored_by).toBe('user_stated');
+    expect(second.public_label).toBe('Is your deadline 10 August 2027 (10 months from 10 October 2026)? Your words: “ten months”.');
+  });
+  it('W2 ISO interpretation reaches the real approval writer; malformed dates write nothing', async () => {
+    const w = world();
+    const out = await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'after the spring launch', deadline_date: '2027-04-30', rationale: '' }), w.ctx('after the spring launch'), w.caps, 'full');
+    expect(out).toMatchObject({ ok: true, mutated: false });
+    expect(w.proposals.get(String(out.proposal_id))?.provenance.authored_by).toBe('model_proposed');
+    expect(out.public_label).toBe('Is your deadline 30 April 2027 (about 6.7 months from 10 October 2026)? Your words: “after the spring launch”. Olumi’s interpretation; check the date and reference before approving.');
+    const done = await w.caps.authoriseChange({ ...w.ctx('Yes'), typed_approval_of: String(out.proposal_id) }, { proposal_id: String(out.proposal_id) });
+    expect(done).toMatchObject({ ok: true, applied: true });
+    expect(goal(w.read()).goal_horizon.deadline).toBe('2027-04-30');
+    for (const deadline_date of ['2027-02-30', 'tomorrow', 123, null]) {
+      expect(await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'ten months', deadline_date, rationale: '' }), w.ctx('ten months'), w.caps, 'full'))
+        .toMatchObject({ ok: false, mutated: false, refusal: 'unreadable_deadline' });
+    }
   });
   it('manual door keeps its proposal/goal/date/chip identity and expected null deadline', async () => {
     const w = world(), before = w.read();
@@ -371,7 +412,7 @@ describe('R4 durable first-Agent-turn gate', () => {
   });
   it('Change date follow-up can still propose THIS newly typed deadline through the model door', async () => {
     const w = world(); const out = await w.caps.proposeGoalDeadline!(w.ctx('My deadline is eleven months'), { deadline_words: 'eleven months', rationale: '' });
-    expect(out).toMatchObject({ ok: true, public_label: 'Is your deadline 10 September 2027 (11 months from 10 October 2026)?' });
+    expect(out).toMatchObject({ ok: true, public_label: 'Is your deadline 10 September 2027 (11 months from 10 October 2026)? Your words: “eleven months”.' });
   });
 });
 
