@@ -412,8 +412,9 @@ export const NodeV3 = z.object({
    * option's effect on the goal is stated in, whether those effects are their size at the period's end (amendment 2),
    * the other conditions this target leaves out (amendment 4), and an open question when the target reads more than one
    * way (amendment 3). `quantity_frame`, `target_frame` and `target_raw` are the staleness key: once the target is edited the
-   * reading is never applied. Written ONLY by construction; CEE-owned (`field-safety.ts`); out of the analysis hash (it
-   * changes what may be SAID about a Run, never what the engine computes); a malformed value is absence (`.catch`).
+   * reading is never applied. Written ONLY by construction, and by the user's approved answer to its open question, which
+   * removes that one member (`goal-reading-write.ts`); CEE-owned (`field-safety.ts`); in the analysis hash (Batch C gap 2:
+   * a change to it stales a stored Run, though it changes only what may be SAID about one); a malformed value is absence.
    */
   goal_target_basis: z.object({
     quantity_frame: z.enum(['level', 'change']),
