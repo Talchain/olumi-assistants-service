@@ -85,7 +85,9 @@ const store = {
   readCommittedTurn: vi.fn(async (_scenario: string, id: string) => {
     const r = rows.find((x) => x.turn_id === id);
     return r === undefined ? null : { id: String(r.turn_id), request_hash: r.request_hash, assistant_message: r.assistantMessage ?? null,
-      user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [] };
+      user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [],
+      // As the real store reads it back (T1h #2996, migration 20261013230000): the narration this answer was sent with.
+      run_narration: r.run_narration ?? null };
   }),
   append: vi.fn(async (row: Row) => { rows.push({ ...row }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => []),
@@ -193,6 +195,8 @@ describe('a native Run with an unvalued risk root carries the numerical withhold
     const first = (await runTurn(turnId)).json() as Body;
     expectWithheldContract(first, line);
     expect(first.assistant_text.includes('numerical analysis is withheld')).toBe(false);
+    // A concrete original Run identity, so two absent narrations can never compare equal below.
+    expect(first.narration?.run_key).toMatch(/^[0-9a-f]{16}$/);
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
       const replay = (await runTurn(turnId)).json() as Body;
