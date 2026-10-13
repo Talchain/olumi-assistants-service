@@ -14,6 +14,7 @@ import {
   readOptionResultSources,
 } from '../../../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../../../orchestrator/context/constraint-feasibility.js';
+import { RETAINED_LIMIT_WITHHELD, RETAINED_LIMIT_WITHHOLD_CODE } from '../../../../graph/retained-limit.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { GOAL_FIGURES_NO_STATED_TARGET, withholdUnusableGoalChances } from '../../../goal-target/goal-chance-gate.js';
 import { withholdGoalFiguresForChanceGoal, withholdGoalFiguresForMissingCurrentLevel, withholdGoalFiguresForUntestedHorizon, withholdGoalFiguresForUntestableTarget } from '../../../tools/handlers/run-analysis.js';
@@ -43,6 +44,8 @@ const IDENTITY = GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED;
  * coherent identity row. Remove an entry when its actual bar recovery is delivered.
  */
 export const KNOWN_GAPS = new Set<string>([
+  // M1: equivalence is still an unanswered card question; no action-bar answer/removal writer exists.
+  RETAINED_LIMIT_WITHHOLD_CODE,
   // P45 supplies Add monthly changes; Science §(o′) forbids a control before its writer serves.
   GOAL_FIGURES_HORIZON_NOT_TESTED,
   // PLoT's scale-cut reason needs a rescale/correct-size door on the bar.
@@ -150,6 +153,9 @@ function chanceAsGoal(): Fixture {
 }
 
 const INVENTORY: Readonly<Record<string, { make: () => Fixture; resolves: readonly string[] }>> = {
+  [RETAINED_LIMIT_WITHHOLD_CODE]: { make: () => boundaryWithhold(twoParentGraph(), RETAINED_LIMIT_WITHHOLD_CODE, {
+    message: RETAINED_LIMIT_WITHHELD,
+  }), resolves: [] },
   [IDENTITY]: { make: () => boundaryWithhold(paul(), IDENTITY), resolves: ['confirm_reading'] },
   // PLoT #422 boundary replay: served reason pinned by goal-chance-clamp-reason.test.ts.
   [GOAL_FIGURES_USER_EFFECT_CLAMPED]: { make: () => boundaryWithhold(twoParentGraph(), GOAL_FIGURES_USER_EFFECT_CLAMPED, {

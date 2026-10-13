@@ -1,3 +1,4 @@
+import { RETAINED_LIMIT_WITHHOLD_CODE } from '../../graph/retained-limit.js';
 /**
  * Single source of truth for "which array carries the option-level results",
  * with CURRENT-first precedence (M1, Codex r2 pre-merge review).
@@ -121,6 +122,7 @@ export const GOAL_FIGURES_CHANCE_AS_GOAL = 'GOAL_FIGURES_CHANCE_AS_GOAL';
 
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
+  RETAINED_LIMIT_WITHHOLD_CODE,
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_PLACEHOLDER_PATH,

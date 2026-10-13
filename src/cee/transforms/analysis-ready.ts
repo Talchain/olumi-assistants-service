@@ -1,3 +1,4 @@
+import { retainedLimitOnlyNodeIds } from '../../graph/retained-limit.js';
 import { isUnverifiedUserMaterial } from './provenance-display.js';
 /**
  * Analysis-Ready Transformer
@@ -1325,11 +1326,13 @@ export function buildAnalysisReadyPayload(
 
   // Find unreachable controllable factors
   const unreachableControllableBlockers: AnalysisBlockerT[] = [];
+  const retainedLimitOnly = retainedLimitOnlyNodeIds(graph);
   for (const node of graph.nodes) {
     if (node.kind !== "factor") continue;
     // Exclude constraint nodes by ID prefix (compound-goals creates constraint_* nodes with kind=constraint,
     // but guard against any that might be mis-tagged as factor)
     if (node.id.startsWith("constraint_")) continue;
+    if (retainedLimitOnly.has(node.id)) continue;
     if (transitivelyReachableFactors.has(node.id)) continue;
     // Skip factors that already have mapped interventions (reachable via V3 option data)
     if (factorsWithInterventions.has(node.id)) continue;
