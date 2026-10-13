@@ -48,3 +48,19 @@ export function oneNextStep(blockers: readonly (PressBlocker | null | undefined)
   }
   return null;
 }
+
+/**
+ * One step, one owner (DL): where the reply already has an owner of its next step, the typed blocker yields and adds nothing.
+ * The owners are the route's own facts: the scoped guided finding with its presses (`guidedRunFinding`), a typed card's own
+ * question (`typedControlQuestions`), or a specific press already offered for this blocked Run (`offeredSpecific`).
+ */
+export interface NextStepOwners {
+  readonly guidedRunFinding: boolean;
+  readonly typedControlQuestion: boolean;
+  readonly specificOffer: boolean;
+}
+
+export function unownedNextStep(step: PressBlocker | null, owners: NextStepOwners): PressBlocker | null {
+  if (step === null) return null;
+  return owners.guidedRunFinding || owners.typedControlQuestion || owners.specificOffer ? null : step;
+}

@@ -10,7 +10,7 @@ import { jointBlockerOf, jointWithheldLine, type JointWithholdReason } from '../
 import { chanceGoalBlockerOf, chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { unreadGoalProductBlockerOf, type UnreadGoalProduct } from '../unread-goal-product.js';
 import { staleBlockerOf, staleResultLine } from '../write-outcome.js';
-import { AIE_TEXT_PENDING_CANNOT_CALCULATE_YET, AIE_TEXT_PENDING_STARTING_VALUE_ASK, oneNextStep, type PressBlocker } from '../press-next-step.js';
+import { AIE_TEXT_PENDING_CANNOT_CALCULATE_YET, AIE_TEXT_PENDING_STARTING_VALUE_ASK, oneNextStep, unownedNextStep, type PressBlocker } from '../press-next-step.js';
 
 type Rec = Record<string, any>;
 const read = (name: string): Rec => JSON.parse(readFileSync(new URL(`../../goal-target/__tests__/fixtures/s4b/${name}.json`, import.meta.url), 'utf8'));
@@ -113,5 +113,17 @@ describe('ONE step when several stand', () => {
     expect(oneNextStep([unbuilt, null, input])).toBe(input);
     expect(oneNextStep([undefined, unbuilt])).toBe(unbuilt);
     expect(oneNextStep([null, undefined])).toBeNull();
+  });
+});
+
+describe('one step, one owner: an existing owner keeps the step', () => {
+  const step: PressBlocker = { kind: 'missing_implementation', what: 'x' };
+  const none = { guidedRunFinding: false, typedControlQuestion: false, specificOffer: false };
+  it('no owner → the typed step stands; any one owner → nothing is added', () => {
+    expect(unownedNextStep(step, none)).toBe(step);
+    expect(unownedNextStep(step, { ...none, guidedRunFinding: true })).toBeNull();
+    expect(unownedNextStep(step, { ...none, typedControlQuestion: true })).toBeNull();
+    expect(unownedNextStep(step, { ...none, specificOffer: true })).toBeNull();
+    expect(unownedNextStep(null, none)).toBeNull();
   });
 });
