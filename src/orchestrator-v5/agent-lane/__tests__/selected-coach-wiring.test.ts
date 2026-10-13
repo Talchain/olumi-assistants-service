@@ -271,7 +271,15 @@ describe('selected Sol-high coach on the actual Agent route', () => {
   });
 
   it('PROMPT 28: the SENT converse call carries each approved packet text once and no retired deferral', async () => {
-    await sendTurn('What does the analysis say?', [say('The comparison is provisional.')]);
+    // The UI's own typed-message shape (DGAI `buildV5Payload`, e218e3d2: kind, turn_id, scenario_id, stage, turn_class, message,
+    // source), never a self-authored wire body.
+    scripted = [say('The comparison is provisional.')];
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', turn_id: '5d4c3b2a-1f0e-4d9c-8b7a-0000000000f8', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'review',
+      message: 'What does the analysis say?', source: 'composer',
+    } });
+    expect(response.statusCode, response.body.slice(0, 300)).toBe(200);
+    expect(sent).toHaveLength(1);
     const body = sent[0]!;
     for (const [site, text] of Object.entries(PACKET_SYSTEM_TEXTS)) expect(body.instructions.split(text).length - 1, site).toBe(1);
     for (const retired of RETIRED_DEFERRALS) expect(body.instructions, retired).not.toContain(retired);
