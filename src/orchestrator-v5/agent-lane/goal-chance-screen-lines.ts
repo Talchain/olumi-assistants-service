@@ -186,9 +186,10 @@ export function goalChanceNotesForAgent(result: unknown, graph: unknown, current
   const out: string[] = [];
   const targets = facts.goal_targets;
   if (targets !== undefined) {
-    if (targets.joint.status === 'withheld') {
-      out.push(targets.joint.line);
-      if (targets.joint.frechet_line !== undefined) out.push(targets.joint.frechet_line);
+    const joint = targets.joint;
+    if (joint.status === 'withheld') {
+      if (!targets.note_groups?.some((group) => group.joint_line === joint.line)) out.push(joint.line);
+      if (joint.frechet_line !== undefined) out.push(joint.frechet_line);
     }
     for (const t of targets.per_target) {
       const each = Object.entries(t.pct_by_option).flatMap(([id, pct]) => {
@@ -199,7 +200,15 @@ export function goalChanceNotesForAgent(result: unknown, graph: unknown, current
     }
   }
   if (facts.goal_chance_status_quo !== undefined) out.push(facts.goal_chance_status_quo.line);
-  for (const note of facts.goal_chance_notes ?? []) out.push(note);
+  const saidGroups = new Set<number>();
+  for (const note of facts.goal_chance_notes ?? []) {
+    const groups = targets?.note_groups?.flatMap((group, index) => group.source_notes.includes(note) ? [{ group, index }] : []) ?? [];
+    if (groups.length === 0) out.push(note);
+    for (const { group, index } of groups) {
+      if (!saidGroups.has(index)) out.push(group.line);
+      saidGroups.add(index);
+    }
+  }
   // ⛔ RE-SCOPE 2 (R5-2): a range resting on an unverified input says so once too (never "zero estimates"), unless said already.
   const ranges = rangeCensusOf(facts, graph);
   const rangeIds = Object.keys(facts.goal_chance_range_display ?? {});

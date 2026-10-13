@@ -21,7 +21,7 @@
  * `store_draft_graph`, `create_model_version*`, `restore_*`, `append_turn_atomic` v1–v4) do not set the mutation id and
  * are not proven uncalled; G1's stamps are the backstop for a human edit through any of them.
  */
-import { RETAINED_LIMIT_QUESTION } from '../../../graph/retained-limit.js';
+import { RETAINED_LIMIT_QUESTION, RETAINED_LIMIT_QUANTITY_QUESTION, unresolvedRetainedLimits, retainedLimitWithheldLine } from '../../../graph/retained-limit.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { constructionOperationId } from './build-model.js';
@@ -204,7 +204,9 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
       previous_constraint_id: c.constraint_id, proposed_constraint_ids: proposedRows.map((r) => r.constraint_id),
       question: RETAINED_LIMIT_QUESTION };
     rows.push({ ...structuredClone(c), ...(proposedRows.length > 0
-      ? { retained_unresolved_limit: { ...marker, role: 'original' } } : {}) });
+      ? { retained_unresolved_limit: { ...marker, role: 'original' } }
+      : existing === undefined ? { retained_unresolved_limit: { ...marker, role: 'original',
+        reason: 'retained_limit_quantity_unresolved', question: RETAINED_LIMIT_QUANTITY_QUESTION } } : {}) });
     // An isolated proposed interpretation is retained for this SAME unanswered question, not made a causal factor.
     // Connected proposed quantities remain independently modelled; only the isolated question carrier is unscored.
     for (const proposedRow of proposedRows) {
@@ -217,8 +219,9 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
       }
     }
   }
-  return { kept, dropped, carried, uncertain, conflict, limits: [...theirs.map(rowOf), ...dropped],
-    replacement: { ...rec(candidate), nodes, goal_constraints: rows } };
+  const replacement = { ...rec(candidate), nodes, goal_constraints: rows };
+  return { kept, dropped, carried, uncertain, conflict, limits: theirs.map(rowOf),
+    ...(unresolvedRetainedLimits(replacement).length > 0 ? { withheld: retainedLimitWithheldLine(replacement) } : {}), replacement };
 }
 
 /** The candidate's targets for the goal: each `goal_target` row and the goal's own row, with the comparator as stated. */
