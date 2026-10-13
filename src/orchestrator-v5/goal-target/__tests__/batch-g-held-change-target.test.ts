@@ -9,17 +9,19 @@
  *     refused" and later "The saved target still hasn't been corrected" — false (judge §(a), §(c)).
  *   · 2026-10-13T131858Z read 07 (after the cold reopen): the draft holds the same reading AND its open question ("10%
  *     relative to today's productivity, or 10 percentage points?"), so every cell is withheld "can be read more than one
- *     way". No route records the user's answer: the change frame is refused and `goal_target_basis` is written only by
- *     construction.
+ *     way". No route recorded the user's answer: the change frame is refused and the reading was written only by construction.
  *
- * The capture holds the refusal codes, not the Agent's arguments; the arguments here are RECONSTRUCTED from the second
- * turn-14 call (the one that reached the change-frame refusal, so its figure passed the user-words door): at least 10 %.
+ * The capture holds the refusal codes, not the Agent's arguments; the arguments are RECONSTRUCTED from the second turn-14
+ * call (the one that reached the change-frame refusal, so its figure passed the user-words door): at least 10 %. The module
+ * is driven with exactly what `proposeGoalTarget`'s one hook line passes (the hook lands after PROMPT's merge, DL lease);
+ * the approval goes through the real `authoriseChange`, the real level door and its commit, and the read-back.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { userWordsOf } from '../../agent-lane/stated-by-user.js';
+import { approvalChipIdFor, approvalChipsFor } from '../../agent-lane/approval-chips.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -27,7 +29,8 @@ import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/ut
 import type { SessionTurnWrite } from '../../session/store.js';
 import { CONDITIONS_NOT_KEPT } from '../goal-target-basis.js';
 import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
-import { applyGoalReadingEdit } from '../goal-reading-write.js';
+import { answeredBasisOf, applyGoalReadingEdit } from '../goal-reading-write.js';
+import { heldChangeTargetAnswer, savedGoalMeaningOf } from '../held-change-target.js';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: vi.fn(async () => undefined) }));
 
 type Rec = Record<string, any>;
@@ -37,29 +40,23 @@ const ASKED = read('served-hiring-read-19-after-reopen-20261013T131858Z.json');
 /** The user's turn-14 words, verbatim (07:44 `turns/14.json` `request_body.message`). */
 const CLARIFIED = "I mean 10% relative to today's productivity, not percentage points.";
 const GOAL = 'productivity';
-/** The card's words and the receipt, exactly (AIE_TEXT_PENDING templates, filled from the stored reading and its question). */
+const QUESTION = 'Does “increase productivity by at least 10%” mean 10% relative to today\'s productivity, or 10 percentage points on a productivity score?';
+/** The card's words, its button and the receipt, exactly (AIE_TEXT_PENDING templates, filled from the stored reading). */
 const READING = '‘productivity’ up at least 10% from today at three months, measured against today\'s development productivity';
-const CARD = `Read your target as ${READING}. This answers: Does “increase productivity by at least 10%” mean 10% relative to today's productivity, or 10 percentage points on a productivity score?`;
-const RECEIPT = `Recorded your answer: your target is read as ${READING}. Run the analysis again.`;
-
-function world(body: Rec) {
-  const sent: Array<{ path: string; body: unknown }> = [];
-  const d: InternalDispatch = async (p, b) => {
-    if (p.endsWith('/graph')) return { status: 200, json: structuredClone(body) };
-    sent.push({ path: p, body: b });
-    return { status: 500, json: {} };
-  };
-  return { d, sent };
-}
-function propose(body: Rec, args: Rec, said = CLARIFIED) {
-  const w = world(body);
-  const store = new ProposalStore();
-  const ctx = { scenario_id: String(body.scenario_id), authenticated_user_id: null, request_id: 'r-g14',
-    user_text: userWordsOf([String(body.brief_text)], said), user_turn_text: said };
-  return createAgentCapabilities(w.d, store).proposeGoalTarget!(ctx as never, args as never).then((p) => ({ p: p as Rec, w, store, ctx }));
-}
-const AT_LEAST_10 = { constraint_type: 'at_least', value: 10, unit: '%', rationale: 'The user clarified the target is relative to today.' };
+const CARD = `Read your target as ${READING}. This answers: ${QUESTION}`;
+const BUTTON = { label: 'Yes, read it that way', message: 'Yes, read my target that way.' };
+const RECEIPT = `Recorded your answer: “${CLARIFIED}”. Your target is read as ${READING}. Run the analysis again.`;
+/** At least 10 %: the reconstructed second turn-14 call, as the hook passes it (`TARGET_OPERATOR[type]`, value, unit). */
+const AT_LEAST_10 = { operator: '>=', value: 10, unit: '%' };
 const goalOf = (body: Rec): Rec => (body.graph.nodes as Rec[]).find((n) => n.id === GOAL)!;
+
+/** Exactly what the hook passes: the turn's context, the caller's own graph read, the goal, the requested target. */
+function answer(body: Rec, requested: Rec = AT_LEAST_10, said = CLARIFIED, proposals = new ProposalStore()) {
+  const p = heldChangeTargetAnswer({ scenario_id: String(body.scenario_id), user_id: null, user_text: userWordsOf([String(body.brief_text)], said),
+    user_turn_text: said, graph: { graph_hash: String(body.graph_hash), raw: body.graph, nodes: body.graph.nodes }, goal_id: GOAL,
+    requested: requested as never, rationale: 'The user clarified how the target is read.', proposals });
+  return { p: p as Rec | undefined, proposals };
+}
 
 describe('G14: restating the saved change target is "already saved", never a refusal', () => {
   it('precondition: the 07:44 saved goal already encodes the relative reading, with no open question', () => {
@@ -69,38 +66,45 @@ describe('G14: restating the saved change target is "already saved", never a ref
     expect(goalOf(SAVED).goal_target_basis.open_question).toBeUndefined();
   });
 
-  it('RED→GREEN: the turn-14 restatement → ok, already_saved, nothing prepared, nothing sent, with the saved meaning', async () => {
-    const { p, w, store } = await propose(SAVED, AT_LEAST_10);
-    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, already_saved: true });
-    expect(p.saved_goal).toEqual({
+  it('precondition (RED as served): the caller today refuses the turn-14 restatement as goal_is_a_change', async () => {
+    const d: InternalDispatch = async (p) => (p.endsWith('/graph') ? { status: 200, json: structuredClone(SAVED) } : { status: 500, json: {} });
+    const out = await createAgentCapabilities(d, new ProposalStore()).proposeGoalTarget!({ scenario_id: String(SAVED.scenario_id),
+      authenticated_user_id: null, request_id: 'r', user_text: userWordsOf([String(SAVED.brief_text)], CLARIFIED), user_turn_text: CLARIFIED } as never,
+    { constraint_type: 'at_least', value: 10, unit: '%' } as never);
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'goal_is_a_change' });
+  });
+
+  it('RED→GREEN: the turn-14 restatement → ok, already_saved, nothing prepared, with the FULL saved meaning', () => {
+    const { p, proposals } = answer(SAVED);
+    expect(p, JSON.stringify(p)).toEqual({ ok: true, mutated: false, already_saved: true, saved_goal: {
       label: 'Productivity', target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=',
       reference: 'today', denominator: 'today’s productivity', effect_unit: '% of today’s productivity', period_months: 3, period_kind: 'at_end',
       also_required: ['maintaining code quality'],
-    });
-    expect(p.proposal_id).toBeUndefined();
-    expect(store.outstanding(String(SAVED.scenario_id), null)).toEqual([]);
-    expect(w.sent).toEqual([]);
+    } });
+    expect(proposals.outstanding(String(SAVED.scenario_id), null)).toEqual([]);
   });
 
-  it('CONTRAST: a genuinely different relative target (15%) keeps the change-frame refusal, now with the saved meaning to compare', async () => {
-    const said = "I mean 15% relative to today's productivity.";
-    const { p, w, store } = await propose(SAVED, { ...AT_LEAST_10, value: 15 }, said);
-    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'goal_is_a_change' });
-    expect(p.saved_goal).toMatchObject({ target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=', reference: 'today' });
-    expect(store.outstanding(String(SAVED.scenario_id), null)).toEqual([]);
-    expect(w.sent).toEqual([]);
+  it('the held effect unit itself is the same target too ("% of today\'s productivity", either apostrophe)', () => {
+    expect(answer(SAVED, { ...AT_LEAST_10, unit: "% of today's productivity" }).p).toMatchObject({ already_saved: true });
   });
 
-  it('CONTRAST: the opposite comparator on the same figure is not the saved target', async () => {
-    const { p } = await propose(SAVED, { ...AT_LEAST_10, constraint_type: 'at_most' }, "I mean at most 10% relative to today's productivity.");
-    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, refusal: 'goal_is_a_change' });
-    expect(p.already_saved).toBeUndefined();
+  it.each([
+    ['a different figure (15%)', { ...AT_LEAST_10, value: 15 }, "I mean 15% relative to today's productivity."],
+    ['the opposite comparator', { ...AT_LEAST_10, operator: '<=' }, "I mean at most 10% relative to today's productivity."],
+    ['percentage points', { ...AT_LEAST_10, unit: 'percentage points' }, 'I mean 10 percentage points on the productivity score.'],
+    ['another denominator', { ...AT_LEAST_10, unit: '% of revenue' }, "I mean 10% of revenue."],
+  ])('CONTRAST: %s is not the saved target — the caller\'s refusal stands, and its saved meaning is there to compare', (_n, requested, said) => {
+    const { p, proposals } = answer(SAVED, requested, said);
+    expect(p).toBeUndefined();
+    expect(proposals.outstanding(String(SAVED.scenario_id), null)).toEqual([]);
+    expect(savedGoalMeaningOf(SAVED.graph, GOAL)).toMatchObject({ target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=',
+      reference: 'today', denominator: 'today’s productivity', period_months: 3 });
   });
 
-  it('CONTRAST: a percentage-points reading (another unit family) is not the saved relative target', async () => {
-    const { p } = await propose(SAVED, { ...AT_LEAST_10, unit: 'percentage points' }, 'I mean 10 percentage points on the productivity score.');
-    expect(p.already_saved).toBeUndefined();
-    expect(p.ok).toBe(false);
+  it('CONTRAST: the same figure on a goal with no validated reading is never "already saved" (value alone never matches)', () => {
+    const body = structuredClone(SAVED);
+    delete goalOf(body).goal_target_basis;
+    expect(answer(body).p).toBeUndefined();
   });
 });
 
@@ -108,35 +112,42 @@ describe('G: the user\'s answer to the goal\'s open question reaches the saved r
   it('precondition: the 13:18 draft holds the relative reading AND its open question', () => {
     expect(goalOf(ASKED)).toMatchObject({ goal_threshold_frame: 'change_abs', goal_threshold_raw: 10, goal_threshold_unit: '%', goal_direction: '>=',
       goal_target_basis: { reference: 'today', effect_unit: '% of today\'s productivity', target_raw: 10, target_frame: 'change_abs',
-        also_required: ['maintaining code quality', 'launch readiness'] } });
-    expect(goalOf(ASKED).goal_target_basis.open_question).toMatch(/relative to today's productivity, or 10 percentage points/);
+        also_required: ['maintaining code quality', 'launch readiness'], open_question: QUESTION } });
   });
 
-  it('RED→GREEN: the clarification over the asked draft → ONE confirm_goal_reading card, nothing sent before approval', async () => {
-    const { p, w, store } = await propose(ASKED, AT_LEAST_10);
-    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false });
-    expect(typeof p.proposal_id).toBe('string');
-    expect(store.outstanding(String(ASKED.scenario_id), null).map((x) => x.proposal_id)).toEqual([p.proposal_id]);
-    expect(store.get(String(p.proposal_id))?.operations).toEqual([{ op: 'confirm_goal_reading', path: GOAL,
-      value: { expected_basis: goalOf(ASKED).goal_target_basis, open_question: goalOf(ASKED).goal_target_basis.open_question } }]);
-    expect(p.public_label).toBe(CARD);
-    expect(p.saved_goal).toMatchObject({ open_question: goalOf(ASKED).goal_target_basis.open_question, also_required: ['maintaining code quality', 'launch readiness'] });
-    expect(w.sent).toEqual([]);
+  it('RED→GREEN: the clarification over the asked draft → ONE confirm_goal_reading card with the user\'s verbatim answer; nothing written', () => {
+    const { p, proposals } = answer(ASKED);
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, public_label: CARD });
+    expect(proposals.outstanding(String(ASKED.scenario_id), null).map((x) => x.proposal_id)).toEqual([p!.proposal_id]);
+    expect(proposals.get(String(p!.proposal_id))?.operations).toEqual([{ op: 'confirm_goal_reading', path: GOAL,
+      value: { expected_basis: goalOf(ASKED).goal_target_basis, open_question: QUESTION, answer_words: CLARIFIED } }]);
+    // The user authors the answer and the approval, never Olumi's reading: the card is the user's statement of which reading.
+    expect(proposals.get(String(p!.proposal_id))?.provenance.authored_by).toBe('user_stated');
+    expect(p!.saved_goal).toMatchObject({ open_question: QUESTION, also_required: ['maintaining code quality', 'launch readiness'] });
   });
 
-  it('CONTRAST: a percentage-points answer over the asked draft is not the held reading — refused with the saved meaning, no card', async () => {
-    const { p, store } = await propose(ASKED, { ...AT_LEAST_10, unit: 'percentage points' }, 'I mean 10 percentage points on a productivity score.');
-    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, refusal: 'goal_is_a_change' });
-    expect(p.saved_goal).toMatchObject({ open_question: goalOf(ASKED).goal_target_basis.open_question });
-    expect(store.outstanding(String(ASKED.scenario_id), null)).toEqual([]);
+  it('the card renders with its own button and its words in `detail`, only when the proposer\'s own result returned that card', () => {
+    const { p, proposals } = answer(ASKED);
+    const call = { name: 'propose_goal_target', ok: true, mutated: false, proposal_id: String(p!.proposal_id) };
+    const chips = approvalChipsFor([call], () => ({ proposal: proposals.get(String(p!.proposal_id)), result: p as never }));
+    expect(chips[0]).toEqual({ id: approvalChipIdFor(String(p!.proposal_id)), ...BUTTON, detail: CARD });
+    expect(chips.map((c) => c.label)).not.toContain('Set this target');
+    expect(approvalChipsFor([call], () => ({ proposal: proposals.get(String(p!.proposal_id)), result: { ...p!, public_label: 'other' } as never }))).toEqual([]);
   });
 
-  it('CONTRAST: admission\'s conditions refusal is not a question the user can answer — already saved, no card', async () => {
+  it('CONTRAST (mismatched reading): a percentage-points answer over the asked draft is not the held reading — no card, the refusal stands', () => {
+    const { p, proposals } = answer(ASKED, { ...AT_LEAST_10, unit: 'percentage points' }, 'I mean 10 percentage points on a productivity score.');
+    expect(p).toBeUndefined();
+    expect(proposals.outstanding(String(ASKED.scenario_id), null)).toEqual([]);
+    expect(savedGoalMeaningOf(ASKED.graph, GOAL)).toMatchObject({ open_question: QUESTION });
+  });
+
+  it('CONTRAST: admission\'s conditions refusal is not a question the user can answer — already saved, no card', () => {
     const body = structuredClone(ASKED);
     goalOf(body).goal_target_basis.open_question = CONDITIONS_NOT_KEPT;
-    const { p, store } = await propose(body, AT_LEAST_10);
-    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, already_saved: true });
-    expect(store.outstanding(String(ASKED.scenario_id), null)).toEqual([]);
+    const { p, proposals } = answer(body);
+    expect(p).toMatchObject({ ok: true, mutated: false, already_saved: true });
+    expect(proposals.outstanding(String(ASKED.scenario_id), null)).toEqual([]);
   });
 });
 
@@ -173,76 +184,111 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
       if (!p.endsWith('/graph')) return { status: 500, json: {} };
       return { status: 200, json: { ...structuredClone(body), graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never) } };
     };
+    /** One process: its own proposal store; the card is issued by the module exactly as the hook will, on this read. */
     const open = () => {
       const proposals = new ProposalStore();
-      return { proposals, caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels: commit }) };
+      const caps = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels: commit });
+      const card = () => answer({ ...body, graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never) }, AT_LEAST_10, CLARIFIED, proposals).p!;
+      const press = (pid: string, user: string | null = null) => caps.authoriseChange({ scenario_id: String(body.scenario_id), authenticated_user_id: user,
+        request_id: 'r-g', user_text: BUTTON.message, user_turn_text: BUTTON.message, turn_id: 'g-turn-2', typed_approval_of: pid } as never,
+      { proposal_id: pid } as never) as Promise<Rec>;
+      return { proposals, caps, card, press };
     };
     return { graph, rows, commits, store, open, setGraph: (g: Rec) => { bytes = JSON.stringify(g); } };
   }
-  const ctxOf = (body: Rec, extra: Rec = {}) => ({ scenario_id: String(body.scenario_id), authenticated_user_id: null, request_id: 'r-g',
-    user_text: userWordsOf([String(body.brief_text)], CLARIFIED), user_turn_text: CLARIFIED, turn_id: 'g-turn-1', ...extra });
   /** The 13:18 graph with ONLY the question removed from the goal's reading: the one write's whole postimage. */
   const answered = (): Rec => { const g = structuredClone(ASKED.graph) as Rec; delete goalOf({ graph: g }).goal_target_basis.open_question; return g; };
 
-  it('RED→GREEN: the pressed card writes ONE commit removing only the question; the read-back and receipt say so', async () => {
+  it('RED→GREEN: the pressed card writes ONE commit removing only the question; the read-back, receipt and row say so', async () => {
     const w = persisted(ASKED);
-    const { caps } = w.open();
-    const card = await caps.proposeGoalTarget!(ctxOf(ASKED) as never, AT_LEAST_10 as never) as Rec;
-    expect(card.proposal_id).toEqual(expect.any(String));
-    const r = await caps.authoriseChange(ctxOf(ASKED, { typed_approval_of: card.proposal_id, turn_id: 'g-turn-2' }) as never, { proposal_id: card.proposal_id } as never) as Rec;
-    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: true, applied: true, proposal_id: card.proposal_id });
+    const { card, press } = w.open();
+    const c = card();
+    const r = await press(String(c.proposal_id));
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: true, applied: true, proposal_id: c.proposal_id });
     expect(r.follow_up).toBe(RECEIPT);
     expect(w.commits).toHaveLength(1);
-    expect(w.commits[0]!.goal_reading).toEqual({ goal_id: GOAL, expected_basis: goalOf(ASKED).goal_target_basis });
+    expect(w.commits[0]!.goal_reading).toEqual({ goal_id: GOAL, expected_basis: goalOf(ASKED).goal_target_basis, answer_words: CLARIFIED });
     expect(w.rows).toHaveLength(1);
+    // Byte equality: the whole postimage is the read with that one member gone; the reading's bytes, key order included.
     expect(w.graph()).toEqual(answered());
-    // Everything but that one member is byte-identical: the target, the reading's other members, and every other node and link.
-    expect(goalOf({ graph: w.graph() }).goal_target_basis).toEqual({ ...goalOf(ASKED).goal_target_basis, open_question: undefined });
-    expect(goalOf({ graph: w.graph() }).goal_target_basis.source).toBe('olumi_reading');
+    expect(JSON.stringify(goalOf({ graph: w.graph() }).goal_target_basis)).toBe(JSON.stringify(answeredBasisOf(goalOf(ASKED).goal_target_basis)));
+    expect(goalOf({ graph: w.graph() }).goal_target_basis).toMatchObject({ source: 'olumi_reading', effects_at_period_end: false,
+      also_required: ['maintaining code quality', 'launch readiness'] });
+    // The committed row keeps the user's verbatim answer (the existing history), beside the card that showed the question.
+    expect(JSON.stringify(w.rows[0]!.write)).toContain(JSON.stringify(`“${CLARIFIED}”`).slice(1, -1));
     // The analysis hash moves (the reading is in it), so the stored Run is stale and the next Run reads the answered reading.
     expect(computeAnalysisAffectingGraphHash(w.graph() as never)).not.toBe(computeAnalysisAffectingGraphHash(ASKED.graph as never));
   });
 
-  it('a retry of the same approval writes nothing twice (one row), and says it was already applied', async () => {
+  it('duplicate press: the same approval again writes nothing twice (one row) and says it was already applied', async () => {
     const w = persisted(ASKED);
-    const { caps } = w.open();
-    const card = await caps.proposeGoalTarget!(ctxOf(ASKED) as never, AT_LEAST_10 as never) as Rec;
-    const press = () => caps.authoriseChange(ctxOf(ASKED, { typed_approval_of: card.proposal_id, turn_id: 'g-turn-2' }) as never, { proposal_id: card.proposal_id } as never);
-    expect(await press()).toMatchObject({ ok: true, applied: true });
-    expect(await press()).toMatchObject({ ok: true, mutated: false, already_applied: true });
+    const { card, press } = w.open();
+    const pid = String(card().proposal_id);
+    expect(await press(pid)).toMatchObject({ ok: true, applied: true });
+    expect(await press(pid)).toMatchObject({ ok: true, mutated: false, already_applied: true });
     expect(w.rows).toHaveLength(1);
   });
 
-  it('cold reopen: a fresh process reads the answered reading back — no question, and the target-question withhold no longer fires', async () => {
+  it('denied: another user\'s press is refused and nothing is written', async () => {
+    const w = persisted(ASKED);
+    const { card, press } = w.open();
+    expect(await press(String(card().proposal_id), 'someone-else')).toMatchObject({ ok: false, mutated: false, refusal: 'not_authorised' });
+    expect(w.rows).toHaveLength(0);
+    expect(w.graph()).toEqual(ASKED.graph);
+  });
+
+  it('declined: the user answers the other reading instead — no card for it, the first card is never applied, nothing is written', async () => {
+    const w = persisted(ASKED);
+    const { proposals, card } = w.open();
+    const first = card();
+    expect(answer(ASKED, { ...AT_LEAST_10, unit: 'percentage points' }, 'No, I mean 10 percentage points.', proposals).p).toBeUndefined();
+    expect(proposals.isApplied(String(first.proposal_id))).toBe(false);
+    expect(w.rows).toHaveLength(0);
+    expect(w.graph()).toEqual(ASKED.graph);
+  });
+
+  it('stale: the reading changed after the card was made (a condition edited) → nothing written, never a partial write', async () => {
+    const w = persisted(ASKED);
+    const { card, press } = w.open();
+    const pid = String(card().proposal_id);
+    const moved = structuredClone(ASKED.graph) as Rec;
+    goalOf({ graph: moved }).goal_target_basis.also_required = ['maintaining code quality'];
+    w.setGraph(moved);
+    expect(await press(pid)).toMatchObject({ ok: false, refusal: 'superseded' });
+    expect(w.rows).toHaveLength(0);
+    expect(w.graph()).toEqual(moved);
+  });
+
+  it('conflict: another writer moved the model (a factor\'s level) after the card → a truthful conflict, nothing written', async () => {
+    const w = persisted(ASKED);
+    const { card, press } = w.open();
+    const pid = String(card().proposal_id);
+    const moved = structuredClone(ASKED.graph) as Rec;
+    const factor = (moved.nodes as Rec[]).find((n) => n.kind === 'factor' && typeof n.observed_state?.value === 'number')!;
+    factor.observed_state.value = factor.observed_state.value === 0.5 ? 0.6 : 0.5;
+    w.setGraph(moved);
+    expect(computeAnalysisAffectingGraphHash(moved as never)).not.toBe(computeAnalysisAffectingGraphHash(ASKED.graph as never));
+    expect(await press(pid)).toMatchObject({ ok: false, mutated: false, refusal: 'superseded' });
+    expect(w.rows).toHaveLength(0);
+    expect(w.graph()).toEqual(moved);
+  });
+
+  it('reload: a fresh process reads the answered reading back — no question, no target-question withhold, a restatement is already saved', async () => {
     const w = persisted(ASKED);
     const first = w.open();
-    const card = await first.caps.proposeGoalTarget!(ctxOf(ASKED) as never, AT_LEAST_10 as never) as Rec;
-    await first.caps.authoriseChange(ctxOf(ASKED, { typed_approval_of: card.proposal_id, turn_id: 'g-turn-2' }) as never, { proposal_id: card.proposal_id } as never);
+    await first.press(String(first.card().proposal_id));
     const reopened = JSON.parse(JSON.stringify(w.graph())) as Rec;
     expect(goalOf({ graph: reopened }).goal_target_basis.open_question).toBeUndefined();
     const stored = ASKED.analysis_result.enrichment as Rec;
     expect(withholdForOpenTargetQuestion(stored, ASKED.graph, GOAL)).not.toBe(stored);
     expect(withholdForOpenTargetQuestion(stored, reopened, GOAL)).toBe(stored);
-    // The same restatement after the reopen is now "already saved" — never a second card, never a refusal.
-    const again = await w.open().caps.proposeGoalTarget!(ctxOf(ASKED) as never, AT_LEAST_10 as never) as Rec;
+    const again = w.open().card();
     expect(again).toMatchObject({ ok: true, mutated: false, already_saved: true });
     expect(again.saved_goal.open_question).toBeUndefined();
+    expect(w.rows).toHaveLength(1);
   });
 
-  it('stale: the reading changed after the card was made (a condition edited) → nothing written, never a partial write', async () => {
-    const w = persisted(ASKED);
-    const { caps } = w.open();
-    const card = await caps.proposeGoalTarget!(ctxOf(ASKED) as never, AT_LEAST_10 as never) as Rec;
-    const moved = structuredClone(ASKED.graph) as Rec;
-    goalOf({ graph: moved }).goal_target_basis.also_required = ['maintaining code quality'];
-    w.setGraph(moved);
-    const r = await caps.authoriseChange(ctxOf(ASKED, { typed_approval_of: card.proposal_id, turn_id: 'g-turn-2' }) as never, { proposal_id: card.proposal_id } as never) as Rec;
-    expect(r.ok).toBe(false);
-    expect(w.rows).toHaveLength(0);
-    expect(w.graph()).toEqual(moved);
-  });
-
-  it('the writer, directly: stale reading, conditions question and a compound edit are each refused; a landed write is a verified no-op', async () => {
+  it('the writer, directly: stale reading, an older card, the conditions question, a stale base and a compound edit are refused; a landed write is a no-op', async () => {
     const w = persisted(ASKED);
     const base = { scenarioId: String(ASKED.scenario_id), turnId: 'g-direct', requestId: 'g-door', requestHash: 'g:direct', stage: 'frame' as const,
       freshness: 'fresh' as const, hasExistingAnalysis: true, expectedGraphHash: computeAnalysisAffectingGraphHash(ASKED.graph as never)!, targets: [] };
@@ -255,6 +301,8 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
       .toEqual({ kind: 'refused', reason: 'goal_reading_reading_changed' });
     expect(await executeOptionInterventionBatch({ ...base, goalReading: { goal_id: GOAL, expected_basis: { ...expected, open_question: CONDITIONS_NOT_KEPT } } }, w.store))
       .toEqual({ kind: 'refused', reason: 'goal_reading_not_a_reading_question' });
+    expect(await executeOptionInterventionBatch({ ...base, expectedGraphHash: 'stale-base', goalReading: { goal_id: GOAL, expected_basis: expected } }, w.store))
+      .toEqual({ kind: 'refused', reason: 'stale_graph' });
     expect(await executeOptionInterventionBatch({ ...base, goalReading: { goal_id: GOAL, expected_basis: expected },
       targets: [{ optionId: 'hire_a_tech_lead', factorId: 'tech_lead_headcount', modelValue: 0.2 }] }, w.store))
       .toEqual({ kind: 'refused', reason: 'goal_reading_not_alone' });

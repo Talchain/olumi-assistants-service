@@ -66,6 +66,9 @@ export function savedGoalMeaningOf(raw: unknown, goalId: string): SavedGoalMeani
 }
 
 const namesPoints = (unit: string): boolean => /\bpoints?\b|\bpp\b/i.test(unit);
+/** One unit phrase, compared exactly: case, apostrophe form and spacing aside; "percent" is "%". */
+const unitPhrase = (unit: string): string => unit.trim().toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ')
+  .replace(/^(?:per ?cent|percent)\b/, '%');
 
 /** The one equality: the requested target IS the goal's held change target (see the module note). */
 export function restatesHeldChangeTarget(
@@ -76,9 +79,17 @@ export function restatesHeldChangeTarget(
 ): boolean {
   const record = readGoalRecord(graph.raw, goalId);
   const target = record?.target;
-  if (record == null || target == null || target.frame !== 'change_abs' || target.raw !== requested.value) return false;
+  // The FULL saved meaning (PL amendment): a validated reading holds the reference, denominator and period the request is
+  // compared within; without one the request is never "the same target".
+  const basis = goalTargetBasisOf(goalNodeOf(graph.raw, goalId));
+  if (record == null || target == null || basis === undefined || target.frame !== 'change_abs' || basis.target_frame !== 'change_abs'
+    || target.raw !== requested.value || basis.target_raw !== requested.value) return false;
   const heldUnit = target.unit ?? '';
   if (heldUnit === '' || unitsConflict(requested.unit, heldUnit) !== null) return false;
+  // A unit saying more than the bare sign must be the held unit or the reading's own effect unit, exactly: a request naming
+  // another denominator ("% of revenue") is another quantity, never this target restated.
+  const asked = unitPhrase(requested.unit);
+  if (asked !== unitPhrase(heldUnit) && asked !== unitPhrase(basis.effect_unit)) return false;
   // Points are never a % of today, nor a % of today points (ruling 20): the held unit's own words decide.
   if (namesPoints(requested.unit) !== namesPoints(heldUnit)) return false;
   if (target.comparator !== requested.operator) return false;
@@ -103,6 +114,8 @@ export function heldChangeTargetAnswer(args: {
   readonly scenario_id: string;
   readonly user_id: string | null;
   readonly user_text: string | null | undefined;
+  /** This turn's own words: the user's answer, kept verbatim on the card for the receipt and the ledger. */
+  readonly user_turn_text?: string | null;
   readonly graph: { readonly graph_hash: string; readonly raw: unknown; readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] };
   readonly goal_id: string;
   readonly requested: { readonly operator: string; readonly value: number; readonly unit: string };
@@ -123,7 +136,8 @@ export function heldChangeTargetAnswer(args: {
     scenario_id: args.scenario_id,
     user_id: args.user_id,
     base_graph_identity_hash: graph.graph_hash,
-    operations: [{ op: CONFIRM_GOAL_READING_OP, path: goalId, value: { expected_basis: stored, open_question: basis.open_question } }],
+    operations: [{ op: CONFIRM_GOAL_READING_OP, path: goalId, value: { expected_basis: stored, open_question: basis.open_question,
+      ...(typeof args.user_turn_text === 'string' && args.user_turn_text.trim() !== '' ? { answer_words: args.user_turn_text.trim() } : {}) } }],
     provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: CONFIRM_GOAL_READING_LABEL_TEMPLATE.replace('{reading}', reading).replace('{question}', basis.open_question),

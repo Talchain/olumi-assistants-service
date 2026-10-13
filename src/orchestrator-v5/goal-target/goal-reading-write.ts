@@ -38,6 +38,8 @@ export interface ApprovedGoalReading {
   readonly goal_id: string;
   /** The stored `goal_target_basis` the card showed, byte for byte, with its `open_question`: the writer's stale gate. */
   readonly expected_basis: Readonly<Rec>;
+  /** The user's own words of the turn the card was made on, verbatim: the answer, kept in the committed row's receipt. */
+  readonly answer_words?: string;
 }
 
 export type GoalReadingRefusal = 'invalid_graph' | 'goal_not_found' | 'not_a_goal' | 'no_open_question' | 'not_a_reading_question'
@@ -72,8 +74,19 @@ export function goalReadingWords(graph: unknown, goalId: string, basis: GoalTarg
   return `‘${label}’ ${change} ${periodWords(basis)}${basis.denominator !== undefined ? `, measured against ${basis.denominator}` : ''}`;
 }
 
-/** AIE_TEXT_PENDING: the receipt after the approved answer. Facts only; no promise of a chance. */
-export const GOAL_READING_RECORDED_TEMPLATE = 'Recorded your answer: your target is read as {reading}. Run the analysis again.';
+/** AIE_TEXT_PENDING: the receipt after the approved answer, with the user's words verbatim. Facts only; no promise of a chance. */
+export const GOAL_READING_RECORDED_TEMPLATE = 'Recorded your answer: “{answer}”. Your target is read as {reading}. Run the analysis again.';
+/** AIE_TEXT_PENDING: the same receipt when the answer's words are not held (or too long to quote whole). */
+export const GOAL_READING_RECORDED_NO_WORDS_TEMPLATE = 'Recorded your answer. Your target is read as {reading}. Run the analysis again.';
+const ANSWER_QUOTE_MAX = 300;
+
+/** The receipt: the user's answer quoted whole (never cut), else said without it. */
+export function goalReadingRecordedWords(reading: string, answer: string | undefined): string {
+  const words = answer?.trim() ?? '';
+  return words !== '' && words.length <= ANSWER_QUOTE_MAX && !/[\r\n]/.test(words)
+    ? GOAL_READING_RECORDED_TEMPLATE.replace('{answer}', words).replace('{reading}', reading)
+    : GOAL_READING_RECORDED_NO_WORDS_TEMPLATE.replace('{reading}', reading);
+}
 
 export function applyGoalReadingEdit(persistedGraph: unknown, approved: ApprovedGoalReading): GoalReadingEditResult {
   if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes) || !Array.isArray(persistedGraph.edges)) {
@@ -123,7 +136,7 @@ export function applyGoalReadingEdit(persistedGraph: unknown, approved: Approved
   });
   const reading = goalReadingWords(graph, approved.goal_id, basis) ?? `the target for ‘${label}’ as the model states it`;
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
-    confirmation: GOAL_READING_RECORDED_TEMPLATE.replace('{reading}', reading) };
+    confirmation: goalReadingRecordedWords(reading, approved.answer_words) };
 }
 
 /** The freshly computed atomic write, exactly: the writer's own postimage of `before`, nothing else. */
