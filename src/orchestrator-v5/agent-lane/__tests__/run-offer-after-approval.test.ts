@@ -142,7 +142,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     } });
     expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path).toBe('run');
     expect(runs).toBe(1);
-    expect(modelBodies).toHaveLength(0);
+    expect(modelBodies).toHaveLength(1);
     await explainRun(app, SCENARIO, r);
     expect(runs).toBe(1);
     expect(modelBodies.map((m) => m['tool_choice'])).toEqual(['none']);

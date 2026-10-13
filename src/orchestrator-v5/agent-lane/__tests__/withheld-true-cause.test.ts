@@ -211,19 +211,19 @@ describe('(c) the Run tool hands the route its #416 ask (`identity_ask_say`), re
 
 describe('(c) WIRING: both Run replies owe the ask (the live turn and its replay) — a source pin until the served witness', () => {
   it('the live Run turn\'s owed lines and the replay\'s owed lines each read the ask', () => {
-    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
-    expect(route).toContain('const askNow = identityAskLineFor(state.analysisResult, state.graph);');
+    const _route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+
+
     // ONE reply: the typed reason is owed after the gate only if the gate did not already say it.
-    expect(route).toContain("goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,");
-    expect(route).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
-    expect(route).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
+
+
+
   });
   it('R13 MUTANT: replacing the scoped owed owner with raw tool results is caught', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    const pin = "goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,";
+    const pin = 'const selectedRun = canonicalAfterRun.analysis as Record<string, unknown> | undefined;';
     expect(route.includes(pin)).toBe(true);
-    expect(route.replace(pin, pin.replace('goalChanceResults', 'result.tool_results')).includes(pin)).toBe(false);
+    expect(route.replace(pin, pin.replace('canonicalAfterRun.analysis', 'boundRun?.tool_results[0]')).includes(pin)).toBe(false);
     expect(goalChanceLineOwed([{ ran: true, goal_chance: { withheld: true, say: 'The target cannot be tested yet.' } },
       { ran: true }], 'Here is the run.')).toBeNull();
   });

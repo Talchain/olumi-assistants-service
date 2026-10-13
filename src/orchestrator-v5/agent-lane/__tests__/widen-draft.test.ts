@@ -28,7 +28,7 @@ const OPTIONS_PREAMBLE = 'Where the text asks why an option might do better, wri
 const PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
 // Re-pinned for S5 slice 4 (#2913): the only change is modelGapOf's deadline read (goalDeadlineOf(goal) →
 // goalDeadlineFromRecord(graph, goal.id)); no route directive byte changed.
-const WIDEN_TURN_SHA256 = '6bf5be56197c03c376ffd16d81c32fae8182d43c4a82e83fbe498d0219b7dce0';
+const WIDEN_TURN_SHA256 = '1e46d33ae071c31487450cf0edfc898cc71fc89b8a9ed87dbd78f99f0aee3631';
 const B1_GRAPH = (JSON.parse(readFileSync(new URL('./fixtures/b1-two-state/turn-004-WIDEN-1791343253849.json', import.meta.url), 'utf8')) as { draft_graph: Rec }).draft_graph;
 const ADMIT = admission.admitCandidateModel;
 // Unit-only injection; the served builder supplies its own construction-aware admission closure.
@@ -98,7 +98,7 @@ const optionsArgs = () => ({ options: [
   { label: 'Combine lead and developer hires', acts_on: [{ factor_label: 'Developer hires', direction: 'positive', level: level(1) }, { factor_label: 'Tech lead hires', direction: 'positive', level: level(1) }], rationale: RATIONALE },
   { label: 'Try a contractor pilot', acts_on: [{ factor_label: 'Developer hires', direction: 'positive', level: level(1) }, { factor_label: 'Contractor hours', direction: 'positive', level: level(10, 'hours') }], rationale: RATIONALE },
 ] });
-const isRisks = (req: Parameters<CallStructuredModel>[0]) => req.instructions.includes('suggest risks they have not considered');
+const isRisks = (req: Parameters<CallStructuredModel>[0]) => Object.hasOwn((req.schema as { properties: object }).properties, 'risk_suggestions');
 const isOptions = (req: Parameters<CallStructuredModel>[0]) => req.instructions.includes('METHOD TURN:') && req.instructions.includes('propose_new_option');
 function generator(risks?: unknown, options: unknown = optionsArgs()) {
   return vi.fn<CallStructuredModel>(async (req) => {

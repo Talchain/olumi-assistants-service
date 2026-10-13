@@ -172,6 +172,7 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
   };
   const explainPayload = async (): Promise<Json> => {
     const first = await run();
+    modelBodies = []; // Run now narrates; inspect the subsequent Explain request independently.
     const chip = first.suggested_actions.find((c) => isRunExplanationChip(c.id));
     expect(chip, JSON.stringify(first.suggested_actions)).toBeDefined();
     const second = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { turn_id: randomUUID(), scenario_id: SCENARIO,

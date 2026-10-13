@@ -457,6 +457,8 @@ export interface SettledMethodTurn {
    * Never a repaired sentence: a story is kept whole or replaced whole.
    */
   readonly reply: string;
+  /** Independently checked worksheet content; never appended to the AI reply. */
+  readonly artefact_reply?: string;
   /** True when what is sent passed every post-check (the draft, or the composed reply re-checked). */
   readonly passed: boolean;
   /** The draft's failed checks, kept when a composed reply is sent so the refusal stays measurable. */
@@ -557,12 +559,18 @@ export function settleMethodTurn(turn: RunMethodTurn, draft: string): SettledMet
   try {
     check = checkMethodTurn(METHOD, draft, turn.check_inputs, storyOnlyDecision(turn.context));
   } catch {
-    return { reply: draft, passed: false, failed: ['CHECKER_UNAVAILABLE'], target: items[0] };
+    return { reply: 'I could not verify this pre-mortem against the current model.', passed: false, failed: ['CHECKER_UNAVAILABLE'], target: items[0] };
   }
   const indices = check.targets.map(id => items.findIndex(item => item.id === id));
   const failed = check.pass && (indices.length === 0 || indices.some(i => i < 0)) ? ['PM-GROUNDED'] : check.failed;
-  // The check licenses a structured artefact/card, never replaces the model's prose.
-  return { reply: draft, passed: failed.length === 0, failed,
+  if (failed.length > 0) {
+    // Preserve the worksheet's checked stories and provenance without restoring host-written reply prose.
+    const artefact = composedSettle(turn, draft, failed);
+    if (artefact !== null) return { ...artefact, artefact_reply: artefact.reply,
+      reply: 'I could not verify every part of this pre-mortem. The worksheet distinguishes the supported stories.' };
+  }
+  // Failed grounding, invented figures and recommendations cannot reach prose or history.
+  return { reply: failed.length === 0 ? draft : 'I could not verify this pre-mortem against the current model.', passed: failed.length === 0, failed,
     target: failed.length === 0 ? items[Math.min(...indices)] : items[0] };
 }
 

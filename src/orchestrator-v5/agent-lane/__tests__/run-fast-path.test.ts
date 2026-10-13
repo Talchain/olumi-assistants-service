@@ -102,6 +102,7 @@ describe('fast path 3: a typed Run dispatches once and returns its AI interpreta
     const input = JSON.stringify(modelBodies[0]!['input']);
     expect(input, 'the call sees the canonical selected Run').toContain('selected_run_reference');
     expect(input, 'raw unprojected tool payload is absent').not.toContain('the-run');
+    expect(input, 'interpreter input has no raw analysis_result').not.toContain('analysis_result');
     expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(b._agent.tool_calls.map((c) => c.name)).toEqual(['run_analysis']);
     expect(b.assistant_text).toBe('In the current model, the result turns on Capacity.');

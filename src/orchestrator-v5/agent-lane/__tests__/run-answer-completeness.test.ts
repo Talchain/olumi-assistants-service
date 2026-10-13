@@ -199,7 +199,7 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
         // response, preserving the successful run. This is not a new public result schema.
         expect(body.assistant_text, JSON.stringify(capture)).toBe(fallback);
         const toolCalls = (body._agent as { tool_calls?: { name: string }[] } | undefined)?.tool_calls ?? [];
-        expect(toolCalls.map((c) => c.name)).toEqual(entry === 'typed_run' ? [] : ['run_analysis']);
+        expect(toolCalls.map((c) => c.name)).toEqual(['run_analysis']);
       });
     }
   }

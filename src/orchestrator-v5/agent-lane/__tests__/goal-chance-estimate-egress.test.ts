@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as screenLines from '../goal-chance-screen-lines.js';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 
@@ -63,13 +64,15 @@ describe('r16 option and goal bound estimate points', () => {
     const renamed = { nodes: graph.nodes.map(n => ({ ...n, label: `Changed ${n.id}` })), edges: [] };
     const bare = 'Monthly recurring revenue reaches its target in 67% of model runs.';
     const out = withEstimateGoalPointsAtEgress({ assistant_text: bare }, { analysisResult: result, graph: renamed, current: true });
-    expect(out.assistant_text).toBe(line.chance);
-    expect(out.assistant_text).not.toContain(bare);
+    expect(out.assistant_text).toBe('');
+    expect(out.assistant_text).not.toContain(line.label);
   });
   it.each([false, true])('without a current estimate-backed licence preserves all bytes (current=%s)', current => {
     const unlabelled = { enrichment: { inference_warnings: [{ ...licence, olumi_estimate_link_count: 0 }] } };
     const body = { assistant_text: '‘Raise to £59’: about 67% in this model.' };
-    expect(withEstimateGoalPointsAtEgress(body, { analysisResult: current ? unlabelled : result, graph, current })).toBe(body);
+    const out = withEstimateGoalPointsAtEgress(body, { analysisResult: current ? unlabelled : result, graph, current });
+    if (!current) expect(out).toBe(body);
+    else { expect(out.assistant_text).toContain('67%'); expect(out.assistant_text).not.toContain("Olumi's estimates"); }
   });
   it.each([
     'The chance of supplier failure is 10%.',
@@ -116,7 +119,7 @@ describe('r11 option, scored goal and displayed value identity', () => {
   });
 
   it('uses the scored second goal from analysis_result, never graph order or selection', () => {
-    expect(apply('Monthly recurring revenue reaches its target in 67% of model runs.')).toBe('Monthly recurring revenue reaches its target in 67% of model runs.');
+    expect(apply('Monthly recurring revenue reaches its target in 67% of model runs.')).toBe('');
     const other = 'Supplier reliability reaches its target in 67% of model runs.';
     expect(apply(other)).toBe(other);
   });
@@ -135,7 +138,7 @@ describe('r11 option, scored goal and displayed value identity', () => {
     const tied = run({ pct_by_option: { raise: 67, keep: 67 } });
     const text = 'Monthly recurring revenue reaches its target in 67% of model runs.';
     expect(apply(text, tied)).toBe('');
-    expect(apply('Raise to £59: 67%.', tied)).toBe('Raise to £59: 67%.');
+    expect(apply('Raise to £59: 67%.', tied)).toBe(line.chance);
   });
   it('duplicate option labels cannot invent an option identity', () => {
     const text = 'Raise to £59: 67%.';
@@ -146,9 +149,9 @@ describe('r11 option, scored goal and displayed value identity', () => {
     const noIdentity = source === 'enrichment'
       ? { enrichment: { inference_warnings: [historical] } } : { inference_warnings: [historical] };
     const text = 'Raise to £59: 67%.';
-    expect(apply(text, noIdentity, { ...graph, goal_node_id: 'mrr' })).toBe(text);
+    expect(apply(text, noIdentity, { ...graph, goal_node_id: 'mrr' })).toBe(line.chance);
     const risk = 'The chance of supplier failure is 67%.';
-    expect(apply(`${text}\n${risk}\n${line.chance}`, noIdentity)).toBe(`${text}\n${risk}\n${line.chance}`);
+    expect(apply(`${text}\n${risk}\n${line.chance}`, noIdentity)).toBe(`\n${risk}\n${line.chance}`);
     expect(apply('Raise to £59: 65%.', noIdentity)).toBe(line.chance);
     for (const unrelated of [risk, 'Monthly recurring revenue reaches its target in 67% of model runs.']) {
       expect(apply(unrelated, noIdentity)).toBe(unrelated);
@@ -157,7 +160,7 @@ describe('r11 option, scored goal and displayed value identity', () => {
   it('a legacy licence can bind a graph label when no label snapshot was stored', () => {
     const { goal_node_id: _id, goal_label: _label, option_labels_by_option: _labels, ...historical } = licence;
     const noIdentity = { enrichment: { inference_warnings: [historical] } };
-    expect(apply('Raise to £59: 67%.', noIdentity)).toBe('Raise to £59: 67%.');
+    expect(apply('Raise to £59: 67%.', noIdentity)).toBe(line.chance);
   });
   it('rejects conflicting scored goal identities on the same analysis_result', () => {
     const text = 'Raise to £59: 67%.';
@@ -166,7 +169,7 @@ describe('r11 option, scored goal and displayed value identity', () => {
   it('uses the exact licensed value at nearest-five rounding, never the raw probability', () => {
     const rounded = run({ pct_by_option: { raise: 65, keep: 30 }, display_rounding_by_option: { raise: 'nearest_5' } });
     const expected = goalChanceScreenLinesForAgent(rounded, multiGraph, true).find(l => l.option_id === 'raise')!.chance;
-    expect(apply('Raise to £59: about 65%.', rounded)).toBe('Raise to £59: about 65%.');
+    expect(apply('Raise to £59: about 65%.', rounded)).toBe(expected);
     // Narrator figures are replaced by the recorded rounded licence, never admitted because they differ from it.
     for (const text of ['Raise to £59: about 67%.', 'Raise to £59: about 66.7%.']) expect(apply(text, rounded)).toBe(expected);
   });
@@ -182,7 +185,7 @@ describe('B4 final numerical check without a prose composer', () => {
   });
   it.each(['Raise to £59 has a 67% chance of meeting your goal in this model.',
     'The recorded chance for Raise to £59 is 67 per cent.'])('keeps correct AI words: %s', assistant_text => {
-    expect(clean(assistant_text)).toBe(assistant_text);
+    expect(clean(assistant_text)).toBe(line.chance);
   });
 });
 
@@ -190,4 +193,35 @@ it('withheld and excluded options cannot borrow another licensed percentage', ()
   const assistant_text = 'Raise to £59 has a 67% chance of meeting your goal.';
   const none = { enrichment: { inference_warnings: [{ ...licence, form: 'withheld', pct_by_option: {} }] } };
   expect(withEstimateGoalPointsAtEgress({ assistant_text }, { analysisResult: none, graph, current: true }).assistant_text).not.toContain('67%');
+});
+
+it.each(['Raise to £59 has a 67% chance of meeting your goal.', 'This gives a 67% chance.'])(
+  'zero estimate links preserves the correct AI sentence: %s', assistant_text => {
+    const analysisResult = { enrichment: { inference_warnings: [{ ...licence, olumi_estimate_link_count: 0 }] } };
+    const body = { assistant_text };
+    expect(withEstimateGoalPointsAtEgress(body, { analysisResult, graph, current: true })).toBe(body);
+  });
+
+it.each(['Raise to £59 has a 67% chance of meeting your goal.', 'This gives a 67% chance.'])(
+  'an explicit zero in the projected line is not estimate provenance: %s', assistant_text => {
+    // The current producer often omits zero; exercise the consumer's valid explicit-zero boundary as well.
+    const projected = vi.spyOn(screenLines, 'licensedGoalChanceLinesForAgent').mockReturnValue([
+      { ...line, olumi_estimate_link_count: 0, chance: 'Raise to £59: about 67% chance of meeting your goal, in this model.' },
+    ]);
+    try {
+      const body = { assistant_text };
+      expect(withEstimateGoalPointsAtEgress(body, { analysisResult: result, graph, current: true })).toBe(body);
+    } finally { projected.mockRestore(); }
+  });
+
+// A zero relationship count does not erase other positively recorded estimate kinds.
+it.each([
+  { counts: { olumi_estimate_value_count: 1 }, words: '1 starting value' },
+  { counts: { olumi_estimate_settings_by_option: { raise: 1 } }, words: '1 option setting' },
+])('zero links retains attribution for $words', ({ counts, words }) => {
+  const analysisResult = { enrichment: { inference_warnings: [{ ...licence, olumi_estimate_link_count: 0, ...counts }] } };
+  const expected = `‘Raise to £59’: about 67% chance of meeting your goal, in this model, using Olumi's estimates for ${words} (see Check estimates).`;
+  for (const assistant_text of ['Raise to £59 has a 67% chance of meeting your goal.', 'This gives a 67% chance.']) {
+    expect(withEstimateGoalPointsAtEgress({ assistant_text }, { analysisResult, graph, current: true }).assistant_text).toBe(expected);
+  }
 });

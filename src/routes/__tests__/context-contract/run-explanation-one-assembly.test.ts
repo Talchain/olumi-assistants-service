@@ -12,8 +12,10 @@ describe('Explain uses the canonical assembly (serialized provider bytes)', () =
     expect(Object.keys(ordinaryState).length, 'ordinary state decoded').toBeGreaterThan(0);
     for (const c of explain.calls) {
       const { run_explanation: section, ...base } = findState(c.payloads);
-      expect(base).toEqual(ordinaryState);
-      expect(Object.keys(object(section)).sort()).toEqual(['claim_permissions', 'leading_option_id', 'warning_codes']);
+      const { run_explanation: ordinarySection, ...ordinaryBase } = ordinaryState;
+      expect(base).toEqual(ordinaryBase);
+      expect(section).toEqual(ordinarySection);
+      expect(Object.keys(object(section)).sort()).toEqual(['claim_permissions', 'leading_option_id', 'robustness', 'warning_codes']);
       expect(object(section).leading_option_id).toBe(explain.seed.snapshot.analysis_result.leading_option_id);
       expect(object(section).claim_permissions).toEqual(object(ordinaryState.analysis).claim_permissions);
       expect(c.body.instructions).toBeDefined();
@@ -185,7 +187,7 @@ describe('Explain scoped assembly safety', () => {
   it('Explain instruction bytes retain the approved sha256', async () => {
     const w = await capture('Run-explanation','run2');
     expect(createHash('sha256').update(String(w.calls[0].body.instructions)).digest('hex'))
-      .toBe('fb8392d685fc041eefb6924758a587f930ef21d24841249c4b6e31059680f400');
+      .toBe('82efb6ade6b48c0f52003dae201318472c76da7e803931e204898aac222699ee');
   },60000);
 });
 

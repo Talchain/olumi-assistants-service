@@ -178,7 +178,7 @@ describe('A2 final root carrier and existing consent door', () => {
   it('refusal and non-method never emit a worksheet', async () => {
     const refused = await turn(planPickChipId('removed'));
     expect(refused._premortem_worksheet).toBeUndefined();
-    expect(modelCalls).toBe(0);
+    expect(modelCalls).toBe(1);
     script = [() => say('A shared model helps us think.')];
     expect((await turn(undefined, 'What is in the model?'))._premortem_worksheet).toBeUndefined();
   });

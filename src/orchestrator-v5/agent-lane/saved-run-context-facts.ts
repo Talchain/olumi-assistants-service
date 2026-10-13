@@ -99,8 +99,8 @@ export function runExplanationContextFacts(
       // that repeats analysis.goal_chance.say. The Explain route applies the asked-once rule to this `say` too.
       ...(typeof target.message === 'string' ? { say: target.message } : {}),
     } }),
-    ...((projected.enrichment as { robustness?: unknown } | undefined)?.robustness === undefined ? {}
-      : { robustness: (projected.enrichment as { robustness: unknown }).robustness }),
+    // Raw robustness prose and recommendation fields are not licensed model facts.
+    ...(analysis.robustness === undefined ? {} : { robustness: analysis.robustness }),
     warning_codes: [...rows, ...(() => {
       const brief = (projected.enrichment as { decision_brief?: { warnings?: unknown } } | undefined)?.decision_brief;
       return Array.isArray(brief?.warnings) ? brief.warnings.filter((w): w is Record<string, unknown> =>

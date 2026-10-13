@@ -1,4 +1,4 @@
-import { explainRun } from './fixtures/run-explanation-follow-up.js';
+import { explainRun as _explainRun } from './fixtures/run-explanation-follow-up.js';
 /** Selected coaching reaches the real Agent route on every conversation path. No provider is called. */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -21,7 +21,7 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // the share of runs; chat quotes the screen's goal-chance display: 09f7b6ac… → f6cec112….
 // S-E GOALS S2b (7 Oct): #34 and #35 gain the share-by-date sentences (goal_chance_words; a stated_time range says slow to
 // fast end, never causal doubt): 22,393 → 23,075 bytes (+682, exactly the two added sentences). 0732df33… → a9c847ef….
-const HOST_SHA = 'b3408ba62f21baecce57fd8ab676101baf459085675501b249c1883509a44fd4';
+const HOST_SHA = '94e79c562592a952eb67e8ca8e5eb1d0af249c1281cf157f9feeebb3de9c8ff5';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -47,8 +47,8 @@ const HOST_SHA = 'b3408ba62f21baecce57fd8ab676101baf459085675501b249c1883509a44f
 // Combined (#2762 merge of staging): 34,302 + 682 + 193 = 35,177 bytes; sha re-derived from the SENT body.
 // + S-E GOALS S4 propose_new_limit clause in the proposing-tool instruction: staging 35,177 + 241 = 35,418 bytes.
 //   Removing exactly that clause from the SENT body reproduces staging's 915133ba… sha and 35,177 bytes.
-const RENDERED_SHA = '3f5d3cee3a3d68dd8cc46a7432a7ae653affcb650d9f5a739ae99fca1a916a9a';
-const RENDERED_BYTES = 33944;
+const RENDERED_SHA = '00e807513d0d33c40be2fc784c4fa4fcaca68de479479552c728e532ecb9119c';
+const RENDERED_BYTES = 34228;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 // AIE 6134666922 exact replacements; old/new pins are in recovery-notes/b2-assembled-pins.json.
 const NAMING_RULE_FORM = "Run result replies: lead with the selected Run's licensed goal-chance or withholding lines.";
@@ -232,7 +232,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(input).toContain('reasoning_source');
     expect(input).toContain('run_explanation');
     expect(input).toContain('withheld_reason');
-    expect(input).toContain('goal_chance');
+    expect(input).toContain('selected_run_reference');
   });
 
   it('keeps the same selected prompt on a tool-followup conversation; the narrating hop is low effort (P44 S1)', async () => {

@@ -730,7 +730,9 @@ export async function runAgentTurn(
       // PL condition 2: the narration after a write/Run sees the newly selected facts,
       // not the packet captured before the tool. This is the existing canonical reader.
       if (result.mutated === true || result.ran === true) {
-        const current = await caps.getCanonicalState(input.ctx).catch(() => ({ ok: false, mutated: false, current_state_unknown: true }));
+        let current: unknown;
+        try { current = await caps.getCanonicalState(input.ctx); }
+        catch { current = { ok: false, mutated: false, current_state_unknown: true }; }
         result = { ...result, current_model_state: current };
       }
       toolResults.push(result);

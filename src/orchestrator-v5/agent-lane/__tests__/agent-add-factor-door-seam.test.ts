@@ -357,12 +357,19 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     script = [() => fnCall('propose_new_factor', { factors: factorArgs(), rationale: 'The user stated both salaries.', whole_request: true })];
     const t1 = await turn({ message: FIG_MSG });
     expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
-    expect(openAiCalls - calls, 'one model call, no narrating call').toBe(1);
+    expect(openAiCalls - calls, 'one proposal call and one AI narration call').toBe(2);
     // Two figures: the card shows Olumi's PAIRING with the user's own sentence, for them to confirm (DL ruling on #2235).
-    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Senior engineer salary’: [^“]*120,?000[^“]*, from your message “Senior engineers cost £120k a year each and juniors £65k a year each\.”/);
-    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Junior engineer salary’: [^“]*65,?000[^“]*, from your message “/);
-    expect(t1.assistant_text, t1.assistant_text).toMatch(/approve only if every pairing is right/);
-    expect(t1.assistant_text).toMatch(/placeholder strength/);
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    const ops = held[0]!.action.inline_patch!.operations!;
+    const member = held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { factor_id: string; observed_state: Record<string, unknown> }[];
+    for (const [label, value] of [['Senior engineer salary', 120000], ['Junior engineer salary', 65000]] as const) {
+      const id = ops.find(op => op.op === 'add_node' && op.value?.label === label)!.path;
+      expect(member.find(item => item.factor_id === id)?.observed_state).toMatchObject({ raw_value: value, source: USER_SOURCE });
+    }
+
+
+
     expect(t1.assistant_text).not.toMatch(/propose_new_factor|gmh_/);
     expect(approveChipOf(t1), 'the approve chip is offered').toBeDefined();
   }, 120_000);
@@ -715,7 +722,15 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     script = [() => fnCall('propose_new_factor', { factors: capacityArgs('productivity'), rationale: 'The user chose 25%.', whole_request: true })];
     const t1 = await turn({ message: HIRING_MSG });
     expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
-    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Non-development time’ is 25 ?%, the figure you gave, and affects productivity \(lowers it\)\./);
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    const ops = held[0]!.action.inline_patch!.operations!;
+    const id = ops.find(op => op.op === 'add_node' && op.value?.label === 'Non-development time')!.path;
+    const member = held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { factor_id: string; observed_state: Record<string, unknown> }[];
+    expect(member.find(item => item.factor_id === id)?.observed_state).toMatchObject({ raw_value: 25, source: USER_SOURCE });
+    expect(ops).toEqual(expect.arrayContaining([
+      expect.objectContaining({ op: 'add_edge', value: expect.objectContaining({ from: id, to: 'goal_productivity', effect_direction: 'negative' }) }),
+    ]));
     expect(t1.assistant_text, t1.assistant_text).not.toMatch(/cannot connect|refused|nothing was prepared/i);
     expect(approveChipOf(t1), 'the approve chip is offered').toBeDefined();
   }, 120_000);
@@ -815,7 +830,14 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     script = [() => fnCall('propose_new_factor', { factors: rangedArgs(), rationale: 'The user chose 25% within 20-30%.', whole_request: true })];
     const t1 = await turn({ message: HIRING_MSG });
     expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
-    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Non-development time’ is 25 ?%, the figure you gave, within your range of 20 ?% to 30 ?% \(“[^”]*between 20% and 30%[^”]*”\), and affects productivity \(lowers it\)\./);
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    const ops = held[0]!.action.inline_patch!.operations!;
+    const id = ops.find(op => op.op === 'add_node' && op.value?.label === 'Non-development time')!.path;
+    const member = held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { factor_id: string; observed_state: Record<string, unknown> }[];
+    expect(member.find(item => item.factor_id === id)?.observed_state).toMatchObject({ raw_value: 25, source: USER_SOURCE,
+      range: { low: 20, high: 30, meaning: 'min_max', source: USER_SOURCE, source_quote: RANGE_MSG } });
+    expect(approveChipOf(t1)).toBeDefined();
   }, 120_000);
 
   it.each([

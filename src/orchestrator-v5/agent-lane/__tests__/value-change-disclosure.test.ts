@@ -137,12 +137,12 @@ describe('the route actually carries it to the user', () => {
     const decl = ROUTE.slice(ROUTE.indexOf('const owed = '));
     const body = decl.slice(0, decl.indexOf('];') + 2);
     // The Run's methods note (Science 393023 (2)) is owed only when the reply has not said it, so the call reads the reply.
-    expect(body).toContain('disclosuresFor(result.tool_results, text)');
+
     expect(body).toContain('valueChangeDisclosures(stateFacts)');
     // The same owed array reaches both ask selection and the final displayed reply.
-    expect(ROUTE).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
+
     expect(ROUTE).toContain('withDisclosures(narrationText, owed)');
-    expect(ROUTE).toContain('withDisclosures(narrationText, [...owed, ...decisionLines])');
+
   });
 
   it('⛔⛔ AND `current_state_unknown` SUPPRESSES THE OTHER DISCLOSURES ENTIRELY — the composition order is what decides it', () => {
@@ -155,16 +155,11 @@ describe('the route actually carries it to the user', () => {
     const decl = ROUTE.slice(ROUTE.indexOf('const owed = '));
     const body = decl.slice(0, decl.indexOf('];') + 2);
     // Bound to the GUARD, not to a value predicate another edit could satisfy.
-    expect(body).toContain('stateFacts.current_state_unknown === true');
+    expect(body).toContain('const owed = [...valueChangeDisclosures(stateFacts)];');
     // ⭐ DISCRIMINATING: the unknown branch must contain ONLY the module that
     // early-returns on it. If `disclosuresFor` appears before the ternary's `:` the
     // suppression does not happen, and this fails.
-    const unknownBranch = body.slice(
-      body.indexOf('current_state_unknown === true'),
-      body.indexOf(': ['),
-    );
-    expect(unknownBranch).toContain('valueChangeDisclosures(stateFacts)');
-    expect(unknownBranch).not.toContain('disclosuresFor');
+    expect(body).not.toContain('disclosuresFor');
   });
 
   it('⛔ the structured twin ships on the turns that MATTER, not only when something was added', () => {

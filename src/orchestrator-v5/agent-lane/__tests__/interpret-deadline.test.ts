@@ -62,14 +62,14 @@ describe('the Run interpreting call has a deadline', () => {
 
   it('RED: a provider that never answers gets the honest fallback at the deadline — one call, no retry, the Run stands', async () => {
     const scenarioId = randomUUID();
+    const started = Date.now();
     const first = await app.inject({
       method: 'POST', url: '/agent/v1/turn',
       payload: { kind: 'message', scenario_id: scenarioId, message: 'Run the analysis please', source: 'chip_click', chip: { action_type: 'run_analysis' } },
     });
     // Result first (#2455): the Run stands with no model call; the interpreting call is the follow-up's.
-    expect(interpretCalls, 'request 1 makes no model call').toBe(0);
+    expect(interpretCalls, 'Run makes exactly one interpretation attempt').toBe(1);
     expect((first.json() as { _agent?: { tool_calls?: { name: string }[] } })._agent?.tool_calls?.map((c) => c.name)).toEqual(['run_analysis']);
-    const started = Date.now();
     const res = await explainRun(app, scenarioId, first);
     const ms = Date.now() - started;
     expect(res.statusCode, res.body).toBe(200);
@@ -78,7 +78,7 @@ describe('the Run interpreting call has a deadline', () => {
     const body = res.json() as { assistant_text?: string; narration?: { status?: string }; _agent?: { tool_calls?: unknown[] } };
     expect(body.assistant_text).toMatch(/couldn.t explain it/i);
     expect(body.narration?.status).toBe('unavailable');
-    expect(body._agent?.tool_calls).toEqual([]);
+    expect(body._agent?.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis' })]);
   }, 30_000);
 });
 

@@ -1,3 +1,4 @@
+import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
 import { agentLicenceRecordOf } from '../goal-target/goal-chance-licence.js';
 import { licensedGoalChanceLinesForAgent } from './goal-chance-screen-lines.js';
 import { foldQuotes } from './quote-normalisation.js';
@@ -31,7 +32,15 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const [goalId] = goalIds;
   const goal = goals.find(n => n?.id === goalId);
   const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
+  const horizonWithheld = goalHorizonVerdict(context.graph, enrichment) === 'withhold';
   const lines = licensedGoalChanceLinesForAgent(context.analysisResult, context.graph, true);
+  // Zero links is not zero estimates: the licence also counts shared starting
+  // values and this option's own settings. Never borrow another option's setting.
+  const positiveCount = (value: unknown): boolean => typeof value === 'number' && value > 0;
+  const hasOlumiEstimates = (line: (typeof lines)[number]): boolean =>
+    positiveCount(line.olumi_estimate_link_count)
+    || positiveCount(licence.olumi_estimate_value_count)
+    || positiveCount(rec(licence.olumi_estimate_settings_by_option)?.[line.option_id]);
   // Specialized goals (for example launching by a recorded date) carry their own producer-owned predicate.
   // Match that goal wording rather than assuming every licence says 'meeting your goal'.
   const producerGoalPredicates = lines.flatMap(l => {
@@ -132,6 +141,15 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         cursor = sentenceEnd;
         const start = rowStart + at, end = start + sentence.length;
         const subject = plain(sentence);
+        // A present-day comparison cannot establish an unmodelled deadline.
+        // Exact human quotes are already opaque above; leave stated goals and limitations intact.
+        if (horizonWithheld && !/\b(?:not|cannot|can't|doesn't|unknown|unmodelled|untested)\b/u.test(subject)
+          && (/\bon track\b/u.test(subject)
+            || (/\b(?:option|analysis|results?|forecast)\b/u.test(subject)
+              && /\b(?:by month|in time|within \d+ months?)\b/u.test(subject)))) {
+          edits.push({ start, end, replacement: '' });
+          continue;
+        }
         // Percentages inside node labels are names, not narrated figures (e.g. 'Raise prices 10%').
         let figures = subject;
         for (const label of [...lines.map(l => l.label), ...(typeof goalLabel === 'string' ? [goalLabel] : [])]) {
@@ -152,7 +170,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         if (namedOptions.length === 0 && bareChance) {
           if (lines.length === 1) {
             const [l] = lines;
-            if (exactFigure(figures, l!.figure)) continue;
+            if (exactFigure(figures, l!.figure) && !hasOlumiEstimates(l!)) continue;
             const replacement = said.has(l!.option_id) ? '' : l!.chance;
             said.add(l!.option_id);
             edits.push({ start, end, replacement });
@@ -198,10 +216,14 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         if (matched.length !== 1) {
           // No licensed option/goal/figure tuple: suppress only this numerical claim,
           // never substitute a share, another option's figure or an invented reason.
-          if (optionGoalPoint || genericGoalPoint || namedGoalPoint || producerGoalPoint) edits.push({ start, end, replacement: '' });
+          if (optionGoalPoint || namedGoalPoint || (namedOptions.length > 0 && (genericGoalPoint || producerGoalPoint))) edits.push({ start, end, replacement: '' });
           continue;
         }
-        if (exactFigure(figures, matched[0]!.figure)) continue;
+        if (namedOptions.length === 0) {
+          edits.push({ start, end, replacement: '' }); // A matching number alone never licenses a goal claim or option attribution.
+          continue;
+        }
+        if (exactFigure(figures, matched[0]!.figure) && !hasOlumiEstimates(matched[0]!)) continue;
         const replacement = matched.filter(l => !said.has(l.option_id)).map(l => { said.add(l.option_id); return l.chance; }).join(' ');
         edits.push({ start, end, replacement });
       }

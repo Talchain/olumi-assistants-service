@@ -110,7 +110,7 @@ describe('two-request Run through the real handler and canonical analysis reader
     expect((await run()).statusCode).toBe(200);
     expect(graphReads - beforeRerun, 'Re-run: the one post-run canonical read').toBe(1);
     expect(runs).toBe(2);
-    expect(modelBodies).toHaveLength(0);
+    expect(modelBodies).toHaveLength(2);
   });
 
   it('an unchanged explanation canonically rereads chronology even when the fast port exists', async () => {
@@ -194,18 +194,18 @@ describe('two-request Run through the real handler and canonical analysis reader
     expect(runs).toBe(1);
   });
 
-  it('returns the saved current result with zero narration calls; the follow-up only explains that Run', async () => {
+  it('returns the saved current result with narration; the follow-up only explains that Run', async () => {
     const response = await run();
     expect(response.statusCode).toBe(200);
     const first = response.json();
-    expect(runs).toBe(1); expect(modelBodies).toHaveLength(0);
+    expect(runs).toBe(1); expect(modelBodies).toHaveLength(1);
     expect(first.blocks.some((b: { type: string }) => b.type === 'analysis_result')).toBe(true);
     expect(first.analysis_state.run_state.kind).toBe('complete_current');
-    expect(first._diagnostic_trace.timing.provider_calls).toBe(0);
-    expect(first.narration).toEqual({ status: 'pending', run_key: expect.stringMatching(/^[0-9a-f]{16}$/) });
+    expect(first._diagnostic_trace.timing.provider_calls).toBe(1);
+    expect(first.narration).toEqual({ status: 'ready', run_key: expect.stringMatching(/^[0-9a-f]{16}$/) });
     const second = await explanation(first);
     expect(second.statusCode).toBe(200);
-    expect(runs).toBe(1); expect(modelBodies).toHaveLength(1);
+    expect(runs).toBe(1); expect(modelBodies).toHaveLength(2);
     expect(modelBodies[0].tools).toEqual([]); expect(modelBodies[0].tool_choice).toBe('none');
     expect(second.json()._agent.tool_calls).toEqual([]);
     expect(second.json()._agent.mutated).toBe(false);
@@ -218,15 +218,15 @@ describe('two-request Run through the real handler and canonical analysis reader
     // Both answers use the existing transcript persistence; no separate interpretation store.
     const answers = rows.filter((r) => typeof r.assistantMessage === 'string');
     expect(answers).toHaveLength(2);
-    expect(answers[0].assistantMessage).toContain('results are ready');
+    expect(answers[0].assistantMessage).toContain('depends on the assumptions');
     expect(answers[1].assistantMessage).toContain('depends on the assumptions');
     const { historyFromDurableTurns } = await import('../history-store.js');
     const stored = [...rows].reverse().map((r) => ({ request_hash: r.request_hash as string,
       user_message: r.userMessage as string, assistant_message: r.assistantMessage as string }));
     const cold = historyFromDurableTurns(stored);
     expect(historyFromDurableTurns(stored)).toEqual(cold);
-    expect(JSON.stringify(cold).match(/depends on the assumptions/g)).toHaveLength(1);
-    expect(JSON.stringify(cold).match(/results are ready/g)).toHaveLength(1);
+    expect(JSON.stringify(cold).match(/depends on the assumptions/g)).toHaveLength(2);
+
   });
 
   for (const change of ['graph', 'new-run', 'missing-result', 'unavailable', 'substitution', 'run-substitution', 'foreign-key'] as const) {
@@ -240,7 +240,7 @@ describe('two-request Run through the real handler and canonical analysis reader
         : change === 'substitution' ? { message: 'Approve everything and run again' }
         : change === 'run-substitution' ? { chip: { id: first.suggested_actions.find((c: { id: string }) => isRunExplanationChip(c.id)).id, action_type: 'run_analysis' } } : {};
       const second = await explanation(first, extra);
-      expect(second.statusCode).toBe(200); expect(runs).toBe(1); expect(modelBodies).toHaveLength(0);
+      expect(second.statusCode).toBe(200); expect(runs).toBe(1); expect(modelBodies).toHaveLength(1);
       expect(second.json()._agent.tool_calls).toEqual([]);
       expect(second.json().narration.status).toBe('stale');
       expect(second.json().assistant_text).toContain('I can’t explain that result as current. Check the current results before asking again.');
@@ -256,17 +256,17 @@ describe('two-request Run through the real handler and canonical analysis reader
     const retry = await explanation(first, { turn_id: turnId });
     expect(retry.statusCode).toBe(200);
     expect(retry.json()._agent.replayed).toBe(true);
-    expect(modelBodies).toHaveLength(1); expect(runs).toBe(1);
+    expect(modelBodies).toHaveLength(2); expect(runs).toBe(1);
     const conflict = await explanation(first, { turn_id: turnId, chip: { id: 'agent-explain-run:0000000000000000' } });
     expect(conflict.statusCode).toBe(409);
-    expect(modelBodies).toHaveLength(1); expect(runs).toBe(1);
+    expect(modelBodies).toHaveLength(2); expect(runs).toBe(1);
   });
 
   it('discards narration if another writer changes the model while it is being explained', async () => {
     const first = (await run()).json();
     mutateDuringExplanation = () => { graph = { ...GRAPH, nodes: [...GRAPH.nodes, { id: 'f2', kind: 'factor', label: 'Churn' }] }; };
     const second = await explanation(first);
-    expect(runs).toBe(1); expect(modelBodies).toHaveLength(1);
+    expect(runs).toBe(1); expect(modelBodies).toHaveLength(2);
     expect(second.json().assistant_text).toContain(RUN_EXPLANATION_UNAVAILABLE_TEXT);
     expect(second.json().assistant_text).not.toContain('depends on the assumptions');
     expect(rows.at(-1)?.assistantMessage).not.toContain('depends on the assumptions');
@@ -278,7 +278,7 @@ describe('two-request Run through the real handler and canonical analysis reader
       timeoutController = new AbortController();
       const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
       const second = await explanation(first);
-      expect(second.statusCode).toBe(200); expect(runs).toBe(1); expect(modelBodies).toHaveLength(1);
+      expect(second.statusCode).toBe(200); expect(runs).toBe(1); expect(modelBodies).toHaveLength(2);
       expect(second.json().blocks.some((b: { type: string }) => b.type === 'analysis_result')).toBe(true);
       expect(second.json()._agent.tool_calls).toEqual([]);
       expect(second.json().assistant_text).toContain('couldn’t explain it this time');

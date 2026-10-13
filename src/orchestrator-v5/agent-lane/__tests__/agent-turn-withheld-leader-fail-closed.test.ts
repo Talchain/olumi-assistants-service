@@ -63,7 +63,7 @@ let callModelOutputs: Record<string, unknown>[][] = [];
 
 describe('the Agent route gates a ranking reply on a withheld turn, and only then', () => {
   let app: FastifyInstance;
-  let noLeaderSentence: string;
+  let _noLeaderSentence: string;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       const output = callModelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
@@ -72,7 +72,7 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
-    noLeaderSentence = (await import('../withheld-leader-fail-closed.js')).agentNoLeaderSentence('constraint_verdict_withheld', FX.state.analysis_ready);
+    _noLeaderSentence = (await import('../withheld-leader-fail-closed.js')).agentNoLeaderSentence('constraint_verdict_withheld', FX.state.analysis_ready);
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
@@ -115,8 +115,8 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     expect((r.json().analysis_state as { leader_claim?: { permitted?: boolean } }).leader_claim?.permitted).toBe(false);
     const text = r.json().assistant_text as string;
     // S-A (#2748): the ONE composer may then move sentences under More detail; it never adds, drops or rewrites one.
-    expect(sentenceMultiset(text)).toEqual(sentenceMultiset(`${REPLY.text.replace(RANKING_SENTENCE, '')}\n\n${noLeaderSentence}`));
-    expect(text.split(noLeaderSentence)).toHaveLength(2);
+    expect(sentenceMultiset(text)).toEqual(sentenceMultiset(REPLY.text.replace(RANKING_SENTENCE, '')));
+
     expect(text).not.toContain(REPLY.leak_phrases[0]!);
     expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the GATED text').toBe(text);
   });

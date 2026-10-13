@@ -1564,7 +1564,7 @@ export interface FailClosedProseResult {
  */
 const CITATION_ONLY = /^\s*(?:\[\d+\]\s*)+$/;
 
-export function dropRankingSentences(text: string, labels: RankingLabelContext = NO_LABELS, protectedExactLine?: string | readonly string[]): FailClosedProseResult {
+export function dropRankingSentences(text: string, labels: RankingLabelContext = NO_LABELS, protectedExactLine?: string | readonly string[], protectedExactSentences: readonly string[] = []): FailClosedProseResult {
   if (typeof text !== 'string' || text.length === 0) return { text, droppedSentences: 0 };
   type Seg = Segment;
   const segs: Seg[] = [];
@@ -1677,6 +1677,13 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
       }
     });
   }
+  // A licensed per-option goal chance is independent of the comparison's leader permission.
+  // Protect only an exact producer-owned sentence, never a neighbouring ranking or a matched number alone.
+  segs.forEach((seg, r) => {
+    if ('units' in seg) seg.units.forEach((unit, i) => {
+      if (protectedExactSentences.includes(unit.trim())) drops[r]![i] = false;
+    });
+  });
   const lines: Array<Seg | null> = segs.map((seg, r) => {
     if ('sep' in seg) return seg;
     const drop = drops[r]!;
@@ -1768,6 +1775,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
      * is kept whole where it stands as its own line: a label inside it can hold ". " and a ranking word.
      */
     readonly protectedHostLines?: readonly string[];
+    readonly protectedGoalChanceSentences?: readonly string[];
   },
 ): WireLeaderClaimEnforcementResult {
   let next = response;
@@ -1802,7 +1810,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const protectedLines = [...(typedSay !== null && !typedSay.includes('\n') ? [typedSay] : []),
         ...(opts.protectedHostLines ?? []).filter((line) => line !== '' && !line.includes('\n'))];
       const projected = dropRankingSentences(projectionInput, rankingLabelContext(opts.graph, opts.analysisReady),
-        protectedLines.length > 0 ? protectedLines : undefined);
+        protectedLines.length > 0 ? protectedLines : undefined, opts.protectedGoalChanceSentences);
       if (projected.droppedSentences > 0) {
         droppedSentences = projected.droppedSentences;
         /**

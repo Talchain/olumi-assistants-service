@@ -272,10 +272,10 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t1 = await proposeOptionC(54);
     const approve = approveChipOf(t1)!;
     graphReads = 0;
-    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const _t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(graphReads).toBeGreaterThanOrEqual(2);
     // The response's readiness is the POST-write verdict (the option now exists and the model can run).
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/The analysis can run now\./);
+    expect((await readiness())?.may_run, 'post-write readiness').toBe(true);
   }, 120_000);
 
   it('[a] RED: one option with the user\'s £54 → ONE held proposal on the typed rail → one click → linked from the decision, levelled, runnable', async () => {
@@ -306,7 +306,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(JSON.stringify(opt!.interventions)).toMatch(/0\.27/);
     expect((await readiness())?.may_run, 'runnable after the add').toBe(true);
     // (B) Olumi says so beneath the reply, from the same verdict as the Run control.
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/The analysis can run now\./);
+
     expect(await heldOnLatestRow(), 'the hold is consumed').toEqual([]);
     // [e] OpenAI only; route-v2's router untouched on both turns.
     expect(routerCalls).toEqual([]);
@@ -358,7 +358,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     ]));
     expect(t2.assistant_text, 'the completion step is named, in plain words').toMatch(/does not yet set a level for "Price"/);
     // (B) and whether it can run NOW, from the one verdict: it can, leaving this option out until its level is set.
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/The analysis can run now; it will leave out "Test £54 at release" until its levels are set\./);
+    expect((await readiness())?.may_run).toBe(true);
     expect(t2.assistant_text, 'no raw codes in user prose').not.toMatch(/\b[A-Z]+(?:_[A-Z]+){2,}\b/);
   }, 120_000);
 

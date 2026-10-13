@@ -242,6 +242,7 @@ describe('real Agent final-answer persistence, captured founder requests', () =>
     expect(next.id).not.toBe(prior.id);
     expect(pending.filter(p => p.action.kind === 'elicit_goal_current_level')).toHaveLength(1);
     pending = [{ ...next, expires_at_iso: '2000-01-01T00:00:00.000Z' }];
+    reply = 'The current model has unresolved assumptions.';
     await run(); expect(askOnLatest()).toBeNull();
   });
   it('non-typed turns and replay preserve TTL; one typed unrelated turn decrements once', async () => {

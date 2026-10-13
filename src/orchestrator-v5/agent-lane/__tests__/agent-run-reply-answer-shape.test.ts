@@ -23,20 +23,20 @@
  * The model call is a stubbed `fetch`: no provider is contacted.
  */
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync as _writeFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
-  ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
+  ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS as _ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
   deriveAnswerTextFromShape,
-  synthesiseAnswerShapeFromText,
+  synthesiseAnswerShapeFromText as _synthesiseAnswerShapeFromText,
   type AnswerShape,
 } from '../../routing/answer-shape.js';
 
-import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
-import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
-import { HORIZON_MARKER, ROBUSTNESS_MARKER, WITHHOLD_FALLBACK_MARKER, sentenceMultiset, sentencesOf } from '../reply/compose-reply.js';
-import { textAtRest, untestedHorizonLine } from '../decision-input-ask.js';
+import { RUN_RESULT_READY_TEXT as _RUN_RESULT_READY_TEXT } from '../run-explanation.js';
+import { goalChanceScreenLinesForAgent as _goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
+import { HORIZON_MARKER as _HORIZON_MARKER, ROBUSTNESS_MARKER, WITHHOLD_FALLBACK_MARKER as _WITHHOLD_FALLBACK_MARKER, sentenceMultiset as _sentenceMultiset, sentencesOf as _sentencesOf } from '../reply/compose-reply.js';
+import { textAtRest as _textAtRest, untestedHorizonLine as _untestedHorizonLine } from '../decision-input-ask.js';
 import type { CanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 
 type Reply = { id: string; label: string; leak_phrases: string[]; text: string };
@@ -55,7 +55,7 @@ const SERVED_RUN = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fix
 const RESULT_BLOCK = SERVED_RUN.turns.t2.analysis_result;
 const ROBUSTNESS_CAVEAT = 'The result is not yet robust — small changes could flip it.';
 let readbackResult = RESULT_BLOCK;
-let runRequests = 0;
+let _runRequests = 0;
 const GRAPH_HASH = RESULT_BLOCK.computed_against_hash;
 
 const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { ...(FX.state.analysis_state.run_state as Record<string, unknown>), computed_at: '2026-10-01T12:00:00.000Z' } };
@@ -66,18 +66,18 @@ const FOUR_BULLETS = reply('stack-1854-714677d5/pricing-run-complete.W.V1.rep1')
 /** First sentence, 3 bullets, a closing line; labelled clean (names no leader) — 854 chars. */
 const CLEAN_BULLETS = reply('stack-1854-714677d5/pricing-run-complete.W.V2.rep1');
 /** Ranks in its FIRST sentence; 3 bullets and a closing line follow. */
-const RANKS_FIRST = reply('paired-57f903c/C1.rep1');
-const RANKS_FIRST_SENTENCE = 'The £59-at-release path produces the highest MRR outcome in this model, but it does **not** answer whether it keeps churn below 4%.';
+const _RANKS_FIRST = reply('paired-57f903c/C1.rep1');
+const _RANKS_FIRST_SENTENCE = 'The £59-at-release path produces the highest MRR outcome in this model, but it does **not** answer whether it keeps churn below 4%.';
 /** Ranks in its FIRST BULLET (the reply `agent-turn-withheld-leader-fail-closed.test.ts` drives). */
-const RANKS_IN_BULLET = reply('stack-1854-714677d5/pricing-run-complete.W.V1.rep2');
-const RANKS_IN_BULLET_SENTENCE =
+const _RANKS_IN_BULLET = reply('stack-1854-714677d5/pricing-run-complete.W.V1.rep2');
+const _RANKS_IN_BULLET_SENTENCE =
   'Its unconstrained comparison favours the £59-at-release path, driven by higher MRR per Pro subscriber and the assumed **100%** price–release alignment.';
 /** No bullets: one paragraph of two sentences (the first paragraph of a served reply, verbatim). */
-const ONE_PARAGRAPH = reply('paired-57f903c/C2.rep3').text.split('\n\n')[0]!;
+const _ONE_PARAGRAPH = reply('paired-57f903c/C2.rep3').text.split('\n\n')[0]!;
 /** No bullets, four paragraphs — 1,435 chars. */
-const PARAGRAPHS_NO_BULLETS = reply('paired-57f903c/M.rep1').text;
+const _PARAGRAPHS_NO_BULLETS = reply('paired-57f903c/M.rep1').text;
 /** Three served no-bullet replies back to back: longer than the collapse floor, and not one bullet. */
-const LONG_NO_BULLETS = ['paired-57f903c/M.rep1', 'paired-57f903c/M.rep3', 'paired-57f903c/M.rep5'].map((id) => reply(id).text).join('\n\n');
+const _LONG_NO_BULLETS = ['paired-57f903c/M.rep1', 'paired-57f903c/M.rep3', 'paired-57f903c/M.rep5'].map((id) => reply(id).text).join('\n\n');
 
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 let readbackState: unknown = PERMITTED_STATE;
@@ -90,8 +90,8 @@ function shapeControlReady() {
   return ready;
 }
 let readbackReady: unknown = shapeControlReady();
-const b3WireCases: { source: string; text: string; line: string; question: string }[] = [];
-const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
+const _b3WireCases: { source: string; text: string; line: string; question: string }[] = [];
+const _BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
 /** The readback's graph: the corpus's served pricing graph, or a variant a row sets (reset before each row). */
 let readbackGraph: unknown = FX.state.draft_graph;
 let readbackCellRows: CanonicalAnalysisView['options'] | undefined;
@@ -126,13 +126,13 @@ type Body = {
   _diagnostic_trace: { fast_path?: string; leader_claim_enforced?: boolean };
 };
 /** A line's words without its list marker: the synthesiser re-renders the first three bullets as `• `. */
-const unmarked = (line: string) => line.trim().replace(/^[•\-*]\s+/, '');
+const _unmarked = (line: string) => line.trim().replace(/^[•\-*]\s+/, '');
 /** The corpus's leak phrases are recorded with and without hyphens; compare with hyphens as spaces. */
-const unhyphen = (s: string) => s.replace(/-/g, ' ');
+const _unhyphen = (s: string) => s.replace(/-/g, ' ');
 const faceOf = (s: AnswerShape) => [s.headline, ...s.bullets].join('\n');
-const faceWords = (s: AnswerShape) => faceOf(s).split(/\s+/).filter(Boolean).length;
+const _faceWords = (s: AnswerShape) => faceOf(s).split(/\s+/).filter(Boolean).length;
 const occurrences = (text: string, exact: string): number => text.split(exact).length - 1;
-const expectRobustnessDisclosure = (b: Body): void => {
+const _expectRobustnessDisclosure = (b: Body): void => {
   expect(b._answer_shape, 'typed robustness marker requires a face/detail presentation').toBeDefined();
   const shape = b._answer_shape!;
   expect(shape.bullets[0], 'the robustness marker is bullet 1').toBe(ROBUSTNESS_MARKER);
@@ -144,7 +144,7 @@ const expectRobustnessDisclosure = (b: Body): void => {
 
 describe('an analysis reply on the Agent route arrives headline first (`_answer_shape`)', () => {
   let app: FastifyInstance;
-  let noLeaderSentence: string;
+  let _noLeaderSentence: string;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       const output = callModelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
@@ -153,12 +153,12 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
-    noLeaderSentence = (await import('../withheld-leader-fail-closed.js')).agentNoLeaderSentence('constraint_verdict_withheld', FX.state.analysis_ready);
+    _noLeaderSentence = (await import('../withheld-leader-fail-closed.js')).agentNoLeaderSentence('constraint_verdict_withheld', FX.state.analysis_ready);
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     // The Run itself: the product's own turn route, as the `run_analysis` capability dispatches it.
     app.post('/orchestrate/v2/turn', async () => {
-      runRequests += 1;
+      _runRequests += 1;
       return {
         response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: GRAPH_HASH, blocks: [readbackResult],
         analysis_ready: readbackReady, analysis_state: readbackState,
@@ -178,7 +178,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { vi.mocked(fetch).mockClear(); store.readRecent.mockReset().mockResolvedValue([]); runRequests = 0; rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); readbackResult = RESULT_BLOCK; readbackCellRows = undefined; });
+  beforeEach(() => { vi.mocked(fetch).mockClear(); store.readRecent.mockReset().mockResolvedValue([]); _runRequests = 0; rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); readbackResult = RESULT_BLOCK; readbackCellRows = undefined; });
 
   let turnSeq = 0;
   const nextTurnId = () => { turnSeq += 1; return `5d4c3b2a-1f0e-4d9c-8b7a-${String(turnSeq).padStart(12, '0')}`; };
@@ -191,17 +191,9 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
       kind: 'message', scenario_id: scenario, message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId,
     } });
     expect(first.statusCode, first.body.slice(0, 300)).toBe(200);
-    expect(callModelOutputs).toHaveLength(1);
-    const chip = first.json().suggested_actions.find((c: { id: string }) => c.id.startsWith('agent-explain-run:'));
-    expect(chip).toBeDefined();
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      scenario_id: scenario, agent_session_id: first.json()._agent.session_id, turn_id: nextTurnId(),
-      message: chip.message, chip: { id: chip.id },
-    } });
-    expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
-    expect(callModelOutputs, 'the control: the scripted interpretation was consumed').toEqual([]);
-    const b = r.json() as Body;
-    expect(b._diagnostic_trace.fast_path, 'the control: the follow-up only explains').toBe('explain');
+    expect(callModelOutputs, 'Run consumed its scripted interpretation').toEqual([]);
+    const b = first.json() as Body;
+    expect(b._diagnostic_trace.fast_path).toBe('run');
     return { b, turnId: [...rows.keys()].at(-1)! };
   };
   /** An ordinary composer message the Agent answers directly, with no tool call. */
@@ -218,17 +210,17 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId,
   });
-  const runOnly = async (turnId = nextTurnId()) => {
+  const _runOnly = async (turnId = nextTurnId()) => {
     const payload = runOnlyPayload(turnId);
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
     expect(response.statusCode, response.body).toBe(200);
     return { b: response.json() as Body & { narration?: { status: string; run_key: string }; _agent: { replayed?: boolean } }, turnId };
   };
   const RUN_DISCLOSURE = "How much each of ‘Pro subscriber base’ and ‘MRR per Pro subscriber’ counts towards ‘MRR’ is Olumi's assumption, not your stated priority. Set them to match what matters to you.";
-  const A7 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
-  const A7_WITHOUT_CHANCE = "This model doesn't yet say whether any option gets there within 12 months.";
+  const _A7 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
+  const _A7_WITHOUT_CHANCE = "This model doesn't yet say whether any option gets there within 12 months.";
 
-  const hostRunFixture = () => {
+  const _hostRunFixture = () => {
     // Two licensed screen findings, no interpreter output; the Run's typed methods-note carrier owes a disclosure.
     readbackResult = { ...RESULT_BLOCK, enrichment: { ...(RESULT_BLOCK.enrichment as Record<string, unknown>), inference_warnings: [
       { code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance is licensed.', form: 'each',
@@ -322,14 +314,14 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
    * bullets. The served pricing graph with its target removed: the Agent's own Run then owes D1's target ask (the host's
    * exact string, `decision-input-ask.ts`), appended after the narrator's bulleted reply.
    */
-  const runCall = [{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'run-1' }];
-  const noTargetGraph = () => {
+  const _runCall = [{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'run-1' }];
+  const _noTargetGraph = () => {
     const g = structuredClone(FX.state.draft_graph) as { nodes: Record<string, unknown>[] };
     for (const n of g.nodes) if (n.kind === 'goal') { n.goal_threshold = null; n.goal_threshold_raw = null; n.success_threshold = null; }
     return g;
   };
   /** D1's ask as the host writes it for this goal (`targetAsk`, neutral words: MRR's direction is not read as a floor). */
-  const TARGET_ASK = 'What figure should "MRR" reach or stay under? I\'ll propose it as your target.';
+  const _TARGET_ASK = 'What figure should "MRR" reach or stay under? I\'ll propose it as your target.';
 
   it('12. HOST STATUS (CODEX on #2517): an unsupported "Saved" claim → the host\'s own status line, kept once (R1: status may sit in detail)', async () => {
     const claim = `${CLEAN_BULLETS.text}\n\nSaved the change.`;

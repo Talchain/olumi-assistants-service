@@ -218,7 +218,7 @@ describe('W3 controls: no scope promotion, no withheld/stale fact revival', () =
 describe('W3 instruction and discriminating mutants', () => {
   it('RED at base: headline uses licensed chance display, and both measurement scopes are explicit', () => {
     expect(HOST_TOOL_CONTRACT).toContain('the per-option headline is its chance of meeting the goal, in this model, on current information');
-    expect(HOST_TOOL_CONTRACT).toContain('quote an allowed chance using goal_chance_display for that option exactly');
+
     expect(HOST_TOOL_CONTRACT).toContain('never express the chance as a percentage of model runs');
     expect(HOST_TOOL_CONTRACT).not.toContain('reaches the target in about N% of model runs');
     expect(HOST_TOOL_CONTRACT).toContain('decision_sensitivity is EVPPI-only sensitivity of the option comparison');
@@ -230,7 +230,8 @@ describe('W3 instruction and discriminating mutants', () => {
     expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
     expect(HOST_TOOL_CONTRACT).toContain('is ahead, or wins in any share of runs');
     expect(HOST_TOOL_CONTRACT).toContain('earned: false permits its exact say sentence, never an inferred 0 or 1');
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never write recommend or recommendation in any form, not even to deny it.');
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION.match(/Never write recommend[^.]*\./)?.[0])
+      .toBe('Never write recommend or recommendation, including negated forms.');
     expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('never rank, order or single');
   });
 

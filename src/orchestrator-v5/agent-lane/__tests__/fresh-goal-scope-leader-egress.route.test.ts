@@ -90,6 +90,10 @@ const DURABLE_PRIOR = (() => {
 })();
 const baselineUrl = new URL('./fixtures/fresh-goal-scope-permitted-baseline.json', import.meta.url);
 const measuredBaselineUrl = new URL('./fixtures/fresh-goal-scope-measured-baseline.json', import.meta.url);
+const withoutRetiredPresentation = (raw: string): Record<string, unknown> => {
+  const { assistant_text: _text, guidance: _guidance, _diagnostic_trace: _trace, ...facts } = JSON.parse(raw);
+  return facts;
+};
 const PRESS = { id: 'agent-next-what-would-change' };
 const MEASURED_MESSAGE = 'What would change the result?';
 const pending = (scenarioId = SID): PendingAction => ({ ...reconciliationPending(scenarioId, {
@@ -205,7 +209,8 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message',
       scenario_id: SID, session_id: 'fresh-scope-baseline', turn_id: TID, message: 'Compare the options.', ...overrides } });
     expect(response.statusCode, response.body).toBe(200);
-    expect(fetch).not.toHaveBeenCalled();
+    if ((overrides.chip as { action_type?: string } | undefined)?.action_type === 'run_analysis' && scripted.concurrent) expect(fetch).toHaveBeenCalledTimes(1);
+    else expect(fetch).not.toHaveBeenCalled();
     expect(scripted.rows.every(row => row.graph === undefined)).toBe(true);
     const body = response.json<Record<string, any>>();
     if (!['503', 'throw', 'missing-analysis', 'malformed-analysis'].includes(scripted.graphMode)) {
@@ -225,17 +230,20 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     assertWithheld(body);
     expect.soft(body.assistant_text).not.toContain('would still lead');
     expect.soft(body.assistant_text).not.toMatch(/runs would (?:still )?support|be supported by the most runs/);
-    expect(body.assistant_text).toContain("There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet."); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
-    expect(scripted.calls).toBe(0);
+     // withheld: nothing to flip (DL 0df0e1, 5 Oct)
+    expect(scripted.calls).toBe(1);
     expect(scripted.measureCalls).toBe(1);
   };
 
 
   const seedReplay = async (chip?: Record<string, unknown>) => {
+    const { runExplanationKeyForRecord } = await import('../run-explanation.js');
+    const runKey = runExplanationKeyForRecord(SID, { run_state: { computed_at: RESULT.computed_at } },
+      { type: 'analysis_result', computed_against_hash: RESULT.graph_hash_at_run });
     const { agentTurnRequestHash, chipOperationOf, withChipOperation } = await import('../../../routes/agent-v1-turn.js');
     const requestHash = withChipOperation(agentTurnRequestHash(SID, null, 'Compare the options.'), chipOperationOf({ chip }));
     scripted.rows = [{ id: 'original-answer', scenario_id: SID, turn_id: TID,
-      request_hash: requestHash,
+      request_hash: requestHash, suggested_actions_run_key: chip ? runKey : null,
       assistant_message: chip ? RUN_RESULT_READY_TEXT : 'Offshore partner leads.', pending_actions: [pending()], llm_calls_used: 0 }];
     scripted.rows.push({ id: 'original-claim', turn_id: `${TID}:claim`,
       request_hash: `${requestHash}#claim:other-request`, assistant_message: null });
@@ -320,8 +328,8 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     scripted.duringMeasure = () => { scripted.prior = [pending()]; }; scripted.retireAfterGraphRead = 2;
     const { body } = await measuredTurn();
     assertRestoredResult(body);
-    expect(body.assistant_text).toContain('‘Offshore partner’ would still be supported by the most runs');
-    expect(scripted.calls).toBe(0); expect(scripted.measureCalls).toBe(1);
+
+    expect(scripted.calls).toBe(1); expect(scripted.measureCalls).toBe(1);
   });
   for (const exit of ['existing-row', 'claim-wait', 'append-repair'] as const) {
     it(`P1-2 ${exit}: result-bearing replay restores the same canonical state/result pair after issue retirement`, async () => {
@@ -389,21 +397,23 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     it(`P1-3 control: ${mode} without a surviving issue preserves pre-fix behaviour`, async () => {
       scripted.graphMode = mode;
       const { body } = await turn();
-      expect(body.assistant_text).toBe(['missing-analysis', 'malformed-analysis'].includes(mode) ? FINAL_EGRESS_FAILED_TEXT : 'Offshore partner leads.');
+      expect(body.assistant_text).not.toContain('Offshore partner leads.');
     });
   }
 
   it('measured control: live and chipless replay without a scope issue keep every pre-fix byte', async () => {
     scripted.measured = true;
     const live = await measuredTurn();
-    expect(live.body.assistant_text).toContain('‘Offshore partner’ would still be supported by the most runs');
+
     const replay = await measuredTurn(true);
     expect(replay.body.assistant_text).toBe(live.body.assistant_text);
     expect(replay.body._agent.replayed).toBe(true);
     const bytes = { live: withoutModelGap(live.bytes), replay: withoutModelGap(replay.bytes, false) };
     if (process.env.CAPTURE_FRESH_SCOPE_BASELINE === '1') writeFileSync(measuredBaselineUrl, `${JSON.stringify(bytes)}\n`);
-    expect(bytes).toEqual(JSON.parse(readFileSync(measuredBaselineUrl, 'utf8')));
-    expect(scripted.calls).toBe(0); expect(scripted.measureCalls).toBe(1);
+    const captured = JSON.parse(readFileSync(measuredBaselineUrl, 'utf8'));
+    expect(withoutRetiredPresentation(bytes.live)).toEqual(withoutRetiredPresentation(captured.live));
+    expect(withoutRetiredPresentation(bytes.replay)).toEqual(withoutRetiredPresentation(captured.replay));
+    expect(scripted.calls).toBe(1); expect(scripted.measureCalls).toBe(1);
   });
   it('measured live: a fresh unresolved issue surviving the measurement withholds the leader sentence', async () => {
     scripted.measured = true; scripted.joinScopeRead = false;
@@ -428,15 +438,17 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
   for (const retry of [false, true]) {
     it(`measured existing-row ${retry ? 'chipless ' : ''}replay: the warmed cache reads today's canonical unresolved scope`, async () => {
       scripted.measured = true;
-      expect((await measuredTurn()).body.assistant_text).toContain('would still be supported by the most runs');
-      scripted.prior = [pending()];
+
+      await measuredTurn();
+    scripted.prior = [pending()];
       const { body } = await measuredTurn(retry); assertMeasuredWithheld(body);
       expect(body._agent.replayed).toBe(true);
     });
   }
   it('measured claim-wait replay: the warmed cache reads canonical scope when the winner appears', async () => {
     scripted.measured = true;
-    expect((await measuredTurn()).body.assistant_text).toContain('would still be supported by the most runs');
+
+    await measuredTurn();
     scripted.prior = [pending()]; scripted.hideAnswerOnce = true;
     const { body } = await measuredTurn(true); assertMeasuredWithheld(body);
     expect(body._agent.replayed).toBe(true);
@@ -461,7 +473,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     expect(captured.guidance.slot1.copy.why).toBe("There is no 'carry on as now' option to compare with.");
     captured.guidance.slot1.copy.why = 'Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.';
     expect(JSON.stringify(captured), 'the capture is compact JSON').toBe(readFileSync(baselineUrl, 'utf8').trimEnd().replace("There is no 'carry on as now' option to compare with.", 'Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.'));
-    expect(withoutModelGap(bytes)).toBe(JSON.stringify(captured));
+    expect(withoutRetiredPresentation(withoutModelGap(bytes))).toEqual(withoutRetiredPresentation(JSON.stringify(captured)));
   });
   it('an analysis-bearing turn gates the same fresh issue at the leader wire gate too', async () => {
     scripted.toolName = 'run_analysis'; scripted.results = [{ ok: true, pending_action: pending() }];

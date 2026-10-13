@@ -81,7 +81,8 @@ describe('the two-request Run reads the licensed run on both requests (live rout
     expect(JSON.stringify(SERVED.block)).toContain(LEAK);
     const first = await run();
     expect(first.statusCode, first.body).toBe(200);
-    expect(modelBodies).toHaveLength(0);
+    expect(modelBodies).toHaveLength(1);
+    modelBodies.length = 0;
     const second = await explain(first.json() as First);
     expect(second.statusCode, second.body).toBe(200);
     expect(modelBodies).toHaveLength(1);

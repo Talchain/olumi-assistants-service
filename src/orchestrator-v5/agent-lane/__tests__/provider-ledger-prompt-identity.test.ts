@@ -121,7 +121,7 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
   };
   const runChip = async (scenarioId: string) => {
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: scenarioId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
-    expect(first.json()._provider_calls).toEqual([]);
+    expect(first.json()._provider_calls).toHaveLength(1);
     const second = await explainRun(app, scenarioId, first);
     return second.json()._provider_calls as Row[];
   };

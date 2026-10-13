@@ -251,7 +251,7 @@ describe('estimate goal points: every discovered assistant writer uses the ONE c
 
   it('MUTANT: removing the call from the existing replay writer goes RED', () => {
     const source = checkedSources.find(s => s.rel === ROUTE)!;
-    const marker = `const gatedReplay = ${GATE}(optionGatedReplay, {`;
+    const marker = `const gatedReplay = ${GATE}(driverGatedReplay, {`;
     expect(source.text).toContain(marker);
     const ast = ts.createSourceFile(source.rel, source.text, ts.ScriptTarget.ES2022, true);
     let call: ts.CallExpression | undefined;
@@ -262,7 +262,7 @@ describe('estimate goal points: every discovered assistant writer uses the ONE c
     };
     find(ast);
     expect(call).toBeDefined();
-    const mutant = { ...source, text: `${source.text.slice(0, call!.getStart())}optionGatedReplay${source.text.slice(call!.end)}` };
+    const mutant = { ...source, text: `${source.text.slice(0, call!.getStart())}leaderGatedReplay${source.text.slice(call!.end)}` };
     expect(unqualified([mutant]).filter(s => s.kind === 'assistant send')).toHaveLength(3);
   }, GUARD_WALK_TIMEOUT_MS);
 
