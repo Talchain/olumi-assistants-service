@@ -122,9 +122,6 @@ import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-
 import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
 
-import { licensedGoalChanceLinesForAgent } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
-import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -2307,12 +2304,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           replayNarration = { status: 'ready', run_key: runKey };
         }
       } else if (approvedProposal === undefined && typedRunOf(body)) {
-        // A committed Run retry keeps its stored answer. The result and Explain
-        // control use staging's canonical readback; replay never calls a provider.
-        if (replayChip !== null) {
+        // Only the saved answer key can bind this committed interpretation to today's Run.
+        // Missing identity (including after restart) is unknown, never current.
+        const savedRunKey = prior.suggested_actions_run_key;
+        if (typeof savedRunKey === 'string' && savedRunKey.length > 0
+          && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${savedRunKey}`) {
           replayNarration = { status: unavailableExplanation.has(replayText) ? 'unavailable' : 'ready',
-            run_key: replayChip.id.slice(RUN_EXPLANATION_PREFIX.length) };
+            run_key: savedRunKey };
           boundControl.push(replayChip);
+        } else {
+          replayNarration = { status: 'stale', run_key: savedRunKey ?? '' };
         }
       }
       const resultFirstReplay = replayNarration?.status === 'ready' || replayNarration?.status === 'unavailable';
@@ -2351,9 +2352,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           modelExists: state.draftGraph !== undefined,
         });
       const replayCard = replayRecords[0];
-      const replayActions = firstOfEachId([...stillValid, ...boundControl]);
+      const committedRunReplay = approvedProposal === undefined && typedRunOf(body);
+      const replayActions = firstOfEachId([...stillValid.filter(action => !committedRunReplay || !isRunExplanationChip(action.id)), ...boundControl]);
       const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready'
-        || (typedRunOf(body) && replayChip !== null)
+        || (typedRunOf(body) && resultFirstReplay)
         ? replayScopedDraftForRun : undefined;
       const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
         await guidedSizingHistory(historyReader, scenarioId, turnId));
@@ -2369,7 +2371,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
       for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
       const composedReplay = composeDirectAnswerResponse({
-        assistant_text: withoutProposalIds(replayText),
+        assistant_text: committedRunReplay ? replayText : withoutProposalIds(replayText),
         stage: 'frame',
         answerKind: 'substantive',
         // The bound Explain control is re-derived from the canonical readback above, so it is valid by construction.
@@ -2410,12 +2412,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graph: state.graph ?? null,
         analysisReady: state.analysisReady,
       }).response;
-      const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(leaderGatedReplay, {
-        emptyReplacement: 'I could not verify that explanation against the current result.',
-        analysisResult: state.analysisResult, graph: state.graph ?? null,
-        requestId: String(req.id), exitPath: 'agent_lane_v1_replay', turnId,
-      });
-      const gatedReplay = withEstimateGoalPointsAtEgress(driverGatedReplay, {
+      const gatedReplay = committedRunReplay ? { ...leaderGatedReplay, assistant_text: replayText } : withEstimateGoalPointsAtEgress(leaderGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
         current: replayNarration?.status !== 'stale' && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
         userAuthoredTexts: userTextsForEgress(
@@ -4596,9 +4593,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
       suggested_actions: offeredNow,
-      // The run's coaching, ONLY when bound to this readback, through the same egress sanitiser the
-      // conventional exit uses — built INTO the finalised response, never appended raw.
-      blocks: (fastPath === 'method' ? [] : coachingBlocks) as OlumiResponse['blocks'],
+      blocks: [], // N14: deterministic Run coaching stays off; bound results are attached separately.
     });
     const finalised = finaliseV5Response(composed, { scenarioId, runDeltaBoundByCaller: true });
 
@@ -4640,20 +4635,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     } as OlumiResponse & Record<string, unknown>;
     // What changed since the last run — the run turn's own block, or why it has none — only beside that same run.
     if (fastPath !== 'method') wireBody = withRunDelta(wireBody, runDelta);
-    /**
-     * ⛔ THE LEADER FOLLOWS THE TYPED PERMISSION, AT THE WIRE (Paul: "do NOT hard-code no leader").
-     * The Agent is told to name a leader only when `leader_may_be_named`; this is the deterministic
-     * backstop, the same gate route-v2 runs at its single send point. On any turn that carries an
-     * analysis, `leader_claim.permitted` from the SAME readback is the entitlement, conjoined inside
-     * the gate with the admission's `permitted_analysis_mode`. PERMIT-WINS: a permitted turn is
-     * returned by reference, byte-identical.
-     *
-     * ⛔ FAIL-CLOSED ON A WITHHELD TURN (AI Quality corpus #63 5823028488; Codex 5823210765): the
-     * shared gate needs the EXACT option label and caught 1 of 13 real paraphrased leaks. So on a
-     * withheld turn every sentence that ranks options is dropped first, whatever it calls the
-     * option, and one deterministic no-leader sentence is appended; then the shared gate runs on
-     * what remains. See `agent-lane/withheld-leader-fail-closed.ts`.
-     */
+    // B4: final egress owns the single exact-label K-b check.
     const viewStanding = leaderStandingOf(composedRead);
     const proposedView = fastPathView ?? provisionalViewOfTurn(result.tool_calls, result.tool_results);
     const safeView = proposedView !== null && viewStanding.analysis_on_record && viewStanding.withheld
@@ -4664,16 +4646,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       analysisResult, graph: readbackGraph, current: (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
       userAuthoredTexts: userTextsForEgress([...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
     });
-    const leaderChecked = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
-      ...leaderGate, requestId: String(req.id), exitPath: 'agent_lane_v1',
-      mayNameLeadingOption: (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted === true,
-      separationEstablished: (analysisState as { leader_claim?: { separation?: unknown } } | undefined)?.leader_claim?.separation === 'separated',
-      userText: typedNow ?? undefined, limitVerdicts, sayWhyWithheld: false,
-      protectedGoalChanceSentences: licensedGoalChanceLinesForAgent(analysisResult, readbackGraph,
-        (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current').map(line => line.chance),
-    });
-    const leaderClaimEnforced = leaderChecked.response !== wireBody;
-    wireBody = leaderChecked.response as OlumiResponse & Record<string, unknown>;
     const ranAnalysisThisTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis');
     const breakEven = ranAnalysisThisTurn && leaderLicenceFromState(analysisState, analysisReady) === 'withheld' && retainedScopeIssues.length === 0 ? breakEvenFor(readbackGraph, identityEvaluated) : null;
     const selectedRunCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
@@ -4709,7 +4681,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     /**
      * ⛔ THE FAIL-CLOSED FINAL EGRESS (AI HARNESS PR-L1, `leader-final-egress.ts`): on EVERY turn, on the body exactly as
-     * it ships — after the leader gate, break-even, A7 and the answer shape, before the answer row so a replay is the
+     * it ships, before the answer row so a replay is the
      * same. One licence (`leaderLicenceFromState`) from this same final readback; a permitted turn is untouched.
      */
     let _leaderFreeEnvelope = false;
@@ -4719,6 +4691,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_final',
         ...leaderGate,
+        noEarlierGate: true,
         mayNameLeadingOption: claim?.permitted === true,
         separationEstablished: claim?.separation === 'separated',
       });
@@ -4744,11 +4717,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (automaticDeadlineLabel !== undefined && String(wholeAnswer.assistant_text ?? '').trim() === '')
       (wholeAnswer as { assistant_text?: unknown }).assistant_text = automaticDeadlineLabel;
     const beforeNumericalCheck = String(wholeAnswer.assistant_text ?? '');
-    const driverGatedAnswer = withoutDriverAbsenceClaimsAtEgress(wholeAnswer, {
-      emptyReplacement: 'I could not verify that explanation against the current result.',
-      analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1', turnId,
-    });
-    wireBody = withEstimateGoalPointsAtEgress(driverGatedAnswer, {
+    wireBody = withEstimateGoalPointsAtEgress(wholeAnswer, {
       analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,
       userAuthoredTexts: userTextsForEgress(
         [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
@@ -5073,7 +5042,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         coaching_next_move: runCoaching.nextMove?.kind ?? null,
         coaching_caveats: runCoaching.caveats.map(caveat => caveat.block.signal_id),
         write_claims_removed: narration.stripped.length,
-        ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /**
          * ⭐ WHAT THE AUTOMATIC FIRST ANALYSIS DID, for witnesses: ran, or why not, how long it took,
          * and the (construction, revision) identity it was bound to. Absent when no construction
@@ -5089,7 +5057,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               construction_turn_id: firstAnalysis.constructionTurnId,
               revision: firstAnalysis.revision,
               ms: firstAnalysis.ms,
-              coaching_blocks: coachingBlocks.length,
+              coaching_blocks: 0, // N14: no deterministic coaching blocks are emitted.
             },
           }
           : {}),

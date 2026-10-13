@@ -124,7 +124,8 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     const marker = "Not shown: some relationships aren't sized yet";
     expect(b.assistant_text, 'no status marker on an ordinary reply').not.toContain(marker);
     expect(b.assistant_text, 'no estimates line on an ordinary reply').not.toContain("Olumi's estimates:");
-    expect(b.assistant_text.trimStart().startsWith(narrator), `the AI's own answer leads: ${b.assistant_text.slice(0, 160)}`).toBe(true);
+    expect(b.assistant_text).toBe(source === 'gate appended'
+      ? `No single option can be put forward yet. ${prose}` : `${prose}\n\n${closing}`);
     expect(b.assistant_text.indexOf('The model records an unresolved assumption.')).toBeGreaterThan(b.assistant_text.indexOf(narrator));
     if (source === 'already present') expect(b.assistant_text.split(closing)).toHaveLength(2);
     expect(saved).toContain(b.assistant_text);

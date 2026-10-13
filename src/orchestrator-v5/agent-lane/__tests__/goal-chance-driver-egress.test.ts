@@ -174,17 +174,14 @@ describe('DL condition 1: what is left is well formed', () => {
   });
 });
 
-describe('wiring: both Agent exits apply the edit after the leader egress', () => {
-  it('live final and replay exits call it on the readback this turn ships', () => {
+describe('B4 scope: only K-a and K-b remain at Agent egress', () => {
+  it('live and replay exits do not call the retired driver phrase filter', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    const live = route.indexOf('const driverGatedAnswer = withoutDriverAbsenceClaimsAtEgress(wholeAnswer, {');
-    expect(live).toBeGreaterThan(route.indexOf('const finalEgress = enforceLeaderLicenceAtFinalEgress(wireBody, {'));
-    expect(route).toContain('const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(leaderGatedReplay, {');
-    expect(route).toContain('const gatedReplay = withEstimateGoalPointsAtEgress(driverGatedReplay, {');
-    expect(route).toContain('wireBody = withEstimateGoalPointsAtEgress(driverGatedAnswer, {');
-    expect(route).toContain("analysisResult: state.analysisResult, graph: state.graph ?? null,");
-    expect(route).toContain("requestId: String(req.id), exitPath: 'agent_lane_v1_replay', turnId,");
-    expect(route).toContain('return wholeReplay;');
+    expect(route).not.toContain('withoutDriverAbsenceClaimsAtEgress');
+    expect(route).not.toContain('enforceAgentLaneLeaderClaimsAtWire');
+    expect(route).toContain('const finalEgress = enforceLeaderLicenceAtFinalEgress(wireBody, {');
+    expect(route).toContain('wireBody = withEstimateGoalPointsAtEgress(wholeAnswer, {');
+    expect(route).toContain('withEstimateGoalPointsAtEgress(leaderGatedReplay, {');
   });
 });
 

@@ -225,3 +225,13 @@ it.each([
     expect(withEstimateGoalPointsAtEgress({ assistant_text }, { analysisResult, graph, current: true }).assistant_text).toBe(expected);
   }
 });
+
+it('K-a: an unbound bare chance is withheld without inventing an option alias or a licensed figure', () => {
+  const unbound = 'Price rise has about 46% chance.';
+  const unrelated = 'Price rise has about 46% chance of supplier failure.';
+  const assistant_text = `${unbound} ${unrelated}`;
+  expect(clean(assistant_text)).toBe(` ${unrelated}`);
+  expect(withEstimateGoalPointsAtEgress({ assistant_text }, {
+    analysisResult: result, graph, current: true, userAuthoredTexts: [unbound],
+  }).assistant_text).toBe(assistant_text);
+});

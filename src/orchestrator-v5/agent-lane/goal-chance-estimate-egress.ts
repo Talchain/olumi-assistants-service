@@ -164,7 +164,15 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         if (percentages.length === 0) continue;
         let withoutFigures = subject;
         for (const p of percentages) withoutFigures = withoutFigures.replace(p[0], ' ');
-        const bareChance = /^this gives (?:a )?chance[.!?]?$/.test(withoutFigures.replace(/\s+/g, ' ').trim());
+        const chanceWithoutFigure = withoutFigures.replace(/\s+/g, ' ').trim();
+        // A bare numerical chance with an unbound subject has no licensed option/goal tuple.
+        // Withhold the claim; do not infer an alias or borrow another option's number. Explicit
+        // other predicates ('chance of supplier failure') and exact user spans remain untouched.
+        if (namedOptions.length === 0 && /^.+ has (?:a )?chance[.!?]?$/.test(chanceWithoutFigure)) {
+          edits.push({ start, end, replacement: '' });
+          continue;
+        }
+        const bareChance = /^this gives (?:a )?chance[.!?]?$/.test(chanceWithoutFigure);
         // A bare pronoun supplies no option identity. A sole option resolves it; beside every complete producer
         // point it is only an unlabelled duplicate, so remove it without guessing which option the pronoun means.
         if (namedOptions.length === 0 && bareChance) {

@@ -226,9 +226,9 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
 
 
     }
-    expect(HOST_TOOL_CONTRACT).toContain('never express the chance as a percentage of model runs');
+    expect(HOST_TOOL_CONTRACT).toContain("Use the current licensed goal chance with its target, scope, assumptions and limits. Never substitute an option's winning share or ranking credit for that chance. You may explain a supplied chance as the proportion of scored simulation draws meeting its licensed target when that is how the supplied result was computed.");
     expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
-    expect(HOST_TOOL_CONTRACT).toContain('Otherwise do not name, rank or hint at one');
+    expect(HOST_TOOL_CONTRACT).toContain('When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward');
     expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
   });
   it('CONTROL: similar licences and whole-percentage displays also work without a leader', async () => {
@@ -409,8 +409,8 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     const _savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
 
     expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
-    expect(HOST_TOOL_CONTRACT).toContain('Otherwise do not name, rank or hint at one');
-    expect(HOST_TOOL_CONTRACT).toContain('never express the chance as a percentage of model runs');
+    expect(HOST_TOOL_CONTRACT).toContain('When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward');
+    expect(HOST_TOOL_CONTRACT).toContain("Use the current licensed goal chance with its target, scope, assumptions and limits. Never substitute an option's winning share or ranking credit for that chance. You may explain a supplied chance as the proportion of scored simulation draws meeting its licensed target when that is how the supplied result was computed.");
     expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
     expect(HOST_TOOL_CONTRACT).toContain('Name an assumption the ordering is sensitive to ONLY from the result’s `decision_sensitivity`');
     expect(HOST_TOOL_CONTRACT).toContain('Never translate either EVPPI status into no measurable assumption or no measurable goal-chance driver');

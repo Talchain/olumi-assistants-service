@@ -650,9 +650,9 @@ describe('the Agent route runs the first analysis itself, once', () => {
     for (const value of ['70', '85', '80']) expect(approval.detail, 'every actually proposed figure is on the approval card').toContain(value);
   });
 
-  it('RED: the run’s coaching block is shown when bound to the readback revision and a current run (test 7)', async () => {
+  it('N14: the bound current result remains without a deterministic coaching card', async () => {
     const b = await buildTurn(app);
-    expect((b.blocks ?? []).map((x) => x.type)).toEqual(['analysis_result', 'review_card']);
+    expect((b.blocks ?? []).map((x) => x.type)).toEqual(['analysis_result']);
   });
 
   it.each([
@@ -672,8 +672,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
    */
   it.each([
     ['exploratory', false],
-    ['comparative_leader', true],
-  ] as const)('RED: a leader-presuming card under a %s admission (separated Run) → shown: %s', async (mode, shown) => {
+    ['comparative_leader', false],
+  ] as const)('N14: a leader-presuming card under a %s admission (separated Run) → shown: %s', async (mode, shown) => {
     knobs.leaderClaim = { permitted: true, separation: 'separated' };
     knobs.analysisReady = { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode } };
     knobs.cardKind = 'narrative';
@@ -748,14 +748,13 @@ describe('AX2: the build turn does not explain an absence nobody asked about', (
     for (const s of AGENT_NO_LEADER_SENTENCES) expect(b.assistant_text).not.toContain(s);
   });
 
-  it('CONTRAST (a later question turn, no run): asked "which is best?", the same drop still says why', async () => {
+  it('B4: a later question retains a paraphrased leader without the broad gate', async () => {
     const { AGENT_NO_LEADER_SENTENCES: _AGENT_NO_LEADER_SENTENCES } = await import('../withheld-leader-fail-closed.js');
     await buildTurn(app);
     // A kept sentence beside the ranking, so the never-silent rule cannot be what adds the sentence.
     script = [say(`Here is where the model stands. ${RANKING}`)];
     const b = await turn(app, { message: 'Which option is best?' });
-    expect(b.assistant_text).toContain('Here is where the model stands.');
-    expect(b.assistant_text).not.toContain(RANKING);
+    expect(b.assistant_text).toBe(`Here is where the model stands. ${RANKING}`);
 
   });
 

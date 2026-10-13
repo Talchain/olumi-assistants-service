@@ -90,10 +90,10 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
 
   let turnSeq = 0;
   let turnId = '';
-  const runThenReply = (message = 'Should we raise Pro to £59?') => {
+  const runThenReply = (message = 'Should we raise Pro to £59?', replyText = REPLY.text) => {
     callModelOutputs = [
       [{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }],
-      [{ type: 'message', content: [{ type: 'output_text', text: REPLY.text }] }],
+      [{ type: 'message', content: [{ type: 'output_text', text: replyText }] }],
     ];
     // A client turn id, so the answer row is written — the row a lost-response retry replays.
     turnSeq += 1;
@@ -107,7 +107,7 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     expect(RANKING_SENTENCE).toContain(REPLY.leak_phrases[0]!);
   });
 
-  it('WITHHELD: the ranking sentence is dropped, every other byte is kept, one no-leader sentence is appended — and that is the text persisted for replay', async () => {
+  it('B4: paraphrased leader survives byte-identically and is persisted', async () => {
     readbackState = WITHHELD_STATE;
     const r = await runThenReply();
     expect(r.statusCode).toBe(200);
@@ -115,10 +115,24 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     expect((r.json().analysis_state as { leader_claim?: { permitted?: boolean } }).leader_claim?.permitted).toBe(false);
     const text = r.json().assistant_text as string;
     // S-A (#2748): the ONE composer may then move sentences under More detail; it never adds, drops or rewrites one.
-    expect(sentenceMultiset(text)).toEqual(sentenceMultiset(REPLY.text.replace(RANKING_SENTENCE, '')));
+    expect(text).toBe(REPLY.text);
 
-    expect(text).not.toContain(REPLY.leak_phrases[0]!);
+    expect(wireGateCalls).not.toHaveBeenCalled();
     expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the GATED text').toBe(text);
+  });
+
+  it.each(['wins in 80% of runs, so it has an 80% chance of meeting the goal.', 'is the leading option.'])('K-b: exact option label assertion is removed: %s', async claim => {
+    readbackState = WITHHELD_STATE;
+    const graph = FX.state.draft_graph as { nodes: Array<{ kind: string; label: string }> };
+    const label = graph.nodes.find(n => n.kind === 'option')!.label;
+    const prose = `${label} ${claim} The result depends on assumptions.`;
+    const r = await runThenReply('Explain the comparison.', prose);
+    expect(r.statusCode).toBe(200);
+    expect(r.json().assistant_text).toBe(claim === 'is the leading option.'
+      ? 'No single option can be put forward yet. The result depends on assumptions.'
+      : ' The result depends on assumptions.');
+    expect(rows.get(turnId)?.assistant_message).toBe(r.json().assistant_text);
+    expect(wireGateCalls).not.toHaveBeenCalled();
   });
 
   it('PERMITTED: the SAME reply comes back byte-identical', async () => {
@@ -132,12 +146,13 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     expect(rows.get(turnId)?.assistant_message).toBe(r.json().assistant_text);
   });
 
-  it('c6 wiring: the live analysis-bearing route passes this turn’s typed refusal to the wire gate', async () => {
+  it('B4: typed refusal does not invoke the retired broad gate', async () => {
     readbackState = WITHHELD_STATE;
     const userText = "We're not checking return rates or adding that to the model. Move on. What do we do first?";
     const r = await runThenReply(userText);
     expect(r.statusCode).toBe(200);
     expect(callModelOutputs).toEqual([]);
-    expect(wireGateCalls).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ userText }));
+    expect(wireGateCalls).not.toHaveBeenCalled();
+    expect(r.json().assistant_text).toBe(REPLY.text);
   });
 });

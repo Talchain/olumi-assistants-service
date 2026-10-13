@@ -159,8 +159,7 @@ describe('fast path 3: a typed Run dispatches once and returns its AI interpreta
     const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
     expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(b.assistant_text).not.toMatch(/\bleads\b/);
-    expect(b.assistant_text).toContain('Your edit did not change the comparison.');
-    expect(b.assistant_text).not.toContain('No single option can be put forward yet');
+    expect(b.assistant_text).toBe('Your edit did not change the comparison. No single option can be put forward yet.');
   });
 
   it('CONTRAST: "Run the analysis" typed as words still goes to the Agent', async () => {

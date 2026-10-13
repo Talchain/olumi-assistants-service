@@ -103,10 +103,10 @@ describe('S2e: the live provisional view loses a driver denial beside a range li
     expect(READ.analysis_state.run_state.kind).toBe('complete_current');
   });
 
-  it('RED at base: the view is shown with only its denial clause removed', async () => {
+  it('B4: the view keeps its supplied reasoning without a driver phrase filter', async () => {
     const b = await runWithView();
     expect(b._agent.provisional_view, JSON.stringify(b._agent)).toBeDefined();
-    expect(b._agent.provisional_view!.reasoning).toBe(CLEAN_REASONING);
+    expect(b._agent.provisional_view!.reasoning).toBe(SERVED_REASONING);
   });
 
   it('CONTRAST: the same live turn with no range record ships the reasoning unchanged', async () => {

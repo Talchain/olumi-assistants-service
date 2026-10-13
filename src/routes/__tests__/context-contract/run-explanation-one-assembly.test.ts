@@ -187,7 +187,7 @@ describe('Explain scoped assembly safety', () => {
   it('Explain instruction bytes retain the approved sha256', async () => {
     const w = await capture('Run-explanation','run2');
     expect(createHash('sha256').update(String(w.calls[0].body.instructions)).digest('hex'))
-      .toBe('82efb6ade6b48c0f52003dae201318472c76da7e803931e204898aac222699ee');
+      .toBe('8eeb6efad635c8b4bd248414137b85ea0e131e82b506f744ceb82d7a2ba7f69b');
   },60000);
 });
 

@@ -173,15 +173,15 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(REPLY.text.split(RANKING_SENTENCE).length).toBe(2);
   });
 
-  it('RED: a withheld Run turn — prose ranking still stripped, the labelled view is typed on `_agent`, never in the prose', async () => {
+  it('B4: a withheld Run keeps paraphrased prose and the independently typed view', async () => {
     readbackState = WITHHELD_STATE;
     const r = await runViewThenReply();
     expect(r.statusCode).toBe(200);
     expect(callModelOutputs, 'the control: all three scripted outputs were consumed').toEqual([]);
     const b = r.json() as Body;
     expect(b._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['run_analysis', true], ['give_provisional_view', true]]);
-    // The gate is unchanged: the model's own ranking sentence is gone and its no-leader sentence is there.
-    expect(b.assistant_text).not.toContain(RANKING_SENTENCE.trim());
+    // B4: a paraphrase is not removed by the retained exact-label check.
+    expect(b.assistant_text).toBe(REPLY.text);
 
     // ⭐ TYPED ONLY (AIC 5855633777): the view is on `_agent`, with its exact heading, and never in the prose.
     expect(b.assistant_text).not.toContain(VIEW.view);
@@ -300,8 +300,8 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(instructions.endsWith(`${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`)).toBe(true);
     // No tool was called: the view is a field of the interpreting call, never a fabricated tool call.
     expect(b._agent.tool_calls.map((c) => c.name)).toEqual(['run_analysis']);
-    // The gate is unchanged over the ANSWER: its ranking sentence is gone and the no-leader sentence is there.
-    expect(b.assistant_text).not.toContain(RANKING_SENTENCE.trim());
+    // B4: the committed answer retains this non-exact-label paraphrase byte-identically.
+    expect(b.assistant_text).toBe(REPLY.text);
 
     // Typed only: the reply text is the answer, never the JSON and never the view.
     expect(b.assistant_text).not.toContain('"provisional_view"');

@@ -310,8 +310,10 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const replay = await run({ turn_id: turnId });
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(replay._answer_shape).toEqual(first._answer_shape);
-    expect(replay.guided_sizing).toEqual(first.guided_sizing);
-    expect(wirePresses(replay)).toEqual(wirePresses(first));
+    expect(replay.guided_sizing).toBeUndefined();
+    expect(replay.narration).toEqual({ status: 'stale', run_key: '' });
+    expect(replay.blocks ?? []).toEqual([]);
+    expect(wirePresses(replay)).toEqual([]);
     expect(runCalls).toBe(calls);
   });
 
@@ -329,7 +331,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const replay = await run({ turn_id: turnId });
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(replay._answer_shape).toEqual(first._answer_shape);
-    expect(wirePresses(replay)).toEqual(wirePresses(first));
+    expect(wirePresses(replay)).toEqual([]);
     expect(runCalls).toBe(calls);
   });
 
@@ -361,16 +363,18 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(body.guided_sizing.links.map((l: Json) => [l.from, l.to])).toEqual(ORDERED_PAIRS.map(pair => [...pair]));
   });
 
-  it('typed Run replay preserves the same hook and identity presses without another Run', async () => {
+  it('typed Run replay without a saved key preserves text and withholds current guided controls', async () => {
     const turnId = randomUUID();
     const first = await run({ turn_id: turnId });
     const calls = runCalls;
     const replay = await run({ turn_id: turnId });
     expect(first.guided_sizing.total).toBe(3);
-    expect(replay.guided_sizing).toEqual(first.guided_sizing);
+    expect(replay.guided_sizing).toBeUndefined();
+    expect(replay.narration).toEqual({ status: 'stale', run_key: '' });
+    expect(replay.blocks ?? []).toEqual([]);
     const presses = (body: Json) => body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-size-link:'));
     expect(replay.assistant_text).toBe(first.assistant_text);
-    expect(presses(replay)).toEqual(presses(first));
+    expect(presses(replay)).toEqual([]);
     expect(runCalls).toBe(calls);
   });
 

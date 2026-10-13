@@ -129,7 +129,21 @@ function scan({ rel, text }: Source): Sink[] {
       return value !== undefined && recur(value);
     }
     if (ts.isPropertyAccessExpression(expr)) return recur(expr.expression);
-    if (ts.isConditionalExpression(expr)) return recur(expr.whenTrue) && recur(expr.whenFalse);
+    if (ts.isConditionalExpression(expr)) {
+      const binding = ts.isIdentifier(expr.condition) ? declarations(expr.condition.text, expr) : undefined;
+      const compact = (node: ts.Node): string => node.getText(source).replace(/\s+/g, '');
+      const sameOwner = owner(expr);
+      const replayFunction = ts.isArrowFunction(sameOwner) && ts.isVariableDeclaration(sameOwner.parent)
+        && name(sameOwner.parent.name) === 'replayed';
+      const savedText = nodes.find((node): node is ts.VariableDeclaration => ts.isVariableDeclaration(node)
+        && name(node.name) === 'replayText' && owner(node) === sameOwner);
+      const committedTypedRun = rel === ROUTE && replayFunction && binding !== undefined
+        && compact(binding) === 'approvedProposal===undefined&&typedRunOf(body)'
+        && savedText?.initializer !== undefined
+        && compact(savedText.initializer) === "prior.assistant_message??'Thatrequestwasalreadycompleted.'"
+        && compact(expr.whenTrue) === '{...leaderGatedReplay,assistant_text:replayText}';
+      return (committedTypedRun || recur(expr.whenTrue)) && recur(expr.whenFalse);
+    }
     if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
       const left = unwrap(expr.left);
       // The route's existing string carrier is pinned; new raw fallback prose
@@ -251,19 +265,32 @@ describe('estimate goal points: every discovered assistant writer uses the ONE c
 
   it('MUTANT: removing the call from the existing replay writer goes RED', () => {
     const source = checkedSources.find(s => s.rel === ROUTE)!;
-    const marker = `const gatedReplay = ${GATE}(driverGatedReplay, {`;
+    const marker = `: ${GATE}(leaderGatedReplay, {`;
     expect(source.text).toContain(marker);
     const ast = ts.createSourceFile(source.rel, source.text, ts.ScriptTarget.ES2022, true);
     let call: ts.CallExpression | undefined;
     const find = (node: ts.Node): void => {
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'gatedReplay'
-        && node.initializer !== undefined && ts.isCallExpression(node.initializer)) call = node.initializer;
+        && node.initializer !== undefined && ts.isConditionalExpression(node.initializer)
+        && ts.isCallExpression(node.initializer.whenFalse)) call = node.initializer.whenFalse;
       ts.forEachChild(node, find);
     };
     find(ast);
     expect(call).toBeDefined();
     const mutant = { ...source, text: `${source.text.slice(0, call!.getStart())}leaderGatedReplay${source.text.slice(call!.end)}` };
     expect(unqualified([mutant]).filter(s => s.kind === 'assistant send')).toHaveLength(3);
+  }, GUARD_WALK_TIMEOUT_MS);
+
+  it('the committed-text exception cannot license ordinary turns or substitute other prose', () => {
+    const source = checkedSources.find(s => s.rel === ROUTE)!;
+    for (const [before, after] of [
+      ['const committedRunReplay = approvedProposal === undefined && typedRunOf(body);', 'const committedRunReplay = true;'],
+      ['{ ...leaderGatedReplay, assistant_text: replayText }', "{ ...leaderGatedReplay, assistant_text: 'Other prose.' }"],
+      ["let replayText = prior.assistant_message ?? 'That request was already completed.';", "let replayText = 'Other prose.';"],
+    ]) {
+      expect(source.text).toContain(before);
+      expect(unqualified([{ ...source, text: source.text.replace(before, after) }]).filter(sink => sink.kind === 'assistant send')).toHaveLength(3);
+    }
   }, GUARD_WALK_TIMEOUT_MS);
 
   it('later unknown spreads and raw nullish fallbacks cannot override a gated carrier', () => {

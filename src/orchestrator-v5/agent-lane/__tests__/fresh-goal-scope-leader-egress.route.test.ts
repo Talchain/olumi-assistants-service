@@ -342,7 +342,14 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
       }
       const { body } = await turn({ chip });
       expect(body._agent.replayed).toBe(true);
-      assertRestoredResult(body);
+      if (exit === 'append-repair') {
+        // The concurrent committed answer has no saved Run key: restored readback is not its identity.
+        expect(body.assistant_text).toBe(scripted.concurrentText);
+        expect(body.narration).toEqual({ status: 'stale', run_key: '' });
+        expect(body.blocks ?? []).toEqual([]);
+        expect(body.suggested_actions.filter((action: { id: string }) => action.id.startsWith('agent-explain-run:'))).toEqual([]);
+        expect(body.analysis_state.leader_claim).toEqual(readState!.leader_claim);
+      } else assertRestoredResult(body);
     });
   }
   for (const unavailable of [false, true]) {
@@ -394,10 +401,12 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
         else expect(body._agent.replayed).toBe(true);
       });
     }
-    it(`P1-3 control: ${mode} without a surviving issue preserves pre-fix behaviour`, async () => {
+    it(`B4 control: ${mode} without a surviving issue cannot run an exact-label check without a roster`, async () => {
       scripted.graphMode = mode;
       const { body } = await turn();
-      expect(body.assistant_text).not.toContain('Offshore partner leads.');
+      if (mode === 'missing-analysis' || mode === 'malformed-analysis')
+        expect(body.assistant_text).not.toContain('Offshore partner leads.');
+      else expect(body.assistant_text).toBe('Offshore partner leads.');
     });
   }
 
@@ -475,10 +484,10 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     expect(JSON.stringify(captured), 'the capture is compact JSON').toBe(readFileSync(baselineUrl, 'utf8').trimEnd().replace("There is no 'carry on as now' option to compare with.", 'Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.'));
     expect(withoutRetiredPresentation(withoutModelGap(bytes))).toEqual(withoutRetiredPresentation(JSON.stringify(captured)));
   });
-  it('an analysis-bearing turn gates the same fresh issue at the leader wire gate too', async () => {
+  it('K-b: an analysis-bearing turn still withholds the fresh issue without the broad gate', async () => {
     scripted.toolName = 'run_analysis'; scripted.results = [{ ok: true, pending_action: pending() }];
     const { body } = await turn(); assertWithheld(body);
-    expect(body._diagnostic_trace.leader_claim_enforced).toBe(true);
+    expect(body._diagnostic_trace.leader_claim_enforced).toBeUndefined();
   });
   it('fresh issue explicitly resolved within this turn stays permitted', async () => {
     const issue = pending(); scripted.results = [{ ok: true, pending_action: issue }, { ok: true, withdrawn: true, proposal_id: issue.chip_id }];

@@ -99,7 +99,7 @@ describe('result-first on retry, lost response and failed explanation (live rout
   const post = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: SCENARIO, ...payload } });
   const runTurn = (turnId: string) => post({ turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
 
-  it('Run dispatches and interprets once; current retry preserves its committed answer after restart', async () => {
+  it('Run dispatches and interprets once; missing-key retry preserves its committed answer after restart without current attribution', async () => {
     const id = randomUUID();
     const first = (await runTurn(id)).json() as Body;
     expect(first.assistant_text).toContain(PROSE);
@@ -110,10 +110,35 @@ describe('result-first on retry, lost response and failed explanation (live rout
     await app.close(); app = await freshApp();
     const replay = (await runTurn(id)).json() as Body;
     expect(replay.assistant_text).toBe(first.assistant_text);
-    expect(replay.narration).toEqual(first.narration);
-    expect(replay.blocks).toEqual(first.blocks);
-    expect(replay.blocks?.some(b => b.type === 'analysis_result')).toBe(true);
-    expect(replay.suggested_actions.filter(c => isRunExplanationChip(c.id))).toEqual(first.suggested_actions.filter(c => isRunExplanationChip(c.id)));
+    expect(replay.narration).toEqual({ status: 'stale', run_key: '' });
+    expect(replay.blocks ?? []).toEqual([]);
+    expect(replay.suggested_actions.filter(c => isRunExplanationChip(c.id))).toEqual([]);
+    expect(runs).toBe(1); expect(modelCalls).toBe(1);
+  });
+  it.each(['same', 'newer', 'stale', 'missing-key'] as const)('saved Run identity after cold restart: %s', async kind => {
+    const id = randomUUID();
+    const first = (await runTurn(id)).json() as Body;
+    const answer = rows.find(r => r.turn_id === id)!;
+    expect(answer).toBeDefined();
+    // Existing rows with durable offers can have this key; ordinary no-offer rows do not.
+    if (kind !== 'missing-key') answer.suggested_actions_run_key = first.narration!.run_key;
+    if (kind === 'newer') computedAt = RUN_B;
+    if (kind === 'stale') runKind = 'stale';
+    await app.close(); app = await freshApp();
+    const saved = structuredClone(rows); store.append.mockClear();
+    const replay = (await runTurn(id)).json() as Body;
+    expect(replay.assistant_text).toBe(first.assistant_text);
+    if (kind === 'same') {
+      expect(replay.narration).toEqual(first.narration);
+      expect(replay.blocks).toEqual(first.blocks);
+      expect(replay.suggested_actions.filter(c => isRunExplanationChip(c.id))).toEqual(first.suggested_actions.filter(c => isRunExplanationChip(c.id)));
+    } else {
+      expect(replay.narration).toEqual({ status: 'stale', run_key: kind === 'missing-key' ? '' : first.narration!.run_key });
+      expect(replay.blocks ?? []).toEqual([]);
+      expect(replay.suggested_actions.filter(c => isRunExplanationChip(c.id))).toEqual([]);
+    }
+    expect(store.append).not.toHaveBeenCalled();
+    expect(rows).toEqual(saved);
     expect(runs).toBe(1); expect(modelCalls).toBe(1);
   });
   it.each(['complete_current', 'stale'])('Explain keeps its request-bound key after a newer or stale Run (%s)', async kind => {
@@ -147,8 +172,9 @@ describe('result-first on retry, lost response and failed explanation (live rout
     const calls = modelCalls;
     const replay = (await runTurn(id)).json() as Body;
     expect(replay.assistant_text).toBe(first.assistant_text);
-    expect(replay.narration).toEqual(first.narration);
-    expect(replay.blocks).toEqual(first.blocks);
+    expect(replay.narration).toEqual({ status: 'stale', run_key: '' });
+    expect(replay.blocks ?? []).toEqual([]);
+    expect(replay.suggested_actions.filter(c => isRunExplanationChip(c.id))).toEqual([]);
     expect(modelCalls).toBe(calls); expect(runs).toBe(1);
   });
 });

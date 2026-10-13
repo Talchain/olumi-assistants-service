@@ -21,7 +21,7 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // the share of runs; chat quotes the screen's goal-chance display: 09f7b6ac… → f6cec112….
 // S-E GOALS S2b (7 Oct): #34 and #35 gain the share-by-date sentences (goal_chance_words; a stated_time range says slow to
 // fast end, never causal doubt): 22,393 → 23,075 bytes (+682, exactly the two added sentences). 0732df33… → a9c847ef….
-const HOST_SHA = '94e79c562592a952eb67e8ca8e5eb1d0af249c1281cf157f9feeebb3de9c8ff5';
+const HOST_SHA = '2433e4bb16fb266833b0c232e9ef0cfb918d107f420090857a7e845030ad3e8c';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -47,8 +47,8 @@ const HOST_SHA = '94e79c562592a952eb67e8ca8e5eb1d0af249c1281cf157f9feeebb3de9c8f
 // Combined (#2762 merge of staging): 34,302 + 682 + 193 = 35,177 bytes; sha re-derived from the SENT body.
 // + S-E GOALS S4 propose_new_limit clause in the proposing-tool instruction: staging 35,177 + 241 = 35,418 bytes.
 //   Removing exactly that clause from the SENT body reproduces staging's 915133ba… sha and 35,177 bytes.
-const RENDERED_SHA = '00e807513d0d33c40be2fc784c4fa4fcaca68de479479552c728e532ecb9119c';
-const RENDERED_BYTES = 34228;
+const RENDERED_SHA = '88d69f13293d38ea51f0886ee510fe88ddb4000a3b2e22c0becc7b0c68620dd4';
+const RENDERED_BYTES = 31661;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 // AIE 6134666922 exact replacements; old/new pins are in recovery-notes/b2-assembled-pins.json.
 const NAMING_RULE_FORM = "Run result replies: lead with the selected Run's licensed goal-chance or withholding lines.";
@@ -212,6 +212,9 @@ describe('selected Sol-high coach on the actual Agent route', () => {
   it('uses the exact selected template and host authority on an ordinary conversation', async () => {
     expect(sha256(SELECTED_COACH_V02_TEMPLATE)).toBe(TEMPLATE_SHA);
     expect(sha256(HOST_TOOL_CONTRACT)).toBe(HOST_SHA);
+    expect(HOST_TOOL_CONTRACT.split("Use the tool result to explain what changed and the value and unit saved. Distinguish a prepared proposal from a committed change. If the result or current read does not confirm the save, say that its outcome is uncertain; never claim it was saved.")).toHaveLength(2);
+    expect(HOST_TOOL_CONTRACT.split("Explain the selected Run’s currently licensed figures in your own words, retaining the exact licensed number or range, named option and target, unit, reference and period, in-this-model meaning, and supplied provisional or timing qualifications. A narrower target is not the chance of meeting the whole goal. Do not derive, invent, re-round or substitute a goal chance, or replace a missing chance with a share of model runs.")).toHaveLength(2);
+    expect(HOST_TOOL_CONTRACT).not.toContain('Name a leading option ONLY');
     expect(SELECTED_COACH_V02_TEMPLATE.split('{{MODE_AND_AUTHORITY}}')).toHaveLength(2);
     await sendTurn('What does the analysis say?', [say('The comparison is provisional.')]);
     expect(sent).toHaveLength(1);

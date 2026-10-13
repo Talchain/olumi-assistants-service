@@ -128,14 +128,14 @@ describe('S2i P6: investigation priority — no claim beyond the screen’s driv
     expect(bodies.some((b) => b.includes('say investigation priority is not established.'))).toBe(false);
   });
 
-  it('(a) served range Run (B1 unseen 1): the served "…so investigation priority is not established." is not said', async () => {
+  it('(a) served range Run (B1 unseen 1): B9 keeps the supplied investigation-priority sentence', async () => {
     const { reply } = await explainSaying(B1, B1_SENTENCE);
-    expect(reply, reply).not.toMatch(/not established/u);
+    expect(reply).toBe(B1_SENTENCE);
   });
 
-  it('(a) served driver Run (B5 T1b): the limitation in the DL’s words is not said', async () => {
+  it('(a) served driver Run (B5 T1b): B9 keeps the supplied limitation', async () => {
     const { reply } = await explainSaying(T1B, LIMIT);
-    expect(reply, reply).not.toMatch(/not established/u);
+    expect(reply).toBe(LIMIT);
   });
 
   it('(b) no driver and no range (author: B5 T1b with no driver claim; robustness ran): the limitation is still said', async () => {
