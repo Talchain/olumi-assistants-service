@@ -40,10 +40,21 @@ export interface ApprovedGoalReading {
   readonly expected_basis: Readonly<Rec>;
   /** The user's own words of the turn the card was made on, verbatim: the answer, kept in the committed row's receipt. */
   readonly answer_words?: string;
+  /**
+   * The goal's whole meaning as the card showed it ({@link goalMeaningOf}: label and stated target, through the ONE record):
+   * a renamed goal or a changed unit does not move the analysis hash, so the card is bound to it here too.
+   */
+  readonly expected_goal?: unknown;
+}
+
+/** The goal's label and stated target, through the ONE goal record (S5): what a card about its reading was shown against. */
+export function goalMeaningOf(graph: unknown, goalId: string): { readonly label: string; readonly target: unknown } | undefined {
+  const record = readGoalRecord(graph, goalId);
+  return record === null ? undefined : { label: record.label, target: record.target };
 }
 
 export type GoalReadingRefusal = 'invalid_graph' | 'goal_not_found' | 'not_a_goal' | 'no_open_question' | 'not_a_reading_question'
-  | 'reading_changed';
+  | 'reading_changed' | 'goal_changed';
 
 export type GoalReadingEditResult =
   | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[]; readonly confirmation: string }
@@ -100,6 +111,9 @@ export function applyGoalReadingEdit(persistedGraph: unknown, approved: Approved
   const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.goal_id);
   if (matches.length !== 1) return { kind: 'refused', reason: 'goal_not_found' };
   if (matches[0]!.kind !== 'goal') return { kind: 'refused', reason: 'not_a_goal' };
+  if (approved.expected_goal !== undefined && !isDeepStrictEqual(goalMeaningOf(persistedGraph, approved.goal_id), approved.expected_goal)) {
+    return { kind: 'refused', reason: 'goal_changed' };
+  }
   const held = matches[0]!.goal_target_basis;
   const answered = answeredBasisOf(expected);
   // ⭐ IDEMPOTENT: a retry after a write that landed finds the answered reading held — the approved outcome. Checked BEFORE

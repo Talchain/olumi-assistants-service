@@ -305,7 +305,8 @@ export function hasCardOnlyOperations(operations: readonly ProposalOperation[]):
   // B2-c: a figure read from the user's words is adopted ONLY by the press on its confirmation card (`quote-confirmation.ts`;
   // AIE #94 6132054663: never a typed yes without the current permission binding, a reseeded message or another card).
   if (operations.some(carriesQuoteConfirmation)) return true;
-  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'set_option_intervention'
+  // G: the answer to the goal's open question about its reading is the user's choice on the card that shows that reading.
+  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'confirm_goal_reading' || op.op === 'set_option_intervention'
     && op.value !== null && typeof op.value === 'object'
     && (Object.hasOwn(op.value, 'unmodelled_mechanisms') || Object.hasOwn(op.value, 'likely_range')));
 }

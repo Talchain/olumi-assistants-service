@@ -212,6 +212,13 @@ export function approvalChipsFor(
   // cannot prove that its omitted operations were gap-free. Offer no approval.
   if (labelSourceFor !== undefined && stored === undefined
     && (tool === 'propose_option_interventions' || tool === 'propose_starting_point')) return [];
+  // ⭐ G (card-only, so before the generic card-only button): the answer to the goal's open question has its own button, never "Set this target" (it sets none); the card's words
+  // ride in `detail`, only when the proposer's own result for that id returned the same card.
+  if (stored?.operations.length === 1 && stored.operations[0]?.op === CONFIRM_GOAL_READING_OP) {
+    if (stored.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
+      || typeof stored.public_label !== 'string' || held.public_label !== stored.public_label) return [];
+    return [{ id: approvalChipIdFor(proposalId), ...CONFIRM_GOAL_READING_APPROVE, detail: stored.public_label }, AMEND_CHIP];
+  }
   if (stored !== undefined && hasCardOnlyOperations(stored.operations)) {
     // This must precede every generic/special chip path: the exact stored gap
     // card and its operands are the subject of the existing typed approval.
@@ -221,13 +228,6 @@ export function approvalChipsFor(
     const replacesDraft = stored!.operations.some((op) => op.op === 'replace_draft');
     return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
       message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : approve.message, detail: stored!.public_label }, AMEND_CHIP];
-  }
-  // ⭐ G: the answer to the goal's open question has its own button, never "Set this target" (it sets none); the card's words
-  // ride in `detail`, only when the proposer's own result for that id returned the same card.
-  if (stored?.operations.length === 1 && stored.operations[0]?.op === CONFIRM_GOAL_READING_OP) {
-    if (stored.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
-      || typeof stored.public_label !== 'string' || held.public_label !== stored.public_label) return [];
-    return [{ id: approvalChipIdFor(proposalId), ...CONFIRM_GOAL_READING_APPROVE, detail: stored.public_label }, AMEND_CHIP];
   }
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
     return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];

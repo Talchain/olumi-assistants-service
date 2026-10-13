@@ -128,7 +128,9 @@ describe('G: the user\'s answer to the goal\'s open question reaches the saved r
     expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, public_label: CARD });
     expect(proposals.outstanding(String(ASKED.scenario_id), null).map((x) => x.proposal_id)).toEqual([p!.proposal_id]);
     expect(proposals.get(String(p!.proposal_id))?.operations).toEqual([{ op: 'confirm_goal_reading', path: GOAL,
-      value: { expected_basis: goalOf(ASKED).goal_target_basis, open_question: QUESTION, answer_words: CLARIFIED } }]);
+      value: { expected_basis: goalOf(ASKED).goal_target_basis, open_question: QUESTION,
+        expected_goal: { label: 'productivity', target: { raw: 10, cap: 200, unit: '%', frame: 'change_abs', comparator: '>=', comparator_source: 'goal_direction', source: 'brief_extraction' } },
+        answer_words: CLARIFIED } }]);
     // The user authors the answer and the approval, never Olumi's reading: the card is the user's statement of which reading.
     expect(proposals.get(String(p!.proposal_id))?.provenance.authored_by).toBe('user_stated');
     expect(p!.saved_goal).toMatchObject({ open_question: QUESTION, also_required: ['maintaining code quality', 'launch readiness'] });
@@ -141,6 +143,21 @@ describe('G: the user\'s answer to the goal\'s open question reaches the saved r
     expect(chips[0]).toEqual({ id: approvalChipIdFor(String(p!.proposal_id)), ...BUTTON, detail: CARD });
     expect(chips.map((c) => c.label)).not.toContain('Set this target');
     expect(approvalChipsFor([call], () => ({ proposal: proposals.get(String(p!.proposal_id)), result: { ...p!, public_label: 'other' } as never }))).toEqual([]);
+  });
+
+  it('an unrelated value elsewhere in the same sentence is never quoted as the answer (strict reading of THIS turn)', () => {
+    const said = 'Quality should stay at 10% and productivity should rise by 20%.';
+    const { p, proposals } = answer(ASKED, AT_LEAST_10, said);
+    // The card is offered (the brief states 10% about productivity: the press is the user's choice), but this turn is not credited.
+    expect(p).toMatchObject({ ok: true, mutated: false, public_label: CARD });
+    expect(Object.keys(proposals.get(String(p!.proposal_id))!.operations[0]!.value as Rec)).not.toContain('answer_words');
+    expect(JSON.stringify(proposals.get(String(p!.proposal_id)))).not.toContain(said);
+  });
+
+  it('an answer that does not restate the figure ("Relative to today, not points.") still gets the card, unquoted', () => {
+    const { p, proposals } = answer(ASKED, AT_LEAST_10, 'Relative to today, not points.');
+    expect(p).toMatchObject({ ok: true, mutated: false, public_label: CARD });
+    expect(Object.keys(proposals.get(String(p!.proposal_id))!.operations[0]!.value as Rec)).not.toContain('answer_words');
   });
 
   it('CONTRAST (mismatched reading): a percentage-points answer over the asked draft is not the held reading — no card, the refusal stands', () => {
@@ -186,16 +203,18 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
         write.handler_facts.map((fact) => ({ turn_id: id, fact_created_at: '2026-10-13T23:00:00.000Z', fact }))),
     });
     const commits: CommitOptionLevelsInput[] = [];
-    let unconfirm = false;
+    let unconfirm: false | 'before' | 'after' = false;
     const commit = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
       commits.push(input);
-      if (unconfirm) return { status: 'unconfirmed' };
+      if (unconfirm === 'before') { unconfirm = false; return { status: 'unconfirmed' }; }
       const out = await executeOptionInterventionBatch({ scenarioId: String(body.scenario_id), turnId: input.turn_id, requestId: 'g-door',
         requestHash: `g:${input.turn_id}`, stage: 'frame', freshness: 'fresh', hasExistingAnalysis: true,
         expectedGraphHash: input.base_graph_hash, targets: [], goalReading: input.goal_reading }, store);
       if (out.kind === 'refused') return { status: 'refused', reason: out.reason };
       if (out.kind === 'unchanged') return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: [], links_resized: [] };
       if (out.kind !== 'committed') return { status: 'unconfirmed' };
+      // The write landed, but its confirmation was lost on the way back.
+      if (unconfirm === 'after') { unconfirm = false; return { status: 'unconfirmed' }; }
       return { status: 'committed', graph_hash: out.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
     };
     const dispatch: InternalDispatch = async (p) => {
@@ -207,12 +226,12 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
       const proposals = new ProposalStore();
       const caps = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels: commit });
       const card = () => answer({ ...body, graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never) }, AT_LEAST_10, CLARIFIED, proposals).p!;
-      const press = (pid: string, user: string | null = null) => caps.authoriseChange({ scenario_id: String(body.scenario_id), authenticated_user_id: user,
-        request_id: 'r-g', user_text: BUTTON.message, user_turn_text: BUTTON.message, turn_id: 'g-turn-2', typed_approval_of: pid } as never,
+      const press = (pid: string, user: string | null = null, pressed = true) => caps.authoriseChange({ scenario_id: String(body.scenario_id), authenticated_user_id: user,
+        request_id: 'r-g', user_text: BUTTON.message, user_turn_text: BUTTON.message, turn_id: 'g-turn-2', ...(pressed ? { typed_approval_of: pid } : {}) } as never,
       { proposal_id: pid } as never) as Promise<Rec>;
       return { proposals, caps, card, press };
     };
-    return { graph, rows, commits, store, open, setGraph: (g: Rec) => { bytes = JSON.stringify(g); }, unconfirmNext: () => { unconfirm = true; } };
+    return { graph, rows, commits, store, open, setGraph: (g: Rec) => { bytes = JSON.stringify(g); }, unconfirmNext: (when: 'before' | 'after' = 'before') => { unconfirm = when; } };
   }
   /** The 13:18 graph with ONLY the question removed from the goal's reading: the one write's whole postimage. */
   const answered = (): Rec => { const g = structuredClone(ASKED.graph) as Rec; delete goalOf({ graph: g }).goal_target_basis.open_question; return g; };
@@ -225,7 +244,8 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: true, applied: true, proposal_id: c.proposal_id });
     expect(r.follow_up).toBe(RECEIPT);
     expect(w.commits).toHaveLength(1);
-    expect(w.commits[0]!.goal_reading).toEqual({ goal_id: GOAL, expected_basis: goalOf(ASKED).goal_target_basis, answer_words: CLARIFIED });
+    expect(w.commits[0]!.goal_reading).toEqual({ goal_id: GOAL, expected_basis: goalOf(ASKED).goal_target_basis, answer_words: CLARIFIED,
+      expected_goal: { label: 'productivity', target: { raw: 10, cap: 200, unit: '%', frame: 'change_abs', comparator: '>=', comparator_source: 'goal_direction', source: 'brief_extraction' } } });
     expect(w.rows).toHaveLength(1);
     // Byte equality: the whole postimage is the read with that one member gone; the reading's bytes, key order included.
     expect(w.graph()).toEqual(answered());
@@ -257,6 +277,45 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     expect(r.follow_up).toBeUndefined();
     expect(JSON.stringify(r)).not.toContain('Recorded your answer');
     expect(proposals.isApplied(pid)).toBe(false);
+  });
+
+  it('landed but unconfirmed: the retry recovers through the writer\'s verified no-op — applied once, never "superseded" by its own write', async () => {
+    const w = persisted(ASKED);
+    const { card, press, proposals } = w.open();
+    const pid = String(card().proposal_id);
+    w.unconfirmNext('after');
+    expect(await press(pid)).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' });
+    expect(w.rows).toHaveLength(1);
+    expect(w.graph()).toEqual(answered());
+    const retry = await press(pid);
+    expect(retry, JSON.stringify(retry)).toMatchObject({ ok: true, applied: true, mutated: false });
+    expect(retry.follow_up).toBe(RECEIPT);
+    expect(proposals.isApplied(pid)).toBe(true);
+    expect(w.rows).toHaveLength(1);
+  });
+
+  it('typed, not pressed: the Agent reading a "yes" cannot approve this card (card-only) — nothing is written', async () => {
+    const w = persisted(ASKED);
+    const { card, press } = w.open();
+    expect(await press(String(card().proposal_id), null, false)).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+    expect(w.rows).toHaveLength(0);
+  });
+
+  it.each([
+    ['the goal renamed', (g: Rec) => { goalOf({ graph: g }).label = 'Team output'; }],
+    ['the goal\'s unit changed', (g: Rec) => { goalOf({ graph: g }).goal_threshold_unit = 'points'; }],
+  ])('stale meaning: %s after the card (the analysis hash need not move) → refused, nothing written', async (_n, change) => {
+    const w = persisted(ASKED);
+    const { card, press } = w.open();
+    const pid = String(card().proposal_id);
+    const moved = structuredClone(ASKED.graph) as Rec;
+    change(moved);
+    w.setGraph(moved);
+    const r = await press(pid);
+    expect(r.ok).toBe(false);
+    expect(JSON.stringify(r)).not.toContain('Recorded your answer');
+    expect(w.rows).toHaveLength(0);
+    expect(w.graph()).toEqual(moved);
   });
 
   it('denied: another user\'s press is refused and nothing is written', async () => {

@@ -6,7 +6,7 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { answeredBasisOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
+import { answeredBasisOf, applyGoalReadingEdit, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { CONFIRM_GOAL_READING_OP } from '../../goal-target/held-change-target.js';
 import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
@@ -3727,14 +3727,24 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const op = parent.operations[0]!;
     const pid = parent.proposal_id;
-    const v = (op.value ?? {}) as { expected_basis?: unknown; answer_words?: unknown };
+    const v = (op.value ?? {}) as { expected_basis?: unknown; answer_words?: unknown; expected_goal?: unknown };
     const expected = v.expected_basis;
     const answer = typeof v.answer_words === 'string' ? v.answer_words : undefined;
     if (!isPlainRecord(expected) || opts.commitOptionLevels === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
     }
+    const approved = { goal_id: op.path, expected_basis: expected, ...(answer !== undefined ? { answer_words: answer } : {}),
+      ...(v.expected_goal !== undefined ? { expected_goal: v.expected_goal } : {}) };
     const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
-      turn_id: authorisationTurnId(pid), links: [], levels: [], goal_reading: { goal_id: op.path, expected_basis: expected, ...(answer !== undefined ? { answer_words: answer } : {}) } });
+      turn_id: authorisationTurnId(pid), links: [], levels: [], goal_reading: approved });
+    // A write that may have landed keeps this proposal's expected bytes, so a retry recovers through the writer's verified
+    // no-op instead of reading its own landed write as another writer's change (the deadline card's recovery).
+    if (res.status === 'committed' || res.status === 'unconfirmed') {
+      const written = applyGoalReadingEdit(before.raw, approved);
+      const postimage = written.kind === 'mutated' ? written.mutatedGraph : written.kind === 'unchanged' ? before.raw : undefined;
+      if (postimage !== undefined) proposals.markPartial(pid, { revision: computeAnalysisAffectingGraphHash(postimage as never)!,
+        landed: [op.path], receipts: [], expected_postimage: postimage });
+    }
     if (res.status === 'stale' || res.status === 'refused') {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: res.status, ...(res.status === 'refused' ? { reason: res.reason } : {}) };
     }
