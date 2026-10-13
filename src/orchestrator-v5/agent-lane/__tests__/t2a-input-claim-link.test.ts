@@ -164,11 +164,11 @@ describe('T2A3 (#2993 check): a bound link still needs the user’s words to nam
   });
   // PL 22:07Z: an ambiguous selection (two links selected) credits NO link, even the one whose end is named.
   it('blocking 1, two links selected: "Quality is strong." credits neither link', async () => {
-    for (const [from, want] of [['Price', 'model_proposed'], ['Quality', 'model_proposed']] as const) {
+    for (const from of ['Price', 'Quality']) {
       const result = await journey(from, { strength: 'strong' }, 'Quality is strong.',
         { ...bothReview, user_turn_text: 'Quality is strong.' }, 0.3);
-      expect(author(result), from).toBe(want);
-      expect(result.edge.provenance.source, from).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
+      expect(author(result), from).toBe('model_proposed');
+      expect(result.edge.provenance.source, from).toBe('cee_hypothesis');
     }
   });
   it.each([
