@@ -450,7 +450,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     const { b: replay } = await runOnly(turnId);
     expect(replay._agent.replayed).toBe(true);
     expect(runRequests, 'the replay did not run again').toBe(1);
-    expect(replay.narration, 'ordinary loop replay does not schedule pending narration').toBeUndefined();
+    expect(replay.narration).toEqual(first.narration);
     expect(first.narration!.status).toBe('ready');
     expect(carriesResult(replay)).toBe(true);
     // DL (reload = same): the replay re-applies the same composer to the same typed parts — same bytes, same shape.

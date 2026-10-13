@@ -348,7 +348,14 @@ type OfferedAction = SuggestedAction;
  * present readiness alone: a Run is re-offered only if the ORIGINAL turn offered it.
  */
 const OFFERED_ACTIONS_MAX = 500;
-const offeredActions = new Map<string, readonly OfferedAction[]>();
+type ReplayNarration = { status: 'pending' | 'ready' | 'unavailable' | 'stale'; run_key: string };
+interface RememberedTurnControls {
+  readonly actions: readonly OfferedAction[];
+  readonly narration?: ReplayNarration;
+  readonly runControlKey?: string;
+  readonly sizingRunKey?: string;
+}
+const offeredActions = new Map<string, RememberedTurnControls>();
 /**
  * ⭐ S-D: a held proposal set aside by the persistence floor (a concurrent arrival filled the row AFTER the reply was
  * composed) is said at the start of the scenario's NEXT reply: the composer is the one last writer (#2748). In-process
@@ -373,13 +380,13 @@ function takeOwedHeldLapses(scenarioId: string): string[] {
   return lines;
 }
 
-function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
+function rememberOffered(key: string, controls: RememberedTurnControls): void {
   offeredActions.delete(key);
   if (offeredActions.size >= OFFERED_ACTIONS_MAX) {
     const oldest = offeredActions.keys().next().value;
     if (oldest !== undefined) offeredActions.delete(oldest);
   }
-  offeredActions.set(key, actions);
+  offeredActions.set(key, controls);
 }
 
 /**
@@ -1190,9 +1197,6 @@ export const RUN_FAILED_TEXT = 'I couldn\u2019t run the analysis: something went
 
 /** Request 1 ran, but the readback cannot confirm a current result: Olumi's own line, live and on replay (#2470). */
 export const RUN_RESULT_UNVERIFIED_TEXT = 'The analysis finished, but I can’t verify a current result. Check the current results before asking again.';
-
-/** K2 receipt: appended by the host to historical loop answers, never supplied by a prompt. */
-const LOOP_REPLAY_CURRENTNESS_TEXT = 'This saved answer is not verified for the current analysis. Run the analysis again to see the current result.';
 
 export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }, modelChangedThisTurn = false): string {
   if (ran.ran === true) {
@@ -2319,7 +2323,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayChip = runExplanationChip(scenarioId, state);
       const unavailableExplanation = new Set([interpretationUnavailableText({ ok: true, ran: true }), RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT]);
       let replayText = prior.assistant_message ?? 'That request was already completed.';
-      let replayNarration: { status: 'pending' | 'ready' | 'unavailable' | 'stale'; run_key: string } | undefined;
+      // Legacy host receipts retain the existing current-state reconstruction below. This is
+      // determined from the stored receipt, before reconstruction can replace its words.
+      const legacyRunReceipt = replayText.includes(RUN_RESULT_READY_TEXT);
+      let replayNarration: ReplayNarration | undefined;
       // ⭐ 2b-0 (DL: reload = same): the replayed Run reply passes the SAME pure composer with the SAME typed roles as the
       // live uninterpreted Run (the ready text and break-even as host parts, the withheld goal chance's sentence as its
       // reason, asks as asks, the root line and basis as evidence), so the bytes and `_answer_shape` come out equal.
@@ -2463,29 +2470,35 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           replayText = RUN_RESULT_UNVERIFIED_TEXT;
         }
       }
-      const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
-      // Legacy fixed receipts retain their existing reconstruction. A host receipt saying nothing ran
-      // is not an analysis answer. Every other Run-loop answer needs its ORIGINAL remembered identity.
+      const rememberedControls = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) : undefined;
+      const remembered = rememberedControls?.actions ?? [];
+      // AI-written loop answers need their ORIGINAL bound identity. Legacy host receipts
+      // are regenerated from current state; receipts saying nothing ran are not analysis answers.
       const replayLoopRun = approvedProposal === undefined && typedRunOf(body)
-        && !(prior.assistant_message ?? '').includes(RUN_RESULT_READY_TEXT)
+        && !legacyRunReceipt
         && replayText !== RUN_FAILED_TEXT
         && replayText !== 'The analysis did not run. Press Run to try again.';
-      const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length);
+      // Original bound controls only: never borrow today's key to identify yesterday's answer.
+      const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length)
+        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey;
       const replayLoopRunCurrent = replayLoopRun
         && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;
       const historicalLoopReplay = replayLoopRun && !replayLoopRunCurrent;
       if (replayLoopRunCurrent) {
-        replayNarration = { status: replayText.includes(interpretationUnavailableText({ ran: true })) ? 'unavailable' : 'ready',
-          run_key: replayLoopRunKey! };
-        boundControl.push(replayChip!);
+        replayNarration = rememberedControls?.narration;
       }
       if (historicalLoopReplay) {
-        replayText = `${prior.assistant_message ?? ''}\n\n${LOOP_REPLAY_CURRENTNESS_TEXT}`;
-        replayNarration = undefined;
+        replayText = prior.assistant_message ?? '';
+        // Empty means unknown original identity, never the current Run's identity.
+        replayNarration = { status: 'stale', run_key: replayLoopRunKey
+          ?? (isRunExplanationChip(explanationId) ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : '') };
         boundControl.length = 0;
-        boundControl.push(RUN_OFFER_CHIP);
+        // A warm answer with no original bound analysis controls must not gain a Run
+        // control just from being resent. Cold/moved bound answers keep the historical exit.
+        if (rememberedControls === undefined || replayLoopRunKey !== undefined
+          || remembered.some(action => action.id === RUN_OFFER_CHIP.id)) boundControl.push(RUN_OFFER_CHIP);
       }
-      const resultFirstReplay = replayNarration !== undefined || replayLoopRunCurrent;
+      const resultFirstReplay = !historicalLoopReplay && (replayNarration !== undefined || replayLoopRunCurrent);
       // The durable carrier: this exact row's persisted Run offer, still within its lifetime.
       const durableRun = (prior.pending_actions ?? []).some((pa) =>
         pa.chip_id === RUN_OFFER_CHIP.id && pa.action.kind === 'run_analysis' && !isPendingActionExpired(pa, Date.now()));
@@ -2520,7 +2533,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           modelExists: state.draftGraph !== undefined,
         });
       const replayCard = replayRecords[0];
-      const replayActions = firstOfEachId([...(historicalLoopReplay ? [] : stillValid), ...boundControl]);
+      // Currentness of analysis does not decide whether a held human decision is still valid.
+      const historicalDecisions = stillValid.filter(action => typedApprovalOf({ chip: { id: action.id } }) !== undefined
+        || action.id === AMEND_CHIP.id || declinedProposalOf(action.id) !== undefined);
+      const replayActions = firstOfEachId([...(historicalLoopReplay ? historicalDecisions : stillValid), ...boundControl]);
       const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready' || replayLoopRunCurrent
         ? replayScopedDraftForRun : undefined;
       const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
@@ -2534,8 +2550,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || actionPressOf(body['chip']) !== null
         || (chiplessRetry && (prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)
           || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
-      if (!historicalLoopReplay && !decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
-      for (const r of historicalLoopReplay ? [] : replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
+      if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
+      for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
+      if (replayLoopRunCurrent) {
+        // Preserve the sent controls and their order. Revalidate human approval independently,
+        // but never manufacture Explain, sizing, or proposal controls on a verified warm resend.
+        const validDecisionIds = new Set(historicalDecisions.map(action => action.id));
+        replayActions.splice(0, replayActions.length, ...remembered.filter(action =>
+          (typedApprovalOf({ chip: { id: action.id } }) === undefined
+            && action.id !== AMEND_CHIP.id && declinedProposalOf(action.id) === undefined)
+          || validDecisionIds.has(action.id)));
+      }
       // The ordinary replay shape still requires parity with the stored answer. A withheld Run's current typed finding
       // owns the new face-first contract even when a newer Run replaced that answer; its rebuilt sentences stay intact.
       // The live turn's A7 rule, read the same way (the answer before the replayed one), so the parity check can hold.
@@ -2618,15 +2643,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
       });
-      const optionCorrectedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
+      const optionGatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
         runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
       });
-      // K2: committed loop prose already crossed the live gates. Today's licence must not rewrite
-      // that historical evidence or append today's findings. Only the host currentness receipt is new.
-      const optionGatedReplay = replayLoopRun
-        ? { ...optionCorrectedReplay, assistant_text: historicalLoopReplay ? replayText : prior.assistant_message ?? replayText }
-        : optionCorrectedReplay;
       const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
         current: !replayLoopRun && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
@@ -2635,6 +2655,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
+      // K2: committed loop prose already crossed the live gates. Preserve those exact bytes;
+      // currentness belongs to typed controls/narration, not a new sentence in the saved answer.
+      if (replayLoopRun) gatedReplay.assistant_text = prior.assistant_message ?? '';
       return withShapeOnlyIfItDerives(gatedReplay);
     };
     /**
@@ -4706,7 +4729,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     // Remembered only once the row's capacity is settled, so a card withdrawn above is never remembered as offered.
-    if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
     // S-B (amendment 6): the card an offered action prepared, with the chips offered beside it, is remembered by its offer,
     // so the same offer pressed again re-offers it (an Agent proposal or a product hold alike). An S-D card re-offered for
@@ -5612,6 +5634,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       'PREMORTEM_WORKSHEET_WITHHELD');
     }
     const issuedTurnIds = await proposalIssuers(heldRecords, [...reconciledPending, ...durablePending, ...liveHolds]);
+    // Remember only the controls actually sent, after egress and held-proposal reconciliation.
+    // This bounded in-process cache changes no persistence; a cold replay has no original key.
+    if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, {
+      actions: wireBody.suggested_actions,
+      ...(wireBody.narration !== undefined ? { narration: wireBody.narration as ReplayNarration } : {}),
+      ...(wireBody.suggested_actions.some(action => action.id === RUN_OFFER_CHIP.id) && narrationKey !== undefined
+        ? { runControlKey: narrationKey } : {}),
+      sizingRunKey: guidedSizingOnWire(guidedSizing, wireBody.graph_hash)?.run_key,
+    });
     return reply.code(200).send({
       ...wireBody,
       suggested_actions: wireBody.suggested_actions.map(guidedSizingWireAction),
