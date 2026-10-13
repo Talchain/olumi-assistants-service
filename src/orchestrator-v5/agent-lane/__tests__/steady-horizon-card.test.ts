@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { assignEntityRefs } from '../../graph/entity-refs.js';
@@ -138,7 +139,9 @@ let modelTool: Record<string, unknown> | undefined;
 describe('steady horizon: one held card through the existing approved batch door', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       const tool = modelTool;
       modelTool = undefined;
       return new Response(JSON.stringify({ output: tool ? [tool] : [{ type: 'message', content: [{ type: 'output_text', text: 'Your judgement stays yours.' }] }] }), { status: 200 });

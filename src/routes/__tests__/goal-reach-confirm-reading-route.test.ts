@@ -1,3 +1,4 @@
+import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * GOAL-REACH rows 0 and 2: the real Agent and scenario-read routes over an in-memory database transport.
@@ -30,7 +31,7 @@ import { readFileSync } from 'node:fs';
 import * as currentLevel from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { CURRENT_LEVEL_TOOL, goalLevelAskOf } from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { assertIdentityYes, WORDS } from './helpers/goal-reach-confirm-reading.js';
-import { RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
+const RUN_INTERPRETATION = 'The model result is provisional.';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../orchestrator-v5/routing/answer-shape.js';
 
 const { port, source } = vi.hoisted(() => ({
@@ -158,7 +159,9 @@ beforeEach(async () => {
   table = []; fenceGenerations = new Map(); runRequests = []; modelCalls = 0; graphWrites = 0; setWithheld(); bindStore();
   port.ensureScenarioExists.mockResolvedValue({ user_id: OWNER }); port.getScenarioOwner.mockResolvedValue(OWNER);
   port.scenarioExists.mockResolvedValue(true); port.isScenarioMember.mockResolvedValue(false);
-  vi.stubGlobal('fetch', vi.fn(async () => { modelCalls += 1; throw new Error('GOAL-REACH must not call an LLM'); }));
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => { modelCalls += 1; return runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [
+    { type: 'message', content: [{ type: 'output_text', text: 'The model result is provisional.' }] },
+  ] }), { status: 200 }); }));
   app = Fastify({ logger: false });
   await installOwnershipHarness(app, () => ({ mode: 'verified', userId: OWNER }));
   await scenarioGraphRoute(app);
@@ -189,6 +192,7 @@ async function press(id: string, message: string, parameters?: Record<string, un
   expect(response.statusCode, response.body).toBe(200); return response.json();
 }
 async function assertDoorThenNextRun(card: Record<string, any>, tools = ['propose_identity']): Promise<void> {
+  const callsBeforeApproval = modelCalls;
   await assertIdentityYes(card, press, id => agentProposals.get(id), () => graphWrites, () => source.graph, tools);
   const freshFacts = actionFactsOf({ scenarioId: scenario, graph: source.graph, graphHash: hashOf(source.graph),
     analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result, analysisReady: READY });
@@ -214,7 +218,7 @@ async function assertDoorThenNextRun(card: Record<string, any>, tools = ['propos
   expect(wire!.graph.nodes.find((n: { id: string }) => n.id === 'mrr').nonlinear_identity).toEqual({
     operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: true,
   });
-  expect(plotRun).not.toHaveBeenCalled(); expect(modelCalls).toBe(0);
+  expect(plotRun).not.toHaveBeenCalled(); expect(modelCalls).toBe(callsBeforeApproval);
 }
 
 describe('GOAL-REACH row 2 through the real doors', () => {
@@ -231,7 +235,7 @@ describe('GOAL-REACH row 2 through the real doors', () => {
       } });
       expect(response.statusCode, response.body).toBe(200);
       const card = response.json();
-      expect(card._diagnostic_trace?.fast_path).toBe('run');
+      expect(card._diagnostic_trace?.fast_path).toBeUndefined();
       expect(runRequests).toHaveLength(1);
       expect(runRequests[0]).toMatchObject({ stage: 'analyse', chip: { action_type: 'run_analysis' } });
       expect(issue).toHaveBeenCalledWith(
@@ -247,7 +251,7 @@ describe('GOAL-REACH row 2 through the real doors', () => {
         outcome_id: 'mrr', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], words: WORDS,
       } });
       expect(runRequests, 'Yes records the reading without running analysis').toHaveLength(1);
-      expect(modelCalls, 'the Run reply and approval press use zero LLM calls').toBe(0);
+      expect(modelCalls, 'two Run-loop calls; approval adds no model call').toBe(2);
     } finally { issue.mockRestore(); writer.mockRestore(); }
   });
   it('row 2 RED: withheld Run bar has one enabled confirm_reading, press → held card → Yes → saved/reloaded identity → NEXT Run wire', async () => {
@@ -323,7 +327,7 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
         chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
       expect(response.statusCode, response.body).toBe(200);
       const body = response.json();
-      expect(body._diagnostic_trace?.fast_path).toBe('run');
+      expect(body._diagnostic_trace?.fast_path).toBeUndefined();
       return body as { assistant_text: string; _answer_shape?: AnswerShape };
     };
     setThresholdRefused('non_finite_conversion_input');
@@ -334,17 +338,17 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
     expect(reply._answer_shape, reply.assistant_text).toBeDefined();
     const shape = reply._answer_shape!;
     // r11d: this served result has no canonical option roster; zero withheld cells means zero marker.
-    expect(shape.headline).toBe(RUN_RESULT_READY_TEXT);
+    expect(shape.headline).toBe(RUN_INTERPRETATION);
     const face = [shape.headline, ...shape.bullets].join('\n');
     expect(face).not.toContain(FINDING);
     expect(shape.detail.split(FINDING)).toHaveLength(2);
-    expect(face).toContain(RUN_RESULT_READY_TEXT);
+    expect(face).toContain(RUN_INTERPRETATION);
     expect(face).not.toMatch(/Not shown(?::| yet;)/);
     // The typed Olumi-side fault owes no user question; its exact full finding is retained under More detail.
     expect(face.match(/\?/g) ?? []).toHaveLength(0);
-    expect(shape.detail).not.toContain(RUN_RESULT_READY_TEXT);
+    expect(shape.detail).not.toContain(RUN_INTERPRETATION);
     expect(shape.detail).toContain(RETAINED_RESULTS);
-    for (const sentence of [FINDING, RETAINED_RESULTS, RUN_RESULT_READY_TEXT]) {
+    for (const sentence of [FINDING, RETAINED_RESULTS, RUN_INTERPRETATION]) {
       expect(reply.assistant_text.split(sentence)).toHaveLength(2);
     }
     expect(reply.assistant_text).toBe(deriveAnswerTextFromShape(shape));

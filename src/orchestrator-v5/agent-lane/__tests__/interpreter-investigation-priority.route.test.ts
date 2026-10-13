@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * S2i P6 (DL, 7 Oct): "make no claim about investigation priority beyond the screen's own driver lines; if the screen
  * shows no driver and no range, say it is not established yet." One row each way, through the real route and its egress.
@@ -72,6 +73,8 @@ describe('S2i P6: investigation priority — no claim beyond the screen’s driv
   const sent: string[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: narrator }] }] }), { status: 200 });
     }));
@@ -98,7 +101,7 @@ describe('S2i P6: investigation priority — no claim beyond the screen’s driv
   const explainSaying = async (on: Read, text: string): Promise<{ reply: string; bodies: string[] }> => {
     read = on;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.',
+      kind: 'message', agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run analysis.',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
     } });
     expect(r.statusCode, r.body).toBe(200);

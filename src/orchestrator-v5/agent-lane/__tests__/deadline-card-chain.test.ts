@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /** Retained d2/d1 replay: local dispatch and real approval writer; providers forbidden. */
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -81,7 +82,8 @@ const apps: FastifyInstance[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 async function route(w: ReturnType<typeof world>) {
   vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
-  vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Network forbidden'); }));
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}')))
+    ?? new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The model is available to review.' }] }] }), { status: 200 })));
   const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
   const app = Fastify({ logger: false }); apps.push(app);
   app.post('/assist/v1/scenarios/:id/graph', async () => w.graphWire());

@@ -575,7 +575,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     oneChance({ goal_horizon_months: undefined }, true);
     expect(whatChangesFaceLine(analysisResult, READ.graph)).not.toBeNull();
     READ.analysis_state.run_state.kind = 'complete_stale';
-    const b = await turn([], 'Run it', { chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    const b = await turn(run('The analysis returned a stale result.'), 'Run it', { chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
     expect(composeInput?.faceContract).toBe('run');
     expect(composeInput?.whatChanges).toBeUndefined();
     expect(b.assistant_text).not.toContain('What would change it:');
