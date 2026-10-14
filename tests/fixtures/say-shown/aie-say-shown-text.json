@@ -1,0 +1,12 @@
+{
+ "_source": {
+  "packet": "recovery/codex/AIE-INTRODUCTION-SAY-SHOWN-AND-EVENT-RISK-RULINGS-20261014.json",
+  "packet_sha256": "6e52e896233a194e91657a35f919e4f4218c05f91a2ed9f9580e1492c8acd303",
+  "board": "#94 6161383921",
+  "field": "say_shown.text",
+  "note": "extracted programmatically, byte for byte"
+ },
+ "text": "The attached `say` is shown once, word for word, in this reply. Do not repeat its chance statement or withholding reason. Answer the user’s question and add relevant reasoning, qualifications or an available next step that `say` does not cover.",
+ "condition": "Attach this context only when the exact same bound say survives final egress and appears once in the actual returned/rendered reply or its shown result. A tool field or intended future append is not display proof. Use the existing actual caller/renderer row, retaining the answer and typed action once. If say is absent/unshown, do not attach this note; the current explain-reason instruction remains.",
+ "text_sha256": "cc6259c9b9338e519c65a3a123a444f4570df68d13030e170b3a7e5c039b4060"
+}
