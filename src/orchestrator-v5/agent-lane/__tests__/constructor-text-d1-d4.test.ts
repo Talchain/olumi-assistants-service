@@ -10,7 +10,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildModelFromBrief } from '../runtime/build-model.js';
+import { buildModelFromBrief, strictForTheDrafter } from '../runtime/build-model.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/constructor-text/t6-d4-b-r2.json', 'utf8')) as Rec;
@@ -51,12 +51,37 @@ describe('D1 and D4 constructor text: what is sent', () => {
     expect(instructions).toContain(`${OPS[2].anchor}${OPS[2].insertion}`);
   });
 
-  it('the two field descriptions no longer contradict the forecast paragraph', async () => {
+  it('the two field descriptions are the AIE\'s, whole and byte for byte, so they no longer contradict the paragraph', async () => {
     const { sent } = await construct(FX.draft);
     const factor = sent.schema.properties.factors.items.properties;
     const link = sent.schema.properties.links.items.properties;
-    expect(factor.baseline_known.description).toContain("A stated no-change forecast's drift is not this exception: its baseline_value is the forecast minus today's level (NO-CHANGE FORECAST), never 0.");
-    expect(link.definitional.description).toContain('a no-change forecast’s drift, in the goal’s own unit, adds to the goal one for one: effect_amount 1, effect_per_source_change 1');
+    expect(factor.baseline_known.description).toBe(FX.aie_d4_fields.baseline_known_description);
+    expect(link.definitional.description).toBe(FX.aie_d4_fields.definitional_description);
+  });
+});
+
+describe('the generation source contract\'s drafter fields (DL 02:0xZ ruling; host checks: session 4 and HIRING)', () => {
+  it('are required where the drafter is called (the route\'s provider boundary), each with its text', async () => {
+    const { sent } = await construct(FX.draft);
+    // `agent-v1-turn.ts` callStructured sends `strictForTheDrafter(reqBody.schema)`: the same function, its defaults.
+    const atBoundary = strictForTheDrafter(sent.schema) as Rec;
+    expect(atBoundary.required).toContain('unknown_concerns');
+    expect(atBoundary.properties.goal.required).toContain('source_quote');
+    expect(atBoundary.properties.links.items.required).toContain('source_quote');
+    expect(atBoundary.properties.goal.properties.source_quote.description).toMatch(/^The user\u2019s own complete statement of the target, copied VERBATIM from the brief/);
+    expect(atBoundary.properties.links.items.properties.source_quote.description).toMatch(/^For a link the user stated \(provenance "explicit"\)/);
+    expect(atBoundary.properties.unknown_concerns.items.required).toEqual(['unknown', 'concerns']);
+  });
+
+  it('are the drafter\'s claims only: none reaches the registered graph until a host check reads it', async () => {
+    const d = structuredClone(FX.draft) as Rec;
+    d.goal.source_quote = 'Q-GOAL-7f3a';
+    (d.links as Rec[])[0]!.source_quote = 'Q-LINK-7f3a';
+    d.unknown_concerns = [{ unknown: (d.unknowns as string[])[0], concerns: ['Q-CONCERN-7f3a'] }];
+    const { graph } = await construct(d);
+    expect(JSON.stringify(graph)).not.toMatch(/Q-(GOAL|LINK|CONCERN)-7f3a/);
+    // Contrast: the same draft's own words do reach it (the probe reads a graph that carries the draft).
+    expect(JSON.stringify(graph)).toContain(DRIFT);
   });
 });
 

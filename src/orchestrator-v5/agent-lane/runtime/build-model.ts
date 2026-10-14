@@ -145,7 +145,8 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
     if (out['type'] === 'object' && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
       for (const name of Object.keys(properties)) {
-        if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence')) continue;
+        if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence' || name === 'source_quote'
+          || name === 'unknown_concerns')) continue;
         if (!required.includes(name)) required.push(name);
       }
       out['required'] = required;
@@ -222,6 +223,13 @@ export function buildCandidateSchema(): Record<string, unknown> {
         open_question: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       }, ['reference', 'denominator', 'period_months', 'period_kind', 'effect_unit', 'effects_at_period_end', 'also_required', 'open_question'])],
       description: 'What the target is measured against (see the TARGET SEMANTICS rule). null when the goal states no target.' },
+      // ⭐ THE SOURCE CONTRACT (DL 02:0xZ 14 Oct, recovery/gen/PLAN.md): the user's own words for the target; the host checks it
+      // (session 4, D3). Optional in the contract, required in what is sent;
+      // LAST so the one-pass and two-pass strict schemas order `required` alike (the manifest sha). AIE_TEXT_PENDING (CONSTRUCTOR-TEXT-DRAFT.md item 6).
+      source_quote: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+        'The user\u2019s own complete statement of the target, copied VERBATIM from the brief: the whole sentence that gives its '
+        + 'figure, its comparator and what it is of (for example "We want monthly recurring revenue to rise by at least 15%."). '
+        + 'null when the brief states no target. Never reword it, shorten it or join two sentences.' },
     }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'frame', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
@@ -286,8 +294,8 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // price 15%" registered with no level because "% from current list price" was marked unknown). Known-zero is what
       // lets admission restate a signed change as "% of today" (restateSignedPercentChanges, rows 4a/4b); the restated
       // factor carries no source, so no authority is claimed for the zero.
-      // AIE_TEXT_PENDING (recovery/prompt/CONSTRUCTOR-TEXT-DRAFT.md item 4): the no-change forecast's carve-out, PROMPT's draft.
-      baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false. EXCEPTION: a factor measured as a CHANGE FROM TODAY (e.g. "% change from the current price", "extra hires") is 0 today by definition: baseline_known true, baseline_value 0. A stated no-change forecast\'s drift is not this exception: its baseline_value is the forecast minus today\'s level (NO-CHANGE FORECAST), never 0.' },
+      // AIE (#94 6159308321; AIE-CONSTRUCTOR-D4-FIELD-AND-SOURCE-RULING-20261014.json): the whole description, byte for byte.
+      baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or supported evidence. A provisional AI estimate keeps this false. EXCEPTION: a factor defined as a CHANGE FROM TODAY may be 0 today by definition; that does not state its value at a future horizon. For the existing NO-CHANGE FORECAST representation, derive the future change as the stated no-change forecast at its specified horizon minus the supported current level of the SAME quantity, with compatible units and reference. Preserve both sources, the horizon and conditions. Do not apply today\'s structural-zero exception to this future value: a valid derived change may be positive, negative or zero. Identify it as a derived conditional forecast, not a newly stated measurement or observed current level. Missing or incompatible operands remain unknown; never invent a value or probability law.' },
       baseline_evidence: { anyOf: [{ type: 'null' }, obj({ quote: { type: 'string' } }, ['quote'])], description: 'Complete verbatim brief sentence stating this factor’s current level; null otherwise.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'The unit of baseline_value, as the brief writes it ("%", a count such as "subscribers", "<currency>/<period>"). ONLY a money amount charged, paid or earned PER ITEM names that item: "<currency> per <item> per <period>", where <item> is what another factor counts.' }, provenance,
@@ -317,17 +325,20 @@ export function buildCandidateSchema(): Record<string, unknown> {
         '"explicit" only when the user stated this size; null when `effect_amount` is null.' },
       // ⭐ DL #75 5916504679: the drafter's word that a link holds by definition. Optional in the contract (a recorded
       // candidate validates unchanged), required in what is sent (`strictForTheDrafter`); checked before any edge has it.
-      // AIE_TEXT_PENDING (recovery/prompt/CONSTRUCTOR-TEXT-DRAFT.md item 5): the drift's one-for-one case, PROMPT's draft.
+      // AIE (#94 6159308321; AIE-CONSTRUCTOR-D4-FIELD-AND-SOURCE-RULING-20261014.json): the whole description, byte for byte.
       definitional: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
-        'true ONLY when this link holds BY DEFINITION, not by estimate: the source is part of the target\u2019s own quantity, in the SAME unit, '
-        + 'so one unit of the source moves the target by exactly one unit (money lost to a risk is money the goal does not get: '
-        + 'effect_amount -1, effect_per_source_change 1; a no-change forecast\u2019s drift, in the goal\u2019s own unit, adds to the goal one for one: '
-        + 'effect_amount 1, effect_per_source_change 1). null for every other link.' },
+        'true ONLY when this link holds BY DEFINITION, not by estimate: the source is a defined contribution to the target\'s own quantity, in the SAME unit and reference, so one unit of the source contributes exactly one unit to the target (money lost to a risk is money the goal does not get: effect_amount -1, effect_per_source_change 1; a supported derived no-change forecast change contributes one for one to that SAME quantity at its stated horizon: effect_amount 1, effect_per_source_change 1). The forecast case is an additive modelling definition, not a causal size estimated from two levels. Preserve the signed change, the original current level and forecast conditions, and count the shared change once. Do not set this for another quantity, an ordinary causal hypothesis or a unit/reference mismatch. null for every other link.' },
       // ⭐ SCIENCE §(p)(1) + §(u)(b) (#2842 follow-up): the one-line reason Olumi's own size holds. Optional in the
       // contract (a recorded candidate validates unchanged), required in what is sent (`strictForTheDrafter`).
       basis: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
         'One short line, from the brief, saying why this size and its direction hold (for example "a higher price pushes '
         + 'more customers to cancel"). null when `effect_amount` is null or the user stated the size.' },
+      // ⭐ THE SOURCE CONTRACT: the user's own words for a relation they stated; the host checks it (HIRING). Optional in the
+      // contract, required in what is sent; LAST, as the goal's (the manifest sha). AIE_TEXT_PENDING (CONSTRUCTOR-TEXT-DRAFT.md item 7).
+      source_quote: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+        'For a link the user stated (provenance "explicit"): their complete statement of it, copied VERBATIM from the brief as '
+        + 'the whole sentence that names both ends, and its size if they gave one. null for every other link. Never reword or '
+        + 'shorten it.' },
     }, ['from', 'to', 'direction', 'provenance', 'effect_amount', 'effect_per_source_change', 'effect_provenance']) },
     /**
      * ⛔ C46: a product the analysis can only ADD UP must be DECLARED, never read off a label.
@@ -351,6 +362,14 @@ export function buildCandidateSchema(): Record<string, unknown> {
     // question" (null) rather than omit it.
     decision_question: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
       'The brief\'s own governing question or statement of intent, copied VERBATIM as one span of 8–240 characters. Include statements such as \'We need to decide whether ...\'. Keep every purpose and condition within that span. Use null only when the brief contains no such span. Do not reword it or turn exploration into a decision.' },
+    // ⭐ THE SOURCE CONTRACT: what each question is about, by the model's own labels; the host binds it to node and link ids
+    // (HIRING; it replaces matching a question by its figures). Optional in the contract, required in what is sent.
+    // AIE_TEXT_PENDING (CONSTRUCTOR-TEXT-DRAFT.md item 8).
+    unknown_concerns: { type: 'array', description:
+      'One entry for each entry in `unknowns`: the question, copied exactly, and what it is about. `concerns` lists the EXACT '
+      + 'labels of the goal, factors, options, risks or outcomes it asks about, and a link as "<from label> \u2192 <to label>". '
+      + 'An empty list when it is about the model as a whole.',
+      items: obj({ unknown: { type: 'string' }, concerns: { type: 'array', items: { type: 'string' } } }, ['unknown', 'concerns']) },
   }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'decision_question']);
 }
 
