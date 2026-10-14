@@ -351,8 +351,8 @@ function statusQuoReadingOf(a: {
 }
 
 /** AIE_TEXT_PENDING (`recovery/prompt/ZERO-SPREAD-LINE-DRAFT.txt`): the plain zero-spread cell's line. */
-export const ZERO_SPREAD_LINE = 'Chance not shown: in this model, this option’s low and high typical results for your goal came out the same, '
-  + 'so they give no range from which to show a chance. You can review whether the figures this option rests on are really that certain.';
+export const ZERO_SPREAD_LINE = 'Chance not shown: this model’s runs gave this option effectively no spread in its result for your goal, '
+  + 'so there is no range to give a chance from. You can review whether the figures this option rests on should be held that firmly.';
 
 /** The goal's target as the face says it: the shared formatter's rate separator (" / month") is the panel's, the face's is "a month". */
 const zeroSpreadFigure = (value: number, unit: string): string => sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');

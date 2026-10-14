@@ -19,8 +19,8 @@ type Rec = Record<string, any>;
 const READ = (JSON.parse(readFileSync('tests/fixtures/zero-spread/served-capacity-post3010-read01-20261014.json', 'utf8')) as Rec).body as Rec;
 const KEEP = 'keep_current_staffing';
 const SERVED_LINE = 'Falls short of 100 tickets per week if today’s figures hold.';
-const LINE = 'Chance not shown: in this model, this option’s low and high typical results for your goal came out the same, '
-  + 'so they give no range from which to show a chance. You can review whether the figures this option rests on are really that certain.';
+const LINE = 'Chance not shown: this model’s runs gave this option effectively no spread in its result for your goal, '
+  + 'so there is no range to give a chance from. You can review whether the figures this option rests on should be held that firmly.';
 const licenceRecord = (result: Rec): Rec => (result.enrichment.inference_warnings as Rec[]).find((w) => w.code === GOAL_CHANCE_LICENSED)!;
 const cells = (result: Rec) => projectCanonicalAnalysisCells(result as never, READ.graph, READ.analysis_goal_certainty);
 const FUTURE = /falls short|meets\b|if today.s (figures|rates) hold/i;
@@ -71,5 +71,19 @@ describe('capacity post3010 row 3: a zero-spread cell says no future event', () 
     expect(licence?.withheld_reason_by_option?.[KEEP]).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
     expect(JSON.stringify(licence)).not.toMatch(FUTURE);
     expect(ZERO_SPREAD_LINE).toBe(LINE);
+    // Codex r1: no certainty language, and no claim of equality the predicate's std arm does not prove.
+    expect(LINE).not.toMatch(/certain|same/i);
+  });
+
+  it('PRODUCER (the std arm, Codex r1’s reproduction): an option whose deciles differ inside the noise tolerance gets the same line, true for it too', () => {
+    // The status quo is read by its own reference rule first (unequal deciles: "moved"); the std arm is reached by an option.
+    const ADD = 'add_one_specialist';
+    const envelope = structuredClone(READ.analysis_result.enrichment) as Rec;
+    const add = (envelope.option_comparison as Rec[]).find((r) => r.option_id === ADD)!;
+    add.probability_of_goal = 0;
+    Object.assign(add.outcome, { p10: 0.1599999995, p50: 0.16, p90: 0.1600000005, mean: 0.16, std: 5e-10 });
+    expect(add.outcome.p10).not.toBe(add.outcome.p90);
+    const licence = goalChanceLicenceOf(envelope, READ.graph, 'weekly_support_capacity');
+    expect(licence?.withheld_reason_by_option?.[ADD]).toEqual(expect.objectContaining({ reason: 'zero_spread', line: LINE }));
   });
 });

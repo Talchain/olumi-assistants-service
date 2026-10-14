@@ -563,8 +563,8 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
     expect(licence.status_quo).toBeUndefined();
     expect(licence.withheld_option_ids).toContain('carry_on_with_the_current_team');
     expect(licence.withheld_reason_by_option?.carry_on_with_the_current_team).toEqual({ reason: 'zero_spread', side: 'falls_short',
-      line: 'Chance not shown: in this model, this option’s low and high typical results for your goal came out the same, '
-        + 'so they give no range from which to show a chance. You can review whether the figures this option rests on are really that certain.' });
+      line: 'Chance not shown: this model’s runs gave this option effectively no spread in its result for your goal, '
+        + 'so there is no range to give a chance from. You can review whether the figures this option rests on should be held that firmly.' });
     expect(JSON.stringify(licence)).not.toMatch(/by assumption|doesn’t match/);
     // Its row is the Run's own, intervals kept: none is removed for an assumption that is not claimed.
     expect((result.enrichment.option_comparison as Rec[]).find((r) => r.option_id === 'carry_on_with_the_current_team')!.outcome)
