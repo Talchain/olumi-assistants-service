@@ -101,7 +101,9 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
   });
 
   it('CONTROL (pair, stated): the same figure STATED is carried, and nothing is said about an estimate', async () => {
-    const { goal, graph, out } = await registeredGoal(pricing({ baseline_known: true, baseline_value: 15000, baseline_provenance: 'explicit' }));
+    // STATED means the brief writes it (#3056: a level the brief never writes is asked for, never carried as the user's).
+    const { goal, graph, out } = await registeredGoal(pricing({ baseline_known: true, baseline_value: 15000, baseline_provenance: 'explicit' }),
+      'Should we raise the Pro plan price? MRR is £15,000 today; we want £20,000.');
     expect(goal.observed_state).toMatchObject({ baseline: 0.6, raw_value: 15000, source: 'brief_extraction' });
     const analysed = (resolveRunAdmission(graph).canonicalGraph as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === GOAL);
     expect(analysed?.observed_state).toMatchObject({ baseline: 0.6, source: 'brief_extraction' });
@@ -180,7 +182,9 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
 
   it('CONTROL (meaning): the same figures on an "at least" goal DO carry the baseline', async () => {
     for (const operator of ['>=']) {
-      const { goal } = await registeredGoal(pricing({ operator, value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
+      // The brief writes the 4% it carries (#3056: a level the brief never writes is asked for).
+      const { goal } = await registeredGoal(pricing({ operator, value: 5, unit: '%', baseline_known: true, baseline_value: 4 }),
+        'Should we raise the Pro plan price? MRR growth is 4% today; we want at least 5%.');
       expect(goal.observed_state, operator).toMatchObject({ baseline: 0.04, raw_value: 4, source: 'brief_extraction' });
     }
   });

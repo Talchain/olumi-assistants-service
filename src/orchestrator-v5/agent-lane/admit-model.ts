@@ -82,7 +82,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting, briefWritesGoalLevel } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting, briefWritesGoalFigure } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -3994,12 +3994,12 @@ function admitOnce(
          * ⛔ THE DRAFTER'S `explicit` IS ITS WORD, NOT THE BRIEF'S (DL 13:49Z 14 Oct; found by #3053's mutant 3: a typed 90 the
          * brief never writes was stored as the user's level). The level path now reads the same authority as the change and
          * ceiling paths (`goalLevelTheUserWrote`, injected as `goalLevelStated`: the brief writes this figure about THIS goal),
-         * a direct sentence of the brief naming the goal writes it (`briefWritesGoalLevel`, `verifiedGoalLevel`'s origin half), or the
-         * user's own sum fixing it (`usersSumFixesGoalLevel`, capacity). Otherwise the level is unknown: withheld and
-         * asked, never Olumi's guess presented as theirs.
+         * the brief writes the figure as a fact, and not only as another quantity's (`briefWritesGoalFigure`), or the user's own sum fixing it (`usersSumFixesGoalLevel`, capacity). Otherwise the level
+         * is unknown: withheld and asked, never Olumi's guess presented as theirs. Fix forward (#3056 CI): a name-bound reader
+         * here withheld "MRR is £16,000 today" and "from about 1,400 today", levels the brief plainly writes.
          */
         const notInBrief = !estimated && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && baselineRaw !== 0
-          && !goalLevelStated(baselineRaw, model.goal.unit) && !briefWritesGoalLevel(model, brief) && !usersSumFixesGoalLevel(model, brief);
+          && !goalLevelStated(baselineRaw, model.goal.unit) && !briefWritesGoalFigure(model, brief) && !usersSumFixesGoalLevel(model, brief);
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
           withheld(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
