@@ -396,8 +396,13 @@ function rawDecisionInputAsk(graph: unknown): string | null {
   // should '…' reach?" asked for the chance Olumi computes, Paul's turn 7). Its one question is the deadline, while the
   // goal holds no date; with the date held, nothing more is asked here (the model does not yet say what must be done).
   if (goalKindOf(goal) === 'chance_of_event') return goalDeadlineFromRecord(graph, goal.id) === undefined ? chanceGoalDeadlineAsk(label) : null;
-  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`
+  return goal.provenance === 'ai_inferred' ? provisionalObjectiveAsk(label)
     : !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
+}
+
+/** The objective ask for Olumi's own provisional objective: the one ask writer's words, shared with the coach step. */
+function provisionalObjectiveAsk(label: string): string {
+  return `I used "${label}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`;
 }
 
 /** Normalise only exact narrator copies of this graph's host ask before placement. */
@@ -447,11 +452,18 @@ export function isChanceGoalModel(graph: unknown): boolean {
 /**
  * ⭐ COACH (Paul's funding test; DL 00:21Z and 00:3xZ 14 Oct): the goal's missing target as a typed blocker, ranked FIRST by
  * `oneNextStep`: with no target, no sizing ask can unlock a chance. The ONE "no target" authority decides and words it
- * (`goalTargetGapOf`, C1: the standing gap, the action bar's "Set target" and the Run cells read the same), Olumi's own
- * inferred goal included (Run 3's "Development speed"); never for an event model's chain (its step is the event's own).
+ * (`goalTargetGapOf`, C1: the standing gap, the action bar's "Set target" and the Run cells read the same); never for an
+ * event model's chain (its step is the event's own). Olumi's own provisional objective (Run 3's "Development speed") is
+ * NOT a missing target (DL ruling on C1's check 3005; the AIE's Q4 never puts a target in place of the purpose): its
+ * step is the objective ask, in the one ask writer's words, ranked before any target.
  */
 export function goalTargetMissingBlockerOf(graph: unknown): PressBlocker | null {
   if (isChanceGoalModel(graph)) return null;
+  const goal = goalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  if (goal?.provenance === 'ai_inferred' && label !== '') {
+    return { kind: 'missing_input', ask: provisionalObjectiveAsk(label), cause: 'objective_provisional' };
+  }
   const gap = goalTargetGapOf(graph);
   return gap === null ? null : { kind: 'missing_input', ask: gap.question, cause: 'goal_target_missing' };
 }

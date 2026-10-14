@@ -220,8 +220,10 @@ describe('goal_target_missing ranks FIRST (Paul\'s funding test, DL 00:21Z)', ()
     expect(step).toMatchObject({ kind: 'missing_input', cause: 'goal_target_missing' });
     // The ONE authority's words (`goalTargetGapOf`, C1): the same question the standing gap and the Run cells say.
     expect((step as { ask: string }).ask).toBe('One gap: ‘Monthly revenue’ has no target or deadline yet. What would count as meeting it, and by when?');
-    // Olumi's own inferred goal is no exception (Run 3's "Development speed" was one); a chance goal's step is its date.
-    expect(goalTargetMissingBlockerOf(noTarget({ provenance: 'ai_inferred' }))).toMatchObject({ cause: 'goal_target_missing' });
+    // Olumi's own provisional objective is not a missing target (DL ruling on C1's check 3005): its step is the objective
+    // ask, in the one ask writer's words; a chance goal's step is its date.
+    expect(goalTargetMissingBlockerOf(noTarget({ provenance: 'ai_inferred' }))).toEqual({ kind: 'missing_input',
+      ask: 'I used "Monthly revenue" as a provisional objective. What should this model help you explore?', cause: 'objective_provisional' });
     expect(goalTargetMissingBlockerOf(noTarget({ goal_threshold_unit: '%', observed_state: { unit: '% likely' } }))).toBeNull();
   });
   it('it outranks every other step, a stale result included', () => {
@@ -229,16 +231,25 @@ describe('goal_target_missing ranks FIRST (Paul\'s funding test, DL 00:21Z)', ()
     const stale: PressBlocker = { kind: 'stale', say: 's' };
     const again: PressBlocker = { kind: 'run_again', why: 'not_returned' };
     expect(oneNextStep([stale, again, { kind: 'missing_input', ask: 'x' }, missing])).toBe(missing);
+    // The purpose before its target: Olumi's provisional objective outranks a missing target.
+    const objective: PressBlocker = { kind: 'missing_input', ask: 'o', cause: 'objective_provisional' };
+    expect(oneNextStep([stale, missing, objective])).toBe(objective);
   });
-  it('agrees with the ONE "no target" authority (`modelGapOf`, moved verbatim to C1\'s `goalTargetGapOf`) on Paul\'s served Run 3', () => {
-    // C1's fixture, byte for byte (tests/fixtures/c1, T1H): the goal "Development speed" held no target. Until C1 merges, this
-    // row pins the two equal; then `goalTargetMissingBlockerOf` calls `goalTargetGapOf` (DL inbox 00:3xZ).
+  it('Paul\'s served Run 3: Olumi\'s provisional "Development speed" asks its purpose; the user\'s own goal agrees with the ONE authority', () => {
+    // C1's fixture, byte for byte (tests/fixtures/c1, T1H). The goal "Development speed" is Olumi's (ai_inferred) and holds
+    // no target. DL ruling on C1's check 3005: its step is the objective ask, never a target ask (C1 fixes its gap alike).
     const run3 = (JSON.parse(readFileSync('tests/fixtures/c1/served-funding-run3-20261014.json', 'utf8')) as Rec).graph as Rec;
-    const withTarget = { ...run3, nodes: (run3.nodes as Rec[]).map((n) => n.id === 'development_speed'
+    expect((run3.nodes as Rec[]).find((n) => n.id === 'development_speed')!.provenance).toBe('ai_inferred');
+    expect(goalTargetMissingBlockerOf(run3)).toEqual({ kind: 'missing_input',
+      ask: 'I used "Development speed" as a provisional objective. What should this model help you explore?', cause: 'objective_provisional' });
+    // ONE change, the user's own goal: the ONE "no target" authority (`modelGapOf`, moved verbatim to C1's
+    // `goalTargetGapOf`) and the step agree that the target is missing.
+    const own = { ...run3, nodes: (run3.nodes as Rec[]).map((n) => n.id === 'development_speed' ? { ...n, provenance: 'explicit' } : n) };
+    expect(modelGapOf(own)?.kind).toBe('goal_target_missing');
+    expect(goalTargetMissingBlockerOf(own)).toMatchObject({ kind: 'missing_input', cause: 'goal_target_missing' });
+    // Contrast: the user's goal states a target; neither says a target is missing.
+    const withTarget = { ...own, nodes: (own.nodes as Rec[]).map((n) => n.id === 'development_speed'
       ? { ...n, goal_threshold_raw: 2, goal_direction: '>=' } : n) };
-    expect(modelGapOf(run3)?.kind).toBe('goal_target_missing');
-    expect(goalTargetMissingBlockerOf(run3)).toMatchObject({ kind: 'missing_input', cause: 'goal_target_missing' });
-    // Contrast: ONE change, the goal states a target; neither says a target is missing.
     expect(modelGapOf(withTarget)?.kind).not.toBe('goal_target_missing');
     expect(goalTargetMissingBlockerOf(withTarget)).toBeNull();
   });

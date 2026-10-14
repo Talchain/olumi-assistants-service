@@ -22,8 +22,12 @@
  */
 
 export type PressBlocker =
-  /** `cause: 'goal_target_missing'`: the goal has no target, so no other answer can unlock a chance (ranked first). */
-  | { readonly kind: 'missing_input'; readonly ask: string; readonly also_unbuilt?: string; readonly cause?: 'goal_target_missing' }
+  /**
+   * Ranked first, in this order: `objective_provisional`, the goal is Olumi's own provisional objective, so its purpose is
+   * asked before any target (DL ruling on C1's check 3005); `goal_target_missing`, the user's goal has no target, so no other
+   * answer can unlock a chance.
+   */
+  | { readonly kind: 'missing_input'; readonly ask: string; readonly also_unbuilt?: string; readonly cause?: 'objective_provisional' | 'goal_target_missing' }
   | { readonly kind: 'missing_implementation'; readonly what: string }
   | { readonly kind: 'confirm'; readonly by: 'identity_card' | 'confirm_reading' }
   | { readonly kind: 'run_again'; readonly why: 'precision_missing' | 'not_returned' }
@@ -41,8 +45,11 @@ export function oneNextStep(blockers: readonly (PressBlocker | null | undefined)
   const present = blockers.filter((b): b is PressBlocker => b != null);
   // Paul's funding test (DL 00:21Z 14 Oct): a goal with no target outranks every other step, a stale result included; with
   // no target, neither a rerun nor a sizing answer can give a chance. T1H's host cells and chips use the same order (C1).
-  const noTarget = present.find((b) => b.kind === 'missing_input' && b.cause === 'goal_target_missing');
-  if (noTarget !== undefined) return noTarget;
+  // An objective that is only Olumi's provisional reading comes before its target: the purpose decides what a target is of.
+  for (const cause of ['objective_provisional', 'goal_target_missing'] as const) {
+    const root = present.find((b) => b.kind === 'missing_input' && b.cause === cause);
+    if (root !== undefined) return root;
+  }
   for (const kind of PRECEDENCE) {
     const first = present.find((b) => b.kind === kind);
     if (first !== undefined) return first;
