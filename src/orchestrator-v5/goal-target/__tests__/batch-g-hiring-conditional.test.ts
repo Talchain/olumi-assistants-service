@@ -28,6 +28,7 @@ import { HOST_TOOL_CONTRACT } from '../../agent-lane/coach-route-v0_2.js';
 import { GOAL_CHANCE_RANKING_INSTRUCTION, SELECTED_RUN_SCOPE_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
 import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
 import { applyGoalReadingEdit } from '../goal-reading-write.js';
+import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon } from '../goal-horizon-verdict.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
@@ -333,9 +334,57 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     expectWithheld(runAsTheHandlerDoes({ brief: '   ' }), 'blank');
   });
 
-  it('NEGATIVE (b): a held month (a producer reading of timing) is never given this note', () => {
-    const held = withGoal(FX.graph, (g) => { g.goal_horizon_months = 3; });
+  it('NEGATIVE (b), AMENDED (DL 14 Oct, option A): a held month OTHER than the target\'s own period is never given this note', () => {
+    const held = withGoal(FX.graph, (g) => { g.goal_horizon_months = 6; });
     expect(periodEndConditionalOf(FX.envelope, held, GOAL, { sentRun: sentRunOf(held), brief: FX.brief, effects_timing: 'not_stated' })).toBeUndefined();
     expect(JSON.stringify(runAsTheHandlerDoes({ graph: held }).envelope)).not.toContain('in place by month three');
+  });
+});
+
+/**
+ * ⭐ DL ruling 14 Oct (option A; Paul: label, never withhold; coach, don't refuse). Served hiring with the deadline card pressed
+ * (live/runs/2026-10-14T140600Z-hiring-e2e-8f52bfd5-5ebc9b0c, hiring/reads/09-19-after-reopen.json): the goal held the card's
+ * month beside the basis' own three months, and every Run withheld "only today's numbers". A held month that IS the target's own
+ * period, with no timing carrier, is the same static reading: the conditional chance with the AIE's note, or E's withhold.
+ */
+describe('option A: the deadline card\'s held month equal to the target\'s own period reads as the static basis', () => {
+  /** The pressed card's goal fields, byte for byte from the served read. */
+  const pressed = (g: Rec): Rec => withGoal(g, (goal) => {
+    goal.goal_horizon = { deadline: '2027-01-14' }; goal.goal_horizon_months = 3; goal.goal_deadline_as_stated = 'three months';
+  });
+  /** The handler's whole order: E's withhold, the horizon gate, then the licence (`run-analysis.ts`). */
+  function runWithHorizonGate(graph: Rec, effects_timing: unknown = 'not_stated'): { envelope: Rec; view: Rec } {
+    const sentRun = sentRunOf(graph);
+    const e = withholdForPeriodEndEffects(FX.envelope, graph, GOAL, { sentRun, brief: FX.brief, effects_timing });
+    const gated = withholdGoalFiguresForUntestedHorizon(e, graph, FX.brief);
+    const envelope = withGoalChanceLicence(gated, graph, GOAL, earned, sentGoalThresholdOf(gated, sentRun.graph, GOAL, earned, { sentRun, brief: FX.brief, effects_timing }),
+      graph, { storedConstraints: graph.goal_constraints, sentConstraints: graph.goal_constraints, sentRun, brief: FX.brief, effects_timing });
+    return { envelope, view: { type: 'analysis_result', enrichment: envelope } };
+  }
+
+  it('⭐ RED (served pressed card): each hiring option is licensed on its own target with the AIE\'s note, as without the card', () => {
+    const graph = pressed(FX.graph);
+    expect(goalOf(graph).goal_target_basis).toMatchObject({ period_months: 3, effects_at_period_end: false, target_frame: 'change_abs' });
+    for (const timing of ['not_stated', 'in_place_by_period'] as const) {
+      const run = runWithHorizonGate(graph, timing);
+      const licence = goalChanceLicenceForAgent(run.view) as Rec | undefined;
+      expect(licence?.option_ids, timing).toEqual(expect.arrayContaining(HIRING));
+      expect(JSON.stringify(run.envelope).split(NOTE), timing).toHaveLength(2);
+      expect(JSON.stringify(run.envelope), timing).not.toContain('GOAL_FIGURES_HORIZON_NOT_TESTED');
+    }
+  });
+
+  it('NEGATIVE (c) still holds with the card: a stated late/partial effect withholds with E\'s sentence', () => {
+    expectWithheld(runWithHorizonGate(pressed(FX.graph), 'later_or_partial'), 'later_or_partial');
+  });
+
+  it('NEGATIVE: a held month that differs from the period, or any timing carrier, still withholds at the horizon', () => {
+    const other = withGoal(pressed(FX.graph), (g) => { g.goal_horizon_months = 6; });
+    expect(goalHorizonVerdict(other)).toBe('withhold');
+    const carrier = structuredClone(pressed(FX.graph));
+    (carrier.nodes as Rec[]).find((n) => n.id !== GOAL && n.kind !== 'option' && n.kind !== 'decision')!.nonlinear_identity =
+      { operation: 'accumulation', factor_ids: [], horizon_months: 3 };
+    expect(goalHorizonVerdict(carrier)).toBe('withhold');
+    for (const g of [other]) expect(JSON.stringify(runWithHorizonGate(g).envelope)).not.toContain('in place by month three');
   });
 });

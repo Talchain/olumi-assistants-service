@@ -80,8 +80,15 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
   if (horizonSteadyAttested(graph)) return 'steady_attested';
   // ⛔ Amendment 2: never assume steady state for an urgent hire. Without an at-horizon basis the chance is withheld.
   const basis = goalTargetBasisOf(goal);
-  return basis !== undefined && basis.effects_at_period_end && basis.open_question === undefined
-    && basis.period_months === heldGoalHorizonMonths(goal) ? 'basis_at_h' : 'withhold';
+  if (basis === undefined || basis.open_question !== undefined || basis.period_months !== heldGoalHorizonMonths(goal)) return 'withhold';
+  if (basis.effects_at_period_end) return 'basis_at_h';
+  // ⭐ DL ruling 14 Oct (option A; Paul: label, never withhold): a CHANGE target whose held month IS its own stated period, with
+  // nothing in the model that works out timing (no accumulation carrier), is the same static reading as no held month: the
+  // licence's conditional reading says Olumi's period-end assumption with the chance, or E's withhold says why not
+  // (`periodEndConditionalOf`). Served hiring: the deadline card's "3 months from today" held month 3 beside the basis' 3, and
+  // every Run withheld "only today's numbers". A held month that differs from the period still withholds.
+  const timingCarrier = Array.isArray(rawNodes) && rawNodes.some(n => recordOf(recordOf(n)?.nonlinear_identity)?.operation === 'accumulation');
+  return basis.target_frame !== 'level' && !timingCarrier ? 'no_horizon' : 'withhold';
 }
 
 /**
