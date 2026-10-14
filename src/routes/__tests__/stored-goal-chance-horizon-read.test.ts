@@ -32,8 +32,7 @@ type Rec = Record<string, any>;
 const SCENARIO = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const graph = (): Rec => ({ goal_node_id: 'goal', nodes: [
   { id: 'decision', kind: 'decision', label: 'Choose' },
-  // C1 (14 Oct): the goal states its target (raw), so these horizon rows keep ranking the horizon reason.
-  { id: 'goal', kind: 'goal', label: 'Revenue', goal_threshold: .7, goal_threshold_raw: 70, goal_direction: '>=' },
+  { id: 'goal', kind: 'goal', label: 'Revenue', goal_threshold: .7 },
   { id: 'factor', kind: 'factor', label: 'Demand' },
   { id: 'a', kind: 'option', label: 'A', interventions: { factor: 1 } },
   { id: 'b', kind: 'option', label: 'B', interventions: { factor: 0 } },
