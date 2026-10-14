@@ -190,6 +190,8 @@ export function heldChangeTargetAnswer(args: {
     public_label: confirmGoalReadingCard(reading, basis.open_question),
   });
   args.proposals.put(proposal);
+  // The request was compared on figure, unit and comparator only, here too: the AIE's partial-match note rides beside the card.
   return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: graph.graph_hash,
-    saved_goal: saved, note: CONFIRM_GOAL_READING_NOTE };
+    saved_goal: saved, compared: [...COMPARED_MEMBERS.compared], not_compared: [...COMPARED_MEMBERS.not_compared], saved_reading: reading,
+    partial_match_note: alreadySavedNote(reading), note: CONFIRM_GOAL_READING_NOTE };
 }

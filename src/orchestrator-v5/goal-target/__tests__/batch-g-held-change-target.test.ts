@@ -152,11 +152,14 @@ describe('G: the user\'s answer to the goal\'s open question reaches the saved r
 
   it('RED→GREEN: the clarification over the asked draft → ONE confirm_goal_reading card with the user\'s verbatim answer; nothing written', () => {
     const { p, proposals } = answer(ASKED);
-    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, public_label: CARD, note: NOTE });
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, public_label: CARD, note: NOTE, ...COMPARED, saved_reading: READING,
+      // The card's comparison is figure, unit and comparator only too (Codex check on #2995, non-blocking): the AIE's note rides beside it.
+      partial_match_note: `The saved reading is ${READING}. Only the figure, unit and comparator were compared with this request and matched. The `
+        + 'reference, denominator, period and additional conditions were not compared; this does not confirm that your complete requested reading is saved.' });
     expect(proposals.outstanding(String(ASKED.scenario_id), null).map((x) => x.proposal_id)).toEqual([p!.proposal_id]);
     expect(proposals.get(String(p!.proposal_id))?.operations).toEqual([{ op: 'confirm_goal_reading', path: GOAL,
       value: { expected_basis: goalOf(ASKED).goal_target_basis, open_question: QUESTION,
-        expected_goal: { label: 'productivity', target: { raw: 10, cap: 200, unit: '%', frame: 'change_abs', comparator: '>=', comparator_source: 'goal_direction', source: 'brief_extraction' } },
+        expected_goal: { label: 'productivity', target: { raw: 10, cap: 200, unit: '%', frame: 'change_abs', comparator: '>=', comparator_source: 'goal_direction', source: 'brief_extraction' }, horizon: { as_stated: 'three months' } },
         answer_words: CLARIFIED } }]);
     // The user authors the answer and the approval, never Olumi's reading: the card is the user's statement of which reading.
     expect(proposals.get(String(p!.proposal_id))?.provenance.authored_by).toBe('user_stated');
@@ -286,7 +289,7 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     expect(r.follow_up).toBe(RECEIPT);
     expect(w.commits).toHaveLength(1);
     expect(w.commits[0]!.goal_reading).toEqual({ goal_id: GOAL, expected_basis: goalOf(ASKED).goal_target_basis, answer_words: CLARIFIED,
-      expected_goal: { label: 'productivity', target: { raw: 10, cap: 200, unit: '%', frame: 'change_abs', comparator: '>=', comparator_source: 'goal_direction', source: 'brief_extraction' } } });
+      expected_goal: { label: 'productivity', target: { raw: 10, cap: 200, unit: '%', frame: 'change_abs', comparator: '>=', comparator_source: 'goal_direction', source: 'brief_extraction' }, horizon: { as_stated: 'three months' } } });
     expect(w.rows).toHaveLength(1);
     // Byte equality: the whole postimage is the read with that one member gone; the reading's bytes, key order included.
     expect(w.graph()).toEqual(answered());
@@ -337,6 +340,31 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     expect(JSON.stringify(r)).not.toContain('Confirmed the saved target reading');
     expect(proposals.isApplied(pid)).toBe(false);
     expect(w.rows).toHaveLength(1);
+  });
+
+  it('HORIZON moved after the commit (Codex check on #2995): the read-back holds another deadline → no receipt, never the three-month reading', async () => {
+    const w = persisted(ASKED);
+    const { card, press, proposals } = w.open();
+    const pid = String(card().proposal_id);
+    w.afterCommitNext((g) => Object.assign(goalOf({ graph: g }), { goal_horizon_months: 6 }));
+    const r = await press(pid);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' });
+    expect(r.follow_up).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('Confirmed the saved target reading');
+    expect(proposals.isApplied(pid)).toBe(false);
+  });
+
+  it('HORIZON moved before the press: the door refuses the card\'s goal as changed — nothing written', async () => {
+    const w = persisted(ASKED);
+    const { card, press } = w.open();
+    const pid = String(card().proposal_id);
+    const moved = structuredClone(ASKED.graph) as Rec;
+    Object.assign(goalOf({ graph: moved }), { goal_horizon_months: 6 });
+    w.setGraph(moved);
+    const r = await press(pid);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, applied: false });
+    expect(w.rows).toHaveLength(0);
+    expect(w.graph()).toEqual(moved);
   });
 
   it('landed but unconfirmed: the retry recovers through the writer\'s verified no-op — applied once, never "superseded" by its own write', async () => {
