@@ -216,6 +216,20 @@ export interface TurnTiming {
   readonly hops: number;
 }
 
+/**
+ * One tool call as the turn's timing log names it: the tool and its outcome, never the payload. `refused` carries the
+ * refusal code; `committed` changed the model; `proposed` left a card awaiting the user's approval; `withdrawn` took one
+ * back; `done` is a read or a call that changed nothing. A tool's own outcome word (`applied`, `outcome_unknown` …) is kept.
+ */
+export function toolCallOutcome(c: { readonly name: string; readonly ok: boolean; readonly mutated: boolean;
+  readonly proposal_id?: string; readonly outcome?: string; readonly refusal?: string }):
+  { tool: string; outcome: 'refused' | 'committed' | 'proposed' | 'withdrawn' | 'done'; code?: string; detail?: string } {
+  const outcome = c.ok === false ? 'refused' : c.name === 'withdraw_proposal' ? 'withdrawn' : c.mutated ? 'committed'
+    : c.proposal_id !== undefined ? 'proposed' : 'done';
+  return { tool: c.name, outcome, ...(c.ok === false ? { code: c.refusal ?? 'error' } : {}),
+    ...(c.outcome !== undefined ? { detail: c.outcome } : {}) };
+}
+
 export interface AgentTurnResult {
   readonly assistant_text: string;
   /** The full item list, for Olumi to persist as the conversation of record. */
@@ -476,6 +490,8 @@ export async function runAgentTurn(
         scenario_id: input.ctx.scenario_id,
         request_id: input.ctx.request_id,
         ...t,
+        // Each call's tool and outcome, in order (DL S4, 14 Oct: the 16:17Z RCA had to read code, the line held only a count).
+        calls: toolCalls.map(toolCallOutcome),
       },
       'Agent lane — where this turn spent its wall time',
     );

@@ -38,7 +38,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 // Force the config mock factory to run before any setFlags call — the factory
 // only executes on first import of the mocked module.
 await import('../../../config/index.js');
-const { runAgentTurn } = await import('../runtime/agent-loop.js');
+const { runAgentTurn, toolCallOutcome } = await import('../runtime/agent-loop.js');
 
 const ctx = { scenario_id: '11111111-1111-1111-1111-111111111111', authenticated_user_id: 'u', request_id: 'req-9' };
 const base = { ctx, history: [], message: 'hi', instructions: 'go', maxOutputTokens: 256 };
@@ -81,6 +81,33 @@ describe('turn timing is observable in production', () => {
     setFlags(false, false);
     await runAgentTurn(base, {} as never, textOnly);
     expect(timingLogs()).toHaveLength(0);
+  });
+
+  it('⭐ names each tool call and its outcome, in order (DL S4: the 16:17Z RCA had to read code; the line held only a count)', async () => {
+    setFlags(true);
+    let n = 0;
+    const scripted = async () => (++n === 1 ? { output: [
+      { type: 'function_call', name: 'get_canonical_state', call_id: 'c1', arguments: '{}' },
+      { type: 'function_call', name: 'propose_goal_deadline', call_id: 'c2', arguments: JSON.stringify({ deadline_words: 'six months', rationale: 'x' }) },
+    ] } : { output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }] }) as never;
+    const capabilities = {
+      getCanonicalState: async () => ({ ok: true, mutated: false }),
+      proposeGoalDeadline: async () => ({ ok: false, mutated: false, refusal: 'origin_unknown', detail: 'x' }),
+    };
+    await runAgentTurn(base, capabilities as never, scripted);
+    expect((timingLogs()[0]![0] as Record<string, unknown>).calls).toEqual([
+      { tool: 'get_canonical_state', outcome: 'done' },
+      { tool: 'propose_goal_deadline', outcome: 'refused', code: 'origin_unknown' },
+    ]);
+  });
+
+  it.each([
+    [{ name: 'authorise_change', ok: true, mutated: true, proposal_id: 'p1', outcome: 'applied' }, { tool: 'authorise_change', outcome: 'committed', detail: 'applied' }],
+    [{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: 'p2' }, { tool: 'propose_assumptions', outcome: 'proposed' }],
+    [{ name: 'withdraw_proposal', ok: true, mutated: false, proposal_id: 'p3' }, { tool: 'withdraw_proposal', outcome: 'withdrawn' }],
+    [{ name: 'authorise_change', ok: false, mutated: false }, { tool: 'authorise_change', outcome: 'refused', code: 'error' }],
+  ])('outcome of %j', (call, expected) => {
+    expect(toolCallOutcome(call)).toEqual(expected);
   });
 
   it('the returned result still carries the timing regardless of the flag', async () => {
