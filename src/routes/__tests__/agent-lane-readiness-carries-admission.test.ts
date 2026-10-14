@@ -41,14 +41,14 @@ const PERSISTED = JSON.parse(
  * admissible-but-not-ready case. A level on each (0.5, inside the unit scale its options' 0.1 levels use) restores
  * that premise; it stays not ready on Option 3's unset level (`MISSING_OPTION_VALUE`), which does not refuse the Run.
  */
-const STATUS_QUO_LEVELS: Record<string, number> = { fac_6: 0.5, fac_7: 0.5, fac_8: 0.5 };
+const STATUS_QUO_LEVELS: Record<string, number> = { fac_6: 0.5, fac_7: 0.5, fac_8: 0.5, rsk_10: 0.2, rsk_11: 0.2, rsk_12: 0.2 };
 for (const id of Object.keys(STATUS_QUO_LEVELS)) {
   if (!PERSISTED.nodes.some((n) => n.id === id)) throw new Error(`overlay target ${id} is not in the fixture`);
 }
 const GRAPH = {
   ...PERSISTED,
   nodes: PERSISTED.nodes.map((n) => (typeof n.id === 'string' && n.id in STATUS_QUO_LEVELS
-    ? { ...n, observed_state: { ...(n.observed_state as object | undefined), value: STATUS_QUO_LEVELS[n.id] } }
+    ? { ...n, observed_state: { ...(n.observed_state as object | undefined), value: STATUS_QUO_LEVELS[n.id], raw_value: STATUS_QUO_LEVELS[n.id], source: 'cee_inference', extractionType: 'inferred' } }
     : n)),
 } as unknown;
 

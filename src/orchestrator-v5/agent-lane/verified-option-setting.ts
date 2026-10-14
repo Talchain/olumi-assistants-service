@@ -705,6 +705,29 @@ export function verifiedGoalLevel(model: CandidateModel, brief: string | undefin
   }
 }
 
+/** Replace only an unquoted Olumi estimate with a conflicting value authenticated by the existing factor verifier. */
+export function verifiedFactorLevelValue(model: CandidateModel, factor: Factor, brief: string | undefined): Factor | null {
+  // A claimed human receipt that fails verification must remain unverified. Do not rewrite its
+  // number, sign or quote into a different claim which happens to pass.
+  if (typeof brief !== 'string' || factor.baseline_known
+    || !['ai_proposed', 'inferred'].includes(factor.provenance)
+    || factor.baseline_evidence != null) return null;
+  const verified = new Map<number, Factor>();
+  for (const a of assertions(brief)) {
+    for (const amount of findLinkEffectAmounts(a.text)) {
+      const value = signedCurrentFigure(factor, a.text, amount);
+      if (value === null) continue;
+      const candidate = { ...factor, baseline_value: value, baseline_evidence: { quote: a.text } };
+      const context = { ...model, factors: model.factors.map(f => f === factor ? candidate : f) };
+      if (verifiedFactorLevel(context, candidate, brief)) verified.set(value, candidate);
+    }
+  }
+  // Replacing a conflicting number must not manufacture a new receipt for an unchanged claim.
+  // Keep all matches in the set above so a competing current figure still refuses substitution.
+  const replacement = verified.size === 1 ? [...verified.values()][0]! : null;
+  return replacement !== null && replacement.baseline_value !== factor.baseline_value ? replacement : null;
+}
+
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
 export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   try {

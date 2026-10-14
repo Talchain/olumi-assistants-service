@@ -180,7 +180,7 @@ import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
-import { breakEvenFor, breakEvenLine, goalNotCheckedLine, thresholdReasonLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { breakEvenFor, breakEvenLine, goalNotCheckedLine, thresholdReasonLine, THRESHOLD_REST_STANDS, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import {
   leaderStandingOf,
@@ -5392,6 +5392,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const question = (pending.action as { question?: unknown }).question;
         if (typeof question === 'string' && controlsOnReply.some((action) => action.id === pending.chip_id)) typedControlQuestions.push(question);
       }
+      // A refused build Run still owes the final read's withheld-goal explanations.
+      // The root refusal does not establish that the rest of that Run remains usable.
+      const blockedBuildGoalDetails = faceContract === 'draft' && firstAnalysisRefusalSaid
+        && chanceCells.length > 0 && chanceCells.every(cell => cell.kind === 'withheld')
+        ? [thresholdReasonLine(readbackGraph, analysisResult)?.replace(THRESHOLD_REST_STANDS, ''),
+          goalChanceWithheldForAgent(analysisResult, readbackGraph)?.say]
+          .filter((line): line is string => typeof line === 'string' && line.trim() !== '')
+        : [];
       const composedReply = composeReplyShape({
         analysisResult,
         text: reply,
@@ -5409,7 +5417,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...((faceContract === 'draft' || runOrExplainTurn) && profile === 'coaching' && estimates !== null && estimates.count > 0
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
-        detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
+        detailLines: stateFacts.current_state_unknown === true ? []
+          : [...eventRiskDisclosuresFor(result.tool_results), ...blockedBuildGoalDetails],
         obligations: withA7AsDetail(obligations, a7Repeat, reply, chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')),
         graph: readbackGraph,
         profile,
