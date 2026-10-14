@@ -81,6 +81,7 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   set_limit: 'slice_3',
   set_team_time: 'slice_3',
   set_hiring_times: 'slice_3', // E5: each capacity option's hiring times, like the team's time
+  set_option_capacity_change: 'none', // the coaching loop: the user's figure and Olumi's adopted reading, quoted on its card
   add_limit: 'slice_3',
   attest_goal_steady: 'none', // the user's temporal judgement is a card answer, not a numeric field
   set_cohort_forecast: 'none', // the user's own cohort forecast, quoted on its card (science PR-4b): a card answer, not a field

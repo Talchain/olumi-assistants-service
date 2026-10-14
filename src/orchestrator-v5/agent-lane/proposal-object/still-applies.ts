@@ -23,6 +23,7 @@ import type { StructuredProposal } from '../proposal.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import { teamTimeReadHolds } from '../../goal-target/team-share-write.js';
 import { hiringTimesStillApply, type ApprovedHiringTimes } from '../../goal-target/hiring-times.js';
+import { optionCapacityChangeStillApplies, type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
 import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
 import { goalReadingProjectionOf } from '../../goal-target/goal-reading-write.js';
 import { riskOccurrenceCardHolds, SET_RISK_OCCURRENCE_OP } from '../risk-occurrence.js';
@@ -68,6 +69,7 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
   if (p.operations.length !== 1) return false;
   const op = p.operations[0]!;
   if (op.op === 'set_hiring_times') return hiringTimesStillApply(op.value as ApprovedHiringTimes, graph);
+  if (op.op === 'set_option_capacity_change') return optionCapacityChangeStillApplies(op.value as ApprovedOptionCapacityChange, graph);
   if (op.op === 'set_goal_deadline') return deadlineSubjectHolds(op, graph) === true;
   // A risk occurrence card: its own writer's gate (its goal as bound, its node as shown; #3013).
   if (op.op === SET_RISK_OCCURRENCE_OP) return riskOccurrenceCardHolds(op, graph);
