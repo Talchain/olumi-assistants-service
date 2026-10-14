@@ -77,7 +77,7 @@ import { sameUnit } from '../same-unit.js';
 import { admitInterventionRange } from '../../intervention-range.js';
 import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
-import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedRange } from '../../../cee/provenance/stated-amounts.js';
+import { findStatedRanges, readCurrencyUnitWithQualifiers, type StatedRange } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
@@ -2258,8 +2258,8 @@ export async function buildModelFromBrief(
 
     const parked = (candidate as { unknowns?: unknown }).unknowns;
     // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
-    // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
-    // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
+    // words ("… the model doesn't hold it yet"). A drafter question is left out beside it only when its verified concerns are
+    // all set-aside links (`withoutSetAsideQuestions`); a question quoting the same amount with no such binding is asked.
     const setAside = setAsideEstimatesOf(admitted.loss);
     const openQuestions = withoutSetAsideQuestions(userFacingDrafterQuestions(parked), setAside,
       (candidate as { unknown_concerns?: unknown }).unknown_concerns, admitted.nodes);
@@ -2718,12 +2718,14 @@ function setAsideEstimatesOf(loss: readonly unknown[]): SetAsideEstimate[] {
  * AIE's text calls these "proposed bindings, not evidence that a question is resolved or may be removed", and served
  * drafts bind one question to several referents ("… from an agency campaign, a small internal campaign, and a partner
  * launch" → three links), so a question that is also about anything else is asked. Nothing is matched by number; a
- * question with no entry, an empty list, or an entry that is not all labels is asked. A draft without the field keeps the
- * rule below (retiring that fallback is a switch-off once every served draft sends the field).
+ * question with no entry, an empty list, or an entry that is not all labels is asked. A draft without the field, or with it
+ * absent, null or malformed, has every question asked: no verified concerns, no removal (DL ruling 02:0xZ; the #3012 check
+ * found the number fallback still deleting "10–20% churn", "400 customers at £20" and the 60-customer campaign). Duplicate
+ * entries for one question must bind it alike; any conflicting or malformed entry keeps it asked.
  */
 function withoutSetAsideQuestions(questions: string[], setAside: readonly SetAsideEstimate[], concerns: unknown,
   nodes: readonly { readonly id: string; readonly label?: unknown }[]): string[] {
-  if (!Array.isArray(concerns)) return withoutSetAsideAmounts(questions, setAside);
+  if (!Array.isArray(concerns)) return questions;
   // The set-aside link is keyed by its admitted ends; a concern's label names a node only when exactly one has that label.
   const idOf = (label: string): string | undefined => {
     const named = nodes.filter((n) => typeof n.label === 'string' && canonicalLabel(n.label) === canonicalLabel(label));
@@ -2731,12 +2733,16 @@ function withoutSetAsideQuestions(questions: string[], setAside: readonly SetAsi
   };
   const asideLinks = new Set(setAside.map((s) => `${s.from}\u0000${s.to}`));
   if (asideLinks.size === 0) return questions;
-  const about = new Map<string, readonly string[]>();
+  // One binding per question: a duplicate entry must bind it alike, and a malformed or conflicting one leaves it unbound.
+  const about = new Map<string, readonly string[] | null>();
   for (const entry of concerns) {
     const e = entry as { unknown?: unknown; concerns?: unknown } | null;
-    if (e === null || typeof e !== 'object' || typeof e.unknown !== 'string' || !Array.isArray(e.concerns)
-      || !e.concerns.every((c) => typeof c === 'string')) continue;
-    about.set(e.unknown.trim(), e.concerns as string[]);
+    if (e === null || typeof e !== 'object' || typeof e.unknown !== 'string') continue;
+    const q = e.unknown.trim();
+    const bound = Array.isArray(e.concerns) && e.concerns.every((c) => typeof c === 'string')
+      ? [...new Set((e.concerns as string[]).map((c) => c.trim()))].sort() : null;
+    const earlier = about.get(q);
+    about.set(q, bound === null || (earlier !== undefined && JSON.stringify(earlier) !== JSON.stringify(bound)) ? null : bound);
   }
   const namesAsideLink = (c: string): boolean => {
     const ends = /^(.+?)\s*(?:\u2192|->)\s*(.+)$/u.exec(c.trim());
@@ -2745,16 +2751,9 @@ function withoutSetAsideQuestions(questions: string[], setAside: readonly SetAsi
   };
   return questions.filter((q) => {
     const aboutQ = about.get(q.trim()) ?? [];
+    if (aboutQ === null) return true;
     return !(aboutQ.length > 0 && aboutQ.every(namesAsideLink));
   });
-}
-
-/** The drafter's questions, less any that writes the amount of a size Olumi set aside (it is asked in the contract's words). */
-function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAsideEstimate[]): string[] {
-  const amounts = setAside.map((s) => s.amount).filter((a): a is number => a !== null && a !== 0).map(Math.abs);
-  if (amounts.length === 0) return questions;
-  const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, a, b);
-  return questions.filter((q) => !findStatedAmounts(q).some((w) => amounts.some((a) => same(Math.abs(w.magnitude), a))));
 }
 
 export function userFacingDrafterQuestions(parked: unknown): string[] {

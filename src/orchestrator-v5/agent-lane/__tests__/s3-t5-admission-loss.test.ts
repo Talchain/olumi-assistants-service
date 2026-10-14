@@ -233,8 +233,40 @@ describe('GEN #2 by entity: a drafter question is left out only when it is ABOUT
     expect(questions).toContain(ASIDE_Q);
   });
 
-  it('CONTRAST: a draft without `unknown_concerns` keeps staging\'s rule until its producer is live (the churn question writes 20)', async () => {
+  /** The raw answer with these extra questions and these exact `unknown_concerns` entries (duplicates allowed). */
+  const withEntries = (extra: readonly string[], entries: readonly unknown[] | null): Episode => {
+    const r = raw();
+    r.unknowns = [...r.unknowns, ...extra];
+    r.unknown_concerns = entries;
+    return { ...RAW, calls: [{ ...RAW.calls[0]!, text: JSON.stringify(r) }, ...RAW.calls.slice(1)] };
+  };
+
+  it('⭐ a draft without `unknown_concerns` has no verified concerns, so every question is asked (the churn question writes 20; #3012 check)', async () => {
     const { questions } = await build(RAW);
-    expect(questions).not.toContain(CHURN);
+    expect(questions).toContain(CHURN);
+    expect(questions).toContain(MRR);
+  });
+
+  it('a null `unknown_concerns` binds nothing: the user\'s figures are asked', async () => {
+    const { questions } = await build(withEntries([CHURN_60, NEW_60], null));
+    for (const q of [CHURN!, CHURN_60, NEW_60]) expect(questions, q).toContain(q);
+  });
+
+  it('duplicate entries that bind a question alike count once: the set-aside link\'s question is left out', async () => {
+    const { questions } = await build(withEntries([ASIDE_Q], [{ unknown: ASIDE_Q, concerns: [ASIDE_LINK] }, { unknown: ASIDE_Q, concerns: [ASIDE_LINK] }]));
+    expect(questions).not.toContain(ASIDE_Q);
+  });
+
+  it('conflicting duplicate entries keep the question asked, in either order', async () => {
+    const narrow = { unknown: ASIDE_Q, concerns: [ASIDE_LINK] }, wide = { unknown: ASIDE_Q, concerns: [ASIDE_LINK, 'Monthly customer churn'] };
+    for (const entries of [[wide, narrow], [narrow, wide]]) {
+      const { questions } = await build(withEntries([ASIDE_Q], entries));
+      expect(questions).toContain(ASIDE_Q);
+    }
+  });
+
+  it('a malformed entry beside a valid one keeps the question asked', async () => {
+    const { questions } = await build(withEntries([ASIDE_Q], [{ unknown: ASIDE_Q, concerns: ASIDE_LINK }, { unknown: ASIDE_Q, concerns: [ASIDE_LINK] }]));
+    expect(questions).toContain(ASIDE_Q);
   });
 });
