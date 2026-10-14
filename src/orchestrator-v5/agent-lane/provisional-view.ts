@@ -216,7 +216,7 @@ export const RUN_INTERPRETATION_FORMAT = Object.freeze({
             properties: {
               view: { type: 'string', description: PROVISIONAL_VIEW_RULE },
               reasoning: { type: 'string', description: 'Why this factor, assumption or figure needs testing, from the model and the user’s words. Never favour an option.' },
-              confirm_step: { type: 'string', description: 'One step to test or find out what the comparison needs. Never an option to do or explore first.' },
+              confirm_step: { type: 'string', description: "One supported executable step to investigate this provisional interpretation or address the recorded blocker. Never imply that answering supplies a missing implementation; never an option to choose or explore first." },
             },
           },
         ],
@@ -236,7 +236,9 @@ export const RUN_INTERPRETATION_VIEW_INSTRUCTION =
   // challenge carried none, 2/2 (its output was the answer alone). The user lost Olumi's view just when they had changed
   // the model. The call is made only when the analysis withholds the leader, which is when Paul's ruling wants the view.
   + 'This call is made only because the analysis cannot put an option forward, so give your view on every such run, including a rerun or after a view you gave earlier: say it again, updated for this run. '
-  + "Set it to null only when the model and the user’s words give you no basis for any view.";
+  + "Set it to null only when the model and the user’s words give you no basis for any view. "
+  // ⭐ AIE C5 (#2994 rulings, 13 Oct): Explain is tool-less and does not inherit the Agent's `confirm_step` tool rule.
+  + "Choose a confirm_step that the user can actually take and that helps investigate this provisional view or address the recorded blocker. Do not imply that supplying input repairs a missing implementation. When an activity can improve reasoning but cannot unlock this calculation, say so. Do not propose a step that cannot help or favour an option.";
 
 /**
  * The typed answer of that one call — or `null` when the text is not it (a plain-text interpretation stays the reply,

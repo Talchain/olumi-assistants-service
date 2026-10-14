@@ -226,7 +226,8 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     for (const retired of ['use goal_chance_words verbatim', 'stated_time.chance_words verbatim', 'say its range text exactly as given', 'using goal_chance_display for that option exactly']) {
       expect(HOST_TOOL_CONTRACT).not.toContain(retired);
     }
-    expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q2, rulings 1ad7f7b2…): the AIE's whole #35 entry; same rule, its words.
+    expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs dedicated comparative reasoning; do not turn per-option facts into an unlicensed ranking.');
   });
   it('CONTROL: similar licences and whole-percentage displays also work without a leader', async () => {
     const read = fixture([{ ...licence, withheld_option_ids: undefined, form: 'similar', similar_option_ids: [A, B], pct_by_option: { [A]: 44, [B]: 48, [C]: 25 }, display_rounding_by_option: undefined }]);
@@ -407,7 +408,8 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     expect(HOST_TOOL_CONTRACT).not.toContain('say that sentence exactly, right after the chance');
     expect(HOST_TOOL_CONTRACT).toContain('A computed comparative leader may be named only in dedicated comparative reasoning when the selected CURRENT Run explicitly sets leader_may_be_named to true. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
     expect(HOST_TOOL_CONTRACT).toContain('Do not state a share of model runs or name a leader from that share in a result reply');
-    expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q2, rulings 1ad7f7b2…): the AIE's whole #35 entry; same rule, its words.
+    expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs dedicated comparative reasoning; do not turn per-option facts into an unlicensed ranking.');
     expect(HOST_TOOL_CONTRACT).toContain('Name an assumption the ordering is sensitive to ONLY from the result’s `decision_sensitivity`');
     expect(HOST_TOOL_CONTRACT).toContain('Never translate either EVPPI status into no measurable assumption or no measurable goal-chance driver');
     expect(HOST_TOOL_CONTRACT).toContain('This availability grants no permission to name or rank a driver or an option.');

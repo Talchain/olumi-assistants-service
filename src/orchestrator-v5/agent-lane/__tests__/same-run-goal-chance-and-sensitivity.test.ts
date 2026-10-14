@@ -218,7 +218,8 @@ describe('W3 controls: no scope promotion, no withheld/stale fact revival', () =
 describe('W3 instruction and discriminating mutants', () => {
   it('RED at base: headline uses licensed chance display, and both measurement scopes are explicit', () => {
     // ⛔ CHANGED EXPECTATION (G, AIE #94 6133027121): the headline no longer directs whole-goal words; the licensed target wording does.
-    expect(HOST_TOOL_CONTRACT).toContain('the per-option headline is its chance, in this model, on current information');
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q2, rulings 1ad7f7b2…): the AIE's whole #35 entry; same rule, its words.
+    expect(HOST_TOOL_CONTRACT).toContain('State a goal chance only where the selected current Run actually licenses that option, quantity, target, unit, reference and period, retaining its in-this-model meaning and supplied qualifications.');
     // ⛔ CHANGED EXPECTATION (prompt P5/P6/P13, AIE one-pass packet 94ad9c8f…): the licensed figure is explained in the AI's own
     // words with its exact number or range kept; a share of model runs never stands in for it.
     expect(HOST_TOOL_CONTRACT).not.toContain('quote an allowed chance using goal_chance_display for that option exactly');
@@ -236,7 +237,8 @@ describe('W3 instruction and discriminating mutants', () => {
     expect(HOST_TOOL_CONTRACT).toContain('Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present.');
     expect(HOST_TOOL_CONTRACT).toContain('Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
     expect(HOST_TOOL_CONTRACT).toContain('When leader permission is withheld, do not describe an option as the better, preferred or superior option, or the one to choose.');
-    expect(HOST_TOOL_CONTRACT).toContain('earned: false permits its exact say sentence, never an inferred 0 or 1');
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q2, rulings 1ad7f7b2…): the AIE's whole #35 entry; same rule, its words.
+    expect(HOST_TOOL_CONTRACT).toContain('earned: false permits explaining its recorded say reason in your own words, retaining its actual scope, source, conditions and uncertainty, never an inferred 0 or 1.');
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never write recommend or recommendation, including negated forms.');
     expect(HOST_TOOL_CONTRACT).toContain('Never write recommend or recommendation, including negated forms.');
     expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('never rank, order or single');
