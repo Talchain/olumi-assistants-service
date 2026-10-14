@@ -591,9 +591,12 @@ describe('later human work is kept: carried by identity, read as context, named 
   it('⭐ Q3: the user\'s own figure is carried back over the drafter\'s, with its stamp, AS THE SAME FIGURE on the revision\'s range', async () => {
     const g = structuredClone(FX.graph);
     const f = (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!;
-    // The shape a real user edit stores (`identity-confirm-edit.ts`): £40,000 encoded on the saved node's £200,000 range.
+    // The shape the value writer stores (`set-factor-value.ts`): £40,000 encoded on the saved node's £200,000 range, and the
+    // node stamped `user_set` beside it (buddy FAIL on #3032: that stamp made the card say the user had ADDED this part).
     expect(f.scale_frame).toBe(200000);
     f.observed_state = { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_override' };
+    f.provenance = 'user_set';
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['your figure for \u2018Advertising spend\u2019']);
     const { caps, proposals } = laneWith(server({ graph: g }));
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
@@ -601,7 +604,10 @@ describe('later human work is kept: carried by identity, read as context, named 
     expect(levelFrameOf(node as never), 'PRECONDITION: the revision measures it on another range').not.toBe(200000);
     expect(node.observed_state).toMatchObject({ unit: 'GBP/year', raw_value: 40000, source: 'user_override' });
     expect(naturalOn(node, node.observed_state.value as number)).toBeCloseTo(40000, 6);
+    // The figure's node stamp travels with it, as the writer pairs them.
+    expect(node.provenance).toBe('user_set');
     expect(cardOf(proposals, r)).toContain('Kept as you set them: your figure for \u2018Advertising spend\u2019. ');
+    expect(cardOf(proposals, r)).not.toContain('which you added');
   });
 
   it('a revision that lacks a part the user set is not offered, and the card names what it would lose', async () => {
@@ -637,7 +643,8 @@ describe('later human work is kept: carried by identity, read as context, named 
 
   it('⭐ FULL PATH: the carried figure is the user\'s £40,000 after approval, in the stored graph, and in what the Run sends', async () => {
     const g = structuredClone(FX.graph);
-    (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!.observed_state = { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_override' };
+    Object.assign((g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!,
+      { observed_state: { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_override' }, provenance: 'user_set' });
     const s = server({ graph: g });
     const { caps } = laneWith(s);
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
@@ -647,6 +654,7 @@ describe('later human work is kept: carried by identity, read as context, named 
     expect(applied, JSON.stringify(applied).slice(0, 600)).toMatchObject({ ok: true, applied: true });
     const stored = (s.graph().nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
     expect(stored.observed_state).toMatchObject({ raw_value: 40000, source: 'user_override' });
+    expect(stored.provenance).toBe('user_set');
     expect(naturalOn(stored, stored.observed_state.value as number)).toBeCloseTo(40000, 6);
     const { payload } = await runFromStore(s.bytes(), true);
     // What the engine receives: the factor's encoded value on the range it is sent with reads back as the user's £40,000.
@@ -684,21 +692,95 @@ describe('later human work is kept: carried by identity, read as context, named 
 
   it('a part the user added that the revision holds keeps the user\'s stamp on it (never the revision\'s own)', async () => {
     const g = structuredClone(FX.graph);
-    Object.assign((g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!, { provenance: 'user_set' });
-    expect(humanMaterialAfterTheDraft(g)).toEqual(['\u2018Advertising spend\u2019, which you added']);
-    const { caps, proposals } = laneWith(server({ graph: g }));
+    // An option the user named (the add-option leg stamps `user_set`); the revision holds it, with no figure on it.
+    Object.assign((g.nodes as Rec[]).find((n) => n.id === 'hire_marketing_manager')!, { provenance: 'user_set' });
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['\u2018Hire marketing manager\u2019, which you added or renamed']);
+    const sameOption = (): Rec => { const c = candidate(); c.options[0].label = 'Hire marketing manager'; return c; };
+    const { caps, proposals } = laneWith(server({ graph: g }), { draft: sameOption });
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    expect((candidateOf(proposals, r).nodes as Rec[]).find((n) => n.label === 'Advertising spend')!.provenance).toBe('user_set');
+    expect((candidateOf(proposals, r).nodes as Rec[]).find((n) => n.label === 'Hire marketing manager')!.provenance).toBe('user_set');
+    expect(cardOf(proposals, r)).toContain('Kept as you set them: \u2018Hire marketing manager\u2019, which you added or renamed. ');
+  });
+
+  it('a part the user added that the revision gives a figure: not offered, naming it (its stamp would claim Olumi\'s figure as theirs)', async () => {
+    const g = structuredClone(FX.graph);
+    // The shape `structural-add.ts` stores: the user's stamp and NO figure. The revision's own 'Advertising spend' holds one.
+    const f = (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!;
+    delete f.observed_state;
+    f.provenance = 'user_set';
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['\u2018Advertising spend\u2019, which you added or renamed']);
+    const r = await laneWith(server({ graph: g })).caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
+    expect(String(r.detail)).toContain('does not hold \u2018Advertising spend\u2019, which you added or renamed, so nothing was offered');
   });
 
   it('a part the user added that the revision lacks: not offered, naming it', async () => {
     const g = structuredClone(FX.graph);
     Object.assign((g.nodes as Rec[]).find((n) => n.label === 'Marketing experience')!, { provenance: 'user_set' });
-    expect(humanMaterialAfterTheDraft(g)).toEqual(['\u2018Marketing experience\u2019, which you added']);
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['\u2018Marketing experience\u2019, which you added or renamed']);
     const r = await laneWith(server({ graph: g })).caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
-    expect(String(r.detail)).toContain('does not hold \u2018Marketing experience\u2019, which you added, so nothing was offered');
+    expect(String(r.detail)).toContain('does not hold \u2018Marketing experience\u2019, which you added or renamed, so nothing was offered');
+  });
+
+  /** One stored state for the user's 'Advertising spend' figure (node stamped as the writer does); the offer it gets. */
+  const offerFor = async (os: Rec): Promise<Rec> => {
+    const g = structuredClone(FX.graph);
+    Object.assign((g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!, { observed_state: os, provenance: 'user_set' });
+    return await laneWith(server({ graph: g })).caps.proposeGoalTarget!(l20Turn, conversion as never) as Rec;
+  };
+  const notHeld = (words: string): string => `The revised draft does not hold ${words}, so nothing was offered and the model is unchanged. `
+    + 'Tell the user plainly which of their changes a revised draft would lose.';
+
+  it('⭐ a figure OUTSIDE the revision\'s range is REFUSED, naming it: the engine would analyse another number (buddy FAIL on #3032)', async () => {
+    // The revision measures 'Advertising spend' on £0–£100,000; the saved model on £0–£200,000.
+    for (const os of [{ unit: 'GBP/year', value: 0.75, raw_value: 150000, source: 'user_override' },
+      { unit: 'GBP/year', value: -0.1, raw_value: -20000, source: 'user_override' }]) {
+      const r = await offerFor(os);
+      expect(r, JSON.stringify(os)).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
+      expect(r.detail).toBe(notHeld('your figure for \u2018Advertising spend\u2019'));
+    }
+    // CONTRAST: the top of the revision's range is inside it, and is carried as £100,000.
+    expect(await offerFor({ unit: 'GBP/year', value: 0.5, raw_value: 100000, source: 'user_override' })).toMatchObject({ ok: true, mutated: false });
+  });
+
+  it('⭐ a level OUTSIDE the revision\'s range is REFUSED, naming it (the level writer\'s own out_of_range)', async () => {
+    const g = structuredClone(FX.graph);
+    const option = (g.nodes as Rec[]).find((n) => n.id === 'hire_marketing_manager')!;
+    option.interventions = { ...option.interventions, advertising_spend: { unit: 'GBP/year', value: 0.75, raw_value: 150000, source: 'user_specified' } };
+    const sameOption = (): Rec => { const c = candidate(); c.options[0].label = 'Hire marketing manager'; return c; };
+    const r = await laneWith(server({ graph: g }), { draft: sameOption }).caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
+    expect(r.detail).toBe(notHeld('your level for \u2018Hire marketing manager\u2019 on \u2018Advertising spend\u2019'));
+  });
+
+  it('a figure whose unit is not the revision\'s (one side has none) is REFUSED, naming it', async () => {
+    const r = await offerFor({ value: 0.2, raw_value: 40000, source: 'user_override' });
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
+    expect(r.detail).toBe(notHeld('your figure for \u2018Advertising spend\u2019'));
+  });
+
+  it('a saved figure whose two spellings disagree (value × range ≠ raw figure) is REFUSED, naming it: its meaning is not known', async () => {
+    const r = await offerFor({ unit: 'GBP/year', value: 0.5, raw_value: 40000, source: 'user_override' });
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
+    expect(r.detail).toBe(notHeld('your figure for \u2018Advertising spend\u2019'));
+  });
+
+  it('the saved baseline is never carried as the user\'s: the revision keeps its own range fields beside the user\'s figure', async () => {
+    const control = laneWith(server());
+    const offered = await control.caps.proposeGoalTarget!(l20Turn, conversion as never);
+    const own = (candidateOf(control.proposals, offered).nodes as Rec[]).find((n) => n.label === 'Advertising spend')!.observed_state as Rec;
+    const g = structuredClone(FX.graph);
+    Object.assign((g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!,
+      { observed_state: { unit: 'GBP/year', value: 0.2, raw_value: 40000, baseline: 0.1, source: 'user_override' }, provenance: 'user_set' });
+    const { caps, proposals } = laneWith(server({ graph: g }));
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    const carried = (candidateOf(proposals, r).nodes as Rec[]).find((n) => n.label === 'Advertising spend')!.observed_state as Rec;
+    expect(carried.baseline).toEqual(own.baseline);
+    expect(carried.cap).toEqual(own.cap);
+    expect(carried).toMatchObject({ raw_value: 40000, source: 'user_override' });
   });
 
   it('G2 (adopted): a saved edit since the draft no longer refuses; the card names what the revision adds and omits against the current saved model', async () => {
@@ -779,6 +861,13 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     const g = structuredClone(FX.graph);
     Object.assign((g.nodes as Rec[]).find((n) => n.kind === 'goal')!, { threshold_source: 'user' });
     expect(humanMaterialAfterTheDraft(g)).toEqual(['your target for \u2018product feature launch\u2019']);
+    await refusedAtOffer(server({ graph: g }));
+  });
+
+  it('a limit the user set still refuses: a stored graph cannot hold a user limit row, so it is never carried', async () => {
+    const g = structuredClone(FX.graph);
+    g.goal_constraints = [...(g.goal_constraints ?? []), { node_id: 'advertising_spend', operator: '<=', value: 50000, unit: 'GBP/year', provenance: 'user' }];
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['your limit or target on \u2018Advertising spend\u2019']);
     await refusedAtOffer(server({ graph: g }));
   });
 
