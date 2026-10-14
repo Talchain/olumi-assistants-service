@@ -15,7 +15,7 @@ describe('an option\'s capacity ratio through the brief\'s own product identity'
       factors: [{ label: 'Mid-weight developers', today: 6, withOption: 6, unit: 'developers' },
         // AIE 6174736249: 75% is derived (the brief states 25% legacy), on Olumi's two-way split assumption.
         { label: 'Time on feature work', today: 75, withOption: 85, unit: '% of development time',
-          derived: { from: 'Time on legacy fixes', split_with: 'Time on legacy fixes' } }],
+          derived: { from: 'Time on legacy fixes', split_with: 'Time on legacy fixes', split_total: 100 } }],
       // The drafter's identity is Olumi's reading (not quoted from the brief); the 15% is Olumi's proposed setting.
       identity_stated: false, settings: [{ label: 'Time on legacy fixes', value: 15, unit: '% of development time', olumis: true }] });
     expect(r.get(2)!.ratio).toBeCloseTo(8 / 6, 12);

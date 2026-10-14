@@ -3604,6 +3604,31 @@ function carryEventReasoningContext(event: AdmittedModel, context: AdmittedModel
     const identity = n.nonlinear_identity;
     nodes.push({ ...n, id, ...(identity ? { nonlinear_identity: { ...identity, factor_ids: identity.factor_ids.map(f => ids.get(f) ?? f) } } : {}) });
   }
+  // PL 6135017311 item 3: each capacity-ratio carrier names its source factors BY ID, so the live compiler
+  // (`withCompiledCapacityRatios`) recomputes r from the saved figures; a label that does not resolve leaves no source.
+  const contextIdOf = (label: unknown): string | undefined => {
+    const hits = nodes.filter(m => m.id.startsWith('event_context_') && m.kind === 'factor'
+      && canonicalLabel(m.label) === canonicalLabel(String(label)));
+    return hits.length === 1 ? hits[0]!.id : undefined;
+  };
+  for (const m of nodes) {
+    const c = (m.observed_state as { extra_share_by_date?: Record<string, any> } | undefined)?.extra_share_by_date;
+    const basis = c?.ratio_basis;
+    if (typeof c?.capacity_ratio !== 'number' || !basis || !Array.isArray(basis.factors) || !Array.isArray(basis.settings)) continue;
+    const factorIds = basis.factors.map((f: { label: unknown }) => contextIdOf(f.label));
+    const setIds = basis.settings.map((x: { label: unknown }) => contextIdOf(x.label));
+    const derived = Object.fromEntries(basis.factors.flatMap((f: { derived?: { from?: unknown; split_total?: unknown } }, i: number) => {
+      const source = contextIdOf(f.derived?.from);
+      return typeof f.derived?.split_total === 'number' && source !== undefined && factorIds[i] !== undefined
+        ? [[factorIds[i], { source_id: source, total: f.derived.split_total }]] : [];
+    }));
+    // The option's own settings ride on its carrier (by factor id): a lever on a kept-out factor would make the Run refuse.
+    const settings = Object.fromEntries(basis.settings.flatMap((x: { value?: unknown }, i: number) =>
+      typeof x.value === 'number' && setIds[i] !== undefined ? [[setIds[i], x.value]] : []));
+    if ([...factorIds, ...setIds].every(x => x !== undefined)) {
+      c.ratio_source = { factor_ids: factorIds, set_ids: setIds, settings, ...(Object.keys(derived).length > 0 ? { derived } : {}) };
+    }
+  }
   const edges = context.edges.flatMap(e => {
     const from = ids.get(e.from), to = ids.get(e.to);
     return from && to ? [{ ...e, from, to }] : [];
@@ -3636,11 +3661,21 @@ function carryEventReasoningContext(event: AdmittedModel, context: AdmittedModel
 function retainEventContextForReview(model: AdmittedModel, candidate: CandidateModel): AdmittedModel {
   const limitIds = model.goal_constraints.map(c => c.node_id);
   const protectedIds = new Set([...limitIds, ...limitSinkBranch(model.nodes, model.edges, limitIds)]);
+  // PL 6135017311 item 3: the factors a capacity-ratio carrier is compiled from (`withCompiledCapacityRatios`) stay out of the
+  // computed graph — live, they reach the goal only through the compiled carrier and readiness refuses the Run (NO_PATH_TO_GOAL);
+  // a lever on them makes the participation guard refuse it — but their saved figures feed the forecast, and the notes say so.
+  const live = new Set(model.nodes.flatMap(n => {
+    const src = (n.observed_state as { extra_share_by_date?: { ratio_source?: { factor_ids?: unknown; set_ids?: unknown } } } | undefined)
+      ?.extra_share_by_date?.ratio_source;
+    return [...(Array.isArray(src?.factor_ids) ? src!.factor_ids : []), ...(Array.isArray(src?.set_ids) ? src!.set_ids : [])] as string[];
+  }));
   const excluded = new Set(model.nodes.filter(n => n.id.startsWith('event_context_') && !protectedIds.has(n.id)).map(n => n.id));
   if (excluded.size === 0) return model;
   const loss: RepairEntry[] = model.nodes.filter(n => excluded.has(n.id)).map(n => ({
     field_path: `nodes[${n.id}].event_forecast_not_modelled`, before: n, after: 'retained_excluded', severity: 'warn',
-    reason: `"${n.label}" is kept as reasoning context; this deadline forecast uses option-level added capacity.`,
+    reason: live.has(n.id)
+      ? `"${n.label}" is kept beside the deadline forecast; its saved figure feeds an option's capacity change.`
+      : `"${n.label}" is kept as reasoning context; this deadline forecast uses option-level added capacity.`,
   } as RepairEntry));
   const nodes = model.nodes.map(n => {
     if (excluded.has(n.id)) return { ...n, analysis_participation: 'retained_excluded' as const };
@@ -3655,7 +3690,9 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
       const unit = original?.unit ?? setting.unit ?? factor.observed_state?.unit ?? '';
       // ONE PROVENANCE AUTHORITY: "Your stated setting" only for the person's own setting (`provenanceOf`).
       const author = settingProvenanceOf(setting, factor).origin === 'human' ? 'Your stated setting' : 'Drafted option setting';
-      const detail = `${author}: ${factor.description ?? factor.label} = ${value}${unit ? ` ${unit}` : ''}. Kept for review; the deadline forecast uses this option's added-capacity estimate.`;
+      const detail = `${author}: ${factor.description ?? factor.label} = ${value}${unit ? ` ${unit}` : ''}. ${live.has(id)
+        ? "The deadline forecast works this setting into the option's capacity change."
+        : "Kept for review; the deadline forecast uses this option's added-capacity estimate."}`;
       loss.push({ field_path: `nodes[${n.id}].event_forecast_not_modelled`, before: { factor, setting, original },
         after: { description: detail }, severity: 'warn', reason: detail } as RepairEntry);
       return detail;

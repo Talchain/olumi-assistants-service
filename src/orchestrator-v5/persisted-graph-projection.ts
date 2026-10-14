@@ -48,6 +48,7 @@
  * (P0-A) — and only a `null` nothing else claimed is dropped as absence.
  * See `drop-null-optional-fields.ts`.
  */
+import { withCompiledCapacityRatios } from './goal-target/event-by-date-model.js';
 import { assertNoScopedIdentityConflict } from './agent-lane/goal-scope.js';
 import { dropNullOptionalGraphFields } from './drop-null-optional-fields.js';
 import { repairGraphForPersistence } from './repair-graph-for-persistence.js';
@@ -81,7 +82,9 @@ export interface PersistedGraphProjectionContext {
  * pass (intercept repair, intervention promotion, options mirror) is a real repair and still refuses.
  */
 export function normaliseAbsenceOnly<T>(graph: T): T {
-  return dropNullOptionalGraphFields(reindexInterventionKeys(graph));
+  // The capacity-ratio compile is a derivation, not a repair (idempotent; a no-op without a compiled carrier), so a stored
+  // base compiled under older figures stays a fixed point of the projection below (PL 6135017311 item 3).
+  return withCompiledCapacityRatios(dropNullOptionalGraphFields(reindexInterventionKeys(graph)));
 }
 
 /**
@@ -122,5 +125,6 @@ export function projectGraphForPersistence<T>(
   const admitted = admitInterventionRanges(normalised, ctx);
   const reconciled = reconcileTopLevelOptionsFromNodes(admitted, ctx);
   const reindexed = reindexInterventionKeys(reconciled);
-  return dropNullOptionalGraphFields(reindexed, ctx);
+  // PL 6135017311 item 3: every committed revision recompiles each capacity ratio from the saved figures.
+  return withCompiledCapacityRatios(dropNullOptionalGraphFields(reindexed, ctx));
 }
