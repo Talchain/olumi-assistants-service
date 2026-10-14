@@ -1,0 +1,8 @@
+{
+ "_source": {
+  "draft": "recovery/prompt/GEN-D4-DRAFTER-TEXT-DRAFT.txt",
+  "draft_sha256": "d32c9b0e8063e0d42ff3bd4602239d275fb4734954ef8809bbecf6266f949a4d",
+  "status": "AIE_TEXT_PENDING: PROMPT's item B, typographic apostrophes; replaced byte for byte from the AIE packet. Ships ONLY with HIRING's calendar-point admission pair (horizon-attestation.ts CALENDAR_POINT)."
+ },
+ "calendar_deadline": "A deadline the brief gives as a calendar point (the end of next quarter, by Q3, by March) is not a month count: leave goal.horizon_months and basis.period_months null and keep the brief’s words in the goal’s source_quote; Olumi asks for the date."
+}
