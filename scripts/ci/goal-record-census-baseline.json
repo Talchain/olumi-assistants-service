@@ -1,5 +1,5 @@
 {
-  "source_sha": "1fec9097fea2ed5bb0650acc1b4cd22037ff8189",
+  "source_sha": "95ffd5439298d1a2bb47f23733a47d3d16b57205",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -318,6 +318,7 @@
       "src/schemas/ceeResponses.ts": 1
     },
     "goal_period": {
+      "src/orchestrator-v5/goal-target/goal-record.ts": 3,
       "src/schemas/cee-v3.ts": 1,
       "src/schemas/contract-field-guard.ts": 2
     },
@@ -827,7 +828,7 @@
     "goal_horizon_months": 43,
     "goal_level_reading": 19,
     "goal_node_id": 288,
-    "goal_period": 3,
+    "goal_period": 6,
     "goal_scope": 48,
     "goal_sense_reading": 15,
     "goal_stated_as": 3,
@@ -849,7 +850,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2471,
+  "total_references": 2474,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

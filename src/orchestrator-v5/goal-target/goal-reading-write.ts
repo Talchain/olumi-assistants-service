@@ -52,17 +52,17 @@ export interface GoalReadingProjection {
   readonly label: string;
   readonly target: GoalRecord['target'];
   readonly horizon: GoalRecord['horizon'];
-  /** The period the goal's figures are per (`goal_period`: week, month …), or null. */
+  /** The period the goal's figures are per (week, month …), from the ONE record, or null. */
   readonly period: string | null;
   /** The reading as the card says it, without its question: reference, denominator, window, effect unit and conditions. */
   readonly reading: Omit<GoalTargetBasis, 'open_question'> | null;
 }
 
 /**
- * ⭐ ONE PROJECTION (Codex check r2 on #2995: horizon, then `goal_period`, each found missing in turn). The card's words are
+ * ⭐ ONE PROJECTION (Codex check r2 on #2995: the horizon, then the goal's period, each found missing in turn). The card's words are
  * rendered from it ({@link goalReadingWords}), the card carries it as `expected_goal`, and the door and the read-back
  * deep-compare it: no member the card says, or that changes what its figure means, can move unseen. Through the ONE goal
- * record (S5) for the label, target and horizon; the goal's own `goal_period`; and the validated reading (`goalTargetBasisOf`).
+ * record (S5) for the label, target, horizon and period; and the validated reading (`goalTargetBasisOf`).
  */
 export function goalReadingProjectionOf(graph: unknown, goalId: string): GoalReadingProjection | undefined {
   const record = readGoalRecord(graph, goalId);
@@ -70,8 +70,7 @@ export function goalReadingProjectionOf(graph: unknown, goalId: string): GoalRea
   const node = ((graph as { nodes: unknown[] }).nodes).find((n): n is Rec => isRec(n) && n.kind === 'goal' && n.id === goalId);
   const basis = goalTargetBasisOf(node);
   const reading = basis === undefined ? null : (({ open_question: _question, ...rest }) => rest)(basis);
-  return { label: record.label, target: record.target, horizon: record.horizon,
-    period: typeof node?.goal_period === 'string' ? node.goal_period : null, reading };
+  return { label: record.label, target: record.target, horizon: record.horizon, period: record.period ?? null, reading };
 }
 
 export type GoalReadingRefusal = 'invalid_graph' | 'goal_not_found' | 'not_a_goal' | 'no_open_question' | 'not_a_reading_question'
