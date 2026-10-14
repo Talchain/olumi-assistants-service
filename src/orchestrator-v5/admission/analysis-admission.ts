@@ -1336,13 +1336,21 @@ export function analysisAdmissionFrom(
   // ── missing_important_inputs ───────────────────────────────────────────────
   if (missing.length > 0) {
     const demanded = missing.filter((m) => m.obligation !== 'offered').length;
+    // C1 (Paul's funding test, 14 Oct): a gap waived by leaving its option out was NOT filled, and including that option
+    // needs the user's values. Say what is required, never "nothing is required of you".
+    const leftOut = [...new Set(missing.filter((m) => m.waived_by_exclusion).map((m) => m.option_label ?? m.option_id))]
+      .filter((label): label is string => typeof label === 'string' && label !== '');
     reasons.push({
       field: 'missing_important_inputs',
       code: 'MODEL_HAS_BLOCKERS',
       message:
         demanded > 0
           ? `${demanded === 1 ? 'One input is' : `${demanded} inputs are`} still needed from you.`
-          : 'Olumi filled in the gaps here itself; you can review them, and nothing is required of you.',
+          : leftOut.length === 1
+            ? `‘${leftOut[0]}’ is left out until you set what it changes.`
+            : leftOut.length > 1
+              ? `${leftOut.length} options are left out until you set what they change.`
+              : 'Olumi filled in the gaps here itself; you can review them, and nothing is required of you.',
     });
   }
 

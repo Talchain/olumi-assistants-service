@@ -1,6 +1,7 @@
 import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
+import { modelGapOf } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
@@ -26,6 +27,9 @@ const OPTION_CHANCE_WITHHELD = 'Olumi can’t yet say its chance of meeting your
 const OPTION_CHANCE_NOT_SHOWN = 'Chance not shown yet';
 /** Recovery Batch C, amendment 1: the status quo row's face — no figure, no interval. */
 const STATUS_QUO_FACE = 'No change, by assumption';
+/** C1: with no goal target, no option can have a chance of meeting it. */
+const GOAL_TARGET_MISSING = 'goal_target_missing';
+const GOAL_TARGET_MISSING_FACE = 'Not shown yet: needs a target';
 
 /**
  * Moved readGoalIdentityWithheld message selection from DGAI
@@ -164,6 +168,11 @@ export function projectCanonicalAnalysisCells(
     return typeof row?.id === 'string' && typeof row.label === 'string' && row.label.trim() !== ''
       ? [[row.id, row.label] as const] : [];
   }));
+  // C1 (Paul's funding test, 14 Oct): with no goal target no option can have a chance of meeting it, so the missing target
+  // is the ONE root reason, ahead of placeholder and horizon reasons. Read from the standing gap (`modelGapOf`, the action
+  // bar's "Set target"), in its own words.
+  const gap = modelGapOf(graph);
+  const targetMissing = gap?.kind === 'goal_target_missing' ? { code: GOAL_TARGET_MISSING, message: gap.question } : undefined;
   const compared = rec(rec(result)?.enrichment)?.option_comparison;
   // The roster belongs to the served Run, not today's graph or a refused attempt.
   const optionIds = [...new Set([
@@ -180,7 +189,7 @@ export function projectCanonicalAnalysisCells(
       ? facts.goal_chance_range_display?.[option_id] : undefined;
     const display = Object.hasOwn(facts.goal_chance_display ?? {}, option_id)
       ? facts.goal_chance_display?.[option_id] : undefined;
-    const reasons = goalChanceWithheldReasonsForAgent(result, option_id);
+    const reasons = [...(targetMissing === undefined ? [] : [targetMissing]), ...goalChanceWithheldReasonsForAgent(result, option_id)];
     const recordedLabel = licence?.option_labels_by_option?.[option_id];
     const label = typeof recordedLabel === 'string' && recordedLabel.trim() !== '' ? recordedLabel : labels.get(option_id);
     const reasonByOption = rec(rec(licence)?.withheld_reason_by_option);
@@ -196,13 +205,13 @@ export function projectCanonicalAnalysisCells(
     // a joint withheld for several targets says its own line. Both are the licence's stored words, never composed here.
     const byAssumption = reasons.find(reason => reason.code === STATUS_QUO_BY_ASSUMPTION);
     const batchCReason = byAssumption ?? reasons.find(reason => reason.code === 'goal_joint_not_shown');
-    const withheldWhy = horizonReason?.message ?? identityMessage ?? certainty.get(option_id) ?? reasonLine
+    const withheldWhy = targetMissing?.message ?? horizonReason?.message ?? identityMessage ?? certainty.get(option_id) ?? reasonLine
       ?? batchCReason?.message ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
     const face = faces.get(option_id);
     const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
       : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }
         : reasons.length > 0 ? { kind: 'withheld', reasons,
-          face: horizonReason !== undefined ? ZERO_SPREAD_NEEDS_MONTHLY_CHANGES : byAssumption !== undefined ? STATUS_QUO_FACE : OPTION_CHANCE_NOT_SHOWN,
+          face: targetMissing !== undefined ? GOAL_TARGET_MISSING_FACE : horizonReason !== undefined ? ZERO_SPREAD_NEEDS_MONTHLY_CHANGES : byAssumption !== undefined ? STATUS_QUO_FACE : OPTION_CHANCE_NOT_SHOWN,
           why: withheldWhy } : { kind: 'none' };
     return { option_id, cell };
   });
