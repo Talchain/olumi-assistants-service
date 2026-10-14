@@ -125,14 +125,14 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
     expect(resolveRunAdmission(w.read()).willProceed).toBe(true);
   });
   it.each([
-    ['unrelated revenue date', 'Revenue was 2m as of 2026-09-01. Our launch deadline is 6 months from today.', undefined],
-    ['unrelated revenue date with correct host echo', 'Revenue was 2m as of 2026-09-01. Our launch deadline is 6 months from today.', '2026-10-13'],
-    ['old report date before deadline dating', 'as of 2026-09-01 for the old report; our launch deadline is 6 months from today as of 2026-10-13', undefined],
-    ['comma and revenue date', 'Revenue was 2m as of 2026-09-01, and our launch deadline is 6 months from today.', undefined],
-    ['comma and revenue date with correct host echo', 'Revenue was 2m as of 2026-09-01, and our launch deadline is 6 months from today.', '2026-10-13'],
-    ['old report comma before deadline dating', 'as of 2026-09-01 for the old report, our launch deadline is 6 months from today as of 2026-10-13', undefined],
-    ['deadline before unrelated revenue date', 'Our launch deadline is 6 months from today, and revenue was 2m as of 2026-09-01.', undefined],
-  ])('DLf4 %s never becomes the saved deadline reference', async (_name, text, reference_date) => {
+    ['unrelated revenue date', 'Revenue was 2m as of 2026-09-01. Our launch deadline is 6 months from today.', undefined, 'Our launch deadline is 6 months from today'],
+    ['unrelated revenue date with correct host echo', 'Revenue was 2m as of 2026-09-01. Our launch deadline is 6 months from today.', '2026-10-13', 'Our launch deadline is 6 months from today'],
+    ['old report date before deadline dating', 'as of 2026-09-01 for the old report; our launch deadline is 6 months from today as of 2026-10-13', undefined, 'as of 2026-09-01 for the old report; our launch deadline is 6 months from today as of 2026-10-13'],
+    ['comma and revenue date', 'Revenue was 2m as of 2026-09-01, and our launch deadline is 6 months from today.', undefined, 'Revenue was 2m as of 2026-09-01, and our launch deadline is 6 months from today'],
+    ['comma and revenue date with correct host echo', 'Revenue was 2m as of 2026-09-01, and our launch deadline is 6 months from today.', '2026-10-13', 'Revenue was 2m as of 2026-09-01, and our launch deadline is 6 months from today'],
+    ['old report comma before deadline dating', 'as of 2026-09-01 for the old report, our launch deadline is 6 months from today as of 2026-10-13', undefined, 'as of 2026-09-01 for the old report, our launch deadline is 6 months from today as of 2026-10-13'],
+    ['deadline before unrelated revenue date', 'Our launch deadline is 6 months from today, and revenue was 2m as of 2026-09-01.', undefined, 'Our launch deadline is 6 months from today, and revenue was 2m as of 2026-09-01'],
+  ])('DLf4 %s never becomes the saved deadline reference', async (_name, text, reference_date, sentence) => {
     const w = world(), atOffer = w.read();
     const card = await w.offer(reference_date === undefined ? {} : { reference_date }, text);
     expect(card.ok, JSON.stringify(card)).toBe(true);
@@ -144,14 +144,15 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
       expected_goal: deadlineCardSubjectOf(atOffer, 'event_goal'),
     } }]);
     expect(proposal.provenance).toEqual({ authored_by: 'user_stated', basis: '' });
-    expect(card.public_label).toBe(`Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: “${WORDS}”.`);
+    // The card quotes the user's own sentence holding the words, verbatim (#3069 fix-forward).
+    expect(card.public_label).toBe(`Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: “${WORDS}” in “${sentence}”.`);
     expect(w.rows.filter(r => r.write.graph !== undefined)).toHaveLength(1);
   });
   it('DLf4 an explicit as-of dates the deadline with a matching model echo', async () => {
     const w = world(), atOffer = w.read();
     const card = await w.offer({ deadline_words: 'six months', reference_date: '2026-11-01' }, 'as of 2026-11-01 our deadline is six months');
     expect(card.ok, JSON.stringify(card)).toBe(true);
-    expect(card.public_label).toBe('Is your deadline 1 May 2027 (6 months from 1 November 2026)? Your words: “six months”.');
+    expect(card.public_label).toBe('Is your deadline 1 May 2027 (6 months from 1 November 2026)? Your words: “six months” in “as of 2026-11-01 our deadline is six months”.');
     const proposal = w.proposals.get(String(card.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: 'event_goal', value: {
       deadline: '2027-05-01', expected_deadline: null, words: 'six months', reference: '2026-11-01', stated_months: 6,

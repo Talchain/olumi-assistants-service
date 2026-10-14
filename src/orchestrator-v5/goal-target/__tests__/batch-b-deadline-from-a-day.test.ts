@@ -152,7 +152,7 @@ describe('the deadline door on Paul\'s marketing turns', () => {
     const d = door();
     const said = "Let's say six months from 9 October.";
     const r = await d.caps.proposeGoalDeadline!(saying(said, [TURN_A, TURN_B]), { deadline_words: SIX_FROM_9_OCT, rationale: said }) as Rec;
-    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “six months from 9 October”.' }));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “six months from 9 October” in “Let\'s say six months from 9 October”.' }));
     expect(d.proposals.get(String(r.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: said });
     expect(r.deadline.words).toBe(SIX_FROM_9_OCT);
     expect(d.graph.nodes.find((n: Rec) => n.id === GOAL_ID).goal_horizon).toBeUndefined();

@@ -167,7 +167,7 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     const said = 'within 6 months as of 2027-02-01';
     const context = { scenario_id: SID, authenticated_user_id: null, request_id: 'new-reference', user_text: said, user_turn_text: said };
     const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', reference_date: '2027-02-01', rationale: said });
-    expect(offered).toMatchObject({ ok: true, public_label: `Is your deadline 1 August 2027 (6 months from 1 February 2027)? Your words: “within 6 months”.` });
+    expect(offered).toMatchObject({ ok: true, public_label: `Is your deadline 1 August 2027 (6 months from 1 February 2027)? Your words: “within 6 months” in “${said}”.` });
     expect(w.writes).toHaveLength(0);
     expect(await w.caps.authoriseChange({ ...context, typed_approval_of: String(offered.proposal_id), user_text: 'Yes', user_turn_text: 'Yes' }, { proposal_id: String(offered.proposal_id) })).toMatchObject({ applied: true });
     expect(goal(w.read())).toMatchObject({ goal_horizon: { deadline: '2027-08-01' }, goal_horizon_reference_date: '2027-02-01' });
@@ -194,7 +194,7 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     const context = { scenario_id: SID, authenticated_user_id: null, request_id: 'matching-as-of', user_text: said, user_turn_text: said };
     const before = w.read();
     const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', reference_date: R, rationale: '' });
-    expect(offered).toMatchObject({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.' });
+    expect(offered).toMatchObject({ ok: true, public_label: `Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months” in “${said}”.` });
     expect(w.read()).toEqual(before); expect(w.writes).toHaveLength(0);
     expect(await w.caps.authoriseChange({ ...context, user_text: 'Yes', user_turn_text: 'Yes' }, { proposal_id: String(offered.proposal_id) })).toMatchObject({ applied: true });
     expect(goal(w.read())).toMatchObject({ goal_horizon_months: 6, goal_horizon_reference_date: R });
@@ -210,7 +210,9 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     const deadline = '2027-04-09';
     expect(offered.ok).toBe(true);
     expect(offered.mutated).toBe(false);
-    expect(offered.public_label).toBe('Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.');
+    // The user's own sentence is quoted where it says more than the words (this turn's "… as of 2027-01-01").
+    const shown = variant === 'earlier context' ? '' : ' in “within 6 months as of 2027-01-01”';
+    expect(offered.public_label).toBe(`Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”${shown}.`);
     const proposal = w.proposals.get(String(offered.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: goal(before).id,
       value: { deadline, expected_deadline: null, words: 'within 6 months', reference, stated_months: 6,
@@ -231,7 +233,7 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', rationale: '' });
     expect(offered.ok).toBe(true);
     expect(offered.mutated).toBe(false);
-    expect(offered.public_label).toBe('Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.');
+    expect(offered.public_label).toBe(`Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months” in “${said}”.`);
     const proposal = w.proposals.get(String(offered.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: goal(before).id,
       value: { deadline: '2027-04-09', expected_deadline: null, words: 'within 6 months', reference: R, stated_months: 6,
@@ -362,7 +364,7 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     const w = world(draft(), false, null, undefined, '2026-10-01T10:00:00Z');
     const context = { scenario_id: SID, authenticated_user_id: null, request_id: 'as-of', user_text: `within 6 months as of ${R}`, user_turn_text: `within 6 months as of ${R}` };
     const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', reference_date: R, rationale: 'The user stated this deadline.' });
-    expect(offered).toMatchObject({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.' });
+    expect(offered).toMatchObject({ ok: true, public_label: `Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months” in “within 6 months as of ${R}”.` });
     expect(goal(w.read()).goal_horizon_months).toBeUndefined();
     expect(await w.caps.authoriseChange({ ...context, user_text: 'Yes', user_turn_text: 'Yes' }, { proposal_id: String(offered.proposal_id) })).toMatchObject({ ok: true, applied: true });
     expect(goal(w.read())).toMatchObject({ goal_horizon_months: 6, goal_horizon_reference_date: R });
