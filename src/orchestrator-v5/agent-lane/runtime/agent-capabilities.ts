@@ -253,7 +253,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, targetTheQuoteStates, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, labelHoldsWords, targetTheQuoteStates, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -3524,6 +3524,8 @@ export function createAgentCapabilities(
   type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
+  /** Proposals this turn's `withdraw_proposal` withdrew: a recorded withdrawal, never inferred from the store's absence. */
+  const withdrawnProposals = new Set<string>();
 
   /**
    * Prepare the revised draft with C's own construction from the stored brief and THIS turn's typed goal
@@ -3623,22 +3625,26 @@ export function createAgentCapabilities(
     }
     // ⛔ A WITHDRAWN CARD IS NOT OFFERED AGAIN (served marketing turn 02 on 00a51f7d): the turn's one draft is reused, so a
     // target call after `withdraw_proposal` returned the withdrawn id as offered, and the reply described a card the user
-    // never saw. Its id is consumed for this turn (`proposalsAwaitingApproval`), so the call says so instead.
-    if (proposals.get(draft.proposal.proposal_id) === undefined) {
+    // never saw. Its id is consumed for this turn (`proposalsAwaitingApproval`), so the call says so instead. Only a recorded
+    // withdrawal refuses: a card merely gone from the store (evicted) is this turn's own preparation and is offered again.
+    if (withdrawnProposals.has(draft.proposal.proposal_id)) {
       return { ok: false, mutated: false, refusal: 'withdrawn', detail: 'This revised-draft card was withdrawn earlier this turn, so it is not offered and nothing has changed. Never say a card is shown.' };
     }
+    if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
     /**
      * Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target. The
      * card holds it when one of its targets carries this figure, comparator and unit AND is this quantity: by the exact
-     * label, or by the AI's `quote` of the user's words verified literally (`targetTheQuoteStates`: the figure once, its own
-     * comparator, the card target's label in that figure's part). A same-figure target that cannot be verified is UNKNOWN,
+     * label, or by the AI's `quote` of the user's words verified literally: the quote states this one figure, of its kind,
+     * with its own comparator, and names `measures` (the user's own words, checked above), and the card target's label holds
+     * those words (`targetTheQuoteStates`, `labelHoldsWords`). A same-figure target that cannot be verified is UNKNOWN,
      * never "not in the draft" (served marketing turn 02: "20 new customers" read NOT on ‘New customers in first 3 months’,
      * so the AI withdrew the card). NOT held only when no card target carries the figure at all.
      */
     const sameFigure = draft.held.filter((t) => t.value === target.value && t.comparator === target.comparator
       && unitsConflict(target.unit, t.unit) === null);
     const verified = sameFigure.some((t) => t.quantity === canonicalLabel(target.measures)
-      || targetTheQuoteStates(target.quote, ctx.user_turn_text ?? '', { figure: t.value, unit: t.unit, operator: t.comparator, label: t.quantity ?? '' }));
+      || (labelHoldsWords(t.quantity, target.measures)
+        && targetTheQuoteStates(target.quote, ctx.user_turn_text ?? '', { figure: target.value, unit: target.unit, operator: t.comparator, label: target.measures })));
     const holds: boolean | 'unknown' = verified ? true : sameFigure.length > 0 ? 'unknown' : false;
     return {
       ok: true, mutated: false,
@@ -6726,6 +6732,7 @@ export function createAgentCapabilities(
         const p = proposals.get(id);
         if (p === undefined || p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return notFound;
         proposals.discard(id);
+        withdrawnProposals.add(id);
       }
       return {
         ok: true, mutated: false, proposal_id: id, withdrawn: true,

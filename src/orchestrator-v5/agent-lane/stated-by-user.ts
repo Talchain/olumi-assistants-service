@@ -412,38 +412,42 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
 /** The drafter's comparator for each comparator the user can write (`comparatorTheUserWrote`), strictness included. */
 const OPERATOR_OF: Readonly<Record<StatedComparator, string>> = { at_least: '>=', at_most: '<=', above: '>', below: '<' };
 
+/** Whole words, lower-case, space-bounded: one spelling for a phrase-containment check. */
+const wordsPhrase = (t: string): string => ` ${t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w !== '').join(' ')} `;
+
+/** `label` holds `words` as a whole-word phrase ("New customers in first 3 months" holds "new customers"). */
+export function labelHoldsWords(label: unknown, words: unknown): boolean {
+  if (typeof label !== 'string' || typeof words !== 'string' || wordsPhrase(words).trim() === '') return false;
+  return wordsPhrase(label).includes(wordsPhrase(words));
+}
+
 /**
  * ⭐ THE AI QUOTES A STATED TARGET, THE HOST VERIFIES THE LITERAL (the AI-quote contract, as T2A5). Two callers: the drafter's
  * `goal.source_quote` (T5 D3 C r2 / A r2: "Customers lost to price rise" took "…revenue to rise by at least 15%" from the
- * goal) and `propose_goal_target`'s `quote` against the revised-draft card's targets (marketing turn 02: "secure 20 new
- * customers within the first 3 months" read NOT on the card's ‘New customers in first 3 months’). True only when:
+ * goal) and `propose_goal_target`'s `quote` against the revised-draft card's targets (marketing turn 02). True only when:
  *  · the quote is verbatim in `text` (whole words);
- *  · the target's figure is written in it, in the target's unit;
- *  · a comparator bound to that figure (`comparatorTheUserWroteFor`) is the target's own, strictness included ("at least"
- *    is >=, "over" is >), so another figure's "over" is never this one's;
- *  · the target's own label is named in the part of the quote that writing of the figure sits in, between the figures
- *    written before and after it (each writing is bound to its own part, so "20 partner sign-ups and 20 new customers"
- *    gives the second 20 to the customers and the first to no one else's label).
- * Positions of written figures only: no verb or word list, and no other node's label is read.
+ *  · it writes ONE figure (a duration such as "within the first 3 months" is not one): with two, WHOSE each is cannot be
+ *    read from the words (`quoteOfFigure`'s ruling), so a two-target sentence is never verified, only the target's own words;
+ *  · that figure is the target's, in its unit and of its kind (a percentage is never a count of customers);
+ *  · a comparator the quote states is the target's own, strictness included ("at least" is >=, "over" is >);
+ *  · `subject` (the goal's label, or the user's own words for the quantity) is in it as a whole-word phrase.
+ * No verb or word list, and no other node's label is read.
  */
 export function targetTheQuoteStates(quote: unknown, text: string,
   target: { readonly figure: number; readonly unit: unknown; readonly operator: unknown; readonly label: string }): boolean {
-  if (typeof quote !== 'string' || target.label.trim() === '') return false;
+  if (typeof quote !== 'string' || wordsPhrase(target.label).trim() === '') return false;
   const said = quote.trim();
   if (said === '' || said.length > 400 || quoteSpansIn(text, said).length === 0) return false;
-  const written = findStatedAmounts(said);
-  const own = written.filter((a) => amountIs(a, target.figure, target.unit, unitPhraseFamily(target.unit), said));
-  if (own.length === 0) return false;
-  const comparator = comparatorTheUserWroteFor(said, own[0]!.magnitude);
+  const figures = [...findStatedAmounts(said), ...countsInWords(said)].filter((a) => unitWordAfter(said, a) !== 'time');
+  if (figures.length !== 1) return false;
+  const a = figures[0]!;
+  const family = unitPhraseFamily(target.unit);
+  const kindFits = a.kind === 'percent' ? family === 'percent' : a.kind === 'currency' ? family === 'currency'
+    : family !== 'percent' && family !== 'currency';
+  if (!kindFits || !amountIs(a, target.figure, target.unit, family, said)) return false;
+  const comparator = comparatorTheUserWrote(said);
   if (comparator !== null && OPERATOR_OF[comparator] !== target.operator) return false;
-  const spans = [...written, ...countsInWords(said)].map((a) => ({ start: a.index, end: a.index + a.matchedText.length }));
-  return own.some((at) => {
-    const atEnd = at.index + at.matchedText.length;
-    const others = spans.filter((a) => a.end <= at.index || a.start >= atEnd);
-    const from = Math.max(0, ...others.filter((a) => a.end <= at.index).map((a) => a.end));
-    const to = Math.min(said.length, ...others.filter((a) => a.start >= atEnd).map((a) => a.start));
-    return factorTheUserNamed(target.label, said.slice(from, to), { options: [], others: [] });
-  });
+  return labelHoldsWords(said, target.label);
 }
 
 /** A figure's scope among a model's QUANTITIES (every node but options and the decision): `target`'s label, and the rest. */

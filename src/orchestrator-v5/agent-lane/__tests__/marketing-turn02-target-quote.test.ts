@@ -112,11 +112,10 @@ describe('marketing turn 02: each quoted target is verified on the card, an unve
     expect(heldTargets(structuredClone(s.graph()))).toEqual(expect.arrayContaining(BOTH));
   });
 
-  it('the whole two-target sentence as each quote: each figure binds only its own part of it, so both are held', async () => {
+  it('the whole two-target sentence as a quote is never verified (two figures: whose each is cannot be read) — unknown, the card still offered', async () => {
     const { caps } = lane(server());
-    const a = await caps.proposeGoalTarget!(turn as never, { ...conversion, quote: L20 } as never) as Rec;
-    const b = await caps.proposeGoalTarget!(turn as never, { ...customers, quote: L20 } as never) as Rec;
-    expect([a.revised_draft?.holds_this_target, b.revised_draft?.holds_this_target]).toEqual([true, true]);
+    const a = await caps.proposeGoalTarget!(turn as never, { ...customers, quote: L20 } as never) as Rec;
+    expect(a).toMatchObject({ ok: true, revised_draft: { holds_this_target: 'unknown' } });
   });
 
   // ⛔ CHANGED EXPECTATION (old → new, MA3 (c)): no quote, and a label the card holds longer: false "NOT in the revised
@@ -151,6 +150,20 @@ describe('marketing turn 02: each quoted target is verified on the card, an unve
       expect(String(b.note)).toMatch(/This target \(25 customers\) is NOT in the revised draft/);
     } else expect(b, JSON.stringify(b)).toMatchObject({ ok: false, mutated: false });
   });
+  it('NEGATIVE (buddy): a quote of ANOTHER quantity’s target never verifies this call’s (customers at 15%, quoting conversion)', async () => {
+    const { caps } = lane(server());
+    const r = await caps.proposeGoalTarget!(turn as never, { constraint_type: 'at_least', value: 15, unit: '%', measures: 'customers', rationale: L20,
+      quote: CONVERSION_WORDS } as never) as Rec;
+    expect(r.revised_draft?.holds_this_target).toBe('unknown');
+  });
+  it('a card gone from the store WITHOUT a withdrawal is this turn’s own preparation: offered again, same id', async () => {
+    const { caps, proposals } = lane(server());
+    const a = await caps.proposeGoalTarget!(turn as never, conversion as never) as Rec;
+    proposals.discard(String(a.proposal_id));
+    const again = await caps.proposeGoalTarget!(turn as never, { ...customers, quote: CUSTOMER_WORDS } as never) as Rec;
+    expect(again).toMatchObject({ ok: true, proposal_id: a.proposal_id, revised_draft: { holds_this_target: true } });
+    expect(proposals.get(String(a.proposal_id))).toBeDefined();
+  });
 
   it('⭐ RED→GREEN: a card withdrawn this turn is never re-offered as if shown (the served propose → withdraw → propose)', async () => {
     const { caps, proposals } = lane(server());
@@ -166,20 +179,18 @@ describe('marketing turn 02: each quoted target is verified on the card, an unve
 
 describe('targetTheQuoteStates: the literal checks, one per check', () => {
   const T = (figure: number, unit: string, operator: string, label: string) => ({ figure, unit, operator, label });
-  it('the figure’s own comparator, strictness included; another figure’s "over" is not this one’s', () => {
+  it('the quote’s own comparator, strictness included', () => {
     expect(targetTheQuoteStates(CONVERSION_WORDS, L20, T(15, '%', '>', 'conversion rate'))).toBe(true);
     expect(targetTheQuoteStates(CONVERSION_WORDS, L20, T(15, '%', '>=', 'conversion rate'))).toBe(false);
-    expect(targetTheQuoteStates(L20, L20, T(20, 'customers', '>=', 'New customers in first 3 months'))).toBe(true);
+    expect(targetTheQuoteStates(CUSTOMER_WORDS, L20, T(20, 'customers', '>=', 'new customers')), 'a duration is not a second figure').toBe(true);
   });
-  it('the figure written twice: each writing binds its own part, so the right one is found and no other is credited', () => {
-    const text = 'We need 20 partner sign-ups and 20 new customers.';
-    expect(targetTheQuoteStates(text, text, T(20, 'customers', '>=', 'New customers'))).toBe(true);
-    expect(targetTheQuoteStates(text, text, T(20, 'sign-ups', '>=', 'Partner sign-ups'))).toBe(true);
-    expect(targetTheQuoteStates(text, text, T(20, 'customers', '>=', 'Monthly churn'))).toBe(false);
-  });
-  it('the label must sit in its figure’s own part: 20 is the customers’, not the partners’', () => {
-    const text = 'We need 20 new customers and 30 partner sign-ups.';
-    expect(targetTheQuoteStates(text, text, T(20, 'customers', '>=', 'Partner sign-ups'))).toBe(false);
-    expect(targetTheQuoteStates(text, text, T(20, 'customers', '>=', 'New customers')), 'control').toBe(true);
+  it.each([
+    ['two targets in one sentence (whose each figure is cannot be read)', L20, T(20, 'customers', '>=', 'new customers')],
+    ['the same figure twice, each with its own comparator (buddy)', 'Conversion must be over 15% and churn at most 15%.', T(15, '%', '>', 'churn')],
+    ['a percentage is never a count of customers (buddy)', 'New customers must be over 15%.', T(15, 'customers', '>', 'New customers')],
+    ['a shared word is not the subject: "monthly" is not monthly recurring revenue (buddy)', 'Monthly churn must fall by at least 15%.', T(15, '%', '>=', 'Monthly recurring revenue')],
+    ['another quantity’s words', 'secure 20 new customers', T(20, 'sign-ups', '>=', 'Partner sign-ups')],
+  ] as const)('NEGATIVE: %s', (_case, quote, target) => {
+    expect(targetTheQuoteStates(quote, quote === L20 ? L20 : `${quote} ${L20}`, target)).toBe(false);
   });
 });
