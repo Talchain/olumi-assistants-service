@@ -52,7 +52,7 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
     expect(map.refused.map((r) => [r.index, r.refusal])).toEqual([[1, 'figure_not_in_quote']]);
   });
 
-  it('CONTRASTS: a figure the sentence does not write, a shortened sentence and words not in the brief are refused; each drops only itself', () => {
+  it('CONTRASTS: a figure the sentence does not write, a shortened sentence and words not in the brief are UNKNOWN, retained with quote and reason; never the user\'s, never Olumi\'s', () => {
     const map = sourceMapOf([
       legacyLevel({ value: 15 }), // NUMBER: the drafter's figure, not the user's
       legacyLevel({ quote: '25% of their time on fixing legacy code.' }), // not a whole statement
@@ -60,13 +60,28 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
       { quote: LEGACY, field: 'level', form: 'point', value: 25 }, // no subject
       legacyLevel(),
     ], SERVED.brief);
-    expect(map.refused.map((r) => [r.index, r.refusal])).toEqual([[0, 'figure_not_in_quote'], [1, 'statement_not_found'], [2, 'statement_not_found'], [3, 'statement_malformed']]);
-    expect(map.verified.get(KEY)).toHaveLength(1);
+    expect(map.refused.map((r) => [r.index, r.refusal, r.quote, r.key])).toEqual([
+      [0, 'figure_not_in_quote', LEGACY, KEY],
+      [1, 'statement_not_found', '25% of their time on fixing legacy code.', KEY],
+      [2, 'statement_not_found', 'Our developers spend 25% of their time on legacy code.', KEY],
+      [3, 'statement_malformed', LEGACY, undefined],
+    ]);
+    expect(map.refused.every((r) => r.detail.length > 0)).toBe(true);
+    // Only the one verified statement is the user's; the refused ones never join it.
+    expect(map.verified.get(KEY)).toEqual([expect.objectContaining({ low: 25, high: 25 })]);
   });
 
   it('nothing reads the map yet: the registered graph is the same with and without statements', async () => {
     const without = await build(SERVED.draft);
     const withStatements = await build({ ...SERVED.draft, statements: [legacyLevel(), legacyLevel({ value: 15 })] });
     expect(withStatements.graph).toEqual(without.graph);
+  });
+
+  it('statements is OPTIONAL: a malformed list never fails a draft (DL condition, 23:06Z)', async () => {
+    const without = await build(SERVED.draft);
+    for (const statements of ['not a list', [null, 7, { quote: 3 }], null]) {
+      expect((await build({ ...SERVED.draft, statements })).graph).toEqual(without.graph);
+      expect(sourceMapOf(statements, SERVED.brief).verified.size).toBe(0);
+    }
   });
 });

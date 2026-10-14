@@ -6,8 +6,11 @@
  * readiness then read this map instead of one carrier and one matcher per field (`baseline_evidence`, `stated_evidence`,
  * `already_true_evidence`, `effects_at_period_end`, `deadline_words`, the capacity-chain prose), each retired in its own step.
  *
- * A statement the host cannot verify never makes a value the user's: it stays Olumi's reading. Figures come only from the
- * quote's own words (`figuresIn`), never from the drafter's value. Pure.
+ * AUTHOR (PL AMEND, 14 Oct 22:53Z; the first cause #3133 repaired): a statement verified for THIS subject is the user's; the
+ * drafter's own labelled estimate with no brief figure behind it is Olumi's; everything else (a refused or misattributed
+ * statement, a brief figure with no statement, an ambiguous label) is UNKNOWN, retained here with its quote and the refusal's
+ * reason, never dropped and never turned into Olumi's estimate. Figures come only from the quote's own words (`figuresIn`),
+ * never from the drafter's value. `statements` is optional: a missing or malformed list never fails a draft. Pure.
  */
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
@@ -32,10 +35,19 @@ export interface DraftedSubject {
   readonly factor_label?: string;
 }
 
+export interface RefusedStatement {
+  readonly index: number;
+  readonly refusal: string;
+  readonly detail: string;
+  readonly quote?: string;
+  readonly key?: string;
+}
+
 export interface SourceMap {
   /** Verified statements by subject key (`subjectKey`), in brief order. */
   readonly verified: ReadonlyMap<string, readonly UserStatement[]>;
-  readonly refused: readonly { readonly index: number; readonly refusal: string; readonly detail: string }[];
+  /** Authorship UNKNOWN: kept with the drafter's quote, subject and field as given, and why the host could not verify it. */
+  readonly refused: readonly RefusedStatement[];
 }
 
 const MAX = 60;
@@ -81,21 +93,25 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
 /** The drafter's `statements`, each verified once against the brief. Anything malformed or unverified is refused, never kept. */
 export function sourceMapOf(raw: unknown, brief: string): SourceMap {
   const verified = new Map<string, UserStatement[]>();
-  const refused: { index: number; refusal: string; detail: string }[] = [];
+  const refused: RefusedStatement[] = [];
   const entries = Array.isArray(raw) ? raw.slice(0, MAX) : [];
   entries.forEach((entry: unknown, index) => {
     const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
     const subject = subjectOf(r['subject']);
     const field = STATEMENT_FIELDS.find((f) => f === r['field']);
     const form = STATEMENT_FORMS.find((f) => f === r['form']);
+    const quote = text(r['quote'], 400);
+    const kept = (refusal: string, detail: string, key?: string): void => {
+      refused.push({ index, refusal, detail, ...(quote !== undefined ? { quote } : {}), ...(key !== undefined ? { key } : {}) });
+    };
     if (subject === undefined || field === undefined || form === undefined) {
-      refused.push({ index, refusal: 'statement_malformed', detail: 'A statement needs a subject (kind and label), one field and one form.' });
+      kept('statement_malformed', 'A statement needs a subject (kind and label), one field and one form.');
       return;
     }
     const key = subjectKey(subject, field);
     const v = verifyStatements([{ quote: r['quote'], form, value: r['value'], low: r['low'], high: r['high'], qualifier: r['qualifier'], conditions: r['conditions'] }],
       { now: brief }, { subject: { quantity: key }, unit: text(r['unit'], 60) ?? '', forms: STATEMENT_FORMS as readonly StatementForm[], figuresIn: figuresWritten });
-    if (v.kind === 'refused') { refused.push({ index, refusal: v.refusal, detail: v.detail }); return; }
+    if (v.kind === 'refused') { kept(v.refusal, v.detail, key); return; }
     verified.set(key, [...(verified.get(key) ?? []), ...v.statements]);
   });
   return { verified, refused };
