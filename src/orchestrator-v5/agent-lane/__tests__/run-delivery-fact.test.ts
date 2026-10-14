@@ -82,6 +82,15 @@ describe('0.79 · runDeliveryFactFor', () => {
     expect(runDeliveryFactFor(input({ toolResults: [deduped] }))).toStrictEqual({ kind: 'omitted', reason: 'no_run_this_turn' });
   });
 
+  it('⭐ RED (capacity e2e c0998b2e turn 01: no run_delivery for the first Run): the served first analysis has NO analysis_state; its committed identity binds', () => {
+    const served = { ran: true, runTurnId: 't', blocks: [{ ...RESULT_BLOCK, computed_against_hash: HASH }] };
+    // CONTRAST, the served failure: without the committed identity there is nothing to bind, so nothing is recorded.
+    expect(firstAnalysisRunReceipt(served)).toBeUndefined();
+    const outcome = { ...served, runIdentity: { graph_hash_at_run: HASH, computed_at: AT } };
+    expect(firstAnalysisRunReceipt(outcome)).toStrictEqual({ ok: true, mutated: false, ran: true, run_identity: { graph_hash_at_run: HASH, computed_at: AT } });
+    expect(runDeliveryFactFor(input({ toolResults: turnRunReceipts(outcome, []) })).kind).toBe('recorded');
+  });
+
   it.each([
     ['did not run', { ran: false, reason: 'no_time' }],
     ['no analysis_result block', { ran: true, blocks: [], analysisState: { run_state: { computed_at: AT } } }],

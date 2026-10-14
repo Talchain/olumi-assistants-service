@@ -282,4 +282,23 @@ describe('chip-click Run → `priorFacts`, the run_delta basis (D1)', () => {
     expect(selectRunAnalysisFact(windowStub.prior as never)).not.toBeNull();
     expect(out).not.toHaveProperty('priorFacts');
   });
+
+  it('RED (capacity e2e c0998b2e row 8): the in-process result carries THIS Run\'s identity, though its response has no analysis_state', async () => {
+    windowStub.prior = [priorRun()];
+    handlerFnMock.mockResolvedValue(handlerRun());
+    const out = await dispatchChipClickRunAnalysis({ payload: payload(), requestId: 'req-row8-identity' });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    // PRECONDITION: the response the automatic first analysis reads is pre-finaliser — no run_state stamp to bind a card to.
+    expect((out.response as { analysis_state?: unknown }).analysis_state).toBeUndefined();
+    expect(out.runIdentity).toEqual({ graph_hash_at_run: THIS_RUN_HASH, computed_at: THIS_RUN_AT });
+  });
+
+  it('CONTRAST (row 8): a no-op run fact completed no Run, so there is no identity to bind', async () => {
+    windowStub.prior = [priorRun()];
+    handlerFnMock.mockResolvedValue(handlerRun({ noop: true }));
+    const out = await dispatchChipClickRunAnalysis({ payload: payload(), requestId: 'req-row8-noop' });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out).not.toHaveProperty('runIdentity');
+  });
 });
+

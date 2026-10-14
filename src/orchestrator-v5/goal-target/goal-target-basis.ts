@@ -20,6 +20,7 @@
  * Pure and total.
  */
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
+import { readGoalRecord } from './goal-record.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -98,6 +99,26 @@ export interface GoalTargetBasis {
   /** Amendment 3: the target can be read more than one way; this asks which. While present, no chance is shown. */
   readonly open_question?: string;
   readonly source: 'olumi_reading';
+}
+
+/** The stored reading while its period waits for the user's confirmed deadline (DL ruling 14 Oct): every other member admitted. */
+export type GoalTargetBasisAwaitingPeriod = Omit<GoalTargetBasis, 'period_months'>;
+
+/**
+ * ⭐ DL ruling 14 Oct (hiring): the drafter's reading with its period left UNSTATED (null), no drafted deadline, and every other
+ * member valid, is kept WITHOUT a period instead of being dropped whole. It speaks only once the user confirms a deadline
+ * (its held months supply the period in `goalTargetBasisOf`); until then it reads as absent, exactly as
+ * today, and construction still says the target needs "when the target must be met". An invalid period (0, 200, 2.5) is
+ * still refused. Served hiring 14 Oct (drafter rows 14:54Z/15:36Z): the same request that held "3" 24 times sent null.
+ */
+export function admitGoalTargetBasisAwaitingPeriod(args: Parameters<typeof admitGoalTargetBasis>[0]): GoalTargetBasisAwaitingPeriod | undefined {
+  const d = args.drafted;
+  if (!isRec(d) || (d.period_months !== null && d.period_months !== undefined) || finite(args.horizonMonths)) return undefined;
+  // Every other member is validated by the one admission, exactly as drafted; the period is then left out.
+  const checked = admitGoalTargetBasis({ ...args, drafted: { ...d, period_months: 1 }, horizonMonths: undefined });
+  if (!('basis' in checked) || checked.basis === null) return undefined;
+  const { period_months: _period, ...rest } = checked.basis;
+  return rest;
 }
 
 export type GoalTargetBasisRefusal = 'reference' | 'denominator' | 'period' | 'period_conflict' | 'effect_unit' | 'frame' | 'conditions'
@@ -223,7 +244,11 @@ export function goalTargetBasisOf(goal: unknown): GoalTargetBasis | undefined {
   if (b.source !== 'olumi_reading' || b.quantity_frame !== quantityFrame || b.target_frame !== targetFrame
     || !finite(b.target_raw) || b.target_raw !== goal.goal_threshold_raw) return undefined;
   if (b.reference !== 'today' && b.reference !== 'launch') return undefined;
-  if (!finite(b.period_months) || !Number.isInteger(b.period_months) || b.period_months < 1 || b.period_months > 120) return undefined;
+  // DL ruling 14 Oct: a reading stored without its period takes the user's confirmed deadline (the ONE goal record's held
+  // months, S5); with no deadline held it stays absent (`admitGoalTargetBasisAwaitingPeriod`).
+  const period = b.period_months === undefined && typeof goal.id === 'string' ? readGoalRecord({ nodes: [goal] }, goal.id)?.horizon?.months
+    : b.period_months;
+  if (!finite(period) || !Number.isInteger(period) || period < 1 || period > 120) return undefined;
   if (b.period_kind !== 'at_end' && b.period_kind !== 'over_period') return undefined;
   const effectUnit = words(b.effect_unit, BASIS_TEXT_MAX);
   if (effectUnit === undefined || typeof b.effects_at_period_end !== 'boolean') return undefined;
@@ -236,7 +261,7 @@ export function goalTargetBasisOf(goal: unknown): GoalTargetBasis | undefined {
   return {
     quantity_frame: quantityFrame, target_frame: targetFrame, target_raw: b.target_raw,
     reference: b.reference, ...(denominator !== undefined ? { denominator } : {}),
-    period_months: b.period_months, period_kind: b.period_kind, effect_unit: effectUnit,
+    period_months: period, period_kind: b.period_kind, effect_unit: effectUnit,
     effects_at_period_end: b.effects_at_period_end,
     ...(also.length > 0 ? { also_required: also } : {}),
     ...(question !== undefined ? { open_question: question } : {}),
