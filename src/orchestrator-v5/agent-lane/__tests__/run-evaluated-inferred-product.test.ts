@@ -8,7 +8,7 @@
  * product's operand links as guesses, because it never saw the Run's `identity_evaluations` (the licence's (S) does).
  * Bound by node and edge identity, on the graph the real construction door registers.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
@@ -16,6 +16,14 @@ import { withholdGoalFiguresForUntestableTarget } from '../../tools/handlers/run
 import { buildGoalReadingDisclosure, goalReadingTailOf } from '../../coaching/goal-reading-disclosure.js';
 import { isAllowedRunAnalysisAssistantText } from '../../coaching/analysis-result-headline.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../orchestrator/context/option-result-source.js';
+import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import type { HandlerInvocation } from '../../tools/registry.js';
+import type { PLoTClient } from '../../../orchestrator/plot-client.js';
+import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
+import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
 const WIN = 'The starter tier would win about 150 new subscribers, between 80 and 250.';
 const T1B = 'We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. '
@@ -68,9 +76,9 @@ const D1 = {
 };
 
 type Rec = Record<string, any>;
-async function d1(brief = T1B): Promise<{ graph: Rec; id: (label: string) => string; named: (verdict: Rec) => string[] }> {
+async function d1(brief = T1B, candidate: Rec = D1): Promise<{ graph: Rec; id: (label: string) => string; named: (verdict: Rec) => string[] }> {
   let graph: Rec | null = null;
-  const call = (async () => ({ text: JSON.stringify(D1) })) as unknown as CallStructuredModel;
+  const call = (async () => ({ text: JSON.stringify(candidate) })) as unknown as CallStructuredModel;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
       graph = structuredClone((body as { graph: Rec }).graph);
@@ -172,5 +180,78 @@ describe('DL condition 3: the Run says the product reading its chance rests on (
     const { graph, id } = await d1();
     expect(buildGoalReadingDisclosure(graph, id('monthly recurring revenue'))).not.toContain('Olumi works out');
     expect(buildGoalReadingDisclosure(graph, id('monthly recurring revenue'), [evaluation(id, { evaluated: false })])).not.toContain('Olumi works out');
+  });
+});
+
+/** The Run's stored goal-chance licence, as the producer records it on the Run (turn and reload read this one record). */
+const licenceOf = (graph: Rec, goal: string, evaluations?: Rec[]): Rec | undefined =>
+  ((withGoalChanceLicence(envelope(graph, evaluations), graph, goal) as Rec).inference_warnings ?? [])
+    .find((w: Rec) => w.code === 'GOAL_CHANCE_LICENSED');
+
+describe('DL 13:55Z (old DGAI #2668): the licensed chance carries Olumi\'s reading of the goal it rests on, typed', () => {
+  it('⭐ RED: evaluated product → the licence says the chance rests on Olumi\'s reading, by node, in the reply\'s own words', async () => {
+    const { graph, id } = await d1();
+    const goal = id('monthly recurring revenue');
+    const licence = licenceOf(graph, goal, [evaluation(id)]);
+    expect(Object.keys(licence?.pct_by_option ?? {}).length, JSON.stringify(licence)).toBeGreaterThan(0);
+    expect(licence!.goal_reading).toEqual({ origin: 'olumi', readings: [{ kind: 'product', node_id: id('Starter-tier MRR'), words: SAID }] });
+    // One predicate: the label's words are exactly the reply's tail, in order.
+    expect(licence!.goal_reading.readings.map((r: Rec) => ` ${r.words}`).join('')).toBe(buildGoalReadingDisclosure(graph, goal, [evaluation(id)]));
+  });
+
+  it('CONTROL: not evaluated (the Run walked the links) → the same licence, no reading label', async () => {
+    const { graph, id } = await d1();
+    const licence = licenceOf(graph, id('monthly recurring revenue'));
+    expect(Object.keys(licence?.pct_by_option ?? {}).length).toBeGreaterThan(0);
+    expect(licence).not.toHaveProperty('goal_reading');
+  });
+});
+
+/** The REAL Run handler on the constructed graph (snapshot loaded as served), PLoT faked with THIS Run's evaluations. */
+/** D1 with no horizon (a goal for month 9 on a today-only model is withheld before any licence: the horizon gate). */
+const T1B_NOW = T1B.replace(' within 9 months', '');
+const D1_NOW = { ...D1, goal: { ...D1.goal, horizon_months: null } };
+
+async function runFact(graph: Rec, evaluations: (sent: Rec) => Rec[]): Promise<Rec> {
+  const stored = GraphV3.parse(structuredClone(graph)) as unknown as Rec;
+  const snapshot = await loadScenarioSnapshotForRunAnalysis('a9ee494a-0000-4000-8000-000000a9ee49', 'req-load', {
+    readMostRecentPendingActions: async () => [], loadGraphAndBriefText: async () => ({ graph: structuredClone(stored), briefText: T1B_NOW }),
+    loadGraph: async () => structuredClone(stored),
+  } as never);
+  const plotRun = vi.fn(async (sent: unknown) => {
+    const payload = sent as Rec;
+    return { ...structuredClone(minimalFixture), inference_warnings: [],
+      results: payload.options.map((o: Rec, i: number) => ({ option_id: o.id ?? o.option_id, option_label: o.label, win_probability: [0.2, 0.5, 0.3][i] })),
+      option_comparison: payload.options.map((o: Rec, i: number) => ({ option_id: o.id ?? o.option_id, option_label: o.label,
+        win_probability: [0.2, 0.5, 0.3][i], probability_of_goal: [0.3, 0.6, 0.2][i],
+        outcome: { p10: 118000, p50: 124000 + 2000 * i, p90: 132000, mean: 124000 + 2000 * i, std: 4000,
+          n_samples: 1000, n_valid_samples: 1000, validity_ratio: 1, percentiles_source: 'samples' } })),
+      identity_evaluations: evaluations(payload),
+    } as unknown as V2RunResponseEnvelope;
+  });
+  const handler = createRunAnalysisHandler({ plotClient: { run: plotRun, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient,
+    scenarioReader: async () => snapshot });
+  const outcome = await handler({ payload: { scenario_id: 'a9ee494a-0000-4000-8000-000000a9ee49', turn_id: 't-run' }, requestId: 'req-run',
+    signal: new AbortController().signal, context: {}, orientationText: '' } as unknown as HandlerInvocation) as unknown as Rec;
+  expect(plotRun).toHaveBeenCalledOnce();
+  return (outcome.handler_facts as Rec[]).find((f) => f.fact_type === 'run_analysis')!;
+}
+const storedLicence = (fact: Rec): Rec | undefined =>
+  (fact.result?.enrichment?.inference_warnings ?? []).find((w: Rec) => w.code === 'GOAL_CHANCE_LICENSED');
+
+describe('DL 13:55Z, real Run: the Run\'s stored licence (turn and reload) carries the reading its chances rest on', () => {
+  it('⭐ RED: real construction → real Run, the product evaluated → `goal_reading` on the stored licence, by node, in the reply\'s words', async () => {
+    const { graph, id } = await d1(T1B_NOW, D1_NOW);
+    const fact = await runFact(graph, () => [evaluation(id)]);
+    const licence = storedLicence(fact);
+    expect(Object.keys(licence?.pct_by_option ?? {}).length, JSON.stringify(fact.result?.enrichment?.inference_warnings)).toBeGreaterThan(0);
+    expect(licence!.goal_reading).toEqual({ origin: 'olumi', readings: [{ kind: 'product', node_id: id('Starter-tier MRR'), words: SAID }] });
+  });
+
+  it('CONTROL (real Run): the Run walked the links (no evaluation) → licensed chances, no reading label', async () => {
+    const { graph } = await d1(T1B_NOW, D1_NOW);
+    const licence = storedLicence(await runFact(graph, () => []));
+    expect(Object.keys(licence?.pct_by_option ?? {}).length).toBeGreaterThan(0);
+    expect(licence).not.toHaveProperty('goal_reading');
   });
 });

@@ -232,8 +232,20 @@ describe('CONTRASTS', () => {
     expect((result.open_questions ?? []).join(' ')).not.toContain('the definition your brief gives');
   });
 
-  it.each(DENIALS)('accepted AI-misreading residual: false declaration from a denial is operative, quote visible: %s', async (quote) => {
+  // DENIALS[1] still writes "80" in a sentence naming the total: the origin reader (`briefWritesGoalLevel`) does not read
+  // negation, so its level stays admitted as before. A known residual of that reader, not of this check.
+  it.each(DENIALS.slice(0, 1))('a denial alone: the brief never writes the total\'s 80 today, so it is unknown and asked; no sum is held: %s', async (quote) => {
     const brief = FX.brief.replace(SENTENCE, quote);
+    const { graph, result } = await construct(declare(run5Shape(), { quote }), brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+    expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
+    expect(result.not_represented).toContain('The current level of "Weekly support capacity" (80) is not a figure your brief states for it, so no chance '
+      + 'of reaching 100 is shown. Tell me the current level of "Weekly support capacity" and the chance of reaching it can be shown.');
+  });
+
+  // The total's level written for it (DL 13:49Z: the level path now checks the brief writes it), so the residual is tested on its own.
+  it.each(DENIALS)('accepted AI-misreading residual: false declaration from a denial is operative, quote visible: %s', async (quote) => {
+    const brief = FX.brief.replace(SENTENCE, `${quote} Weekly support capacity is 80 tickets per week today.`);
     const { graph, result: acceptedResult } = await construct(declare(run5Shape(), { quote }), brief);
     expect(node(graph, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: true });
     for (const from of [EXISTING, PART]) {
@@ -304,5 +316,54 @@ describe('CONTRASTS', () => {
     const { graph: plain, result: r0 } = await construct(run5Shape());
     for (const r of [r0, r1]) expect((r.not_represented as string[]).filter((s) => s.includes('multiplied together'))).toEqual([PRODUCT_REFUSED]);
     for (const g of [plain, withSum]) expect(node(g, PART).nonlinear_identity).toBeUndefined();
+  });
+});
+
+/**
+ * ⭐ SERVED AFTER #2981 (DL 13:36Z 14 Oct): on CEE cbcefb47 the drafter, under the sum text, typed the total's 80 `inferred`
+ * (drafter row 7b90af18, byte for byte). The goal held no level, its sum was refused, and capacity asked for "today's level of
+ * Weekly support capacity". The user's own sum (their sentence, their 80, a zero increment) fixes that level: it is theirs.
+ * The rows above typed the goal's 80 `explicit` by hand (`goalLevelAsRun5`); these use the served draft as it is.
+ */
+describe('⭐ SERVED cbcefb47: the total of the user\'s own sum is the user\'s level today', () => {
+  const SERVED13 = JSON.parse(readFileSync(new URL('./fixtures/capacity-cbcefb47-declared-sum-construction.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
+  const draft13 = (): Rec => JSON.parse(SERVED13.raw_text);
+  const part = (c: Rec, label: string): Rec => c.factors.find((f: Rec) => f.label === label);
+
+  it('fixture control: the served draft types the goal\'s 80 inferred, beside the user\'s sum and their stated 80', () => {
+    const c = draft13();
+    expect(SERVED13.brief).toBe(FX.brief);
+    expect(c.goal).toMatchObject({ metric: 'Weekly support capacity', baseline_value: 80, baseline_known: true, baseline_provenance: 'inferred' });
+    expect(c.identities).toEqual([expect.objectContaining({ operation: 'sum', outcome: 'Weekly support capacity', evidence: { quote: SENTENCE } })]);
+    expect(part(c, 'Existing team capacity')).toMatchObject({ baseline_value: 80, provenance: 'explicit' });
+    expect(part(c, 'Additional specialist capacity')).toMatchObject({ baseline_value: 0, provenance: 'inferred', baseline_evidence: null });
+  });
+
+  it('⭐ RED→GREEN: the goal holds the user\'s 80 today, and the user\'s sum is held on it', async () => {
+    const { graph } = await construct(draft13(), SERVED13.brief);
+    expect(node(graph, GOAL).observed_state, 'the goal\'s level today').toMatchObject({ raw_value: 80, source: 'brief_extraction' });
+    expect(node(graph, GOAL).nonlinear_identity).toMatchObject(SUM);
+  });
+
+  it('ADVERSARIAL: the non-zero part is Olumi\'s (no sentence states it) → the goal\'s level stays Olumi\'s, withheld', async () => {
+    const c = draft13();
+    Object.assign(part(c, 'Existing team capacity'), { provenance: 'inferred', baseline_evidence: null, baseline_value: 75 });
+    c.goal.baseline_value = 75;
+    const { graph } = await construct(c, SERVED13.brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+  });
+
+  it('NEGATIVE: the parts do not add up to the drafter\'s level (90 ≠ 80 + 0) → withheld', async () => {
+    const c = draft13();
+    c.goal.baseline_value = 90;
+    const { graph } = await construct(c, SERVED13.brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+  });
+
+  it('NEGATIVE: the sum has no sentence of the brief (Olumi\'s reading) → withheld', async () => {
+    const c = draft13();
+    c.identities[0].evidence = null;
+    const { graph } = await construct(c, SERVED13.brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
   });
 });

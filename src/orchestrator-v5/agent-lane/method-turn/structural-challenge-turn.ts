@@ -83,6 +83,13 @@ function outcomeLevelLine(who: string, q: StructuralChallengeQuantityClaimV1, re
 }
 const TARGET_FREQUENCY_UNAVAILABLE = 'The target frequency was unavailable.';
 
+/** The reply's fixed lines that SCI-10's card may show, named once so the chat and the typed rows share their bytes. */
+export const STRUCTURAL_CHALLENGE_LINES = {
+  provisional: 'The figures are provisional estimates from these two model versions.',
+  tested: 'What I tested: the same model and inputs, recomputed with only this link removed. The two Runs are separately sampled (unpaired). It compares these two model versions; it doesn\'t say which version of the model is right.',
+  not_saved: 'This test isn\'t saved. You can run it again while the model stays as it is.',
+} as const;
+
 const UNSUPPORTED: Record<string, string> = {
   link_not_found: 'That link isn\'t in the model this analysis ran on, so there is nothing to test.',
   option_wiring_link: 'That link is how one of your options sets a factor, not a belief about how the world works, so removing it would change what the option means rather than test an assumption.',
@@ -109,20 +116,39 @@ const BASIS_WORDS: Partial<Record<StructuralChallengeClaimV1['basis'], string>> 
   missing_on_one_side: 'At least one model version has no usable measurement for this claim.',
 };
 
-function goalSide(value: number | null, optionId: string, decisions: StructuralChallengeCertainty['baseline'], withheld = false, displays?: Readonly<Record<string, string>>): string {
+/** A goal side's words, and the display figure they print (`null` when they print none): SCI-10's typed twin. */
+function goalSideTyped(value: number | null, optionId: string, decisions: StructuralChallengeCertainty['baseline'], withheld = false, displays?: Readonly<Record<string, string>>): { readonly text: string; readonly figure: string | null } {
   const matches = decisions?.filter((d) => d.option_id === optionId);
   // The existing certainty reader also speaks its stored sentence beside a withheld figure, without restoring it.
-  if (value === null) return withheld && matches?.length === 1 && matches[0].earned === false && matches[0].say
-    ? matches[0].say : TARGET_FREQUENCY_UNAVAILABLE;
+  if (value === null) return { text: withheld && matches?.length === 1 && matches[0].earned === false && matches[0].say
+    ? matches[0].say : TARGET_FREQUENCY_UNAVAILABLE, figure: null };
   const headline = () => displays?.[optionId] !== undefined
-    ? `${displays[optionId]} chance of meeting the goal, in this model, on current information.`
-    : TARGET_FREQUENCY_UNAVAILABLE;
+    ? { text: `${displays[optionId]} chance of meeting the goal, in this model, on current information.`, figure: displays[optionId] }
+    : { text: TARGET_FREQUENCY_UNAVAILABLE, figure: null };
   if (value !== 0 && value !== 1) return headline();
   const decision = matches?.length === 1 && matches[0].probability_of_goal === value ? matches[0] : undefined;
   if (decision?.earned === true) return headline();
   // Follow the Run's stored unearned sentence verbatim, just as the existing Agent certainty reader does.
-  return decision?.earned === false && decision.say
-    ? decision.say : 'This is what this model gives, not a certainty; whether that certainty is earned could not be checked.';
+  return { text: decision?.earned === false && decision.say
+    ? decision.say : 'This is what this model gives, not a certainty; whether that certainty is earned could not be checked.', figure: null };
+}
+
+function goalSide(value: number | null, optionId: string, decisions: StructuralChallengeCertainty['baseline'], withheld = false, displays?: Readonly<Record<string, string>>): string {
+  return goalSideTyped(value, optionId, decisions, withheld, displays).text;
+}
+
+/** The figures a goal or limit claim's line prints, as CEE's own display strings (never a raw probability). */
+function claimFigures(c: StructuralChallengeClaimV1, certainty?: StructuralChallengeCertainty): string[] {
+  if (c.kind === 'goal_probability') {
+    const withheld = c.basis === 'withheld_on_one_side';
+    return [goalSideTyped(c.baseline, c.option_id, certainty?.baseline, withheld, certainty?.baselineDisplay).figure,
+      goalSideTyped(c.alternative, c.option_id, certainty?.alternative, withheld, certainty?.alternativeDisplay).figure]
+      .filter((f): f is string => f !== null);
+  }
+  if (c.kind === 'constraint_probability') {
+    return [c.baseline, c.alternative].filter((v): v is number => v !== null && v !== 0 && v !== 1).map(chance);
+  }
+  return [];
 }
 
 function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string, certainty?: StructuralChallengeCertainty, caveat = ''): string {
@@ -212,9 +238,9 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
 
   const lines: string[] = [headline, ''];
   if (input.claimPermissions?.permitted_analysis_mode === 'quantified_provisional' || input.leaderLicence === 'permitted_with_caveat') {
-    lines.push('The figures are provisional estimates from these two model versions.');
+    lines.push(STRUCTURAL_CHALLENGE_LINES.provisional);
   }
-  lines.push('What I tested: the same model and inputs, recomputed with only this link removed. The two Runs are separately sampled (unpaired). It compares these two model versions; it doesn\'t say which version of the model is right.');
+  lines.push(STRUCTURAL_CHALLENGE_LINES.tested);
   const bullet = (cs: readonly StructuralChallengeClaimV1[]) => cs.map((c) => `- ${claimLine(c, label, input.certainty, caveat)}`);
   const groupLines = (input.identicalArms === true ? [] : input.identicalGroups ?? []).map((g) =>
     `- Without the link, ${listOf(g.map(label))} come out the same, so which option most runs support isn't compared for that version.`);
@@ -251,7 +277,7 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
   }
   uncertain.push('- Driver rankings and other diagnostic scores aren\'t compared between the two versions, because they shift with how the model is scaled.');
   uncertain.push('- All of Olumi\'s other estimates were kept as they are; this is one alternative, not the only one.');
-  uncertain.push('- This test isn\'t saved. You can run it again while the model stays as it is.');
+  uncertain.push(`- ${STRUCTURAL_CHALLENGE_LINES.not_saved}`);
   lines.push('', 'What remains uncertain:', ...uncertain);
 
   const from = label(result.alternative.from_id);
@@ -323,6 +349,43 @@ export interface StructuralChallengeTurn {
   readonly identicalArms?: boolean;
   readonly identicalGroups?: readonly (readonly string[])[];
   readonly leaderSameAs?: readonly string[];
+}
+
+/** One line of a completed reply that SCI-10's card may show: what kind it is, the option it is about, its figures. */
+export interface StructuralChallengeRow {
+  readonly text: string;
+  readonly kind: 'provisional' | 'tested' | 'goal' | 'limit' | 'not_saved';
+  readonly option_id?: string;
+  /** A limit line's constraint: one option can carry several limits, so it is part of the row's identity. */
+  readonly constraint_id?: string;
+  readonly figures: readonly string[];
+}
+
+/**
+ * ⭐ SCI-10's allowlist, typed (accel P24): the provisional disclosure, what was tested, each option's goal-chance and
+ * limit lines, and "not saved" — never the headline, a lead line, an outcome-level line or the next step. Built with
+ * the composer's own functions on the turn as PRESENTED (after `structuralChallengeTurnUnderLicence`), then kept only
+ * where the reply says it, in the reply's order: the composer, not this list, decides which claims became lines.
+ * Empty for anything but a completed test.
+ */
+export function structuralChallengeRowsOf(turn: StructuralChallengeTurn): StructuralChallengeRow[] {
+  const result = turn.result;
+  if (result === null || result.status !== 'completed') return [];
+  const label = (id: string) => turn.labels.get(id) ?? id;
+  const candidates: StructuralChallengeRow[] = [
+    { text: STRUCTURAL_CHALLENGE_LINES.provisional, kind: 'provisional', figures: [] },
+    { text: STRUCTURAL_CHALLENGE_LINES.tested, kind: 'tested', figures: [] },
+    ...result.claims.flatMap((c): StructuralChallengeRow[] => c.kind === 'goal_probability' || c.kind === 'constraint_probability'
+      ? [{ text: claimLine(c, label, turn.certainty), kind: c.kind === 'goal_probability' ? 'goal' : 'limit', option_id: c.option_id,
+        ...(c.kind === 'constraint_probability' && c.constraint_id ? { constraint_id: c.constraint_id } : {}), figures: claimFigures(c, turn.certainty) }]
+      : []),
+    { text: STRUCTURAL_CHALLENGE_LINES.not_saved, kind: 'not_saved', figures: [] },
+  ];
+  // Whole reply lines only (bare, or as the composer's `- ` bullet): a substring hit would admit a claim the composer
+  // aggregated away whose text sits inside another line (a label, the headline), and would misorder rows (Codex r1).
+  const replyLines = turn.reply.split('\n');
+  const at = (row: StructuralChallengeRow) => replyLines.findIndex((l) => l === row.text || l === `- ${row.text}`);
+  return candidates.filter((row) => at(row) >= 0).sort((a, b) => at(a) - at(b));
 }
 
 /** Each receipt (dispatch, final, replay) applies this adapter with SAME-read baseline authority.

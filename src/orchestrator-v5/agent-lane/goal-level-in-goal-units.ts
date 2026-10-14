@@ -24,7 +24,7 @@ type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 
 /** The one-character symbol the canonical alphabet reads as this code ("GBP" → "£"); else the code itself. */
-function symbolOf(code: string): string {
+export function symbolOf(code: string): string {
   return Object.entries(CURRENCY_SYMBOL_TO_CODE).find(([symbol, c]) => c === code && Array.from(symbol).length === 1)?.[0] ?? code;
 }
 

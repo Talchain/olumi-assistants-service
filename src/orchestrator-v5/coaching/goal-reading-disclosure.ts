@@ -44,8 +44,8 @@ function senseReadingWords(graph: unknown, goalNodeId: unknown): string | null {
   return typeof words === 'string' && words.trim() !== '' ? words.trim() : null;
 }
 
-/** One sentence per inferred product THIS Run evaluated on a path to the goal, in node order. */
-function productReadingWords(graph: unknown, goalNodeId: unknown, identityEvaluations?: readonly unknown[]): string[] {
+/** One sentence per inferred product THIS Run evaluated on a path to the goal, in node order, with the product's node. */
+function productReadings(graph: unknown, goalNodeId: unknown, identityEvaluations?: readonly unknown[]): GoalReading[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges)
     ? graph.edges.filter((e): e is { from: string; to: string } => isRec(e) && typeof e.from === 'string' && typeof e.to === 'string') : [];
@@ -61,16 +61,35 @@ function productReadingWords(graph: unknown, goalNodeId: unknown, identityEvalua
     const parts = (Array.isArray(identity.factor_ids) ? identity.factor_ids : []).map(label);
     const own = label(n.id);
     if (own === undefined || parts.length < 2 || parts.some((p) => p === undefined)) return [];
-    return [`Olumi works out ‘${own}’ as ${parts.map((p) => `‘${p}’`).join(' × ')}. That’s Olumi’s reading of how they combine; tell me if it’s wrong.`];
+    return [{ kind: 'product' as const, node_id: n.id,
+      words: `Olumi works out ‘${own}’ as ${parts.map((p) => `‘${p}’`).join(' × ')}. That’s Olumi’s reading of how they combine; tell me if it’s wrong.` }];
   });
+}
+
+/** One of Olumi's readings the goal's chance rests on: which part of the goal, the node it is held on, and its words. */
+export interface GoalReading {
+  readonly kind: 'direction' | 'level' | 'product';
+  readonly node_id: string;
+  readonly words: string;
+}
+
+/**
+ * ⭐ THE TYPED READINGS (DL 13:55Z 14 Oct; old DGAI #2668): exactly the readings the Run's reply says, in its order — the
+ * direction, today's level, each evaluated inferred product — so the goal-chance licence carries what the chance rests on
+ * as data, and the UI says it beside the chance. One predicate for both: the tail below is these words, joined.
+ */
+export function goalReadingsOf(graph: unknown, goalNodeId: unknown, identityEvaluations?: readonly unknown[]): GoalReading[] {
+  if (typeof goalNodeId !== 'string') return [];
+  const onGoal = (kind: 'direction' | 'level', words: string | null): GoalReading[] =>
+    words === null ? [] : [{ kind, node_id: goalNodeId, words }];
+  return [...onGoal('direction', senseReadingWords(graph, goalNodeId)), ...onGoal('level', goalLevelReadingWords(graph, goalNodeId)),
+    ...productReadings(graph, goalNodeId, identityEvaluations)]
+    .filter((r) => passesAssistantTextContentDefences(r.words));
 }
 
 /** ' <direction words> <level words> <product words>' for the reply, or '' when the goal holds no reading that speaks. */
 export function buildGoalReadingDisclosure(graph: unknown, goalNodeId: unknown, identityEvaluations?: readonly unknown[]): string {
-  return [senseReadingWords(graph, goalNodeId), goalLevelReadingWords(graph, goalNodeId), ...productReadingWords(graph, goalNodeId, identityEvaluations)]
-    .filter((w): w is string => w !== null && passesAssistantTextContentDefences(w))
-    .map((w) => ` ${w}`)
-    .join('');
+  return goalReadingsOf(graph, goalNodeId, identityEvaluations).map((r) => ` ${r.words}`).join('');
 }
 
 /** The handler's internal channel: the graph the Run analysed and the goal it read. Server-only, never the wire. */

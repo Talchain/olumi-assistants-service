@@ -110,6 +110,17 @@ async function readStored() {
   return { ...read, factorEnrichments: await persistedFactorReviewFor(SCENARIO, read, 'cold-read') };
 }
 
+/** ⭐ SPEED cut 3: the LIVE press computes the review for the same bound Run, inside the Agent turn's provider policy. */
+async function pressRead() {
+  const policy = OPENAI_ONLY('agent_v1_turn');
+  const current = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'press-read' });
+  const block = current.analysis_result as { computed_against_hash?: string } | null;
+  const read = { graph, graphHash: block?.computed_against_hash, analysisState: current.analysis_state,
+    analysisResult: current.analysis_result, analysisReady: buildCanonicalAnalysisReadyFromGraph(graph as never) };
+  const factorEnrichments = await runWithProviderPolicy(policy, () => persistedFactorReviewFor(SCENARIO, read, 'press-read', true));
+  return { ...read, factorEnrichments, policy };
+}
+
 describe('MC factor review served from the persisted Agent Run', () => {
   let agentApp: FastifyInstance;
   let legacyApp: FastifyInstance;
@@ -163,33 +174,13 @@ describe('MC factor review served from the persisted Agent Run', () => {
     expect(factorReviewSensitivity([{ factor_id: 'b', elasticity: 0.2 }])).toEqual([]);
   });
 
-  it('finding 2: PLoT returns with 100 ms remaining; hung extraction stops at the outer cap and cancels the SDK call', async () => {
-    vi.useFakeTimers();
-    const outer = new AbortController();
-    const cap = setTimeout(() => outer.abort(), 1_000);
-    try {
-      sdk.openai.mockImplementationOnce(() => new Promise(() => {}));
-      let settled = false;
-      const pending = runAndPersist(true, true, { signal: outer.signal, plotDelayMs: 900 })
-        .then((result) => { settled = true; return result; });
-      await vi.advanceTimersByTimeAsync(900);
-      expect(extractionSpy).toHaveBeenCalledTimes(1);
-      expect(extractionSpy.mock.calls[0]![2]!.signal).toBe(outer.signal);
-      const sdkSignal = sdk.openai.mock.calls[0]![1]?.signal as AbortSignal | undefined;
-      expect(sdkSignal?.aborted).toBe(false);
-      await vi.advanceTimersByTimeAsync(99);
-      expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(settled).toBe(true);
-      expect(sdkSignal?.aborted).toBe(true);
-      const { result } = await pending;
-      const fact = result.handler_facts.find((f) => f.fact_type === 'run_analysis')!;
-      expect(fact.result.enrichment).not.toHaveProperty('factor_enrichments');
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      clearTimeout(cap);
-      vi.useRealTimers();
-    }
+  it('SPEED cut 3 (RED): the Run makes no factor-review call and stores none; its critical path waits for PLoT only', async () => {
+    const { result } = await runAndPersist();
+    expect(extractionSpy).not.toHaveBeenCalled(); expect(sdk.openai).not.toHaveBeenCalled();
+    const fact = result.handler_facts.find((f) => f.fact_type === 'run_analysis')!;
+    expect(fact.result.enrichment).not.toHaveProperty('factor_enrichments');
+    // The Run keeps the sensitivity the press computes from.
+    expect(fact.result.enrichment).toHaveProperty('factor_sensitivity');
   });
 
   it('finding 2 CONTROL: an expired outer budget skips enrichment without an extraction call', async () => {
@@ -210,7 +201,7 @@ describe('MC factor review served from the persisted Agent Run', () => {
   ])('finding 3: stored option-action/priority paraphrase is withheld: %s', async (question) => {
     sdk.openai.mockImplementationOnce(async () => ({ choices: [{ message: { content: JSON.stringify({ enrichments: [enrichment(question)] }) } }] }));
     await runAndPersist();
-    const read = { ...await readStored(), graph: { ...graph,
+    const read = { ...await pressRead(), graph: { ...graph,
       nodes: [...graph.nodes, { id: 'hire-lead', kind: 'option', label: 'Hire a Tech Lead' }] } };
     expect(read.factorEnrichments).toEqual([enrichment(question)]);
     expect(factorReviewPressLine(read)).toBeNull();
@@ -227,10 +218,11 @@ describe('MC factor review served from the persisted Agent Run', () => {
     }
   });
 
-  it('(a) RED at base: an Agent Run stores the enrichment and the route serves exactly one rank-1 item', async () => {
+  it('(a) SPEED cut 3: the Run stores no enrichment; the review press computes it and serves exactly one rank-1 item', async () => {
     const { plot } = await runAndPersist();
     const fact = durable.rows[0]!.handler_facts.find((f) => f.fact_type === 'run_analysis')!;
-    expect(fact.result.enrichment).toHaveProperty('factor_enrichments', [enrichment()]);
+    expect(fact.result.enrichment).not.toHaveProperty('factor_enrichments');
+    expect(extractionSpy).not.toHaveBeenCalled();
     expect(plot.mock.calls[0]![0]).not.toHaveProperty('brief');
     const response = await press(); expect(response.statusCode).toBe(200);
     const text = response.json().assistant_text as string;
@@ -238,8 +230,9 @@ describe('MC factor review served from the persisted Agent Run', () => {
     expect(text).not.toMatch(/0\.62|elasticity/); expect(extractionSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('(b) RED at base: extraction uses the exact OpenAI per-call model despite the Anthropic env default', async () => {
-    const { policy } = await runAndPersist();
+  it('(b) the press\'s extraction uses the exact OpenAI per-call model despite the Anthropic env default', async () => {
+    await runAndPersist();
+    const { policy } = await pressRead();
     expect(extractionSpy).toHaveBeenCalledTimes(1);
     const options = extractionSpy.mock.calls[0]![2]!;
     expect(options.modelOverride).toBe(AGENT_LANE_ENRICH_MODEL);
@@ -269,20 +262,23 @@ describe('MC factor review served from the persisted Agent Run', () => {
     expect(extractionSpy).not.toHaveBeenCalled(); expect(policy.calls).toEqual([]);
   });
 
-  it('(e) RED at base: cold reload reads the stored Run and serves the same words with no model call', async () => {
+  it('(e) cold reload: the live press computes for the same bound Run (one call); a replay reads stored only, with no model call', async () => {
     await runAndPersist();
     durable.rows = JSON.parse(JSON.stringify(durable.rows)) as Row[];
     extractionSpy.mockClear(); sdk.openai.mockClear(); sdk.anthropic.mockClear();
-    const read = await readStored(); expect(read.factorEnrichments).toEqual([enrichment()]);
-    expect(decisionReviewFor(SCENARIO, read).reply).toContain(WORDS);
     expect((await press()).json().assistant_text).toContain(WORDS);
-    expect(extractionSpy).not.toHaveBeenCalled(); expect(sdk.openai).not.toHaveBeenCalled(); expect(sdk.anthropic).not.toHaveBeenCalled();
+    expect(extractionSpy).toHaveBeenCalledTimes(1); expect(sdk.anthropic).not.toHaveBeenCalled();
+    extractionSpy.mockClear(); sdk.openai.mockClear();
+    // The replay path's reader (stored only): a new Run stored nothing, so nothing is composed and no model is called.
+    const replay = await readStored(); expect(replay.factorEnrichments).toBeUndefined();
+    expect(decisionReviewFor(SCENARIO, replay).reply).not.toContain(WORDS);
+    expect(extractionSpy).not.toHaveBeenCalled(); expect(sdk.openai).not.toHaveBeenCalled();
   });
 
   it.each(['What is best in this model?', 'What would you recommend in this model?', 'What does elasticity 0.62 show in this model?'])(
     '(f) MUST-FAIL: the guarded press withholds unsafe question %s', async (question) => {
     sdk.openai.mockImplementation(async () => ({ choices: [{ message: { content: JSON.stringify({ enrichments: [enrichment(question)] }) } }] }));
-    await runAndPersist(); const read = await readStored();
+    await runAndPersist(); const read = await pressRead();
     expect(read.factorEnrichments).toEqual([enrichment(question)]);
     expect(factorReviewPressLine(read)).toBeNull();
     const text = (await press()).json().assistant_text as string;
@@ -296,27 +292,28 @@ describe('MC factor review served from the persisted Agent Run', () => {
     expect(extractionSpy).not.toHaveBeenCalled();
   });
 
-  it('CONTROL: an enrichment failure leaves the completed Run intact', async () => {
-    sdk.openai.mockRejectedValueOnce(new Error('enrichment unavailable'));
+  it('CONTROL: an enrichment failure at the press leaves the review without the line, and the Run intact', async () => {
     const { result } = await runAndPersist();
     expect(result.handler_facts[0]!.fact_type).toBe('run_analysis');
-    const fact = result.handler_facts.find((f) => f.fact_type === 'run_analysis')!;
-    expect(fact.result.enrichment).not.toHaveProperty('factor_enrichments');
+    sdk.openai.mockRejectedValueOnce(new Error('enrichment unavailable'));
+    const read = await pressRead();
+    expect(read.factorEnrichments).toBeUndefined();
+    expect(decisionReviewFor(SCENARIO, read).reply).not.toContain('The result moves most with');
   });
 
-  it('CONTROL: a timed-out enrichment leaves the completed Run intact within its time box', async () => {
+  it('CONTROL: a timed-out enrichment at the press stops within its time box and composes no line', async () => {
+    await runAndPersist();
     vi.useFakeTimers();
     try {
       sdk.openai.mockImplementationOnce(() => new Promise(() => {}));
       // The time box is the factor-review cap itself (8 s since 8 Oct), never a literal.
       let settled = false;
-      const pending = runAndPersist().then((r) => { settled = true; return r; });
+      const pending = pressRead().then((r) => { settled = true; return r; });
       await vi.advanceTimersByTimeAsync(AGENT_FACTOR_REVIEW_TIMEOUT_MS - 1);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(2);
-      const { result } = await pending;
-      const fact = result.handler_facts.find((f) => f.fact_type === 'run_analysis')!;
-      expect(fact.result.enrichment).not.toHaveProperty('factor_enrichments');
+      const read = await pending;
+      expect(read.factorEnrichments).toBeUndefined();
       expect(sdk.openai.mock.calls[0]![1]?.signal.aborted).toBe(true);
     } finally {
       vi.useRealTimers();
@@ -326,7 +323,8 @@ describe('MC factor review served from the persisted Agent Run', () => {
   it('the live and replay route both use the persisted reader; the callback gate remains shut', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     expect(route).toContain('factorEnrichments: await persistedFactorReviewFor(scenarioId, state, String(req.id))');
-    expect(route).toContain('factorEnrichments: await persistedFactorReviewFor(scenarioId, composedRead, String(req.id))');
+    // SPEED cut 3: only the LIVE press computes (`true`); the replay reads stored only.
+    expect(route).toContain('factorEnrichments: await persistedFactorReviewFor(scenarioId, composedRead, String(req.id), true)');
     const handler = readFileSync(new URL('../../tools/handlers/run-analysis.ts', import.meta.url), 'utf8');
     expect(handler).toContain('config.cee.sendBriefToPlot && currentProviderPolicy() === undefined');
   });

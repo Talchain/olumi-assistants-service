@@ -15,7 +15,10 @@ const sha256 = (text: string | Buffer) => createHash('sha256').update(text).dige
 // USER VOCABULARY (Paul, 14 Oct, agreed; CLAUDE.md §3): the template gains its VOCABULARY section (after STYLE) and three
 // phrases follow it ("qualitative what-ifs", "improve the user's reasoning", "assumption, what-if"): 7,431 → 8,006 bytes
 // (+575). Reversing exactly those four edits on the new template reproduces 170ac5e7….
-const TEMPLATE_SHA = '557b1cf20d5f58cdcf536475937f4691cfe255def6c6b9b816af68e412e0f2f8';
+// OLUMI'S PURPOSE (DL 14 Oct; Paul via the DL): READINESS AND RESULTS' leader sentence never recommends or chooses for the
+// user, and says each option's chance and which is most likely to achieve the goal, in this model, with its uncertainty:
+// 8,006 → 8,207 bytes (+201). Reversing exactly that sentence on the new template reproduces 557b1cf2….
+const TEMPLATE_SHA = '7546b130973218710840fa1d76ebf867ceee8fc15a69ec0ba8c4398308852cce';
 // AI HARNESS (1 Oct, DL 5936996041 on R3 DEFECT 2): the links sentence defines `sizing` (F1b's linkSizing) and no longer
 // says `defaulted` means unsized: 325bb61e… → 26f7e9c0…. The template sha above is unchanged.
 // MODEL GENERATION (2 Oct, M1 Accept receipt; Codex pre-review 2 on CEE mg/accept-receipt-authorship): the link-set sentence
@@ -82,8 +85,11 @@ const HOST_SHA = 'c716ececa934ccdbff3c7baa660ce804071471244d42f0360cfcc9fc0c62c0
 // + T2A5 (#3002): the host contract above only: 33,222 → 33,229 bytes (+7, the AIE's coach sentence); same leaf-diff proof.
 // + USER VOCABULARY (Paul, 14 Oct): the template edits above only: 33,229 → 33,804 bytes (+575). Derived from the SENT
 //   body; reversing exactly those four edits on the SENT prefix reproduces ce179434… and 33,229 bytes.
-const RENDERED_SHA = '125f58683dd0b151cb252b11ff9459710783984bf4f206613f8388bdce9a2aec';
-const RENDERED_BYTES = 33_804;
+// + OLUMI'S PURPOSE (DL 14 Oct): the block FIRST in the host's part (+1,721 bytes with its separator) and the template
+//   sentence above (+201): 33,804 → 35,726 bytes. Derived from the SENT body; removing exactly the block and reversing that
+//   sentence on the SENT prefix reproduces 125f5868… and 33,804 bytes.
+const RENDERED_SHA = 'a3d35f6f3324c675f7e6c6e3b95300204ca054572b626f5fb5f555b4938c7369';
+const RENDERED_BYTES = 35_726;
 /**
  * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the
  * stated-figure rule; a tool-less call carries the coach alone. The coach bytes stay exactly RENDERED either way.
@@ -277,6 +283,28 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(modelInput).toContain('do no arithmetic');
     // SHA and byte count are derived from the intercepted request, not estimated from source literals.
     expectCoachInstructions(body);
+  });
+
+  /**
+   * ⭐ OLUMI'S PURPOSE governs every reply (Paul's principle, CLAUDE.md §4; principle review E; DL 14 Oct 12:46Z, with the DL's
+   * line-2 correction). The block is SENT once, FIRST in the host's part: straight after the template's identity paragraph.
+   * Its words are written here from the review (never read from the source module).
+   */
+  it('RED (OLUMI\'S PURPOSE): the block is SENT once, first in the host\'s part, and nothing tells the AI to rank or favour', async () => {
+    const PURPOSE_OPENING = [
+      'OLUMI\'S PURPOSE (governs every reply)',
+      'You are a reasoning partner, not an answer or decision engine. The user and their team own every conclusion and choice.',
+      'Never recommend or choose an option for the user, and never call one "best", the "winner" or the one to "go with". When the current result permits it, say each option\'s chance of meeting the goal in this model and which option is most likely to achieve it, as a model-relative finding with its uncertainty, what it rests on and what would change it. Never present how often an option came out on top as its chance of meeting the goal.',
+    ].join('\n');
+    await sendTurn('What does the analysis say?', [say('The comparison is provisional.')]);
+    const instructions = sent[0]!.instructions;
+    const [identity] = SELECTED_COACH_V02_TEMPLATE.split('{{MODE_AND_AUTHORITY}}');
+    expect(instructions.startsWith(`${identity}${PURPOSE_OPENING}\n`)).toBe(true);
+    expect(instructions.split('OLUMI\'S PURPOSE (governs every reply)')).toHaveLength(2);
+    expect(instructions).not.toContain('Name, rank or favour');
+    // Paul (via the DL, 14 Oct): the template's leader sentence says which option is most likely, never chooses for the user.
+    expect(instructions).toContain('say each option\'s chance of meeting the goal in this model and which option is most likely to achieve it');
+    expect(instructions).not.toContain('Never rank, favour or recommend');
   });
 
   it('uses the exact selected template and host authority on an ordinary conversation', async () => {

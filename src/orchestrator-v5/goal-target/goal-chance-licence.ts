@@ -53,6 +53,7 @@ import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js'
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { resolveGoalDirection } from './goal-direction.js';
+import { goalReadingsOf, type GoalReading } from '../coaching/goal-reading-disclosure.js';
 import {
   BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, periodEndWords, statusQuoAssumptionWords, statusQuoMovedWords,
   statusQuoProjectionWords, statusQuoRowWords,
@@ -232,6 +233,13 @@ export interface GoalChanceLicence {
   /** G2: the AI reading belongs to CEE's conditional licence, never the provider envelope. */
   readonly effects_timing?: EffectsTiming;
   readonly effects_timing_origin?: 'olumi';
+  /**
+   * ⭐ OLUMI'S READING OF THE GOAL, TYPED (DL 13:55Z 14 Oct; old DGAI #2668): present iff a chance is licensed AND it rests on
+   * one of Olumi's own readings of the goal — its direction, today's level, or an inferred product this Run evaluated
+   * (`goalReadingsOf`, the very predicate and words the Run's reply says). Stored with the Run, so the turn and the reload
+   * read the same label. The period Olumi assumed is its own field (`period_end_assumption`). Absent: nothing to say.
+   */
+  readonly goal_reading?: { readonly origin: 'olumi'; readonly readings: readonly GoalReading[] };
 }
 
 /** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
@@ -1323,7 +1331,11 @@ export function withGoalChanceLicence<E>(
   // precision and no Monte Carlo interval on any surface (its standard error is 0 by construction: never "±0").
   const shown = licence.status_quo === undefined ? checked : withholdStatusQuoIntervals(checked, licence.status_quo.option_id);
   const warnings = Array.isArray(shown.inference_warnings) ? shown.inference_warnings : [];
-  return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(checked) }] } as E;
+  // Only a licensed chance rests on a reading; the readings are the ones THIS Run evaluated (its own identity_evaluations).
+  const readings = Object.keys(licence.pct_by_option).length === 0 ? []
+    : goalReadingsOf(graph, goalId, Array.isArray(checked.identity_evaluations) ? checked.identity_evaluations : undefined);
+  return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(checked),
+    ...(readings.length > 0 ? { goal_reading: { origin: 'olumi' as const, readings } } : {}) }] } as E;
 }
 
 /**

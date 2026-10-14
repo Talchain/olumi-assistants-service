@@ -93,6 +93,7 @@ import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
 // ratified constraint labels it names.
 import {
   deriveIntakeOptionReconciliation,
+  withoutUnwrittenOptionWords,
   applyIntakeToLeaderPermission,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
@@ -244,7 +245,6 @@ export {
   type HandlerInvocationFailedCause,
 } from '../handler-errors.js';
 import { currentProviderPolicy } from '../../../adapters/llm/provider-policy.js';
-import { agentFactorEnrichments } from '../../agent-lane/factor-review.js';
 
 // ============================================================================
 // Locked assistant_text templates (Refinement R1)
@@ -2551,11 +2551,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // projection. snapshot.options can include a value-less option the gate
     // excluded from PLoT. Recover existing source quotes only by canonical ID
     // from this same snapshot; labels never manufacture lineage.
-    const intakeReconciliation = deriveIntakeOptionReconciliation(
+    // ⭐ No option-words record on the served lane (its constructor never writes one) → no intake withhold: the goal-chance
+    // licence alone decides whether the most likely option is named (`withoutUnwrittenOptionWords`, DL 14 Oct).
+    const intakeReconciliation = withoutUnwrittenOptionWords(deriveIntakeOptionReconciliation(
       snapshot.briefText,
       finalWireOptions,
       snapshot.rawPersistedGraph ?? snapshot.graph,
-    );
+    ), finalWireOptions, snapshot.rawPersistedGraph ?? snapshot.graph);
     // ⚠ NO TELEMETRY EVENT HERE, AND THAT IS A DISCLOSED GAP RATHER THAN AN
     // OVERSIGHT. The obvious move — reuse `V5RunAnalysisConstraintUnevaluated`
     // with a discriminating code — is the exact conflation this module's
@@ -3122,11 +3124,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'PLoT refused the goal chance for an Olumi-side reason (Science §(g) defect row)',
       );
     }
-    // Option C: compute in-process before the existing fact commit; no callback and no brief carry.
-    const factorEnrichments = await agentFactorEnrichments(snapshot.rawPersistedGraph ?? snapshot.graph,
-      (response as Record<string, unknown>).factor_sensitivity, invocation.requestId, invocation.signal);
-    // Attached to the PLoT response before the one owned projection stamp (handler-ownership guard pins that line).
-    if (factorEnrichments !== undefined) (response as Record<string, unknown>).factor_enrichments = factorEnrichments;
+    // ⭐ SPEED cut 3 (undeployed/SPEED.md, DL 14 Oct): the factor review's gpt-4.1 call no longer sits on every Run's
+    // critical path (2.7 s median, p90 4.3, 8 s cap). Its one reader, the decision-review press, computes it for the same
+    // bound Run (`persistedFactorReviewFor`). A Run fact stored before this change keeps its enrichment and is still read.
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,

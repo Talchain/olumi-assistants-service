@@ -78,11 +78,23 @@ describe('controls: a goal level nothing verifies is written exactly as before',
     expect(os?.source).toBe('brief_extraction');
     expect(os?.extractionType).toBeUndefined();
   });
+  // ⛔ DL 13:49Z 14 Oct: a non-zero goal level no sentence naming the goal writes is not the user's. It is unknown and asked,
+  // never stored as theirs (it was, unverified, before; #3053's mutant 3 found the hole).
   for (const [name, brief] of [
     ['a drafted-only level: the brief never writes the 80', cap.brief.replace(OWN, '').replace(DEFINED, 'Total weekly support capacity is the existing capacity plus the additional specialist capacity.')],
+    ['the goal sentence writes no 80, only the factor sentence does', cap.brief.replace(DEFINED, 'Total weekly support capacity is defined as the existing capacity plus the additional specialist capacity.')],
+  ] as const) {
+    it(`unknown and asked, never the user's: ${name}`, () => {
+      expect(brief).not.toBe(cap.brief);
+      expect(goal(served, brief)).toBeUndefined();
+      const loss = admitCandidateModel(structuredClone(served) as unknown as CandidateModel, {}, brief).loss;
+      expect(loss.map(l => l.reason)).toContain('The current level of "Weekly support capacity" (80) is not a figure your brief states for it, so no '
+        + 'chance of reaching 100 is shown. Tell me the current level of "Weekly support capacity" and the chance of reaching it can be shown.');
+    });
+  }
+  for (const [name, brief] of [
     ['a third party owns the 80 ("Their existing team …")', cap.brief.replace(OWN, 'Their existing team resolves 80 tickets per week.')],
     ['the 80 is past ("Last year our existing team resolved …")', cap.brief.replace(OWN, 'Last year our existing team resolved 80 tickets per week.')],
-    ['the goal sentence writes no 80, only the factor sentence does', cap.brief.replace(DEFINED, 'Total weekly support capacity is defined as the existing capacity plus the additional specialist capacity.')],
   ] as const) {
     it(`stays as before (brief_extraction, no extractionType): ${name}`, () => {
       expect(brief).not.toBe(cap.brief);

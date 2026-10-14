@@ -228,7 +228,7 @@ describe('the pre-mortem line names the horizon the model holds (contract v1.1 i
     const g = structuredClone(D3.graph) as G;
     (g.nodes.find((n) => n.kind === 'goal') as Record<string, unknown>).goal_horizon = { deadline: '2027-04-07' };
     const withDate = offers(bar(preRun(g))).find((o) => o.action_id === 'pre_mortem')!;
-    expect(withDate.user_line).toBe('Run a pre-mortem with me: imagine it is 7 April 2027 and this decision went badly. What most plausibly went wrong?');
+    expect(withDate.user_line).toBe('Run a pre-mortem with me: imagine it is 7 April 2027, we went ahead, and it went badly. What most plausibly went wrong?');
     expect(offers(bar(preRun(D3.graph))).find((o) => o.action_id === 'pre_mortem')!.user_line).toBe(ACTION_REGISTRY.pre_mortem.user_line);
     expect(sayDate('2026-12-01')).toBe('1 December 2026');
     expect(sayDate('not a date')).toBeNull();

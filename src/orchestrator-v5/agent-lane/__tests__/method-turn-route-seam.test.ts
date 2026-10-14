@@ -114,7 +114,7 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(res.statusCode).toBe(200);
     return res.json() as Body;
   };
-  const generic = () => press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?');
+  const generic = () => press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?');
   const pick = (id = PLAN, turnId?: string) => press(planPickChipId(id), `Run a pre-mortem on ${q(label(id))}.`, turnId);
   /** The ordinary turn's instructions, read off the wire (the route does not export them). */
   const baseInstructions = async (): Promise<string> => {
@@ -227,14 +227,14 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
   const callsOnRow = (turnId: string): number => rows.get(`${SCENARIO}:${turnId}`)!.llm_calls_used;
   it('ROW R12 RED: a generic multi-option pre-mortem records the ONE model call it makes', async () => {
     const t = randomUUID();
-    await press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?', t);
+    await press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?', t);
     expect(sent).toHaveLength(1);
     expect(callsOnRow(t)).toBe(1);
   });
   it('ROW R12 RED: the "can\'t run" reply (read failed) records 0 calls', async () => {
     failRead = true;
     const t = randomUUID();
-    await press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?', t);
+    await press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?', t);
     expect(sent).toHaveLength(0);
     expect(callsOnRow(t)).toBe(0);
   });
