@@ -205,6 +205,23 @@ describe('the one rule (`heldCardStillApplies`), read at press, at lapse and by 
     expect(heldCardStillApplies(legacy as never, linkMoved(w.read()))).toBe(false);
   });
 
+  it('THE WRITER: the goal renamed elsewhere with the hash unchanged, pressed with no turn between → refused, nothing written', async () => {
+    const { w, c, ctx } = caps();
+    const out = await c.proposeGoalDeadline!(ctx(null), DEADLINE_ARGS) as Rec;
+    const pid = String(out.proposal_id);
+    const g = w.read(); const before = hash(g); goal(g).label = 'Team productivity';
+    expect(hash(g), 'the analysis hash does not see a goal label').toBe(before);
+    w.replace(g);
+    const pressed = await c.authoriseChange!({ ...ctx(null), typed_approval_of: pid } as never, { proposal_id: pid }) as Rec;
+    expect(pressed).toMatchObject({ ok: false, mutated: false, reason: 'model_changed_since_approval' });
+    expect(goal(w.read()).goal_horizon ?? null).toBeNull();
+    // CONTRAST: the same press on the goal as the card bound it writes the date.
+    const { w: w2, c: c2, ctx: ctx2 } = caps();
+    const pid2 = String((await c2.proposeGoalDeadline!(ctx2(null), DEADLINE_ARGS) as Rec).proposal_id);
+    expect(await c2.authoriseChange!({ ...ctx2(null), typed_approval_of: pid2 } as never, { proposal_id: pid2 })).toMatchObject({ ok: true, mutated: true });
+    expect(goal(w2.read()).goal_horizon).toMatchObject({ deadline: DEADLINE });
+  });
+
   it('PERMISSION: another user’s press is refused, even on an unchanged model; nothing is written', async () => {
     const { w, c, ctx } = caps();
     const out = await c.proposeGoalDeadline!(ctx(null), DEADLINE_ARGS) as Rec;
