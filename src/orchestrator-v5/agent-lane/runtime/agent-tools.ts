@@ -128,6 +128,11 @@ export interface AgentToolContext {
    */
   readonly user_turn_text?: string;
   /**
+   * Olumi's previous reply in this conversation, bound by the route from the session's own items (never the model's words now):
+   * what a user's answer to Olumi's question about ONE risk's chance is bound by (AIE 6179240850, `occurrenceBoundTo`).
+   */
+  readonly preceding_assistant_text?: string;
+  /**
    * The proposal THIS request's typed approve chip names (`typedApprovalOf`), bound by the route — never model output.
    * A link's stated effect is written only from that button, which shows the exact reading it records (PR Review's
    * fifth CR on #2275): a free-text "yes" to the model never records it.

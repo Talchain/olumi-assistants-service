@@ -100,7 +100,9 @@ export function riskHoldsALevel(node: Rec, graph: unknown): boolean {
   // Olumi's own range stated over a window that is no longer the goal's is stale, so no level (offered again over the current
   // window). Any other block, valid or not, is held as it stands and is never overwritten here.
   const block = EventRiskV1.safeParse(node.event_risk);
-  return !(block.success && block.data.occurrence.basis === 'olumi' && !riskOccurrenceIsCurrent(node, graph));
+  // The user's S2 estimate over a window the goal no longer has is retained but no level for the new window (AIE 6179240850).
+  const stated = userStatementOf(node.occurrence_statement) !== undefined;
+  return !(block.success && (block.data.occurrence.basis === 'olumi' || stated) && !riskOccurrenceIsCurrent(node, graph));
 }
 
 /**
@@ -113,7 +115,23 @@ export function riskHoldsALevel(node: Rec, graph: unknown): boolean {
 export function riskOccurrenceIsCurrent(node: object, graph: unknown): boolean {
   const block = EventRiskV1.safeParse((node as { event_risk?: unknown }).event_risk);
   if (!block.success) return false;
-  return block.data.occurrence.basis !== 'olumi' || block.data.horizon.months === riskOccurrenceWindowMonths(graph);
+  // AIE 6179240850: a user's estimate recorded through the S2 card keeps its OWN window; after the goal's window moves it is
+  // retained, never applied to the new analysis on `basis: 'user'` alone.
+  const statedOverItsWindow = userStatementOf((node as { occurrence_statement?: unknown }).occurrence_statement) !== undefined;
+  return (block.data.occurrence.basis !== 'olumi' && !statedOverItsWindow) || block.data.horizon.months === riskOccurrenceWindowMonths(graph);
+}
+
+/**
+ * The goal's window counts from TODAY (its held horizon, or a target reading from today), never from a later launch: a user's
+ * "within the next 3 months" is the goal's 3-month window only then (AIE 6179240850: the same month count after a launch is
+ * a different window).
+ */
+export function riskOccurrenceWindowFromToday(graph: unknown): boolean {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goals = nodes.filter((n) => n.kind === 'goal' && typeof n.id === 'string');
+  if (goals.length !== 1 || riskOccurrenceWindowMonths(graph) === undefined) return false;
+  const reading = goalTargetBasisOf(goals[0]);
+  return reading === undefined || reading.reference === 'today';
 }
 
 /**
@@ -226,12 +244,37 @@ export const riskHoldsNowCardWords = (label: string, source: string): string => 
   + `‘${label.trim()}’ is already true now? How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.`;
 export const riskHoldsNowRecordedWords = (label: string): string => `Recorded from your words: ‘${label.trim()}’ is already true now. `
   + 'How strongly it affects the model is still Olumi’s placeholder on its link.';
-/** AIE_TEXT_PENDING (DL relays): S2, the user's own occurrence figure. Their words are quoted; Olumi's reading of them is offered. */
-export const riskStatedOccurrenceCardWords = (label: string, source: string, block: EventRiskV1T): string => `From your message: ‘${source}’ `
-  + `Olumi reads this as your figure: a ${rangeWords(block)} chance that ‘${label.trim()}’ happens at least once within ${windowWords(block.horizon.months)}, `
-  + 'your goal’s time window. Do you want to record it as yours? How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.';
-export const riskStatedOccurrenceRecordedWords = (label: string, block: EventRiskV1T): string => `Recorded from your words: a ${rangeWords(block)} chance `
-  + `that ‘${label.trim()}’ happens at least once within ${windowWords(block.horizon.months)}. How strongly it affects the model is still Olumi’s placeholder on its link.`;
+/**
+ * AIE 6179240850, exact: S2, the user's own occurrence estimate. Their complete statement is quoted; Olumi's reading of it (the
+ * chance as they stated it, with "about"; the event; THEIR window) is offered, and the effect stays a separate assumption.
+ */
+export const chanceAsStated = (s: UserStatement): string => `${s.qualifier !== undefined ? 'about ' : ''}`
+  + `${s.low === s.high ? `${s.low}%` : `${s.low}–${s.high}%`}`;
+const statedWindowWords = (block: EventRiskV1T): string => `within the next ${block.horizon.months === 1 ? 'month' : `${block.horizon.months} months`} from today`;
+/** What the risk's effect rests on: its links' sizes as held, or Olumi's placeholder still to be sized. */
+export function riskEffectBasisWords(graph: unknown, riskId: string): string {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const out = edges.filter((e) => e.from === riskId);
+  const labelOf = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? id).trim();
+  if (out.length === 0) return 'it is not linked to anything in the model yet';
+  const targets = [...new Set(out.map((e) => `‘${labelOf(e.to)}’`))].join(' and ');
+  const placeholder = out.every((e) => e.defaulted === true || (isRec(e.provenance) && typeof e.provenance.magnitude === 'string'
+    && /placeholder/.test(e.provenance.magnitude)));
+  return placeholder ? `its effect on ${targets} is still Olumi’s placeholder, not yet sized` : `its effect on ${targets} is the size the model holds`;
+}
+export const riskStatedOccurrenceCardWords = (label: string, s: UserStatement, block: EventRiskV1T, goal: string, effect: string): string =>
+  `From your message: “${s.source}”. Olumi reads this as your estimate of ${chanceAsStated(s)} that ‘${label.trim()}’ happens at least once `
+  + `${statedWindowWords(block)}. Record this reading? How strongly it affects ‘${goal.trim()}’ is a separate assumption: ${effect}.`;
+export const riskStatedOccurrenceRecordedWords = (label: string, s: UserStatement, block: EventRiskV1T, effect: string): string =>
+  `Recorded your estimate: ${chanceAsStated(s)} that ‘${label.trim()}’ happens at least once ${statedWindowWords(block)}. `
+  + `${effect.charAt(0).toUpperCase()}${effect.slice(1)}.`;
+/** The risk node as the S2 write leaves it: its block, and (for the user's estimate) their complete statement beside it. */
+export const riskOccurrencePostimageNode = (approved: ApprovedRiskOccurrence): Rec => ({ ...approved.expected_node, event_risk: approved.event_risk,
+  ...(approved.stated_occurrence !== undefined ? { occurrence_statement: JSON.parse(JSON.stringify(approved.stated_occurrence)) as Rec } : {}) });
+/** The goal the window belongs to, by label (the card and receipt name it). */
+export const riskOccurrenceGoalLabel = (graph: unknown, goalId: string): string => String((isRec(graph) && Array.isArray(graph.nodes)
+  ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === goalId)?.label : undefined) ?? 'the goal');
 
 export type RiskOccurrenceRefusal = 'invalid_graph' | 'invalid_block' | 'risk_not_found' | 'risk_changed' | 'goal_changed' | RiskOccurrenceIneligible;
 
@@ -261,7 +304,7 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   if (matches.length !== 1) return { kind: 'refused', reason: 'risk_not_found' };
   // ⭐ IDEMPOTENT, by identity: a retry after THIS proposal's own write landed finds exactly the card's node with this block. The
   // same block found without that identity is a node that changed since the card (refused below), never this card's write.
-  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], { ...approved.expected_node, event_risk: approved.event_risk })) return { kind: 'unchanged' };
+  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], riskOccurrencePostimageNode(approved))) return { kind: 'unchanged' };
   if (!isDeepStrictEqual(matches[0], approved.expected_node)) return { kind: 'refused', reason: 'risk_changed' };
   const subject = riskOccurrenceSubject(persistedGraph, approved.risk_id);
   if (subject.kind === 'ineligible') return { kind: 'refused', reason: subject.reason };
@@ -271,6 +314,8 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   const graph = structuredClone(persistedGraph) as Rec & { nodes: unknown[] };
   const risk = graph.nodes.find((n): n is Rec => isRec(n) && n.id === approved.risk_id)!;
   risk.event_risk = structuredClone(approved.event_risk);
+  // AIE 6179240850: the user's complete statement (source, speaker, qualifier, period) is kept beside their block, for reopen.
+  if (stated !== undefined) risk.occurrence_statement = JSON.parse(JSON.stringify(stated)) as Rec;
   const label = String(risk.label).trim();
   const fact = EditGraphHandlerFactSchema.parse({
     fact_type: 'edit_graph',
@@ -291,7 +336,8 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   });
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
     confirmation: holdsNow ? riskHoldsNowRecordedWords(label)
-      : stated !== undefined ? riskStatedOccurrenceRecordedWords(label, block.data) : riskOccurrenceRecordedWords(label, block.data) };
+      : stated !== undefined ? riskStatedOccurrenceRecordedWords(label, stated, block.data, riskEffectBasisWords(persistedGraph, approved.risk_id))
+        : riskOccurrenceRecordedWords(label, block.data) };
 }
 
 /** The freshly computed atomic write, exactly: the writer's own postimage of `before`, nothing else. */
