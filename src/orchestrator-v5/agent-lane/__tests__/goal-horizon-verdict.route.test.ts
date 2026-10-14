@@ -243,7 +243,9 @@ describe('Science §(ad) through the producer and reply route', () => {
       expect(row.cell).toMatchObject({ reasons: expect.arrayContaining([expect.objectContaining({ code: HORIZON_WITHHOLD })]) });
     }
     expect(body.assistant_text).not.toContain('%');
-    expect([body._answer_shape.headline, ...body._answer_shape.bullets]).toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
+    // §(ad) amended (Paul pricing, DL → AIE #94): every card carries the marker; the reply never repeats it.
+    expect(lastView.options.every(row => row.cell.kind === 'withheld' && row.cell.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES)).toBe(true);
+    expect(body.assistant_text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
     expect(body.assistant_text).not.toContain(OLD_HORIZON);
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
     expect(JSON.stringify(body)).not.toContain('Add monthly changes');
@@ -331,7 +333,8 @@ describe('Science §(ad) through the producer and reply route', () => {
     // P1a (DL 87114 #2895): a stored triple does not unlock even a zero-spread result.
     expect(licence).toBeUndefined();
     expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(body.assistant_text).toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
+    expect(lastView.options.every(row => row.cell.kind === 'withheld' && row.cell.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES)).toBe(true);
+    expect(body.assistant_text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
     expect(body.assistant_text).not.toContain(WHY);
   }, 60_000);
 
@@ -339,8 +342,10 @@ describe('Science §(ad) through the producer and reply route', () => {
     const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
     const body = await turn(); // turn asserts deep equality on the real same-id replay, without a model call.
     expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(body._answer_shape).toMatchObject({ headline: ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, bullets: [] });
-    expect(body._answer_shape!.detail).toContain("Your goal is for month 9, and this model only has today's numbers.");
+    // §(ad) amended: the reply leads with the why, once; the cards keep the marker.
+    expect(body._answer_shape).toMatchObject({ headline: "Your goal is for month 9, and this model only has today's numbers.", bullets: [] });
+    expect(body._answer_shape!.detail).not.toContain("Your goal is for month 9, and this model only has today's numbers.");
+    expect(body.assistant_text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
   }, 60_000);
 
   it('no-H brief: all three current-number chances survive and baseline reply bytes are unchanged', async () => {
