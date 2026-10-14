@@ -1378,7 +1378,10 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
   // window, never a level "today". Every other risk keeps its ask, byte for byte.
   const eventPath = gap.kind === 'risk' ? riskOccurrenceSubject(rawGraph, gap.id) : undefined;
   const question = eventPath?.kind === 'eligible' ? riskOccurrenceAskWords(gap.label, eventPath.window_months) : `How likely or how large is "${gap.label}" today?`;
-  if (gap.kind === 'risk') return `${question} The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.`;
+  // The offer to propose is said only where the card can exist (PL 05:53Z): with no single saved goal period there is no
+  // window, so no card, and the ask never promises one.
+  if (gap.kind === 'risk') return `${question} The numerical analysis is withheld until this risk has a supported value.`
+    + (eventPath?.kind === 'eligible' ? ' You can also ask Olumi to propose a labelled starting assumption for review.' : '');
   return statusQuoLevelAsk(gap.label);
 };
 

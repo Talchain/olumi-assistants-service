@@ -24,6 +24,7 @@ import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { goalTargetBasisOf } from '../goal-target/goal-target-basis.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
+import { goalReadingProjectionOf } from '../goal-target/goal-reading-write.js';
 import { EventRiskV1, type EventRiskV1T } from '../../schemas/event-risk.js';
 
 type Rec = Record<string, unknown>;
@@ -40,6 +41,30 @@ export interface ApprovedRiskOccurrence {
   readonly event_risk: EventRiskV1T;
   /** The risk node exactly as stored when the card was made: the stale gate (a rename, a level or a cause moves it). */
   readonly expected_node: Readonly<Rec>;
+  /** The one goal whose window the range is stated over, and that goal exactly as it stood ({@link riskOccurrenceGoalSubject}). */
+  readonly goal_id: string;
+  readonly expected_goal: Readonly<Rec>;
+}
+
+/**
+ * ⭐ THE GOAL THE CARD'S WINDOW IS STATED OVER, exactly as it stood when the card was made (Codex r1 on #3013: binding the
+ * month COUNT let a card made for 14 October–14 January write after the saved window moved to 14 November–14 February, the
+ * analysis hash unchanged). The goal's COMPLETE projection (`goalReadingProjectionOf`: label, target, horizon with its
+ * deadline, period, reading) and the date its horizon counts from (`goal_horizon_reference_date`, outside the record),
+ * as the stored card carries it (JSON). ANY change to it retires the card (DL 14 Oct, conservative); an unrelated edit does not.
+ */
+export function riskOccurrenceGoalSubject(graph: unknown, goalId: string): Rec | undefined {
+  const projection = goalReadingProjectionOf(graph, goalId);
+  if (projection === undefined) return undefined;
+  const goal = (graph as { nodes: unknown[] }).nodes.find((n): n is Rec => isRec(n) && n.kind === 'goal' && n.id === goalId);
+  const starts = typeof goal?.goal_horizon_reference_date === 'string' ? goal.goal_horizon_reference_date : null;
+  return JSON.parse(JSON.stringify({ ...projection, starts })) as Rec;
+}
+
+/** The card's goal still stands exactly as bound: the one rule the press, the writer and the read-back each read. */
+export function riskOccurrenceGoalHolds(approved: Pick<ApprovedRiskOccurrence, 'goal_id' | 'expected_goal'>, graph: unknown): boolean {
+  const now = riskOccurrenceGoalSubject(graph, approved.goal_id);
+  return now !== undefined && isDeepStrictEqual(now, approved.expected_goal);
 }
 
 /** Readiness's level rule, on the node as stored (`observed_state`, the V1 `data`, a sampled prior, the event block). */
@@ -62,8 +87,12 @@ export function riskOccurrenceWindowMonths(graph: unknown): number | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goals = nodes.filter((n) => n.kind === 'goal' && typeof n.id === 'string');
   if (goals.length !== 1) return undefined;
-  const recorded = [readGoalRecord(graph, goals[0]!.id as string)?.horizon?.months, goalTargetBasisOf(goals[0])?.period_months]
-    .filter(finite);
+  const reading = goalTargetBasisOf(goals[0]);
+  const held = readGoalRecord(graph, goals[0]!.id as string)?.horizon?.months;
+  // The goal's horizon counts from its own reference date; a reading counted from a launch is a DIFFERENT window, whatever its
+  // month count (Codex r1): two such periods are a conflict, never a window. A launch reading alone is the one window.
+  if (finite(held) && reading !== undefined && reading.reference !== 'today') return undefined;
+  const recorded = [held, reading?.period_months].filter(finite);
   if (recorded.length === 0 || recorded.some((m) => m !== recorded[0])) return undefined;
   const months = recorded[0]!;
   return Number.isInteger(months) && months >= 1 && months <= 600 ? months : undefined;
@@ -73,7 +102,8 @@ export type RiskOccurrenceIneligible = 'not_a_risk' | 'holds_a_level' | 'has_a_c
 
 /** Whether Olumi may offer a range for this node, and the window it would be stated over. */
 export function riskOccurrenceSubject(graph: unknown, nodeId: string):
-  { readonly kind: 'eligible'; readonly node: Rec; readonly window_months: number } | { readonly kind: 'ineligible'; readonly reason: RiskOccurrenceIneligible } {
+  { readonly kind: 'eligible'; readonly node: Rec; readonly window_months: number; readonly goal_id: string; readonly goal: Rec }
+  | { readonly kind: 'ineligible'; readonly reason: RiskOccurrenceIneligible } {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return { kind: 'ineligible', reason: 'unreadable' };
   const matches = graph.nodes.filter((n): n is Rec => isRec(n) && n.id === nodeId);
   if (matches.length !== 1) return { kind: 'ineligible', reason: 'unreadable' };
@@ -84,7 +114,10 @@ export function riskOccurrenceSubject(graph: unknown, nodeId: string):
   if (riskHoldsALevel(node)) return { kind: 'ineligible', reason: 'holds_a_level' };
   if (graph.edges.some((e) => isRec(e) && e.to === nodeId)) return { kind: 'ineligible', reason: 'has_a_cause' };
   const window = riskOccurrenceWindowMonths(graph);
-  return window === undefined ? { kind: 'ineligible', reason: 'no_window' } : { kind: 'eligible', node, window_months: window };
+  const goalId = graph.nodes.find((n): n is Rec => isRec(n) && n.kind === 'goal')?.id;
+  const goal = window !== undefined && typeof goalId === 'string' ? riskOccurrenceGoalSubject(graph, goalId) : undefined;
+  return window === undefined || goal === undefined ? { kind: 'ineligible', reason: 'no_window' }
+    : { kind: 'eligible', node, window_months: window, goal_id: goalId as string, goal };
 }
 
 /** Olumi's range as a validated block, from percentages (0 ≤ low ≤ high ≤ 100), or `undefined`. */
@@ -120,7 +153,7 @@ export const riskOccurrenceAskWords = (label: string, windowMonths: number): str
 export const riskOccurrenceCardWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_CARD_TEMPLATE, label, block);
 export const riskOccurrenceRecordedWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_RECORDED_TEMPLATE, label, block);
 
-export type RiskOccurrenceRefusal = 'invalid_graph' | 'invalid_block' | 'risk_not_found' | 'risk_changed' | RiskOccurrenceIneligible;
+export type RiskOccurrenceRefusal = 'invalid_graph' | 'invalid_block' | 'risk_not_found' | 'risk_changed' | 'goal_changed' | RiskOccurrenceIneligible;
 
 export type RiskOccurrenceEditResult =
   | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[]; readonly confirmation: string }
@@ -136,6 +169,8 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   if (!block.success || block.data.occurrence.basis !== 'olumi' || !isDeepStrictEqual(block.data, approved.event_risk)) {
     return { kind: 'refused', reason: 'invalid_block' };
   }
+  // The window's goal exactly as the card bound it, before anything else (a retry included): its dates, period and reading.
+  if (!riskOccurrenceGoalHolds(approved, persistedGraph)) return { kind: 'refused', reason: 'goal_changed' };
   const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.risk_id);
   if (matches.length !== 1) return { kind: 'refused', reason: 'risk_not_found' };
   // ⭐ IDEMPOTENT: a retry after a write that landed finds exactly the card's node with this block, nothing else moved on it.

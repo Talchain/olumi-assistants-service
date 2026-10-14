@@ -48,14 +48,21 @@ const CARD = 'Adopt Olumi’s starting assumption: the chance that ‘Code quali
   + `\nOlumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “${BASIS}”`;
 const RECEIPT = 'Recorded Olumi’s starting assumption: the chance that ‘Code quality deterioration’ happens at least once within 3 months is 20–40%. It stays marked as Olumi’s estimate: your approval applied it, it did not make it your judgement.';
 const ROUTE_MS = 60_000;
+/** A claim that adopting the card licenses or readies the Run (PL 05:53Z: never made). */
+const NO_RUN_CLAIM = /\b(you can|can now|ready to|able to) run\b|licen[cs]/i;
 const riskOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.id === RISK)!;
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 const call = (name: string, args: Rec) => ({ output: [{ type: 'function_call', name, call_id: `call_${name}_${randomUUID().slice(0, 8)}`, arguments: JSON.stringify(args) }] });
+const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+/** The served read with a saved 3-month window, 14 October 2026 to 14 January 2027 (Codex r1's shape). */
+const DATED = (() => { const b = structuredClone(SERVED) as Rec; Object.assign(goalOf(b.graph), { goal_horizon: { deadline: '2027-01-14' },
+  goal_horizon_reference_date: '2026-10-14', goal_horizon_months: 3, goal_horizon_stated_months: 3 }); return b; })();
 const levelAsks = (g: Rec): Rec[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[]).filter((i) => i.code === 'MISSING_FACTOR_LEVEL');
 
 /** The served read in a stateful store: the read route, the level door's append (graph, facts) and its read-back. */
-function world(body: Rec) {
+function world(body: Rec, opts: { raceAfterWrite?: (g: Rec) => void } = {}) {
   const sid = String(body.scenario_id);
+  let raced = false;
   let bytes = JSON.stringify(body.graph);
   const graph = (): Rec => JSON.parse(bytes);
   const rows: SessionTurnWithContent[] = [];
@@ -81,9 +88,15 @@ function world(body: Rec) {
     },
   });
   live.store = store;
-  const graphWire = () => ({ ...structuredClone(body), graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never),
-    graph_identity_hash: computeGraphIdentityHash(graph() as never) });
-  return { sid, rows, writes, graph, graphWire };
+  const graphWire = () => {
+    // A concurrent writer that lands right after the risk's own write, before the press reads it back (Codex r1's race).
+    if (opts.raceAfterWrite !== undefined && !raced && riskOf(graph()).event_risk !== undefined) {
+      raced = true; const g = graph(); opts.raceAfterWrite(g); bytes = JSON.stringify(g);
+    }
+    return { ...structuredClone(body), graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never),
+      graph_identity_hash: computeGraphIdentityHash(graph() as never) };
+  };
+  return { sid, rows, writes, graph, graphWire, replace: (g: Rec) => { bytes = JSON.stringify(g); } };
 }
 
 let agentScript: Rec[] = [];
@@ -156,6 +169,11 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     const expected = structuredClone(SERVED.graph) as Rec;
     riskOf(expected).event_risk = BLOCK;
     expect(w.graph()).toEqual(expected);
+    // PL 05:53Z: the risk's own origin is unchanged; only its occurrence carries Olumi's basis.
+    expect(riskOf(w.graph()).provenance).toBe(riskOf(SERVED.graph).provenance);
+    expect(riskOf(w.graph()).event_risk.occurrence.basis).toBe('olumi');
+    // Adoption alone never claims the Run: neither the card nor the receipt speaks of running.
+    expect(`${chip!.detail}\n${pressed.assistant_text}`).not.toMatch(NO_RUN_CLAIM);
     expect((w.graph().edges as Rec[]).filter((e) => e.from === RISK).map((e) => e.provenance)).toEqual([
       { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', mean_projected: true }]);
     expect(JSON.stringify(w.writes)).toContain(JSON.stringify(RECEIPT).slice(1, -1));
@@ -239,5 +257,69 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect((offer._agent.tool_calls as Rec[]).find(c => c.name === 'propose_assumptions')).toMatchObject({ ok: false, refusal: 'nothing_to_adopt' });
     expect(JSON.parse(toolOutputs.at(-1)!)).toMatchObject({ risk_occurrence_needed: [{ label: LABEL, within_months: 3 }] });
     expect(w.graph()).toEqual(SERVED.graph);
+  }, ROUTE_MS);
+
+  it('⛔ Codex r1 STALE WINDOW: a card made for 14 Oct–14 Jan, the saved window moved to 14 Nov–14 Feb (hash unchanged) → the press writes nothing, no receipt', async () => {
+    const w = world(DATED);
+    const turn = await route(w);
+    const { offer, chip } = await offerCard(turn);
+    const shifted = w.graph();
+    Object.assign(goalOf(shifted), { goal_horizon: { deadline: '2027-02-14' }, goal_horizon_reference_date: '2026-11-14' });
+    expect(computeAnalysisAffectingGraphHash(shifted as never)).toBe(computeAnalysisAffectingGraphHash(DATED.graph as never));
+    w.replace(shifted);
+    const pressed = await turn({ message: chip!.message, source: 'chip_click', chip: { id: chip!.id }, agent_session_id: offer._agent.session_id });
+    expect((pressed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change'))
+      .toEqual([expect.objectContaining({ ok: false, mutated: false })]);
+    expect(riskOf(w.graph())).not.toHaveProperty('event_risk');
+    expect(w.graph()).toEqual(shifted);
+    expect(JSON.stringify([pressed.assistant_text, w.writes])).not.toContain(JSON.stringify(RECEIPT).slice(1, -1));
+  }, ROUTE_MS);
+
+  it('⛔ Codex r1 RACED READ-BACK: the goal moves from 3 to 6 months as the write lands → not confirmed: no receipt, no may_run', async () => {
+    // Its own scenario: a proposal's id is its content's, so the GREEN row's applied card must not be this one.
+    const w = world({ ...structuredClone(SERVED), scenario_id: randomUUID() }, { raceAfterWrite: (g) => { goalOf(g).goal_target_basis.period_months = 6; } });
+    const turn = await route(w);
+    const { offer, chip } = await offerCard(turn);
+    const pressed = await turn({ message: chip!.message, source: 'chip_click', chip: { id: chip!.id }, agent_session_id: offer._agent.session_id });
+    expect((pressed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change'))
+      .toEqual([expect.objectContaining({ ok: false, mutated: true, refusal: 'not_confirmed' })]);
+    expect(goalOf(w.graph()).goal_target_basis.period_months).toBe(6);
+    // No receipt in the reply or its answer row (the door's own inner row records the write that did land), no Run offered on
+    // the strength of it, and the reply says the save is unconfirmed.
+    expect(JSON.stringify([pressed.assistant_text, w.writes.at(-1)])).not.toContain(JSON.stringify(RECEIPT).slice(1, -1));
+    expect(pressed.suggested_actions ?? []).toEqual([]);
+    expect(String(pressed.assistant_text)).toMatch(/could not be confirmed/);
+  }, ROUTE_MS);
+
+  it('PL 05:53Z: NO saved goal period → no card, and the ask never promises one', async () => {
+    const unperiod = structuredClone(SERVED) as Rec;
+    delete goalOf(unperiod.graph).goal_target_basis;
+    const w = world(unperiod);
+    const turn = await route(w);
+    const offer = await turn({ message: 'Please propose a labelled starting assumption for it.', source: 'composer' },
+      [call('propose_assumptions', ARGS), say('Done.')]);
+    expect((offer._agent.tool_calls as Rec[]).find(c => c.name === 'propose_assumptions')).toMatchObject({ ok: false });
+    expect((offer.suggested_actions ?? []).filter((c: Rec) => String(c.id).startsWith('agent-approve'))).toEqual([]);
+    expect(w.graph()).toEqual(unperiod.graph);
+    expect(levelAsks(w.graph()).filter((i) => i.factor_id === RISK).map((i) => i.message)).toEqual([
+      'How likely or how large is "Code quality deterioration" today? The numerical analysis is withheld until this risk has a supported value.']);
+  }, ROUTE_MS);
+
+  it('PL 05:53Z: adoption alone never licenses the Run — another unresolved root still withholds it after the press', async () => {
+    // A second risk root with no level, acting on the goal as the first does.
+    const twoRoots = { ...structuredClone(SERVED), scenario_id: randomUUID() } as Rec;
+    (twoRoots.graph.nodes as Rec[]).push({ id: 'key_developer_leaves', kind: 'risk', label: 'Key developer leaves', provenance: 'ai_inferred' });
+    (twoRoots.graph.edges as Rec[]).push({ ...structuredClone((twoRoots.graph.edges as Rec[]).find((e) => e.from === RISK)!), from: 'key_developer_leaves' });
+    expect(levelAsks(twoRoots.graph).map((i) => i.factor_id).sort()).toEqual(['code_quality_deterioration', 'key_developer_leaves']);
+    const w = world(twoRoots);
+    const turn = await route(w);
+    const { offer, chip } = await offerCard(turn);
+    const pressed = await turn({ message: chip!.message, source: 'chip_click', chip: { id: chip!.id }, agent_session_id: offer._agent.session_id });
+    expect((pressed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change')).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    expect(riskOf(w.graph()).event_risk).toEqual(BLOCK);
+    expect(buildCanonicalAnalysisReadyFromGraph(w.graph())).toMatchObject({ may_run: false });
+    expect(levelAsks(w.graph()).map((i) => i.factor_id)).toEqual(['key_developer_leaves']);
+    expect(String(pressed.assistant_text)).toContain('The analysis can\'t run yet. How likely is ‘Key developer leaves’ to happen at least once within 3 months?');
+    expect(String(pressed.assistant_text)).not.toMatch(NO_RUN_CLAIM);
   }, ROUTE_MS);
 });

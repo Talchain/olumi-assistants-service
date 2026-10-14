@@ -8,7 +8,7 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
-import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceRecordedWords, riskOccurrenceSubject,
+import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds, riskOccurrenceRecordedWords, riskOccurrenceSubject,
   SET_RISK_OCCURRENCE_OP, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import type { EventRiskV1T } from '../../../schemas/event-risk.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
@@ -3805,9 +3805,10 @@ export function createAgentCapabilities(
    * writer's stale gate). Card-only; nothing is written here.
    */
   const proposeRiskOccurrence = async (ctx: AgentToolContext, g: GraphRead,
-    risk: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string }): Promise<ToolResult> => {
+    risk: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string; goal_id: string;
+      goal: Record<string, unknown> }): Promise<ToolResult> => {
     const operations: ProposalOperation[] = [{ op: SET_RISK_OCCURRENCE_OP, path: risk.id,
-      value: { event_risk: risk.block, expected_node: structuredClone(risk.node) } }];
+      value: { event_risk: risk.block, expected_node: structuredClone(risk.node), goal_id: risk.goal_id, expected_goal: structuredClone(risk.goal) } }];
     const proposal = createProposal({
       scenario_id: ctx.scenario_id,
       user_id: ctx.authenticated_user_id,
@@ -3842,11 +3843,19 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const op = parent.operations[0]!;
     const pid = parent.proposal_id;
-    const v = (op.value ?? {}) as { event_risk?: unknown; expected_node?: unknown };
-    if (!isPlainRecord(v.event_risk) || !isPlainRecord(v.expected_node) || opts.commitOptionLevels === undefined) {
+    const v = (op.value ?? {}) as { event_risk?: unknown; expected_node?: unknown; goal_id?: unknown; expected_goal?: unknown };
+    if (!isPlainRecord(v.event_risk) || !isPlainRecord(v.expected_node) || typeof v.goal_id !== 'string' || !isPlainRecord(v.expected_goal)
+      || opts.commitOptionLevels === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
     }
-    const approved: ApprovedRiskOccurrence = { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node };
+    const approved: ApprovedRiskOccurrence = { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node,
+      goal_id: v.goal_id, expected_goal: v.expected_goal };
+    // The card's goal as bound (its dates, period and reading), by the rule the writer and the read-back also read: a goal
+    // that moved since the card was made writes nothing, whatever the analysis hash says (Codex r1 on #3013).
+    if (!riskOccurrenceGoalHolds(approved, before.raw)) {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied', reason: 'model_changed_since_approval',
+        detail: 'The model changed after this was approved, so nothing was written. Read it again and propose afresh.', receipts: [] };
+    }
     const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
       turn_id: authorisationTurnId(pid), links: [], levels: [], risk_occurrence: approved });
     // A write that LANDED keeps this proposal's expected bytes, so a retry recovers through the writer's verified no-op (the
@@ -3862,12 +3871,16 @@ export function createAgentCapabilities(
     if (res.status === 'stale' || res.status === 'refused') {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: res.status, ...(res.status === 'refused' ? { reason: res.reason } : {}) };
     }
+    // Not confirmed: no receipt, and no readiness from the stored graph (`may_run` follows only a verified read-back).
     const notConfirmed: ToolResult = { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
-      detail: RISK_OCCURRENCE_UNKNOWN_SAVE };
+      detail: RISK_OCCURRENCE_UNKNOWN_SAVE, readiness_after: readinessViewOf(undefined) };
     if (res.status === 'unconfirmed') return notConfirmed;
+    // The read-back verifies the WHOLE bound postimage: the risk holds exactly the card's range, and the goal its window is
+    // stated over is still exactly as bound (Codex r1: a concurrent 3 → 6 month change still said the 3-month receipt).
     const check = await readGraph(ctx.scenario_id);
     const held = (check?.raw as { nodes?: unknown[] } | undefined)?.nodes?.find((n) => isPlainRecord(n) && n.id === op.path);
-    if (check === null || !isDeepStrictEqual(held, { ...approved.expected_node, event_risk: approved.event_risk })) return notConfirmed;
+    if (check === null || !isDeepStrictEqual(held, { ...approved.expected_node, event_risk: approved.event_risk })
+      || !riskOccurrenceGoalHolds(approved, check.raw)) return notConfirmed;
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(pid, receipts);
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
@@ -5899,7 +5912,8 @@ export function createAgentCapabilities(
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; asPercent?: true; kept?: true }[] = [];
       const notKeepable: { label: string; why: 'no_figure' | 'not_exact' | 'yours' | 'brief' | 'unverified_brief' | 'already_accepted' }[] = [];
       // ⭐ Hiring path (a): an unvalued risk ROOT takes Olumi's occurrence range on its own card (`risk-occurrence.ts`).
-      const riskRanges: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string }[] = [];
+      const riskRanges: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string;
+        goal_id: string; goal: Record<string, unknown> }[] = [];
       const riskRangeNeeded: { label: string; within_months: number }[] = [];
 
       for (const given of input) {
@@ -5928,7 +5942,8 @@ export function createAgentCapabilities(
             const block = range === undefined ? undefined : olumiOccurrenceBlock(range.low_percent, range.high_percent, subject.window_months);
             if (block === undefined) riskRangeNeeded.push({ label: res.node.label, within_months: subject.window_months });
             else if (!riskRanges.some((r) => r.id === res.node.id)) {
-              riskRanges.push({ id: res.node.id, label: res.node.label, node: subject.node, block, basis: String(a?.basis ?? '') });
+              riskRanges.push({ id: res.node.id, label: res.node.label, node: subject.node, block, basis: String(a?.basis ?? ''),
+                goal_id: subject.goal_id, goal: subject.goal });
             }
             continue;
           }
@@ -10686,7 +10701,8 @@ export function createAgentCapabilities(
         // apply path (the in-turn tool and the typed-approve fast path). A failed read says "not checked".
         let after: GraphRead | null = null;
         try { after = await readGraph(ctx.scenario_id); } catch { after = null; }
-        return { ...r, readiness_after: readinessViewOf(after?.raw), ...nextStepFactOf(after) };
+        // A result that set its own readiness keeps it (an unconfirmed save says "not checked", never the stored graph's `may_run`).
+        return { ...r, readiness_after: 'readiness_after' in r ? r.readiness_after : readinessViewOf(after?.raw), ...nextStepFactOf(after) };
       }
       return r;
     },
