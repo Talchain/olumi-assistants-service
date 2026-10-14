@@ -715,9 +715,15 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   // provisional, with its own note saying what it rests on. It is never counted as Olumi's (that is `olumiInputs`).
   const provisional = c.estimateOnly || c.olumiInputs || c.unverifiedInputs || c.periodEndNote !== undefined;
   const unverified = c.unverifiedInputs ? [UNVERIFIED_SOURCES_NOTE] : [];
-  // Amendment 1, every frame: the status quo's own line, by assumption — never a figure or an interval.
+  // Amendment 1, every frame: the status quo's own line, by assumption — never a chance or an interval. A level goal's held
+  // level today is said against its target, in the target's own unit (capacity judge row 3); anything else keeps the words.
+  const goalState = isRec(c.goal?.observed_state) ? c.goal!.observed_state : undefined;
+  const levelUnit = typeof goalState?.unit === 'string' ? goalState.unit.trim() : undefined;
+  const sqLevel = c.changeFrame === undefined && c.quantityFrame !== 'change' && finite(goalState?.raw_value)
+    && typeof c.target.unit === 'string' && (levelUnit === undefined || levelUnit === '' || levelUnit === c.target.unit.trim())
+    ? { today: goalState!.raw_value as number, comparator: c.comparatorHeld, target: c.target.value, unit: c.target.unit } : undefined;
   const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
-    ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel) } } : {};
+    ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel, sqLevel) } } : {};
   // AIE disposition: a forecast's status quo is carrying on's own projection, said as such (never "no change").
   const projection = c.sqReading === 'projection' && c.statusQuoLabel !== undefined && c.statusQuoId !== undefined
     && single.option_ids.includes(c.statusQuoId) ? [statusQuoProjectionWords(c.statusQuoLabel)] : [];
