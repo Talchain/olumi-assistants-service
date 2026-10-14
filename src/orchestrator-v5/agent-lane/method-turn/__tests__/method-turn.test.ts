@@ -457,10 +457,7 @@ describe('the ONE change card, through the existing door (RC action_target; HARN
       if (isPlaceholderLink(edge)) { expect(card, item.id).toBeNull(); continue; }
       expect(card?.tool).toBe('propose_link_strengths');
       if (card?.tool !== 'propose_link_strengths') return;
-      // ⛔ EXPECTATION CHANGED (#3002, the AIE's producer AMEND, packet 2b19ae59): the band is the STORED band, declared `stored`,
-      // so the door carries its stored origin by identity; it claims no basis and no new Olumi estimate.
-      expect(card.args.links).toEqual([{ from_label: nodeLabel(edge.from), to_label: nodeLabel(edge.to), strength: edgeBandFromMagnitude(Math.abs(edge.strength.mean)),
-        origin: 'stored' }]);
+      expect(card.args.links).toEqual([{ from_label: nodeLabel(edge.from), to_label: nodeLabel(edge.to), strength: edgeBandFromMagnitude(Math.abs(edge.strength.mean)) }]);
       expect([nodeLabel(edge.from), nodeLabel(edge.to)]).toEqual(item.labels);
       expect(bandEnum).toContain(card.args.links[0].strength);
       expect(Object.keys(card.args.links[0])).not.toContain('from_words');

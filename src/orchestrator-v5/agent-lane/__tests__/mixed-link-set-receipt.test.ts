@@ -46,8 +46,7 @@ const SIX: { from: string; to: string; kept: boolean }[] = [
 const edgeOf = (g: Graph, l: { from: string; to: string }): Edge => g.edges.find((e) => key(e) === key(l))!;
 /** The served links at these SIX positions, as the Agent offered them (all six by default). */
 const argsFor = (at: readonly number[] = SIX.map((_, i) => i)) => ({ rationale: 'served mixed set', links: at.map((i) => SIX[i]!)
-  // ⛔ INPUT CHANGE (#3002, known-origin transport): each stub link declares its origin, as a prompt-following AI gives it: user when it quotes the user; olumi, with Olumi's own basis, when it does not.
-  .map((l) => ({ origin: 'olumi' as const, basis: 'Olumi’s own estimate from the model', from_label: label(l.from), to_label: label(l.to),
+  .map((l) => ({ from_label: label(l.from), to_label: label(l.to),
     strength: l.kept ? edgeBandFromMagnitude(Math.abs(edgeOf(FX.before.graph, l).strength.mean)) : 'moderate' })) });
 
 /**
@@ -72,11 +71,7 @@ function world(variant = false, servedBytes = false) {
     commitOptionLevels: async (input) => {
       sent.push(input as unknown as Record<string, unknown>);
       // The stored outcome is the SERVED read after the approval; the variant link is written as that writer writes it.
-      // ⛔ INPUT CHANGE (#3002 whole-postimage readback, AIE packet 2b19ae59): like the real writer, the stub writes only the
-      // links it was SENT; a link not in this set keeps its bytes (the served before/after differ only on the six).
-      const written = new Set((input.link_strengths ?? []).map((l) => `${l.from}::${l.to}`));
       graph = { ...structuredClone(FX.after.graph), edges: FX.after.graph.edges.map((e) => {
-        if (!written.has(key(e))) return structuredClone(before.edges.find((x) => key(x) === key(e))!);
         if (!drawn.has(key(e))) return structuredClone(e);
         const was = before.edges.find((x) => key(x) === key(e))!;
         return { ...structuredClone(e), provenance: { ...was.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-10-12T00:17:53.645Z' } } };
