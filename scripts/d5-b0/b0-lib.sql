@@ -243,9 +243,9 @@ CREATE FUNCTION b0.fn_snapshot(p_exclude text DEFAULT '') RETURNS jsonb LANGUAGE
 $$;
 CREATE FUNCTION b0.cat_snapshot() RETURNS jsonb LANGUAGE sql AS $$
   SELECT jsonb_build_object(
-    'relations', (SELECT md5(string_agg(c.relname || ':' || c.relkind || ':' || COALESCE(c.relacl::text, '') || ':' || c.relrowsecurity || c.relforcerowsecurity, ',' ORDER BY c.relname))
+    'relations', (SELECT md5(string_agg(c.relname || ':' || c.relkind::text || ':' || COALESCE(c.relacl::text, '') || ':' || c.relrowsecurity::text || c.relforcerowsecurity::text, ',' ORDER BY c.relname))
                   FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace),
-    'columns', (SELECT md5(string_agg(c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod) || ':' || a.attnotnull || ':' || COALESCE(a.attacl::text, ''), ',' ORDER BY c.relname, a.attnum))
+    'columns', (SELECT md5(string_agg(c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod) || ':' || a.attnotnull::text || ':' || COALESCE(a.attacl::text, ''), ',' ORDER BY c.relname, a.attnum))
                 FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped),
     'constraints', (SELECT md5(string_agg(conname || ':' || pg_get_constraintdef(oid), ',' ORDER BY conname)) FROM pg_constraint WHERE connamespace = 'public'::regnamespace),
     'triggers', (SELECT md5(string_agg(pg_get_triggerdef(t.oid), ',' ORDER BY t.tgname)) FROM pg_trigger t WHERE NOT t.tgisinternal),
@@ -255,7 +255,7 @@ CREATE FUNCTION b0.cat_snapshot() RETURNS jsonb LANGUAGE sql AS $$
 $$;
 CREATE FUNCTION b0.data_snapshot() RETURNS jsonb LANGUAGE sql AS $$
   SELECT jsonb_build_object(
-    'scenarios', (SELECT md5(string_agg(id::text || ':' || COALESCE(user_id::text, 'guest') || ':' || revision || ':' || event_seq || ':' || md5(events::text) || ':' || updated_at::text, ',' ORDER BY id)) FROM public.scenarios),
+    'scenarios', (SELECT md5(string_agg(id::text || ':' || COALESCE(user_id::text, 'guest') || ':' || revision::text || ':' || event_seq::text || ':' || md5(events::text) || ':' || updated_at::text, ',' ORDER BY id)) FROM public.scenarios),
     'turns', (SELECT md5(string_agg(id::text || ':' || turn_id || ':' || request_hash || ':' || COALESCE(user_id::text, 'guest'), ',' ORDER BY id)) FROM public.v5_conversation_turns),
     'n_scenarios', (SELECT count(*) FROM public.scenarios),
     'n_turns', (SELECT count(*) FROM public.v5_conversation_turns),
