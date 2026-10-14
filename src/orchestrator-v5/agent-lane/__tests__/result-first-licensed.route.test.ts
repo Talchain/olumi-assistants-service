@@ -86,21 +86,25 @@ describe('the two-request Run reads the licensed run on both requests (live rout
     expect(JSON.stringify(SERVED.block)).toContain(LEAK);
     const first = await run();
     expect(first.statusCode, first.body).toBe(200);
-    expect(modelBodies).toHaveLength(0);
+    // #3099: this is a re-run after a change (the read carries a delta), so request 1 itself makes the one interpreting call.
+    expect(modelBodies).toHaveLength(1);
     expect(runModelBodies).toHaveLength(1);
     const second = await explain(first.json() as First);
     expect(second.statusCode, second.body).toBe(200);
-    expect(modelBodies).toHaveLength(1);
-    const ctx = explanationContext(modelBodies[0]!.input);
-    expect(ctx, JSON.stringify(modelBodies[0]!.input)).toBeDefined();
-    const seen = JSON.stringify(ctx);
-    expect(seen).not.toContain(LEAK);
-    expect(seen).not.toContain('leading option');
-    expect(JSON.stringify((ctx as { canonical_state: { run_explanation: unknown } }).canonical_state.run_explanation)).not.toMatch(/"message":/);
-    expect(seen).toContain('CONSTRAINT_LEVEL_DRAWS_OUT_OF_DOMAIN');
-    expect((ctx as { canonical_state: { run_explanation: { claim_permissions: { leader_may_be_named: boolean } } } }).canonical_state.run_explanation.claim_permissions.leader_may_be_named).toBe(false);
-    expect((ctx as { canonical_state: { analysis: Record<string, unknown> } }).canonical_state.analysis).not.toHaveProperty('run_delta');
-    expect(seen).not.toContain('current_leading_option_id');
+    expect(modelBodies).toHaveLength(2);
+    // Both interpreting calls (request 1's and request 2's) read only the licensed run.
+    for (const body of modelBodies) {
+      const ctx = explanationContext(body.input);
+      expect(ctx, JSON.stringify(body.input)).toBeDefined();
+      const seen = JSON.stringify(ctx);
+      expect(seen).not.toContain(LEAK);
+      expect(seen).not.toContain('leading option');
+      expect(JSON.stringify((ctx as { canonical_state: { run_explanation: unknown } }).canonical_state.run_explanation)).not.toMatch(/"message":/);
+      expect(seen).toContain('CONSTRAINT_LEVEL_DRAWS_OUT_OF_DOMAIN');
+      expect((ctx as { canonical_state: { run_explanation: { claim_permissions: { leader_may_be_named: boolean } } } }).canonical_state.run_explanation.claim_permissions.leader_may_be_named).toBe(false);
+      expect((ctx as { canonical_state: { analysis: Record<string, unknown> } }).canonical_state.analysis).not.toHaveProperty('run_delta');
+      expect(seen).not.toContain('current_leading_option_id');
+    }
   });
 
   it('GUARD (CR item 2 withdrawn): request 1\'s run reaches the next Agent turn only as the history time marker', async () => {

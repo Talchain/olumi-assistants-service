@@ -1,5 +1,6 @@
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
+import { isForeignExplanation, namesALatestRun, type TurnNarration } from '../../../../tests/fixtures/dgai-narration-consumer.js';
 /**
  * ⭐ THE EXPLICIT RUN AFTER AN OPENAI APPROVAL (RC #63; Codex 5805970015: "served Agent
  * approval calls approvalChipsFor after authorise_change and that helper returns no chips").
@@ -414,7 +415,28 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       expect(b.assistant_text).toContain(CODE_LINE);
       expect(b.assistant_text).toContain(COACHING);
       expect(b.assistant_text, 'the coaching answers "ask me to explain them"').not.toContain(RUN_RESULT_READY_TEXT);
-      expect(b.narration?.status, 'this Run\'s narration is delivered').toBe('ready');
+    });
+
+    /**
+     * ⛔ #3099 SHIPPED narration "ready" on this press. DGAI's real consumer (extracted verbatim, `dgai-narration-consumer.ts`)
+     * takes the latest Run's key only from a pending/unavailable narration and drops the WHOLE assistant message of a
+     * "ready" one whose key is not the latest: the canvas's automatic Run reply, coaching and all, would never show.
+     */
+    it('RED (DGAI consumer): the coached press keeps request 1\'s narration, so the UI keeps its message; CONTRAST "ready" is dropped', async () => {
+      runStampedAt = RUN_AT;
+      runDelta = LINK_ENTERED;
+      const b = await press();
+      expect(b.assistant_text).toContain(COACHING);
+      const wire = { status: b.narration?.status, runKey: b.narration?.run_key } as TurnNarration;
+      expect(wire.runKey, 'the press names its Run').toEqual(expect.any(String));
+      // As useConversation.ts applies it: the transcript's latest Run before this press is the preceding one (R1).
+      const uiKeeps = (n: TurnNarration, latestBefore: string): boolean => {
+        const latest = namesALatestRun(n) ? n.runKey : latestBefore;
+        return !isForeignExplanation(n, latest);
+      };
+      expect(wire.status).toBe('pending');
+      expect(uiKeeps(wire, 'the-preceding-run'), 'the UI shows this Run\'s reply').toBe(true);
+      expect(uiKeeps({ ...wire, status: 'ready' }, 'the-preceding-run'), 'CONTRAST: a "ready" press is dropped whole').toBe(false);
     });
 
     it('CONTRAST: a re-run with nothing changed (C0_identical) → no interpreting call; the ready line stays', async () => {
