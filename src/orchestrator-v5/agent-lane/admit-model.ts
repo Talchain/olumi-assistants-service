@@ -69,7 +69,7 @@ export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unk
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import { untargetedGoalLevelAsk } from './untargeted-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
-import { admitGoalTargetBasis, conditionsRefusedBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
+import { admitGoalTargetBasis, admitGoalTargetBasisAwaitingPeriod, conditionsRefusedBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis, type GoalTargetBasisAwaitingPeriod } from '../goal-target/goal-target-basis.js';
 import {
   admitCandidateConstraints,
   canonicalProvenance,
@@ -542,7 +542,7 @@ export interface AdmittedNode {
    */
   goal_level_reading?: { level: number; level_unit: string; quote: string; lead: string; bound?: '<=' | '<' | '>=' | '>' };
   /** Recovery Batch C: Olumi's validated reading of the target's semantics (`goal-target-basis.ts`); `NodeV3.goal_target_basis`. */
-  goal_target_basis?: GoalTargetBasis;
+  goal_target_basis?: GoalTargetBasis | GoalTargetBasisAwaitingPeriod;
   /**
    * ⛔ A NODE'S `provenance` IS A DISPLAY ENUM, NOT THE EDGE OBJECT
    * (`cee-v3.ts:363` — `from_brief | ai_inferred | user_set`). Edges carry the
@@ -3082,7 +3082,12 @@ export function admitStatedGoalChange(
   const refusedForConditions = conditionsRefusedBasis(basisArgs, basisVerdict);
   const keptRefusal = refusedForConditions === undefined ? {} : { goal_target_basis: refusedForConditions };
   const basis = 'basis' in basisVerdict ? basisVerdict.basis : null;
-  const withBasis = (n: Partial<AdmittedNode>): Partial<AdmittedNode> => (basis === null ? n : { ...n, goal_target_basis: basis });
+  // ⭐ DL ruling 14 Oct: a reading whose period the drafter left unstated is kept without it, waiting for the user's confirmed
+  // deadline (`admitGoalTargetBasisAwaitingPeriod`); the target is admitted as with a basis, and its words still ask for the period.
+  const awaiting = 'refused' in basisVerdict && basisVerdict.refused === 'period' ? admitGoalTargetBasisAwaitingPeriod(basisArgs) : undefined;
+  const storedBasis = basis ?? awaiting ?? null;
+  const askPeriod = awaiting === undefined ? {} : { withheld: goalTargetBasisRefusalWords(goal.metric, 'period') };
+  const withBasis = (n: Partial<AdmittedNode>): Partial<AdmittedNode> => (storedBasis === null ? n : { ...n, goal_target_basis: storedBasis });
   if (quantityFrame === 'change') {
     /**
      * ⭐ A CHANGE QUANTITY (ruling 2, hiring): "productivity, % change from today" with `change_abs` +10 in its own unit. ISL
@@ -3095,8 +3100,8 @@ export function admitStatedGoalChange(
     const changeNode: Partial<AdmittedNode> = {
       ...(goal.unit ? { goal_threshold_unit: goal.unit } : {}), goal_threshold_frame: frame, goal_threshold_raw: stored, quantity_frame: 'change',
     };
-    const refusal = frame !== 'change_abs' ? 'frame' as const : 'refused' in basisVerdict ? basisVerdict.refused
-      : basis === null ? 'denominator' as const : !goal.unit ? 'frame' as const : null;
+    const refusal = frame !== 'change_abs' ? 'frame' as const : 'refused' in basisVerdict && awaiting === undefined ? basisVerdict.refused
+      : storedBasis === null ? 'denominator' as const : !goal.unit ? 'frame' as const : null;
     if (refusal !== null) return { node: { ...changeNode, ...keptRefusal }, withheld: goalTargetBasisRefusalWords(goal.metric, refusal) };
     const resolvedChange = stored !== 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(stored), goal.unit, undefined) : null;
     if (resolvedChange === null) {
@@ -3107,8 +3112,8 @@ export function admitStatedGoalChange(
       goal_threshold_cap: resolvedChange.cap,
       goal_threshold_cap_provenance: resolvedChange.provenance,
       goal_threshold: stored / resolvedChange.cap,
-      goal_target_basis: basis!,
-    } };
+      goal_target_basis: storedBasis!,
+    }, ...askPeriod };
   }
   // ⛔ Re-scope (r2 BLOCKING 2): a change of a LEVEL quantity whose reading is refused while the drafter retained conditions
   // refuses the whole goal reading, with why (a change quantity's refusal above already writes no threshold and says why).

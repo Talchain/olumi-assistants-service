@@ -176,8 +176,10 @@ describe('hiring — a change of +10% from today has its ruled sentence (ruling 
 
   it('the horizon (amendment 2): at-horizon effects at the held month license "at three months"; anything else withholds', () => {
     expect(goalHorizonVerdict(hiringGraph())).toBe('basis_at_h');
-    // Steady state is never assumed: effects not stated at the period's end → withheld.
-    expect(goalHorizonVerdict(hiringGraph({ goal_target_basis: { ...HIRING_BASIS, effects_at_period_end: false } }))).toBe('withhold');
+    // Steady state is never assumed SILENTLY: effects not stated at the period's end, at the held month that IS the period, with no
+    // timing carrier, read as the static basis (DL ruling 14 Oct, option A; #3071) — the licence then labels Olumi's period-end
+    // assumption or E withholds (`batch-g-hiring-conditional`). Never `basis_at_h`.
+    expect(goalHorizonVerdict(hiringGraph({ goal_target_basis: { ...HIRING_BASIS, effects_at_period_end: false } }))).toBe('no_horizon');
     // A basis for another month than the held one → withheld.
     expect(goalHorizonVerdict(hiringGraph({ goal_target_basis: { ...HIRING_BASIS, period_months: 6 } }))).toBe('withhold');
     expect(goalHorizonVerdict(hiringGraph({ goal_target_basis: undefined }))).toBe('withhold');

@@ -115,7 +115,7 @@ import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct-link.js';
 import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-sentence-route.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
-import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures, withoutDisclosure } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceSayPromisedThisTurn, goalChanceWithheldOptionsFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
@@ -150,7 +150,7 @@ import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js'
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
 import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
-import { GUIDANCE_WRAPPER_REFUSAL, runDeliveryFactFor, turnRunReceipts, type RunDeliveryOutcome } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
+import { firstAnalysisRunReceipt, GUIDANCE_WRAPPER_REFUSAL, runDeliveryFactFor, turnRunReceipts, type RunDeliveryOutcome } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
 import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED, WITHHELD_GOAL_PATH_UNSIZED, WITHHELD_SEPARATION_UNAVAILABLE, WITHHELD_LEADER_CAUSE_UNRECORDED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
@@ -186,7 +186,7 @@ import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
-import { breakEvenFor, breakEvenLine, goalNotCheckedLine, thresholdReasonLine, THRESHOLD_REST_STANDS, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { breakEvenFor, breakEvenLine, goalNotCheckedLine, cardSaysMissingLevel, thresholdReasonLine, THRESHOLD_REST_STANDS, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import { carriedEffectsTiming } from '../orchestrator-v5/goal-target/carried-effects-timing.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import {
@@ -5287,20 +5287,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const out = result.tool_results[i] as { ran?: unknown; run_identity?: unknown } | undefined;
         if (out?.ran === true) return out.run_identity;
       }
-      if (fa?.ran !== true) return undefined;
-      const executed = fa.blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as { computed_against_hash?: unknown } | undefined;
-      return { scenario_id: scenarioId, graph_hash_at_run: executed?.computed_against_hash,
-        computed_at: (fa.analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at };
+      // The first pass binds by the ONE first-analysis receipt the run_delivery writer reads: its committed identity (the
+      // in-process response carries no `analysis_state`; capacity e2e c0998b2e row 8), else its block and state.
+      const own = firstAnalysisRunReceipt(fa)?.run_identity;
+      return own === undefined ? undefined : { scenario_id: scenarioId, ...(own as Record<string, unknown>) };
     })();
     const cardView = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
       ? composedRead.canonicalAnalysisView as { run?: { run_id?: unknown; graph_hash_at_run?: unknown; computed_at?: unknown };
-        staleness?: { stale?: unknown }; options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown } }[] }
+        staleness?: { stale?: unknown }; options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown; reasons?: unknown } }[] }
       : undefined;
     const cardBound = cardView !== undefined && cardView.staleness?.stale === false
       && typeof cardView.run?.run_id === 'string' && cardView.run.run_id !== ''
       && compareAnalysisRunFactIdentity(thisTurnRun, { scenario_id: scenarioId, graph_hash_at_run: cardView.run.graph_hash_at_run,
         computed_at: cardView.run.computed_at }).status === 'match'
       && (analysisResult as { computed_against_hash?: unknown }).computed_against_hash === cardView.run.graph_hash_at_run;
+    // ⭐ SAID ONCE (DL 14 Oct, marketing e2e 25d14238; the #3034 rule): this turn's bound card shows the §(g) cause itself,
+    // so the GOAL-REACH 3b sentence is not said again (`cardSaysMissingLevel`; its next step stays on the action bar).
+    if (reasonLine !== null && cardBound && cardSaysMissingLevel(analysisResult, cardView!.options)
+      && typeof wireBody.assistant_text === 'string') {
+      wireBody = { ...wireBody, assistant_text: withoutDisclosure(wireBody.assistant_text, reasonLine) };
+    }
     // ⭐ THE CARD SAYS IT (Paul via DL, 14 Oct: no host line that repeats what the card already shows). When this turn's
     // bound current card shows a withheld cell for every option the withheld line covers, each cell carries its own reason
     // ("Not shown. …", from the same Run's warnings), so the host does not say it again. The AI holds the same

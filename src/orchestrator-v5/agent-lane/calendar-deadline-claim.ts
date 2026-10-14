@@ -9,7 +9,7 @@
  * only elsewhere in the brief (a forecast's "next quarter") are another statement, never the goal's deadline.
  *
  * TRANSIENT (DL condition (a)): the result is only asked, in this construction turn, as Olumi's reading (the AIE's question).
- * Nothing is stored on the goal: no deadline words and no horizon. Any claim that fails a check is not asked.
+ * Nothing is stored on the goal: neither its deadline as stated nor a month count. Any claim that fails a check is not asked.
  */
 import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { quoteSpansIn } from './stated-by-user.js';

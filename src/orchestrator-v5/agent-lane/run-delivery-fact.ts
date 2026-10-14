@@ -69,10 +69,13 @@ const omitted = (reason: RunDeliveryOmitReason): RunDeliveryOutcome => ({ kind: 
  */
 export function firstAnalysisRunReceipt(outcome: unknown): Rec | undefined {
   if (!isRec(outcome) || outcome.ran !== true || !Array.isArray(outcome.blocks)) return undefined;
+  // The Run's own committed identity first (the in-process response has no `analysis_state`: capacity e2e c0998b2e turn 01
+  // recorded no run_delivery for its first Run), else its block and state as before.
+  const own = isRec(outcome.runIdentity) ? outcome.runIdentity : undefined;
   const block = outcome.blocks.find((b) => isRec(b) && b.type === 'analysis_result');
-  const graphHashAtRun = isRec(block) ? block.computed_against_hash : undefined;
+  const graphHashAtRun = own?.graph_hash_at_run ?? (isRec(block) ? block.computed_against_hash : undefined);
   const state = isRec(outcome.analysisState) ? outcome.analysisState : undefined;
-  const computedAt = isRec(state?.run_state) ? state.run_state.computed_at : undefined;
+  const computedAt = own?.computed_at ?? (isRec(state?.run_state) ? state.run_state.computed_at : undefined);
   if (typeof graphHashAtRun !== 'string' || graphHashAtRun === '' || typeof computedAt !== 'string' || computedAt === '') return undefined;
   return { ok: true, mutated: false, ran: true, run_identity: { graph_hash_at_run: graphHashAtRun, computed_at: computedAt } };
 }

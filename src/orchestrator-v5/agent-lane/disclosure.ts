@@ -74,6 +74,13 @@ export function withDisclosures(assistantText: string, owed: readonly string[]):
   return body.length === 0 ? owed.join('\n\n') : `${body}\n\n${owed.join('\n\n')}`;
 }
 
+/** The inverse of {@link withDisclosures} for ONE host-owed line: removed with its paragraph break, only when it stands exactly once. */
+export function withoutDisclosure(assistantText: string, line: string): string {
+  if (line.trim() === '' || assistantText.split(line).length !== 2) return assistantText;
+  const form = [`\n\n${line}`, `${line}\n\n`, line].find((f) => assistantText.includes(f))!;
+  return assistantText.replace(form, '');
+}
+
 /**
  * ⭐⭐ A VALUE THE USER APPROVED, STORED AS SOMETHING ELSE — SAID IN PROSE.
  *

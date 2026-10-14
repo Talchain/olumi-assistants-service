@@ -633,7 +633,27 @@ function expectedSentences(text: string, dropped: readonly string[]): string[] |
 /**
  * Compose the reply's shape. Only recorded whole-sentence copies may be deleted; all other text is retained.
  */
+/**
+ * A reply kept whole has no face and no detail, so a face marker and the full note it stands for would both be read, one
+ * after the other (capacity e2e c0998b2e turn 01, judge row 4: "Risks Olumi added aren't in the chance yet, so it may be
+ * too high." and "Leaves out Olumi's added risks; may be too high"). The note says it once; the marker goes. A shaped reply
+ * keeps both, each in its own place (face marker, detail note).
+ */
+function withoutMarkerBesideItsNote(text: string, input: ReplyComposeInput): string {
+  const note = input.widenedRiskNote;
+  if (note === undefined || !text.includes(note)) return text;
+  const markers = new Set([input.widenedRiskMarker, WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE]
+    .filter((m): m is string => typeof m === 'string' && m !== ''));
+  const kept = text.split('\n').filter((line) => !markers.has(line.replace(/^[ \t]*(?:[-•*][ \t]*)?/, '').trim()));
+  return kept.length === text.split('\n').length ? text : kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
+  const composed = composeReplyShapeWhole(input);
+  return composed.outcome === 'kept_whole' ? { ...composed, text: withoutMarkerBesideItsNote(composed.text, input) } : composed;
+}
+
+function composeReplyShapeWhole(input: ReplyComposeInput): ReplyComposition {
   const composed = composeNormalReplyShape(input);
   if (input.eligibleIntervention !== undefined && composed.reason === 'proposal') {
     return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, false, true, input.interventionWhySaid === true);

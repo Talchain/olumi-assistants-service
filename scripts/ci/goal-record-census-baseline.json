@@ -1,5 +1,5 @@
 {
-  "source_sha": "1785a6975c1e26c19db06bb296707cde5abd2cec",
+  "source_sha": "f3a0a6bbe8a46077477370f4977d260b42a0ebe5",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -141,7 +141,7 @@
       "src/orchestrator-v5/tools/handlers/d1-shared/constraint-target-alternative.ts": 2,
       "src/orchestrator-v5/tools/handlers/d1-shared/constraint-write-admissibility.ts": 4,
       "src/orchestrator-v5/tools/handlers/d1-shared/format-confirmation.ts": 1,
-      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 22,
+      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 21,
       "src/orchestrator-v5/tools/handlers/run-input-residual.ts": 2,
       "src/orchestrator-v5/tools/handlers/run-input-snapshot.ts": 3,
       "src/orchestrator-v5/tools/handlers/set-factor-value.ts": 1,
@@ -826,7 +826,7 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 27,
     "goalUnitOf": 5,
-    "goal_constraints": 453,
+    "goal_constraints": 452,
     "goal_deadline_as_stated": 11,
     "goal_direction": 100,
     "goal_horizon": 51,
@@ -855,7 +855,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2480,
+  "total_references": 2479,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

@@ -3,7 +3,9 @@
  * gets coaching today rather than the joint chance, so each reason must be right and said once:
  * (b) the goal's missing current level carried no target binding, so the several-targets licence gave it to EVERY target and
  *     told ‘New customers in first 3 months’ "Conversion rate's current level is missing" beside its own reason;
- * (a) the card listed each note and the reply said them again, joined into one group line no card line equals.
+ * (a) the card listed each note and the reply said them again, joined into one group line no card line equals;
+ * (c) the reply's §(g) sentence (GOAL-REACH 3b) said the same cause a third time beside the card (DL: drop it; the next step
+ *     stays on the action bar, `set_current_level`).
  *
  * Corpus: the served Run press (turn 08) of that capture, verbatim (`tests/fixtures/marketing-withheld-once/run-08.json`,
  * `_source`), through the real producer (`withholdGoalFiguresForMissingCurrentLevel`), licence (`withGoalChanceLicence`) and
@@ -14,6 +16,8 @@ import { describe, expect, it } from 'vitest';
 import { withholdGoalFiguresForMissingCurrentLevel, wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
 import { withGoalChanceLicence } from '../goal-chance-licence.js';
 import { goalChanceNotesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
+import { cardSaysMissingLevel, thresholdReasonLine } from '../../agent-lane/break-even.js';
+import { withoutDisclosure } from '../../agent-lane/disclosure.js';
 
 type Rec = Record<string, any>;
 const F = JSON.parse(readFileSync('tests/fixtures/marketing-withheld-once/run-08.json', 'utf8')) as Rec;
@@ -79,5 +83,28 @@ describe('marketing: each target gets its own withheld reason, said once', () =>
   it('CONTROL: a goal with no stored target row keeps the unbound warning (one target: nothing changes)', () => {
     const { warning } = licensed((F.graph.goal_constraints as Rec[]).filter((r) => r.role !== 'goal_target'));
     expect(warning).not.toHaveProperty('constraint_ids');
+  });
+
+  it('RED (c): the bound card shows every option withheld for the missing level → the reply\'s §(g) sentence goes, nothing else', () => {
+    const result = { enrichment: F.enrichment };
+    const line = thresholdReasonLine(F.graph, result)!;
+    expect(line).toBe("Olumi can't show each option's chance of reaching your Conversion rate target yet: the model doesn't have Conversion rate's current level to measure from. The rest of this Run's results still stand.");
+    expect((F.assistant_text as string).split(line)).toHaveLength(2);
+    expect(cardSaysMissingLevel(result, F.card_options)).toBe(true);
+    const said = withoutDisclosure(F.assistant_text, line);
+    expect(said).not.toContain(line);
+    expect(said).toBe((F.assistant_text as string).replace(`\n\n${line}`, ''));
+  });
+
+  it('CONTRAST (c): one cell without that reason, another carried reason, or no bound card → the sentence stays', () => {
+    const result = { enrichment: F.enrichment };
+    const oneWithout = (F.card_options as { cell: Rec }[]).map((o, i) => i === 0
+      ? { ...o, cell: { ...o.cell, reasons: (o.cell.reasons as Rec[]).filter((r) => r.code !== 'GOAL_FIGURES_MISSING_CURRENT_LEVEL') } } : o);
+    expect(cardSaysMissingLevel(result, oneWithout)).toBe(false);
+    const fault = { enrichment: { ...F.enrichment, inference_warnings: (F.enrichment.inference_warnings as Rec[]).map((w) => w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE'
+      ? { ...w, detail: { reason: 'goal_node_missing' } } : w) } };
+    expect(cardSaysMissingLevel(fault, F.card_options)).toBe(false);
+    expect(cardSaysMissingLevel(result, undefined)).toBe(false);
+    expect(withoutDisclosure(`${F.assistant_text}\n\n${thresholdReasonLine(F.graph, result)}`, thresholdReasonLine(F.graph, result)!), 'said twice: never guessed which').toContain(thresholdReasonLine(F.graph, result));
   });
 });
