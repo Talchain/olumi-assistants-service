@@ -35,7 +35,7 @@ import { ProposalStore } from '../proposal.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { proposalPendingAction } from '../durable-proposal.js';
-import { readExecutableHeldProposalOffers } from '../held-approval-offers.js';
+import { agentProposals, executableProposalId, readExecutableHeldProposalOffers } from '../held-approval-offers.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
 type Rec = Record<string, any>;
@@ -153,6 +153,30 @@ describe('held deadline card: an unrelated approval never lapses it; any change 
     expect(w.read().edges).toEqual(withLinks.edges);
     expect(String(cold.assistant_text)).not.toMatch(LAPSE);
     expect((cold.suggested_actions as Rec[] ?? []).some((c) => c.id === deadline.id)).toBe(false);
+  }, 90_000);
+
+  // ⛔ Codex r2 on #3024 (`/private/tmp/check3024-r2/independent.test.ts:362`), adopted RED → GREEN: a COLD session after an
+  // unrelated approval (the process's in-memory proposal gone) still offers the exact waiting card, by its own rule.
+  it('⭐ COLD: after an unrelated link approval and a cold session, the exact waiting deadline card is still offered (chip and fields)', async () => {
+    const w = world(); const turn = await route(w);
+    const { deadline, links, session } = await bothCards(w, turn);
+    await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+    const p = agentProposals.outstanding(w.sid, null).find((x) => approvalChipIdFor(x.proposal_id) === deadline.id)!;
+    expect(p, 'the deadline card is still outstanding').toBeDefined();
+    agentProposals.discard(p.proposal_id);
+    const cold = await turn({ message: 'Where are we?', source: 'composer', agent_session_id: randomUUID() });
+    expect(w.onLatestRow(deadline.id)).toBe(true);
+    expect((cold.suggested_actions ?? []).some((a: Rec) => a.id === deadline.id), JSON.stringify(cold.suggested_actions)).toBe(true);
+    expect((cold._proposal_fields?.proposals ?? []).map((a: Rec) => a.proposal_id)).toContain(p.proposal_id);
+    expect(executableProposalId(p.proposal_id, w.sid, null, hash(w.read()), w.read())).toBe(p.proposal_id);
+    const offers = await readExecutableHeldProposalOffers({ scenarioId: w.sid, userId: null, graphHash: hash(w.read()), graph: w.read(),
+      latest: await (live.store as Rec).readMostRecentPendingActions(w.sid), rows: w.rows, store: live.store } as never);
+    expect(offers.map((x: Rec) => x.proposal_id)).toContain(p.proposal_id);
+    // CONTRAST: its goal renamed (the hash unchanged) → a cold session neither offers the card nor projects its fields.
+    const g = w.read(); goal(g).label = 'Team productivity'; w.replace(g);
+    const cold2 = await turn({ message: 'And now?', source: 'composer', agent_session_id: randomUUID() });
+    expect((cold2.suggested_actions ?? []).some((a: Rec) => a.id === deadline.id)).toBe(false);
+    expect((cold2._proposal_fields?.proposals ?? []).map((a: Rec) => a.proposal_id)).not.toContain(p.proposal_id);
   }, 90_000);
 
   it('NEGATIVE: the goal’s TARGET changed (with the links) → the card lapses, said; its press writes nothing', async () => {

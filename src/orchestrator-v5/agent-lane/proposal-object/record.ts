@@ -37,6 +37,7 @@ import { eventRiskCardLine } from '../stated-event-risk-draft.js';
 import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
 import { whoSized } from '../strength-authorship-words.js';
 import { computeProposalId, type ProposalOperation, type StructuredProposal } from '../proposal.js';
+import { heldCardAppliesAt } from './still-applies.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 
 /** The approve chip id prefix (`approval-chips.ts` APPROVE_PREFIX), restated here only to build the card's id. */
@@ -518,14 +519,32 @@ export interface ProposalFieldsWire {
   }[];
 }
 
-/** Only records pinned to `graphHash` are projected: the values shown are the values on the model the user sees. */
+/**
+ * A held card's record applies to this graph by the one rule (#3024): an Agent card by `heldCardAppliesAt` (its own subject,
+ * read on a moved model too: an unrelated approval never hides it); a product hold by its pin.
+ */
+export function heldRecordAppliesAt(hold: PendingAction, record: ProposalRecord, graph: unknown, graphHash: string | undefined): boolean {
+  const p = agentProposalOf(hold);
+  return p !== undefined ? heldCardAppliesAt(p, graph, graphHash) : record.base_graph_hash === graphHash;
+}
+
+/** The predicate {@link proposalFieldsWire} reads for records built from `holds` on `graph` (by proposal id). */
+export function heldRecordsApplyAt(holds: readonly PendingAction[], graph: unknown, graphHash: string | undefined): (r: ProposalRecord) => boolean {
+  return (r) => holds.some((h) => heldProposalId(h) === r.proposal_id && heldRecordAppliesAt(h, r, graph, graphHash));
+}
+
+/**
+ * Only records that apply to the model the user sees are projected: pinned to `graphHash`, or (with `applies`, #3024) still
+ * applying there by their own rule.
+ */
 export function proposalFieldsWire(
   records: readonly ProposalRecord[],
   graphHash: string | undefined,
   issuedTurnIds: ReadonlyMap<string, string> = new Map(),
+  applies?: (r: ProposalRecord) => boolean,
 ): ProposalFieldsWire | undefined {
   if (graphHash === undefined || graphHash === '') return undefined;
-  const pinned = records.filter((r) => r.base_graph_hash === graphHash);
+  const pinned = records.filter((r) => (applies !== undefined ? applies(r) : r.base_graph_hash === graphHash));
   if (pinned.length === 0) return undefined;
   return {
     version: 1,
