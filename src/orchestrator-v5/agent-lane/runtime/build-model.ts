@@ -286,6 +286,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // price 15%" registered with no level because "% from current list price" was marked unknown). Known-zero is what
       // lets admission restate a signed change as "% of today" (restateSignedPercentChanges, rows 4a/4b); the restated
       // factor carries no source, so no authority is claimed for the zero.
+      // AIE_TEXT_PENDING (recovery/prompt/CONSTRUCTOR-TEXT-DRAFT.md item 4): the no-change forecast's carve-out, PROMPT's draft.
       baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false. EXCEPTION: a factor measured as a CHANGE FROM TODAY (e.g. "% change from the current price", "extra hires") is 0 today by definition: baseline_known true, baseline_value 0. A stated no-change forecast\'s drift is not this exception: its baseline_value is the forecast minus today\'s level (NO-CHANGE FORECAST), never 0.' },
       baseline_evidence: { anyOf: [{ type: 'null' }, obj({ quote: { type: 'string' } }, ['quote'])], description: 'Complete verbatim brief sentence stating this factor’s current level; null otherwise.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
@@ -316,6 +317,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
         '"explicit" only when the user stated this size; null when `effect_amount` is null.' },
       // ⭐ DL #75 5916504679: the drafter's word that a link holds by definition. Optional in the contract (a recorded
       // candidate validates unchanged), required in what is sent (`strictForTheDrafter`); checked before any edge has it.
+      // AIE_TEXT_PENDING (recovery/prompt/CONSTRUCTOR-TEXT-DRAFT.md item 5): the drift's one-for-one case, PROMPT's draft.
       definitional: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
         'true ONLY when this link holds BY DEFINITION, not by estimate: the source is part of the target\u2019s own quantity, in the SAME unit, '
         + 'so one unit of the source moves the target by exactly one unit (money lost to a risk is money the goal does not get: '
