@@ -68,15 +68,21 @@ export function optionStatedLinkEffect(
   const graph = graphOf(persisted);
   const options = graph.nodes.filter((n) => n.kind === 'option');
   const labelOf = (n: GraphNode): string => String(n.label ?? '');
-  const named = (clause: string): GraphNode[] => options.filter((o) => factorTheUserNamed(labelOf(o), clause,
-    { options: options.filter((x) => x.id !== o.id).map(labelOf), others: [] }));
   const setters = optionsSetting(graph.nodes, graph.edges, link.from);
+  if (setters.length === 0) return null;
+  const others = options.filter((o) => !setters.some((s) => s.id === o.id));
+  // ⛔ Served hiring negative r4 (14 Oct 22:15Z): "Hire two developers" and "Hire one developer" BOTH set the developer lever,
+  // so "each additional developer" named neither by its own words. The options that set the SAME source are one group: a
+  // clause names the source when it names a setter by words no other option shares, and names no option outside the group.
+  const namesSetter = (clause: string): GraphNode[] => setters.filter((o) => factorTheUserNamed(labelOf(o), clause, { options: others.map(labelOf), others: [] }));
+  const namesOther = (clause: string): boolean => others.some((o) => factorTheUserNamed(labelOf(o), clause,
+    { options: [...setters, ...others.filter((x) => x.id !== o.id)].map(labelOf), others: [] }));
   const governing = coordinateClausesOf(quote).flatMap((clause) => {
-    const names = named(clause);
-    return names.length === 1 && setters.some((s) => s.id === names[0]!.id) ? [{ clause, option: names[0]! }] : [];
+    const named = namesSetter(clause);
+    return named.length > 0 && !namesOther(clause) ? [{ clause, named }] : [];
   });
   if (governing.length !== 1) return null;
-  const { clause, option } = governing[0]!;
+  const { clause, named } = governing[0]!;
   if (hasLinkEffectRange(clause)) return null;
   const figures = findLinkEffectAmounts(clause).map((a) => a.magnitude);
   const amount = Math.abs(effect.amount), per = Math.abs(effect.per_source_change);
@@ -91,12 +97,14 @@ export function optionStatedLinkEffect(
   const sign = Math.sign(effect.amount) * Math.sign(effect.per_source_change);
   if (says === 'reverse' || (says === 'positive' && sign < 0) || (says === 'negative' && sign > 0)) return null;
   const verdict = verifyStatements([{ quote, form: 'point', value: amount }], texts, {
-    subject: { quantity: link.to, node_id: link.from, option_id: option.id }, unit: 'link_effect', forms: ['point'],
+    subject: { quantity: link.to, node_id: link.from, ...(named.length === 1 ? { option_id: named[0]!.id } : {}) }, unit: 'link_effect', forms: ['point'],
     figuresIn: () => figures.map((f) => ({ low: f, high: f })) });
   if (verdict.kind !== 'verified') return null;
-  // One of what the option adds, in the source's own unit ("a Tech lead" on "Tech lead headcount" in people): Olumi's reading.
-  const added = option.interventions !== null && typeof option.interventions === 'object'
-    ? (option.interventions as Record<string, { unit?: unknown } | undefined>)[link.from]?.unit : undefined;
-  return { statement: verdict.statements[0]!,
-    ...(rest.length === 0 && typeof added === 'string' && added.trim() !== '' ? { per_source_change_unit: added.trim() } : {}) };
+  // One of what the options add, in the source's own unit ("a Tech lead" on "Tech lead headcount" in people): Olumi's reading.
+  // Several named setters must agree on that unit, or none is read.
+  const units = new Set(named.map((o) => (o.interventions !== null && typeof o.interventions === 'object'
+    ? (o.interventions as Record<string, { unit?: unknown } | undefined>)[link.from]?.unit : undefined))
+    .map((u) => (typeof u === 'string' ? u.trim() : '')));
+  const added = units.size === 1 ? [...units][0] : '';
+  return { statement: verdict.statements[0]!, ...(rest.length === 0 && added !== '' ? { per_source_change_unit: added } : {}) };
 }

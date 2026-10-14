@@ -150,3 +150,43 @@ describe('⛔ WRONG AUTHOR: Olumi\'s claim is never the user\'s figure (it bound
       'Hiring a Tech lead would raise productivity by about 8% of today’s.')).toBe(false);
   });
 });
+
+/**
+ * ⛔ Served hiring negative r4 (14 Oct 22:16Z, CEE e7f95dc6): the draft held TWO options that set the developer lever ("Hire two
+ * developers", "Hire one developer"), so "each additional developer" named neither by its own words and the 3% was refused and
+ * asked again. The options that set the same source are one group. This draft holds no Tech lead → Productivity link.
+ */
+describe('⭐ two options setting one source are one group (served negative r4)', () => {
+  const R4 = JSON.parse(readFileSync(new URL('./fixtures/hiring-negative-r4-turn02.json', import.meta.url), 'utf8')) as { graph: Json };
+  const r4 = () => {
+    const graph = structuredClone(R4.graph);
+    const store = new ProposalStore();
+    const d: InternalDispatch = async (path) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never) } };
+      throw new Error(`unexpected dispatch ${path}`);
+    };
+    return { store, caps: createAgentCapabilities(d, store), ctx: (said = SAID) => ({ scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'hiring-neg-r4', user_text: said, user_turn_text: said }) };
+  };
+  const dev = (amount: number, said = SAID) => ({ from_label: 'Mid-weight developer headcount', to_label: 'Productivity', amount, amount_unit: '%', per_source_change: 1, per_source_change_unit: 'developer', quote: said });
+  it('RED→GREEN: the developer link binds 3 through the two developer options, one of what they add, in people', async () => {
+    const w = r4();
+    const r = await w.caps.proposeLinkEffect!(w.ctx() as never, dev(3) as never) as Json;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(w.store.get(String(r.proposal_id))?.operations[0]?.value).toMatchObject({ quote: expect.stringContaining('each additional developer by about 3% of today’s'),
+      effect: { amount: 3, amount_unit: '%', per_source_change: 1, per_source_change_unit: 'people' } });
+  });
+  it('⛔ the developer never takes the Tech lead\'s 8', async () => {
+    const w = r4();
+    expect((await w.caps.proposeLinkEffect!(w.ctx() as never, dev(8) as never) as Json).ok).toBe(false);
+  });
+  it('⛔ a clause naming both groups binds neither', async () => {
+    const said = 'Hiring a Tech lead or a developer would raise productivity by about 5% of today’s.';
+    const w = r4();
+    expect((await w.caps.proposeLinkEffect!(w.ctx(said) as never, dev(5, said) as never) as Json).ok).toBe(false);
+  });
+  it('⛔ the Tech lead link this draft does not hold prepares nothing', async () => {
+    const w = r4();
+    const r = await w.caps.proposeLinkEffect!(w.ctx() as never, { from_label: 'Tech lead headcount', to_label: 'Productivity', amount: 8, amount_unit: '%', per_source_change: 1, per_source_change_unit: 'people', quote: SAID } as never) as Json;
+    expect(r.ok).toBe(false);
+  });
+});
