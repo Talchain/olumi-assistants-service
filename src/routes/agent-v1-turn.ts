@@ -4893,8 +4893,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // BYPASS1: the AI holds `readiness_after`, so the readiness sentence goes. The save or refusal receipt (with any claim the
     // stripper removed), what a proposal left out, goal-not-checked, stale, the post-write ask (gate 2: a root treated as zero
     // is always said) and held lapses stay: server truth "whatever the model said" (write-outcome, starting-point-omission,
-    // real-writer, one-reply-build rows).
-    const aiStatusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, askLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
+    // real-writer, one-reply-build rows). After a refused first analysis the readiness line is the REST of that refusal
+    // (T4: "Review all N readiness issues" names none; `refusalSaid` drops what it already said), so it stays with it.
+    const aiStatusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine,
+      firstAnalysisRefusalSaid ? readinessLine : null, askLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
     // The retained fresh scope question is this turn's existing step, even if the
     // narrator parked it behind the questions toggle. Count it before another ask.
     const freshScopeAsk = freshScopeIssues.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.expected !== 'approval' && retainedScopeIssues.some(held => held.chip_id === p.chip_id));

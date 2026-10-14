@@ -153,5 +153,9 @@ describe('event-risk disclosure through the served build reply', () => {
   it('ER-2-control: no likelihood keeps the current reply and shape byte-identical', async () => {
     const body = await turn(PREFIX + 'Our key developer might leave in the next 6 months.');
     expect({ text: body.assistant_text, shape: body._answer_shape }).toMatchSnapshot();
+    // BYPASS1: the AI wrote this reply and holds the D1 objective ask as its typed next step, so the host adds it 0 times.
+    const objectiveAsk = 'I used "Delivery" as a provisional objective. What should this model help you explore?';
+    expect(buildOutput?.next_step_blocker).toMatchObject({ kind: 'missing_input', cause: 'objective_provisional', ask: objectiveAsk });
+    expect(body.assistant_text).not.toContain(objectiveAsk);
   });
 });
