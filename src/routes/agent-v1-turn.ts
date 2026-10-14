@@ -4153,8 +4153,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (savedRead !== undefined && admitsRunOffer(savedRead.analysisReady)) {
       // The AI's timing reading, carried from the Run current when the turn began while this change left its subject as it was.
       const turnStart = (await readCache.turnStartRead())?.json as { graph?: unknown; analysis_result?: unknown } | undefined;
-      const effectsTiming = carriedEffectsTiming(turnStart === undefined ? undefined
-        : { graph: turnStart.graph, analysisResult: turnStart.analysis_result }, savedRead.graph);
+      const effectsTiming = carriedEffectsTiming(turnStart, savedRead.graph);
       autoRun = await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.', effects_timing: effectsTiming },
         { afterCommittedChange: true });
       // ⭐ THE AUTOMATIC RUN IS THIS TURN'S RUN (principle review C.md, after #3038): recorded as the Agent's own Run is, so

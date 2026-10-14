@@ -553,7 +553,9 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const card = prepared.suggested_actions.find((c: Json) => c.id.startsWith('agent-approve-proposal:'));
     expect(card, JSON.stringify(prepared._agent)).toBeDefined();
     const approved = await turn(card.message, { source: 'chip', chip: { id: card.id } });
-    expect(approved._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    // The approval commits, then the route's automatic Run is recorded as this turn's Run (#3044, C.md).
+    expect(approved._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }),
+      expect.objectContaining({ name: 'run_analysis', ok: true, mutated: false })]);
     expect(doorCalls).toHaveLength(writesBefore + 1);
     expect(doorCalls[writesBefore].link_effect).toMatchObject({ from, to });
     return approved;
