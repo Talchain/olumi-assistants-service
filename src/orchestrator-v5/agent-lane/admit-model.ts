@@ -204,10 +204,8 @@ export interface CandidateModel {
       stated_evidence?: StatedOptionEvidence | null;
       /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
       range?: InterventionV3T['range'];
-      /** Internal: a setting the drafter called the user's whose quote did not verify — UNKNOWN origin (`quotedOptionSetting`). */
+      /** Internal: a setting the drafter called the user's that the verifier could not credit — UNKNOWN origin, never Olumi's. */
       user_material_unverified?: true;
-      /** Internal: the user's setting by its own verified quote (`quotedOptionSetting`) — admitted with `extractionType: 'explicit'`. */
-      quote_verified?: true;
     }[];
     /**
      * Factors this option changes WITHOUT a stated level.
@@ -420,8 +418,6 @@ export interface ConstructedLevel {
   basis?: string;
   /** UNKNOWN origin, as `observed_state.user_material_unverified`: never the user's, never Olumi's (`settingProvenanceOf`). */
   user_material_unverified?: true;
-  /** The user's setting by its own verified quote, as a verified current level (`source` + `extractionType`, below). */
-  extractionType?: 'explicit';
 }
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
@@ -4344,7 +4340,6 @@ function admitOnce(
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
       if (iv.user_material_unverified === true) bundle[factorId]!.user_material_unverified = true;
-      if (iv.quote_verified === true && bundle[factorId]!.source === 'brief_extraction') bundle[factorId]!.extractionType = 'explicit';
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
       if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
     }

@@ -39,8 +39,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel } from '../verified-option-setting.js';
-import { quotedOptionSetting } from '../quoted-option-setting.js';
+import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -904,18 +903,14 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
         const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
-        // ⛔ THE USER'S STATED SETTING IS NEVER OLUMI'S (capacity authorship, DL 14 Oct (B)). Kept as the user's only by its own
-        // quote (`quotedOptionSetting`: whole statement, the option's label in it, the figure at its offset), and then marked
-        // so (`quote_verified` → admission's `extractionType: 'explicit'`). Otherwise its origin is UNKNOWN: it keeps today's
-        // non-user path through admission (no rule exempts it as the user's) and carries `user_material_unverified`, which
-        // the one authority (`settingProvenanceOf`) reads as unknown, never as Olumi's.
-        const quoted = intervention.provenance === 'explicit' && unknownBaseline
-          && factors[0]!.baseline_value === 0 && quotedOptionSetting(option, intervention, brief);
-        if (intervention.provenance === 'explicit' && unknownBaseline && !quoted) {
+        // ⛔ THE USER'S STATED SETTING IS NEVER OLUMI'S (capacity authorship row 7, DL 14 Oct). A setting the drafter called the
+        // user's that the verifier cannot credit keeps today's non-user path through admission (no rule exempts it as the
+        // user's), and its origin is UNKNOWN, not Olumi's: it carries `user_material_unverified`, which the one authority
+        // (`settingProvenanceOf`) reads as unknown, so the census discloses it as unverified, never as an Olumi estimate.
+        if (intervention.provenance === 'explicit' && unknownBaseline
+          && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed', user_material_unverified: true });
-        } else if (quoted) {
-          interventions.push({ ...intervention, quote_verified: true });
         } else {
           interventions.push(intervention);
         }
