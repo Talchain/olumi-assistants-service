@@ -12,7 +12,7 @@ import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goa
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskHoldsNowCardWords, riskHoldsNowRecordedWords, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
-import { verifyStatements, type UserStatement } from '../user-statements.js';
+import { userStatementOf, verifyStatements, type UserStatement } from '../user-statements.js';
 import type { EventRiskV1T } from '../../../schemas/event-risk.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { heldTeamTimeStatements, quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeFromStatements, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
@@ -4103,7 +4103,7 @@ export function createAgentCapabilities(
     const ownWriteLanded = proposals.partialProgressOf(pid) !== undefined || await ownCommitInLedger();
     const approved: ApprovedRiskOccurrence = { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node,
       goal_id: v.goal_id, expected_goal: v.expected_goal, own_write_landed: ownWriteLanded,
-      ...(isPlainRecord(v.holds_now) ? { holds_now: v.holds_now as unknown as UserStatement } : {}) };
+      ...(userStatementOf(v.holds_now) !== undefined ? { holds_now: userStatementOf(v.holds_now)! } : {}) };
     // The card's goal as bound (its dates, period and reading), by the rule the writer and the read-back also read: a goal
     // that moved since the card was made writes nothing, whatever the analysis hash says (Codex r1 on #3013).
     if (!riskOccurrenceGoalHolds(approved, before.raw)) {

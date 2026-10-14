@@ -174,6 +174,30 @@ export function combineStatementEnds(statements: readonly UserStatement[]): Comb
   return { kind: 'conflict', detail: 'None of these statements gives a figure. Quote the words that state one.' };
 }
 
+/**
+ * A statement as stored (a card's operation, a carrier's `statements`), read back as the contract's type, or `undefined` if it is
+ * not one. The ONE reader, so no caller double-casts stored bytes into a statement (the forbidden-boundary gate).
+ */
+export function userStatementOf(v: unknown): UserStatement | undefined {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const r = v as Record<string, unknown>;
+  const subject = r.subject !== null && typeof r.subject === 'object' && !Array.isArray(r.subject) ? r.subject as Record<string, unknown> : undefined;
+  const form = STATEMENT_FORMS.find((f) => f === r.form);
+  const optional = (k: string): string | undefined => (typeof r[k] === 'string' ? r[k] as string : undefined);
+  const end = (k: string): number | undefined => (typeof r[k] === 'number' && Number.isFinite(r[k]) ? r[k] as number : undefined);
+  if (r.speaker !== 'user' || r.reading !== 'olumi' || typeof r.quote !== 'string' || typeof r.source !== 'string' || form === undefined
+    || subject === undefined || typeof subject.quantity !== 'string') return undefined;
+  const low = end('low'), high = end('high'), qualifier = optional('qualifier'), conditions = optional('conditions');
+  return { speaker: 'user', quote: r.quote, source: r.source, form, reading: 'olumi',
+    subject: { quantity: subject.quantity, ...(typeof subject.node_id === 'string' ? { node_id: subject.node_id } : {}),
+      ...(typeof subject.option_id === 'string' ? { option_id: subject.option_id } : {}) },
+    ...(low !== undefined ? { low } : {}), ...(high !== undefined ? { high } : {}),
+    ...(optional('unit') !== undefined ? { unit: optional('unit') } : {}), ...(optional('reference') !== undefined ? { reference: optional('reference') } : {}),
+    ...(optional('period') !== undefined ? { period: optional('period') } : {}),
+    ...(qualifier !== undefined ? { qualifier, ...(typeof r.qualifier_in_quote === 'boolean' ? { qualifier_in_quote: r.qualifier_in_quote } : {}) } : {}),
+    ...(r.negated === true ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}) };
+}
+
 /** How a statement's reading reads on a card: "at least 7 months", "a likely upper end of 8 months". */
 export function statementReadingWords(s: UserStatement, unit: string): string {
   const q = s.qualifier !== undefined ? `${s.qualifier} ` : '';
