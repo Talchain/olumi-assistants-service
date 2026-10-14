@@ -4252,24 +4252,43 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * THIS Run (its identity); with no interpretation, the Explain press's own fallback words.
      */
     const autoRunIdentity = autoRun?.ran === true ? (autoRun as { run_identity?: unknown }).run_identity : undefined;
+    // ⭐ THE SAME FOR A RUN PRESS AFTER A CHANGE (DL 14 Oct, joined-flow witness): the canvas's own automatic Run after an
+    // edit or Undo (DGAI #2767) reaches CEE as a Run press, which answered only "Your results are ready", so its coaching
+    // never came. A pressed Run whose selected delta says something changed since the preceding Run (any case but
+    // `C0_identical`) gets this same one call over THAT Run. The first Run (no delta) and a re-run with nothing changed keep
+    // the ready line and spend no call.
+    const pressedRunIdentity = fastPath === 'run' && runPressResult?.ran === true
+      ? (runPressResult as { run_identity?: unknown }).run_identity : undefined;
+    const interpretRunIdentity = autoRunIdentity ?? pressedRunIdentity;
+    let pressedRunNarration: 'ready' | 'unavailable' | undefined;
     // A Run with no identity to bind is never interpreted, and costs no read.
-    if (autoRunIdentity !== undefined) {
+    if (interpretRunIdentity !== undefined) {
       const autoRead = await readBackState(readingDispatch, scenarioId);
       const readRun = { scenario_id: scenarioId,
         graph_hash_at_run: (autoRead.analysisResult as { computed_against_hash?: unknown } | undefined)?.computed_against_hash,
         computed_at: (autoRead.analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at };
       // The read selects another Run: nothing more is read or called for this one.
-      const selected = compareAnalysisRunFactIdentity(autoRunIdentity, readRun).status === 'match';
+      const selected = compareAnalysisRunFactIdentity(interpretRunIdentity, readRun).status === 'match';
       // The same kept read (no write since), carrying the producer's selected-Run delta, as on the Explain press.
       const selectedRead = selected ? await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {}) : undefined;
       const currentRead = selectedRead?.status === 200
         ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
-      const interpretedRun = !selected ? undefined
+      const pressedAfterChange = autoRunIdentity === undefined
+        && typeof currentRead?.run_delta === 'object' && currentRead.run_delta !== null
+        && (currentRead.run_delta as { attribution_case?: unknown }).attribution_case !== 'C0_identical';
+      const interpretedRun = !selected || (autoRunIdentity === undefined && !pressedAfterChange) ? undefined
         : await interpretSelectedRun(autoRead, currentRead?.run_delta, recentRunExplanationConversation(result.items), true);
       if (interpretedRun?.admitted === true) {
         const said = interpretedRun.interpreted?.answer
           ?? interpretedRun.rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true });
-        text = [text, said].filter((x) => x.trim() !== '').join('\n\n');
+        // A pressed Run's coaching replaces its ready line ("…or ask me to explain them"), which it now answers.
+        // As on the Explain press: the AI's words are the narrator's, and the Run's narration is ready (or unavailable).
+        if (pressedAfterChange) {
+          runInterpreted = true; text = said;
+          if (interpretedRun.words !== null) narratorWords = interpretedRun.words;
+          pressedRunNarration = interpretedRun.explanationReady ? 'ready' : 'unavailable';
+        }
+        else text = [text, said].filter((x) => x.trim() !== '').join('\n\n');
         result = { ...result,
           // The next turn sees the interpretation: an id-less assistant message, which needs no reasoning item.
           items: [...result.items, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }],
@@ -5174,8 +5193,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * below edits the text a replay returns, not only the text this request returns.
      */
     const explanationChip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult });
-    if (fastPath === 'run' || firstAnalysisResultFirst) narrationStatus = explanationChip !== null
-      && resultFirstRunCompleted ? 'pending' : 'unavailable';
+    if (fastPath === 'run' || firstAnalysisResultFirst) narrationStatus = pressedRunNarration ?? (explanationChip !== null
+      && resultFirstRunCompleted ? 'pending' : 'unavailable');
     if (runPress && fastPath !== 'run' && resultFirstRunCompleted) narrationStatus = explanationChip !== null
       && result.stopped_reason === 'answered' && result.assistant_text.trim() !== '' ? 'ready' : 'unavailable';
     const narrationKey = fastPath === 'explain' && typeof explanationId === 'string'

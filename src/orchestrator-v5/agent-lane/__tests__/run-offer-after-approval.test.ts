@@ -373,6 +373,78 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     });
   });
 
+  /**
+   * ⭐ A RUN PRESSED AFTER A CHANGE IS INTERPRETED THE SAME WAY (DL 14 Oct, joined-flow witness 2026-10-14T174333Z): the
+   * canvas's own automatic Run after an edit or Undo (DGAI #2767) reaches CEE as a Run press, which answered only "Your
+   * results are ready", so the same-Run coaching never came. The press body is the served one (that witness, turn 2).
+   */
+  describe('a Run pressed after a change is interpreted in its own turn', () => {
+    const RUN_AT = '2026-10-01T12:00:00.000Z';
+    const COACHING = 'This Run reads the model as you just saved it, with the link from Team size to Velocity included.';
+    const LINK_ENTERED = {
+      attribution_case: 'C1_attributable', input_coverage: 'complete', win_probabilities: [], goal_chances: [], flip_thresholds: [],
+      leader: { changed: false, noise_verdict: 'not_noise_qualified' },
+      input_changes: [{ entity_kind: 'link', field: 'presence', link: { from: 'f1', to: 'o1' }, before: null, after: { raw: true } }],
+    };
+    const NOTHING_CHANGED = { ...LINK_ENTERED, attribution_case: 'C0_identical', input_changes: [] };
+    const CODE_LINE = 'The link from ‘Team size’ to ‘Velocity’ is now part of the analysis.';
+    /** The served UI Run press (witness turn 2's request body, ids aside). */
+    const press = async () => {
+      readiness = { status: 'ready', may_run: true };
+      interpretation = COACHING;
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', message: 'Run analysis', source: 'chip_click',
+        chip: { action_type: 'run_analysis' } } });
+      expect(r.statusCode).toBe(200);
+      const b = r.json() as { assistant_text: string; narration?: { status?: string; run_key?: string }; _diagnostic_trace: { fast_path?: string } };
+      expect(b._diagnostic_trace.fast_path, 'the Run press fast path').toBe('run');
+      expect(runs, 'the Run ran once').toBe(1);
+      return b;
+    };
+
+    it('RED: a re-run after a change → ONE interpreting call over THIS Run; its coaching replaces the ready line', async () => {
+      runStampedAt = RUN_AT;
+      runDelta = LINK_ENTERED;
+      const b = await press();
+      const calls = modelBodies.filter(isInterpretingCall);
+      expect(calls, 'one interpreting call').toHaveLength(1);
+      const { RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT } = await import('../run-explanation.js');
+      expect(interpretingRequestOf(calls[0]!).request, 'the Explain press\'s own request').toBe(RUN_EXPLANATION_MESSAGE);
+      expect(String(calls[0]!['instructions']), 'what changed, from THIS Run\'s delta').toContain(`Run record: "${CODE_LINE}`);
+      expect(b.assistant_text).toContain(CODE_LINE);
+      expect(b.assistant_text).toContain(COACHING);
+      expect(b.assistant_text, 'the coaching answers "ask me to explain them"').not.toContain(RUN_RESULT_READY_TEXT);
+      expect(b.narration?.status, 'this Run\'s narration is delivered').toBe('ready');
+    });
+
+    it('CONTRAST: a re-run with nothing changed (C0_identical) → no interpreting call; the ready line stays', async () => {
+      runStampedAt = RUN_AT;
+      runDelta = NOTHING_CHANGED;
+      const b = await press();
+      const { RUN_RESULT_READY_TEXT } = await import('../run-explanation.js');
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+      expect(b.assistant_text).not.toContain(COACHING);
+      expect(b.narration?.status).toBe('pending');
+    });
+
+    it('CONTRAST: a first Run (no preceding Run, no delta) → no interpreting call; the ready line stays', async () => {
+      runStampedAt = RUN_AT;
+      const b = await press();
+      const { RUN_RESULT_READY_TEXT } = await import('../run-explanation.js');
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+    });
+
+    it('ADVERSARIAL: the read selects another Run (same hash, another computed_at) → no interpreting call, no coaching', async () => {
+      runStampedAt = '2026-10-01T11:59:00.000Z';
+      runDelta = LINK_ENTERED;
+      const b = await press();
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      expect(b.assistant_text).not.toContain(COACHING);
+    });
+  });
+
   describe('a durable replay re-offers the original typed actions, re-validated on today\'s state', () => {
     const replay = async (payload: Record<string, unknown>) => {
       const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
