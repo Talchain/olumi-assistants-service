@@ -59,6 +59,7 @@ const EXEMPT: Readonly<Record<string, string>> = {
   'orchestrator-v5/agent-lane/identity-card.ts': 'Reads the stored reading to say which part level is missing; it offers no new card and licenses nothing.',
   'orchestrator-v5/agent-lane/goal-coherence.ts': 'Read-only coherence check of the stored reading; offers and licenses nothing.',
   'orchestrator-v5/tools/handlers/unconfirmed-goal-product.ts': 'Carries the stored product reading on the wire as unconfirmed; offers no card and licenses nothing.',
+  'orchestrator-v5/agent-lane/held-figure-confirm.ts': 'Reads the stored reading\'s part ids only to match the Run\'s own identity ask; it confirms a figure the user already wrote, offers no time-bearing card and licenses nothing.',
 };
 /** The exact calls each exempt file makes today. A change here is a changed use and must be re-reviewed against its reason above. */
 const EXEMPT_CALLS: Readonly<Record<string, readonly string[]>> = {
@@ -69,6 +70,7 @@ const EXEMPT_CALLS: Readonly<Record<string, readonly string[]>> = {
   'orchestrator-v5/agent-lane/identity-card.ts': ['proposeProductIdentity(p.graph)'],
   'orchestrator-v5/agent-lane/goal-coherence.ts': ['proposeProductIdentity(graph)'],
   'orchestrator-v5/tools/handlers/unconfirmed-goal-product.ts': ['proposeProductIdentity(storedGraph)'],
+  'orchestrator-v5/agent-lane/held-figure-confirm.ts': ['proposeProductIdentity(graph)'],
 };
 
 function walk(dir: string): string[] {

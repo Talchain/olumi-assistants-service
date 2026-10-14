@@ -253,6 +253,10 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     expect(route).toContain('{ ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS,');
     // Paul #94 6166259456: the route's automatic Run after a committed change is a dispatch site on the SAME typed carrier.
     expect(route).toContain('autoRun = await capabilities.runAnalysis(toolCtx, ');
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), and the automatic Run after a committed change').toBe(22);
+    // S2 one-press cards the route issues after the Run (#3129, the user's own figure) and from the brief (#3134, holds now):
+    // two dispatch sites on the SAME typed carrier; their cards' door re-verifies the quote as the user's.
+    expect(route).toContain("dispatchTool('propose_assumptions', JSON.stringify(heldConfirm), toolCtx, capabilities, mode)");
+    expect(route).toContain("dispatchTool('propose_assumptions', JSON.stringify(briefHoldsNow), toolCtx, capabilities, mode)");
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), the automatic Run after a committed change, and the two S2 one-press cards the route issues (the held figure, holds now)').toBe(24);
   });
 });
