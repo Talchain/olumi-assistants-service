@@ -6035,10 +6035,20 @@ export function createAgentCapabilities(
       const ownMessage = writes(typed) ? ctx.user_turn_text ?? '' : [...(ctx.verified_user_messages ?? (ctx.user_text ?? '').split('\n'))].reverse()
         .find((m) => writes(plainOf(m)));
       const userSentence = origin === 'human' && ownMessage !== undefined ? sentenceHolding(words, ownMessage) : undefined;
-      return proposePlacedDeadline(ctx, args, g, words, reference,
+      const placed = await proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
         origin === 'human', !echoedAsOfSetAside && datePhrasesIn(source) <= 1, undefined, userSentence);
+      // ⛔ Served hiring r3 (14 Oct 18:45Z, request 73434864): the AI passed reference_date 2026-02-17, the card counted from the
+      // recorded 14 October 2026, and the AI withdrew its own card as "an inconsistent reference date". The set-aside reference
+      // was only logged, so the AI could not tell a deliberate replacement from a fault. It is told, here, in the result.
+      const setAside = typeof args.reference_date === 'string' && args.reference_date.trim() !== '' && args.reference_date !== asOf
+        ? args.reference_date.trim() : undefined;
+      if (placed.ok !== true || setAside === undefined || reference === undefined || setAside === reference) return placed;
+      return { ...placed, reference_used: reference, reference_set_aside: setAside,
+        note: `${String(placed.note ?? '')} The reference_date you passed (${setAside}) was not used: Olumi counts this deadline from the `
+          + `scenario's recorded reference date, ${sayDate(reference)}, which the card shows. That is deliberate, not an inconsistency: `
+          + 'show the card as it is and do not withdraw it for that reason.' };
     },
 
     /**
