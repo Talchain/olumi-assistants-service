@@ -34,6 +34,8 @@ describe('SYSTEM 1 contract: one subject, one verifier, one binding rule, one ca
     expect(resolveSubject(G, { kind: 'risk', label: 'Code quality', field: 'occurrence' })).toEqual({ kind: 'unresolved', reason: 'not_found' });
     expect(resolveSubject(G, { kind: 'factor', id: 'code_quality_deterioration', field: 'level' })).toEqual({ kind: 'unresolved', reason: 'not_found' });
     expect(resolveSubject(G, { kind: 'risk', id: 'code_quality_deterioration', field: 'likelihood' })).toEqual({ kind: 'unresolved', reason: 'unknown_field' });
+    // An option's setting of a node is `level` on {option_id, node} (agreed with PROMPT), never a field of its own.
+    expect(resolveSubject(G, { kind: 'risk', id: 'code_quality_deterioration', field: 'setting' })).toEqual({ kind: 'unresolved', reason: 'unknown_field' });
     expect(resolveSubject(G, { kind: 'link', id: 'code_quality_deterioration', to_id: 'productivity', field: 'effect' }))
       .toMatchObject({ kind: 'resolved', subject: { kind: 'link', id: 'code_quality_deterioration', to_id: 'productivity', field: 'effect' } });
     expect(subjectKey(RISK)).toBe('risk|code_quality_deterioration|||occurrence');
@@ -47,6 +49,15 @@ describe('SYSTEM 1 contract: one subject, one verifier, one binding rule, one ca
     expect(verifyStatement({ quote: 'a 30% chance it slips', form: 'point', value: 30 }, { now: SAID }, rules)).toMatchObject({ kind: 'refused', refusal: 'statement_not_found' });
     expect(verifyStatement({ quote: SAID, form: 'point', value: 30 }, { now: 'Yes.', unverified: SAID }, rules)).toMatchObject({ kind: 'refused', refusal: 'origin_unknown' });
     expect(verifyStatement({ quote: SAID, form: 'point', value: 40 }, { now: SAID }, rules)).toMatchObject({ kind: 'refused', refusal: 'figure_not_in_quote' });
+  });
+
+  it('a stated 0 is a figure only where the field allows it (a level or target: "0% now"); elsewhere it is refused as before', () => {
+    const NONE = 'We spend 0% of the budget on contractors today.';
+    const rules = { subject: { quantity: 'level' }, unit: '%', forms: ['point' as const], figuresIn: () => [{ low: 0, high: 0 }] };
+    expect(verifyStatement({ quote: NONE, form: 'point', value: 0 }, { now: NONE }, rules)).toMatchObject({ kind: 'refused', refusal: 'statement_malformed' });
+    expect(verifyStatement({ quote: NONE, form: 'point', value: 0 }, { now: NONE }, { ...rules, allowsZero: true }))
+      .toMatchObject({ kind: 'verified', statement: { quote: NONE, low: 0, high: 0 } });
+    expect(verifyStatement({ quote: NONE, form: 'point', value: 5 }, { now: NONE }, { ...rules, allowsZero: true })).toMatchObject({ kind: 'refused', refusal: 'figure_not_in_quote' });
   });
 
   it('binding: its words, the user’s selection, or Olumi’s preceding ask in the ask’s own words; never elimination', () => {

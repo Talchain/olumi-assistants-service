@@ -80,6 +80,8 @@ export interface StatementRules {
   readonly figuresIn: (quote: string) => readonly { readonly low: number; readonly high: number }[];
   /** Whether the Agent's figure is the stated one (the server keeps the stated one, never the Agent's rendering). */
   readonly sameFigure?: (quote: string, given: number, stated: number) => boolean;
+  /** A stated 0 is a figure of this field ("no budget", "0% now"), never refused as missing (PROMPT sys2; a level or target). */
+  readonly allowsZero?: boolean;
 }
 
 export type StatementsVerdict =
@@ -89,7 +91,7 @@ export type StatementsVerdict =
 const MAX_STATEMENTS = 6;
 const trimmed = (v: unknown, max: number): string | undefined =>
   typeof v === 'string' && v.trim() !== '' && v.trim().length <= max ? v.trim() : undefined;
-const figure = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
+const figure = (v: unknown, zero = false): number | undefined => (typeof v === 'number' && Number.isFinite(v) && (v > 0 || (zero && v === 0)) ? v : undefined);
 
 export type StatementVerdict =
   | { readonly kind: 'verified'; readonly statement: UserStatement }
@@ -128,13 +130,13 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   if (form === 'holds_now' || form === 'describes') return { kind: 'verified', statement: base };
   const stated = rules.figuresIn(quote);
   if (form === 'range') {
-    const low = figure(given?.low), high = figure(given?.high);
+    const low = figure(given?.low, rules.allowsZero), high = figure(given?.high, rules.allowsZero);
     if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
     const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
     if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
     return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };
   }
-  const value = figure(given?.value);
+  const value = figure(given?.value, rules.allowsZero);
   if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
   const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
   if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
