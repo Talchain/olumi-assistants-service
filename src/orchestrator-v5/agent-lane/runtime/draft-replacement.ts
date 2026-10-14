@@ -32,6 +32,8 @@ import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js';
 import { normaliseGraphForIdentity } from '../../context/graph-identity.js';
+import { unitPhraseHead, unitPhraseTail } from '../unit-conflict.js';
+import { ratePeriodOf } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -187,6 +189,27 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
       kept.push(row);
       continue;
     }
+    /**
+     * ⛔ THE SAME ROW, RE-SPELLED WITHOUT ITS PERIOD (served marketing-2992, 13 Oct 23:04Z): the redraft wrote the budget's
+     * `GBP/year` as `£` on the SAME constraint id, so it was neither kept nor carriable (the id collides) and the whole card
+     * was refused. That row is carried UNCHANGED, the earlier row replacing the candidate's, only when the identity, the
+     * quantity, the stated comparator, the value and the frame are the same, the earlier unit is the currency over ONE period
+     * (`ratePeriodOf`, and nothing else after the currency: not "GBP/customer", a scaled unit or "GBP MRR/year"; Codex buddy),
+     * the candidate's unit has nothing after its currency, and the two figures say the same amount. `sameFigure` is NOT
+     * loosened: "£" never stands for a yearly limit by itself, and any other same-id difference still refuses.
+     */
+    const sameId = theirs.find((t) => t.constraint_id === c.constraint_id);
+    const head = unitPhraseHead(row.unit);
+    if (sameId !== undefined && quantity !== null && quantityOf(candidate, sameId) === quantity && head !== null
+      && String(sameId.operator_as_stated ?? sameId.operator) === row.operator && sameId.value === row.value
+      && (sameId.value_frame ?? 'level') === (c.value_frame ?? 'level')
+      && ratePeriodOf(row.unit) !== null && unitPhraseTail(row.unit).split(' ').filter((w) => w !== '' && w !== 'per').length === 1
+      && unitPhraseTail(unitOf(sameId)) === ''
+      && figure(row.value, unitOf(sameId)) === figure(row.value, head)) {
+      rows[rows.indexOf(sameId)] = structuredClone(c);
+      kept.push(row);
+      continue;
+    }
     dropped.push(row);
     const proposedRows = theirs.filter(sameFigure);
     const proposed = proposedRows.map(rowOf);
@@ -220,7 +243,9 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
     }
   }
   const replacement = { ...rec(candidate), nodes, goal_constraints: rows };
-  return { kept, dropped, carried, uncertain, conflict, limits: theirs.map(rowOf),
+  // The card's limits are the candidate's own rows as they stand after the carry (a re-spelled row says its earlier unit).
+  const candidateLimitIds = new Set(theirs.map((t) => t.constraint_id));
+  return { kept, dropped, carried, uncertain, conflict, limits: limitsOf(replacement).filter((r) => candidateLimitIds.has(r.constraint_id)).map(rowOf),
     ...(unresolvedRetainedLimits(replacement).length > 0 ? { withheld: retainedLimitWithheldLine(replacement) } : {}), replacement };
 }
 
