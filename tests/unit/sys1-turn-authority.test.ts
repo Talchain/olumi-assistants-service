@@ -213,7 +213,10 @@ describe('SYS1 ordinary Responses transport', () => {
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   const turn = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario, message: 'Explain the current model.' } });
   it('RED positive: exact instructions, tool definitions, schema and success bytes stay unchanged', async () => {
-    const res = await turn(); expect(res.statusCode).toBe(200);
+    // ⭐ The turn now carries the server's London day (agent-loop.ts `todayLine`, DL 15 Oct 23:08Z): ONE fixed instant, so these
+    // bytes are the same on every day the suite runs. Only Date is faked; timers stay real.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-10-14T12:00:00Z') });
+    const res = await (async () => { try { return await turn(); } finally { vi.useRealTimers(); } })(); expect(res.statusCode).toBe(200);
     const bodies = sent.map(s => JSON.parse(s));
     const proof = bodies.map(b => ({ body: sha(JSON.stringify(b)), instructions: sha(b.instructions ?? b.input?.[0]?.content?.[0]?.text ?? ''), tools: jsonSha(b.tools ?? null), schema: jsonSha(b.text?.format?.schema ?? null) }));
     // Baseline is retained BEFORE any production edits, not manufactured from the candidate.
