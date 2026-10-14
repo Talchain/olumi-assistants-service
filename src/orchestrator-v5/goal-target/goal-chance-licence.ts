@@ -1,4 +1,4 @@
-import { goalHorizonVerdict, heldGoalHorizonMonths } from './goal-horizon-verdict.js';
+import { goalHorizonVerdict } from './goal-horizon-verdict.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
@@ -380,18 +380,14 @@ function retiredPlainZeroSpreadLine(side: 'meets' | 'falls_short', value: number
 }
 
 function zeroSpreadReasons(
-  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown, envelope: unknown,
+  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, graph: unknown, envelope: unknown,
 ): Record<string, GoalChanceZeroSpread> {
   const verdict = goalHorizonVerdict(graph, envelope);
-  const rates = ordinaryTimingOf(graph, envelope).forecast;
-  const months = heldGoalHorizonMonths(goal);
-  const figure = zeroSpreadFigure(value, unit);
   const out: Record<string, GoalChanceZeroSpread> = {};
+  // Paul's principle review (B.md, #3017 residual): the carrier arm's "Meets / Falls short … if today's rates hold" was the
+  // future-event form #3017 retired for the plain arm; a new Run says the same plain line. A stored Run keeps its own line.
   for (const [id, side] of Object.entries(sides)) {
-    const tail = `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.`;
-    const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine()
-      : rates ? (side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`)
-      : ZERO_SPREAD_LINE;
+    const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine() : ZERO_SPREAD_LINE;
     out[id] = { reason: 'zero_spread', side, line };
   }
   return out;
@@ -672,7 +668,7 @@ export function goalChanceLicenceOf(
   // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
   // reference: withheld with that reason, never relabelled.
   const withheldReasons: Record<string, GoalChanceWithheldReason> = {
-    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope) : {}),
+    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, horizonGraph, envelope) : {}),
     ...(sqReading === 'moved' && statusQuoId !== undefined && withheld.includes(statusQuoId) && goalLabel !== undefined
       ? { [statusQuoId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords([goalLabel]) } } : {}),
   };
@@ -858,7 +854,7 @@ const NO_ESTIMATES: GoalChanceEstimates = { links: 0, values: 0, settingsByOptio
  * Said ONCE beside the result; never a count of Olumi's estimates, never "zero estimates". LABEL, DON'T WITHHOLD (DL 12 Oct):
  * the result it stands beside is shown with the provisional label — never withheld for this alone, never unlabelled.
  */
-export const UNVERIFIED_SOURCES_NOTE = 'Provisional: this result uses inputs whose sources have not been verified.';
+export const UNVERIFIED_SOURCES_NOTE = 'Provisional: Olumi could not confirm where some figures behind this result came from.';
 
 /** Whether the figures said for `said` options rest on any unverified input (shared values, or those options' own settings). */
 function unverifiedOn(e: GoalChanceEstimates, said: readonly string[]): boolean {
@@ -1010,7 +1006,9 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   const targetLabels = block.conditions.map((x) => `‘${x.label}’`);
   const statusQuo = sqId !== undefined && allAssumed && targetNames.length > 0 && targetLabels.length > 0
     ? { status_quo: { option_id: sqId,
-      line: `Doing nothing: no change to ${targetLabels.length === 1 ? targetLabels[0] : `${targetLabels.slice(0, -1).join(', ')} or ${targetLabels[targetLabels.length - 1]}`} in this model, by assumption.` } }
+      line: `This Run can’t give a chance for carrying on as now, because it treats ${targetLabels.length === 1 ? targetLabels[0]
+        : `${targetLabels.slice(0, -1).join(', ')} and ${targetLabels[targetLabels.length - 1]}`} as unchanged from today. Worth checking: how ${
+        targetLabels.length === 1 ? 'it' : 'they'} could change over the goal period if nothing is done.` } }
     : {};
   const moved = sqId !== undefined && movedNames.length > 0
     ? { withheld_reason_by_option: { [sqId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords(movedNames) } } } : {};

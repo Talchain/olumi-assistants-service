@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { addedFactorsReceipt } from '../added-factors-receipt.js';
 
-const PLACEHOLDER = 'how strongly is not known yet: Olumi used a placeholder strength, not an estimate.';
+const PLACEHOLDER = 'how strongly is not known yet: the strength is Olumi’s guess, not an estimate.';
 /** Served f658d106 / CEE 4bdf7b2 (consent-C2c-2094r): the grandfathering option added these two factors. */
 const SERVED = [
   { label: 'New-customer Pro price', changes: ['"MRR"', '"Monthly churn"'], strength: PLACEHOLDER },

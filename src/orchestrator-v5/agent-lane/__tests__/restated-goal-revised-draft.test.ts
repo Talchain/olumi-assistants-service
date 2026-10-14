@@ -789,8 +789,8 @@ describe('later human work is kept: carried by identity, read as context, named 
     expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
     expect(inputs[0]!.startsWith(`${typedBrief}\n\n${CURRENT_MODEL_CONTEXT_LEAD} {`)).toBe(true);
     const card = cardOf(proposals, r);
-    expect(card).toMatch(/Added to the current model: [^.]*\u2018Conversion rate\u2019/);
-    expect(card).toMatch(/Not in the revised draft: [^.]*\u2018Marketing experience\u2019/);
+    expect(card).toMatch(/Would add: [^.]*\u2018Conversion rate\u2019/);
+    expect(card).toMatch(/Would remove from the current model: [^.]*\u2018Marketing experience\u2019/);
     expect(card).not.toContain('Kept as you set them');
   });
 

@@ -146,10 +146,8 @@ export function readingTermsWords(graph: unknown): string {
 
 /** The confirmation receipt, read back from the stored graph: Science §(i) (3) names its terms as the card did. */
 export function identityReceiptWords(goalLabel: string, rate: string, count: string, graph: unknown): string {
-  if (goalStockAccumulationOf(graph) !== null) return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}". Any earlier result is now out of date; `
-    + 'run the analysis again to see it calculated that way.';
-  return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}"${readingTermsWords(graph)}. Any earlier result is now out of date; `
-    + 'run the analysis again to see it calculated that way.';
+  if (goalStockAccumulationOf(graph) !== null) return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}".`;
+  return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}"${readingTermsWords(graph)}.`;
 }
 
 export function proposeProductIdentity(graph: unknown): IdentityProposal | null {
@@ -469,7 +467,7 @@ function proposeOnGoal(graph: unknown): IdentityProposal | null {
     + `${today !== undefined ? 'Today that is ' : ''}${figures} = ${money(r.rate.value * r.count.value)}, close to your ${money(o.value)}. `
     // AIQ 5888571809: the card says what "Yes" does. It does NOT run anything: an approval runs nothing (Paul's ruling,
     // #63 5812069638; enforced server-side), so the Run stays the user's own press (Runtime 5888628288 option (b)).
-    + `If yes, Olumi will calculate “${goalLabel}” that way, and you can run the analysis again.`;
+    + `If yes, Olumi will calculate “${goalLabel}” that way and run the analysis again.`;
   // Canonical #2292's door takes at most 400 characters of card words (5888513620): a card it would refuse is not issued.
   if (words.length > CARD_WORDS_MAX) return null;
   return { outcome_id: goalId, operation: 'product', factor_ids: [r.rate.id, r.count.id], words };
@@ -562,7 +560,7 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
     const figures = todaysFigures(r, money);
     const words = `Is “${carrierLabel}” ${today !== undefined ? '' : 'your '}“${r.rate.label}” × “${r.count.label}”? `
       + `${today !== undefined ? 'Today that is ' : ''}${figures} = ${money(made)}${besideTheCarrier(others, byId, goalMoney, r.code, made, o.value, goalLabel)} `
-      + `If yes, Olumi will calculate “${carrierLabel}” that way, and you can run the analysis again.`;
+      + `If yes, Olumi will calculate “${carrierLabel}” that way and run the analysis again.`;
     if (words.length > CARD_WORDS_MAX) continue;
     found.push({ outcome_id: id, operation: 'product', factor_ids: [r.rate.id, r.count.id], words });
   }

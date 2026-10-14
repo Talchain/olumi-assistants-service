@@ -66,9 +66,10 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     const evaluated = bound.nodes.filter((n: Rec) => n.nonlinear_identity).map((n: Rec) => ({
       node_id: n.id, ...n.nonlinear_identity, evaluated: true,
     }));
-    // The accumulation carrier's own projection words are unchanged (PL 05:25Z: only the plain variant moves).
-    expect(lineOf(bound, fixedRates, evaluated)).toEqual({ reason: 'zero_spread', side: 'meets', line: 'Meets £20,000 a month by month 12 if today’s rates hold.' });
-    expect(lineOf(bound, short, evaluated)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: 'Falls short of £20,000 a month by month 12 if today’s rates hold.' });
+    // Paul's principle review (B.md, #3017 residual): the carrier arm says the plain line too, never "Meets / Falls short … by
+    // month 12 if today’s rates hold" (the future-event form #3017 retired); each side is still recorded.
+    expect(lineOf(bound, fixedRates, evaluated)).toEqual({ reason: 'zero_spread', side: 'meets', line: LINE });
+    expect(lineOf(bound, short, evaluated)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
     const noHorizon = structuredClone(graph);
     delete noHorizon.nodes.find((n: Rec) => n.id === 'mrr').goal_horizon_months;
     expect(lineOf(noHorizon, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: LINE });

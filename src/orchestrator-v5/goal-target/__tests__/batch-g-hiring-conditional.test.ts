@@ -43,9 +43,9 @@ const OWN_TARGET = 'chance of ‘productivity’ being at least 10% higher than 
 /** Amendment 1, read in the change frame (DL ruling after G r1: the AIE's D2 exact equality in the Run's own recorded frame). */
 /** AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): a CHANGE goal's
  * status-quo row is the AIE's generic line (no figures: the LEVEL line is for a level goal's held level and target only). */
-const DOING_NOTHING = 'This Run cannot give a chance for carrying on as now: it uses ‘productivity’ as its unchanged '
-  + 'reference, by assumption. Review the evidence for how ‘productivity’ could change over this Run’s goal '
-  + 'period without an intervention, including any forecast or uncertainty already retained in the model.';
+// Plain words (Paul's principle review, 14 Oct): the generic line's new wording, same meaning.
+const DOING_NOTHING = 'This Run can’t give a chance for carrying on as now, because it treats ‘productivity’ as unchanged from today. '
+  + 'Worth checking: how ‘productivity’ could change over the goal period if nothing is done, including any forecast or range already in the model.';
 const SQ_ASSUMED = 'This assumes carrying on as now leaves ‘productivity’ unchanged through month three; each option is measured against that.';
 const SQ_MOVED = 'Not shown: this run’s result for carrying on as now doesn’t match ‘productivity’ as it stands today in the model, so it needs checking first.';
 const CONDITIONS = 'This chance covers ‘productivity’ only. It does not include: ‘Hiring spend’ at most £200,000; maintaining code quality; the urgent launch date.';
@@ -121,7 +121,7 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     expect(licence.status_quo).toEqual({ option_id: SQ, line: DOING_NOTHING });
     expect(cells[SQ]).toMatchObject({ kind: 'withheld', face: 'No change, by assumption', why: DOING_NOTHING });
     expect(goalChanceNotesForAgent(run.view, FX.graph, true)).toEqual([DOING_NOTHING, SQ_ASSUMED, NOTE, CONDITIONS,
-      'Provisional: this result uses inputs whose sources have not been verified.']);
+      'Provisional: Olumi could not confirm where some figures behind this result came from.']);
     // E's withhold did not run; the Run's own figures stand; the protected field is never written (still false).
     expect((run.envelope.inference_warnings as Rec[]).some((w) => w.detail?.reason === 'effects_at_period_end_unstated')).toBe(false);
     expect(JSON.stringify(FX.graph)).toBe(before);

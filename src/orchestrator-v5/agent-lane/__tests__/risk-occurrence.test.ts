@@ -129,8 +129,8 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
     const moved = structuredClone(written); goalOf(moved).goal_target_basis.period_months = 6;
     expect(buildCanonicalAnalysisReadyFromGraph(moved)).toMatchObject({ may_run: false });
     const asks = (((buildCanonicalAnalysisReadyFromGraph(moved) as Rec).readiness_issues ?? []) as Rec[]).filter((i) => i.factor_id === RISK).map((i) => i.message);
-    expect(asks).toEqual(['How likely is ‘Code quality deterioration’ to happen at least once within 6 months? The numerical analysis is withheld '
-      + 'until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.']);
+    expect(asks).toEqual(['How likely is ‘Code quality deterioration’ to happen at least once within 6 months? Olumi can’t run the numbers '
+      + 'until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
     expect(riskOccurrenceSubject(moved, RISK)).toMatchObject({ kind: 'eligible', window_months: 6 });
     // CONTRAST: a user's range keeps its own stated horizon; it still counts.
     const users = structuredClone(moved); riskOf(users).event_risk = { ...BLOCK, occurrence: { ...BLOCK.occurrence, basis: 'user' } };
@@ -239,11 +239,11 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
   it('AIE readiness copy: the eligible event path asks the occurrence within the window; an ineligible risk keeps its question, never promising a card', () => {
     const ask = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[])
       .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === RISK).map((i) => i.message);
-    expect(ask(G)).toEqual(['How likely is ‘Code quality deterioration’ to happen at least once within 3 months? The numerical analysis is '
-      + 'withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.']);
+    expect(ask(G)).toEqual(['How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers '
+      + 'until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
     // PL 05:53Z: where no card can exist (no single saved goal period), the ask never offers one.
-    const honest = ['How likely or how large is "Code quality deterioration" today? The numerical analysis is withheld until this '
-      + 'risk has a supported value.'];
+    const honest = ['How likely or how large is "Code quality deterioration" today? Olumi can’t run the numbers until this '
+      + 'risk has a figure.'];
     const conflict = structuredClone(G); goalOf(conflict).goal_horizon_months = 6;
     expect(ask(conflict)).toEqual(honest);
     const noPeriod = structuredClone(G); delete goalOf(noPeriod).goal_target_basis;

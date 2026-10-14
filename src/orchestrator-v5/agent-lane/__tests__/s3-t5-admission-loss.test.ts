@@ -181,7 +181,7 @@ describe('GEN #3: the user\'s level for a goal with no target is asked, never dr
   /** The user's own sentence, verbatim from the brief (the attestation's span, widened to its sentence). */
   const QUOTE = 'Our team currently completes about 80 features per week';
   /** The AIE's host fact, byte for byte (packet 6807d4e3 C_caller_scope.host_fact), with the user's retained sentence. */
-  const ASK = 'Your brief says “<complete retained sentence>”. This draft does not yet hold that current level as a model input.'
+  const ASK = 'Your brief says “<complete retained sentence>”. The model doesn’t use this figure yet: with no target stated, there is nothing to measure it against.'
     .replace('<complete retained sentence>', QUOTE);
 
   it('PRECONDITION: the raw draft gives 80 as today\'s level with no target, and T5 saved no level and asked nothing', () => {

@@ -28,14 +28,14 @@ describe('Science goals §(i): a derived level is said before a "less" term with
     expect(readingTermsWords(graph('7f9fe459'))).toBe(`, less ${TERM}`);
     expect(card).toContain(readingTermsWords(graph('7f9fe459')));
     expect(identityReceiptWords('MRR', 'Pro plan price', 'Pro paying subscribers', graph('7f9fe459'))).toBe(
-      `Recorded, as you confirmed: "MRR" is calculated as "Pro plan price" × "Pro paying subscribers", less ${TERM}. Any earlier result is now out of date; run the analysis again to see it calculated that way.`);
+      `Recorded, as you confirmed: "MRR" is calculated as "Pro plan price" × "Pro paying subscribers", less ${TERM}.`);
   });
   it('CONTROL (da6d3e53, no addend): the warning is byte-identical to #2829\'s; no receipt term', () => {
     expect(warned(graph('da6d3e53'), 'Paying Pro subscribers')).toBe(ISL('12,250.00', 'Paying Pro subscribers').replace('12,250.00 in its own units', '£12,250 a month'));
     expect(readingTermsWords(graph('da6d3e53'))).toBe('');
     // Byte-identical to staging's receipt (agent-capabilities.ts before this change).
     expect(identityReceiptWords('MRR', 'Pro plan price', 'Paying Pro subscribers', graph('da6d3e53'))).toBe(
-      'Recorded, as you confirmed: "MRR" is calculated as "Pro plan price" × "Paying Pro subscribers". Any earlier result is now out of date; run the analysis again to see it calculated that way.');
+      'Recorded, as you confirmed: "MRR" is calculated as "Pro plan price" × "Paying Pro subscribers".');
   });
   it('CONTROL: a term WITH a figure keeps the plain level (the receipt still names it)', () => {
     const g = graph('7f9fe459');

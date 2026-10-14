@@ -2276,15 +2276,15 @@ export interface LeftOutLink { readonly pair: string; readonly source?: string }
 const attributed = (x: LeftOutLink): string => `${x.pair}, attributed to "${x.source ?? ''}"`;
 const LEFT_OUT_CARD = {
   unknown_origin: (xs: readonly LeftOutLink[]) => xs.length === 1
-    ? `Left out of this change set: ${xs[0]!.pair}, because the proposed band's source is unverified. Its current relationship and source are kept.`
-    : `Left out of this change set: ${xs.map((x) => x.pair).join('; ')}, because the proposed bands' sources are unverified. Their current relationships and sources are kept.`,
+    ? `Left out of this change set: ${xs[0]!.pair}, because Olumi could not confirm who gave the proposed strength. Its current relationship and source are kept.`
+    : `Left out of this change set: ${xs.map((x) => x.pair).join('; ')}, because Olumi could not confirm who gave the proposed strengths. Their current relationships and sources are kept.`,
   third_party: (xs: readonly LeftOutLink[]) => xs.length === 1
-    ? `Left out of this change set: ${xs[0]!.pair}. The proposed band is attributed to "${xs[0]!.source}"; it is not presented as your judgement or a new Olumi estimate. Its current relationship and source are kept.`
-    : `Left out of this change set: ${xs.map(attributed).join('; ')}. These bands are not presented as your judgement or new Olumi estimates. Their current relationships and sources are kept.`,
-  definitional: (xs: readonly LeftOutLink[]) => `${LEFT_OUT_CARD_LEAD}${xs.map((x) => x.pair).join('; ')}, because a calculation the model declares defines ${
-    xs.length === 1 ? 'it. Its current relationship is kept.' : 'them. Their current relationships are kept.'}`,
+    ? `Left out of this change set: ${xs[0]!.pair}. The proposed strength comes from "${xs[0]!.source}"; it is not presented as your judgement or a new Olumi estimate. Its current relationship and source are kept.`
+    : `Left out of this change set: ${xs.map(attributed).join('; ')}. These strengths are not presented as your judgement or new Olumi estimates. Their current relationships and sources are kept.`,
+  definitional: (xs: readonly LeftOutLink[]) => `${LEFT_OUT_CARD_LEAD}${xs.map((x) => x.pair).join('; ')}, because the model defines ${
+    xs.length === 1 ? 'it by a calculation. Its current relationship is kept.' : 'them by a calculation. Their current relationships are kept.'}`,
   user_figure: (xs: readonly LeftOutLink[]) => `${LEFT_OUT_CARD_LEAD}${xs.map((x) => x.pair).join('; ')}, because ${
-    xs.length === 1 ? 'it holds the user\u2019s own figure. Its current relationship is kept.' : 'they hold the user\u2019s own figure. Their current relationships are kept.'}`,
+    xs.length === 1 ? 'it holds your own figure. Its current relationship is kept.' : 'they hold your own figure. Their current relationships are kept.'}`,
 } as const;
 export const leftOutCard = (reason: keyof typeof LEFT_OUT_CARD, xs: readonly LeftOutLink[]): string => xs.length === 0 ? '' : LEFT_OUT_CARD[reason](xs);
 /** The Agent's notes for a card that leaves links out: the AIE's exact texts (packet 2b19ae59). */
@@ -3472,7 +3472,7 @@ export function createAgentCapabilities(
     if (choice === 'one_off') {
       if (oneOff?.goal_stock_reading !== 'one_off' || oneOff.nonlinear_identity != null || goalStockAccumulationOf(check?.raw) !== null) return { ok: false, mutated: true, applied: false, refusal: 'not_verified' };
       proposals.markApplied(parent.proposal_id, receipts);
-      return { ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts, follow_up: 'Recorded the one-off reading. Run the analysis again.' };
+      return { ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts, follow_up: 'Recorded the one-off reading.' };
     }
     const holds = held?.operation === reading.operation && held.stated_in_brief === true && Array.isArray(held.factor_ids)
       && held.factor_ids.length === reading.factor_ids.length && reading.factor_ids.every((id) => (held.factor_ids as unknown[]).includes(id));
@@ -3738,8 +3738,8 @@ export function createAgentCapabilities(
     const omitted = [...now].filter(([k]) => !next.has(k)).map(([, w]) => w);
     const againstCurrent = !gate.later ? ''
       : (kept.carried.length > 0 ? `Kept as you set them: ${kept.carried.join('; ')}. ` : '')
-        + (added.length > 0 ? `Added to the current model: ${added.join(', ')}. ` : '')
-        + (omitted.length > 0 ? `Not in the revised draft: ${omitted.join(', ')}. ` : '');
+        + (added.length > 0 ? `Would add: ${added.join(', ')}. ` : '')
+        + (omitted.length > 0 ? `Would remove from the current model: ${omitted.join(', ')}. ` : '');
     // The AIE's card clause (packet B card_without_date, 14 Oct), with construction's own deliverable, never the tool's short
     // trigger. A construction never holds a deadline date (only an approved deadline write does: `goal-horizon-write.ts`,
     // `hiring-times.ts`), so the date is always still to be confirmed, and this card never implies it saves one.
@@ -3937,7 +3937,7 @@ export function createAgentCapabilities(
     const committed = 'The approved revised draft was committed and matches the readback. The earlier analysis belongs to the earlier draft.';
     return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
       follow_up: eventPart === null || eventAsk === null
-        ? 'Your model is now the revised draft, with the targets and limits shown on the card you approved. The earlier analysis was of the old draft; run the analysis again.'
+        ? 'Your model is now the revised draft, with the targets and limits shown on the card you approved.'
         : `${committed} No resolved deadline date is held for this deliverable. Where the user's deadline wording is retained, call `
           + `propose_goal_deadline with those exact words; only when that wording is genuinely absent, ask: ${eventAsk} Do not run the analysis.` };
   };
@@ -4047,8 +4047,7 @@ export function createAgentCapabilities(
       provenance: { authored_by: 'model_proposed', basis: 'a starting assumption for a risk, offered for the user to adopt or correct' },
       validation: { admitted: true, loss_count: 0, refusals: [] },
       // AIE 6141593167: the complete basis belongs on the bound card, beside its figure.
-      public_label: `${riskOccurrenceCardWords(risk.label, risk.block)}\nOlumi's proposed basis for this estimate (any claimed earlier `
-        + `statement remains unverified unless shown with its verified source): \u201c${risk.basis}\u201d`,
+      public_label: `${riskOccurrenceCardWords(risk.label, risk.block)}\nWhy Olumi suggests this (not checked against a source unless one is shown): \u201c${risk.basis}\u201d`,
     });
     proposals.put(proposal);
     const preview = await readinessIfApplied(ctx, operations);
@@ -6528,7 +6527,7 @@ export function createAgentCapabilities(
           // AIE 6141593167: the complete basis belongs on the bound card, beside its figure.
           // Keeping a canonical estimate is retention, not a newly authored estimate.
           return usersOwn(a) || a.kept ? figure
-            : `${figure}\nOlumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “${a.basis}”`;
+            : `${figure}\nWhy Olumi suggests this (not checked against a source unless one is shown): “${a.basis}”`;
         }).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
@@ -7295,7 +7294,7 @@ export function createAgentCapabilities(
         proposals.markApplied(decision.proposal.proposal_id, receipts);
         return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id,
           receipts, ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-          follow_up: `Included "${adopted.label}" in your comparison. Its Olumi origin and each level's recorded source remain unchanged. Any earlier result is now out of date; run analysis to include this option.`,
+          follow_up: `Included "${adopted.label}" in your comparison. Its Olumi origin and each level's recorded source remain unchanged.`,
         };
       }
 

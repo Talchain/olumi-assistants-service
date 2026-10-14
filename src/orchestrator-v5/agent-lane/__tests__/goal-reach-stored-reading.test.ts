@@ -86,13 +86,13 @@ describe('GOAL-REACH build 1 stored reading', () => {
     const g = withCurrent(14700);
     { node(g, 'pro_paying_subscribers').observed_state.source = 'brief_extraction'; delete node(g, 'pro_paying_subscribers').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
     g.edges = g.edges.filter(e => e.to !== 'mrr' || ['pro_plan_price', 'pro_paying_subscribers'].includes(e.from));
-    expect(proposeProductIdentity(g)?.words).toBe('Is “MRR” your “Pro plan price” × “Pro paying subscribers”? £49 × 300 = £14,700, close to your £14,700. If yes, Olumi will calculate “MRR” that way, and you can run the analysis again.');
+    expect(proposeProductIdentity(g)?.words).toBe('Is “MRR” your “Pro plan price” × “Pro paying subscribers”? £49 × 300 = £14,700, close to your £14,700. If yes, Olumi will calculate “MRR” that way and run the analysis again.');
   });
   it('row 6: existing served carrier card keeps its original words byte for byte', () => {
     const served = JSON.parse(readFileSync(new URL('./fixtures/served-paul-mrr-ed49d44.json', import.meta.url), 'utf8'));
     const g = served.runs.find((r: any) => r.run === 2).graph;
     // Pinned baseline generated before implementation, on the exact existing carrier branch.
-    expect(proposeProductIdentity(g)?.words).toBe('Is “Pro plan MRR” your “Pro plan price” × “Pro paying subscribers”? £49 × 1,500 = £73,500, close to your £75,000 “MRR”. If yes, Olumi will calculate “Pro plan MRR” that way, and you can run the analysis again.');
+    expect(proposeProductIdentity(g)?.words).toBe('Is “Pro plan MRR” your “Pro plan price” × “Pro paying subscribers”? £49 × 1,500 = £73,500, close to your £75,000 “MRR”. If yes, Olumi will calculate “Pro plan MRR” that way and run the analysis again.');
   });
   it.each(['no_path', 'path_only', 'bidirected', 'excluded', 'unknown_unit', 'wrong_period', 'wrong_currency', 'scope_conflict', 'two_goals', 'long_words', 'second_reading', 'nonfactor'] as const)('fail closed: %s', change => {
     const g = graph(g => {

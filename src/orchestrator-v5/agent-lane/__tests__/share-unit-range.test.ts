@@ -130,7 +130,7 @@ describe('R2: the approval of the user\'s own figure says it is theirs', () => {
     expect(op?.authored_by).toBe('model_proposed');
     // A2i9 B4 (AIE 6141593167): an Olumi estimate now shows its basis on the consent card, verbatim, as Olumi's.
     expect(chip?.detail).toBe('Revise 1 value you asked to change: GCP unit-cost saving: 0.2 share (0-1) \u2192 0.3 share (0-1)\n'
-      + 'Olumi\'s proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): \u201cthe team\'s quote\u201d');
+      + 'Why Olumi suggests this (not checked against a source unless one is shown): \u201cthe team\'s quote\u201d');
     expect(r.note).toContain('assumptions to adopt or correct and NOT measurements');
   });
 });

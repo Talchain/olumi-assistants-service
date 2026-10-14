@@ -193,7 +193,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
       expect(chipsFor(store, [{ name: 'propose_assumptions', result: r }])).toHaveLength(2);
       expect(chipsFor(store, [{ name: 'propose_assumptions', result: r }])[0].detail).toBe(
         'Adopt 1 starting assumption: Campaign effectiveness = 0.2 proportion\n'
-        + "Olumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “From your earlier note, campaign effectiveness is 0.2”");
+        + "Why Olumi suggests this (not checked against a source unless one is shown): “From your earlier note, campaign effectiveness is 0.2”");
     }
     expect(JSON.stringify(graph)).toBe(before);
   });

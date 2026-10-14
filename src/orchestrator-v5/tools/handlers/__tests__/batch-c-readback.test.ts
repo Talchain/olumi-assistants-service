@@ -342,9 +342,8 @@ const hiringAnswer = (request: Rec): Rec[] => [
 ];
 /** AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): a CHANGE goal's
  * status-quo row is the AIE's generic line. */
-const DOING_NOTHING = (label: string): string => `This Run cannot give a chance for carrying on as now: it uses ‘${label}’ as its unchanged reference, by `
-  + `assumption. Review the evidence for how ‘${label}’ could change over this Run’s goal period without an `
-  + `intervention, including any forecast or uncertainty already retained in the model.`;
+const DOING_NOTHING = (label: string): string => `This Run can’t give a chance for carrying on as now, because it treats ‘${label}’ as unchanged `
+  + `from today. Worth checking: how ‘${label}’ could change over the goal period if nothing is done, including any forecast or range already in the model.`;
 
 describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "% higher than today", the status quo by assumption, Olumi\'s sizes named', () => {
   it('RED: the stored Run licenses each option on the ruled sentence; the status quo is "no change, by assumption" with no figure or interval', async () => {
@@ -908,7 +907,7 @@ describe('T4e K1: cold read never licenses an unknown sampled root as zero', () 
       const { assessCanonicalAnalysisReadiness } = await import('../../../../orchestrator/tools/analysis-ready-helper.js');
       expect(assessCanonicalAnalysisReadiness(JSON.parse(bytes)).blockingIssues.map(i => i.message)).toEqual([kind === 'risk'
         // AIE packet 6e52e896 `event_risk.readiness_copy`: a risk root on the event path is asked its occurrence within the goal's period.
-        ? 'How likely is ‘Delivery disruption’ to happen at least once within 3 months? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.'
+        ? 'How likely is ‘Delivery disruption’ to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.'
         : 'What is "Delivery disruption" today, before any option changes it? Without a current level the analysis would treat it as zero.']);
     }
   });

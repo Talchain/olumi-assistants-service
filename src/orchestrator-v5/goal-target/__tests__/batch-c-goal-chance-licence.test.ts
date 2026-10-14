@@ -22,13 +22,12 @@ import { withholdOptionLimitScores } from '../../../orchestrator/context/constra
  * two exact lines. Hiring's ‘Productivity’ is a CHANGE goal: the generic line. ‘Development capacity’ is a LEVEL goal holding
  * today's 75% and a target of at least 85% in one unit: the LEVEL line, naming both as recorded values (never "meets").
  */
-const SQ_GENERIC_PRODUCTIVITY = 'This Run cannot give a chance for carrying on as now: it uses ‘Productivity’ as its unchanged '
-  + 'reference, by assumption. Review the evidence for how ‘Productivity’ could change over this Run’s goal '
-  + 'period without an intervention, including any forecast or uncertainty already retained in the model.';
-const SQ_LEVEL_CAPACITY = 'This Run cannot give a chance for carrying on as now: it uses ‘Development capacity’ as its unchanged '
-  + 'reference, by assumption. The model’s held reference value is 75%; the target for this Run is at least '
-  + '85%. Review the evidence for how ‘Development capacity’ could change over this Run’s goal period '
-  + 'without an intervention, including any forecast or uncertainty already retained in the model.';
+// Plain words (Paul's principle review, 14 Oct): the row's new wording, same meaning.
+const SQ_GENERIC_PRODUCTIVITY = 'This Run can’t give a chance for carrying on as now, because it treats ‘Productivity’ as unchanged from today. '
+  + 'Worth checking: how ‘Productivity’ could change over the goal period if nothing is done, including any forecast or range already in the model.';
+const SQ_LEVEL_CAPACITY = 'This Run can’t give a chance for carrying on as now, because it treats ‘Development capacity’ as unchanged from '
+  + 'today’s 75% (your target is at least 85%). Worth checking: how ‘Development capacity’ could change over the goal period '
+  + 'if nothing is done, including any forecast or range already in the model.';
 type Rec = Record<string, unknown>;
 
 // ── Hiring: productivity, % change from today; +10 by month three ─────────────────────────────────────────────────────
@@ -775,7 +774,7 @@ describe('independent check r1 — item 6: provisional from EVERY Olumi input (a
 // ── RE-SCOPE 2 (R5-2; DL AMEND, AIE #94 6119326092 item 1): THREE provenance states — HUMAN only by positive attestation, AI
 // ORIGIN only for a recognised AI source, anything else UNVERIFIED: never counted as Olumi's, never read as the person's, and
 // never "zero estimates" — disclosed ONCE beside the result in the AIE's minimal existing-notes wording.
-const UNVERIFIED = 'Provisional: this result uses inputs whose sources have not been verified.';
+const UNVERIFIED = 'Provisional: Olumi could not confirm where some figures behind this result came from.';
 /** A read-only view of a licence record in assertions. */
 type Loose = Record<string, any>;
 const unverifiedNotes = (l: Rec | null): number => ((l?.notes as string[] | undefined) ?? []).filter((n) => n === UNVERIFIED).length;
@@ -1067,7 +1066,7 @@ describe('AIE status-quo disposition — AND: the joint and its marginals keep e
     const g = pairedPair();
     const run = withSqRow(marketingRun(), { constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0 } });
     const l = licenceFor(run, g)!;
-    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'Doing nothing: no change to ‘New customers’ or ‘Conversion rate’ in this model, by assumption.' });
+    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'This Run can’t give a chance for carrying on as now, because it treats ‘New customers’ and ‘Conversion rate’ as unchanged from today. Worth checking: how they could change over the goal period if nothing is done.' });
     expect(l.notes).toContain('This assumes carrying on as now leaves ‘New customers’ and ‘Conversion rate’ unchanged through month three; each option is measured against that.');
     expect(Object.keys(l.pct_by_option)).toEqual(['hire_manager', 'ai_plus_ads']);
     for (const t of l.targets!.per_target) expect(t.pct_by_option).not.toHaveProperty('carry_on');
@@ -1135,19 +1134,19 @@ describe('RE-SCOPE 2 (R5-3): the status quo\'s joint reads every condition the R
     expect(l.withheld_option_ids).toContain('carry_on');
     expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'reference_moved', line: MOVED('Annual spend') } });
     // AMENDED (AIE #94 6160089127): the single-target status-quo line now reads "…unchanged reference…"; still neither is said.
-    expect(JSON.stringify(l)).not.toMatch(/Doing nothing: no change|unchanged reference/);
+    expect(JSON.stringify(l)).not.toMatch(/Doing nothing: no change|unchanged reference|carrying on as now, because it treats/);
   });
 
   it('RED on e58b8dbd: every condition — both targets and the paired limit — on the same-draw reference: the line names all three, no figure', () => {
     const l = licenceFor(sqWith(1, 0), pairedWithLimit(false))!;
     expect(l.status_quo).toEqual({ option_id: 'carry_on',
-      line: 'Doing nothing: no change to ‘New customers’, ‘Conversion rate’ or ‘Annual spend’ in this model, by assumption.' });
+      line: 'This Run can’t give a chance for carrying on as now, because it treats ‘New customers’, ‘Conversion rate’ and ‘Annual spend’ as unchanged from today. Worth checking: how they could change over the goal period if nothing is done.' });
     expect(Object.keys(l.pct_by_option)).toEqual(['hire_manager', 'ai_plus_ads']);
   });
 
   it('CONTROL (unchanged): with no limit sent, both targets on the same-draw reference — the line names both, as before', () => {
     const l = licenceFor(withSqRow(marketingRun(), { constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0 } }), pairedPair())!;
-    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'Doing nothing: no change to ‘New customers’ or ‘Conversion rate’ in this model, by assumption.' });
+    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'This Run can’t give a chance for carrying on as now, because it treats ‘New customers’ and ‘Conversion rate’ as unchanged from today. Worth checking: how they could change over the goal period if nothing is done.' });
   });
 });
 

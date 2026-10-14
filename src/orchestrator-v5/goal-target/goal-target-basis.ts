@@ -346,16 +346,17 @@ export interface StatusQuoLevel {
  */
 export function statusQuoRowWords(label: string, level?: StatusQuoLevel): string {
   const bound = level === undefined ? undefined : COMPARATOR_WORDS[level.comparator];
-  const opening = `This Run cannot give a chance for carrying on as now: it uses ‘${label}’ as its unchanged reference, by assumption. `;
-  const review = `Review the evidence for how ‘${label}’ could change over this Run’s goal period without an intervention`
-    + `, including any forecast or uncertainty already retained in the model.`;
+  // Plain words (Paul's principle review, C.md #3028): the same meaning, still no promise that a figure unlocks a chance, and
+  // still no future-event comparison (the AIE's rule for this row: never "stays at" or "meets"), so it says the assumption.
+  const opening = `This Run can’t give a chance for carrying on as now, because it treats ‘${label}’ as unchanged from today`;
+  const review = ` Worth checking: how ‘${label}’ could change over the goal period if nothing is done`
+    + `, including any forecast or range already in the model.`;
   if (level === undefined || bound === undefined || !Number.isFinite(level.today) || !Number.isFinite(level.target)
     || level.unit.trim() === '') {
-    return `${opening}${review}`;
+    return `${opening}.${review}`;
   }
   const say = (v: number): string => sayFigureAsWritten(v, level.unit);
-  return `${opening}The model’s held reference value is ${say(level.today)}; `
-    + `the target for this Run is ${bound} ${say(level.target)}. ${review}`;
+  return `${opening}’s ${say(level.today)} (your target is ${bound} ${say(level.target)}).${review}`;
 }
 
 /**

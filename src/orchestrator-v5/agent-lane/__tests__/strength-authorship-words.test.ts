@@ -17,8 +17,10 @@ const USERS = { provenance: { source: 'user_specified' } };
 
 describe('howStronglyWords', () => {
   it('RED (served): a flat default is a placeholder, never "Olumi\'s estimate"', () => {
-    expect(howStronglyWords([DEFAULT])).toBe('how strongly is not known yet: Olumi used a placeholder strength, not an estimate.');
-    expect(howStronglyWords([PLACEHOLDER])).toMatch(/placeholder/);
+    expect(howStronglyWords([DEFAULT])).toBe('how strongly is not known yet: the strength is Olumi’s guess, not an estimate.');
+    // Plain words (Paul's principle review, E.md): "placeholder" is said as Olumi's guess, still never its estimate.
+    expect(howStronglyWords([PLACEHOLDER])).toBe(howStronglyWords([DEFAULT]));
+    expect(howStronglyWords([PLACEHOLDER])).not.toMatch(/Olumi's estimate/);
   });
   it('an Olumi-sized estimate is said as Olumi\'s estimate', () => {
     expect(howStronglyWords([ESTIMATE, ESTIMATE])).toBe('how strongly is Olumi\'s estimate.');
@@ -47,7 +49,7 @@ describe('howStronglyWords', () => {
     const projected = { from: 'price', to: 'revenue', strength: { mean: 0.5, std: 0.125 },
       provenance: { source: 'user_specified', mean_projected: true } };
     expect(linkSizing(projected)).toBe('placeholder');
-    expect(howStronglyWords([projected])).toBe('how strongly is not known yet: Olumi used a placeholder strength, not an estimate.');
+    expect(howStronglyWords([projected])).toBe('how strongly is not known yet: the strength is Olumi’s guess, not an estimate.');
     const userSized = { ...projected, provenance: { source: 'user_specified' } };
     expect(linkSizing(userSized)).toBe('user');
     expect(howStronglyWords([userSized]), 'CONTROL: a real user-sized 0.5 is still theirs').toBe('how strongly is as you stated it.');

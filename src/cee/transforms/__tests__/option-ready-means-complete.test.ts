@@ -215,7 +215,7 @@ const RECORDED_WITH_RULE_OFF = {
       {
         field: "missing_important_inputs",
         code: "MODEL_HAS_BLOCKERS",
-        message: "Olumi filled in the gaps here itself; you can review them, and nothing is required of you.",
+        message: "Olumi filled these gaps itself with provisional assumptions; check them, because the comparison rests on them.",
       },
       {
         field: "semantic_quality_sufficient",
