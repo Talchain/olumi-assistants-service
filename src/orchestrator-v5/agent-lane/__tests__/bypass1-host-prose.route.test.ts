@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 
 type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB9-unseen1-df15c8c-readback-pre-challenge.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -304,6 +305,53 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     const run = await runPress();
     expect(count(run.assistant_text as string, shortfall)).toBe(1);
     expect(count(run.assistant_text as string, cell.face as string)).toBe(1);
+  });
+
+  /**
+   * ⭐ THE CARD SAYS IT (Paul via DL, 14 Oct): the withheld line the host added to a Run reply repeated the card's own
+   * "Not shown. …" cell. The served 5b6e5eb7 turn-01 read with its Run withholding both options' chance (a
+   * `GOAL_FIGURES_HORIZON_NOT_TESTED` warning added to that read, and both card cells withheld with its words: constructed
+   * from the served read, not served). The owed line is the producer's own `say` for that result
+   * (`goalChanceWithheldForAgent`), by identity; it asks the date, so no `say_shown` promise.
+   */
+  const NOT_TESTABLE = { code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', severity: 'warning',
+    message: "Not shown. Olumi can compare your options, but can't yet test them against your deadline.",
+    say: "This Run can't yet show each option's chance by your deadline. Which date does \"by the end of that quarter\" mean?",
+    node_ids: ['weekly_support_capacity'], option_ids: ['keep_current_staffing', 'add_one_specialist'] };
+  const withNotTestable = (cardCells: boolean): Json => {
+    const read = structuredClone(CAPACITY_3017) as Json;
+    const enrichment = read.analysis_result.enrichment as Json;
+    enrichment.inference_warnings = [...(enrichment.inference_warnings ?? []), NOT_TESTABLE];
+    if (cardCells) for (const o of read.canonical_analysis_view.options as Json[]) {
+      o.cell = { kind: 'withheld', face: 'Not shown', why: NOT_TESTABLE.message, reasons: [{ code: NOT_TESTABLE.code, message: NOT_TESTABLE.message }] };
+    }
+    return read;
+  };
+  /** The withheld line the host owes for that Run: the producer's own `say`, never retyped here. */
+  const owedSay = (read: Json): string => goalChanceWithheldForAgent(read.analysis_result, read.graph)!.say;
+  /** How often each sentence of that line is in the reply (the composer may lay its question out as a bullet). */
+  const saidTimes = (reply: string, read: Json): number[] => (owedSay(read).match(/[^.?!]+[.?!]/g) ?? []).map((x) => count(reply, x.trim()));
+
+  it('RED (the card says it): the bound current card shows both options withheld with the reason; the reply does not repeat it', async () => {
+    served = withNotTestable(true);
+    const run = await runPress();
+    expect((run.canonical_analysis_view.options as Json[]).map((o) => o.cell.why)).toEqual([NOT_TESTABLE.message, NOT_TESTABLE.message]);
+    expect(owedSay(served).includes('?'), 'no say_shown promise').toBe(true);
+    expect(saidTimes(run.assistant_text as string, served)).toEqual([0, 0]);
+  });
+
+  it('CONTRAST (the card says it): with no card to show the withheld cells, the reply keeps the line, once', async () => {
+    const { canonical_analysis_view: _dropped, ...withoutView } = withNotTestable(true);
+    served = withoutView;
+    const run = await runPress();
+    expect(run.canonical_analysis_view).toBeUndefined();
+    expect(saidTimes(run.assistant_text as string, served)).toEqual([1, 1]);
+  });
+
+  it('CONTRAST (the card says it): a bound card that still shows a figure for an option the line covers keeps the line', async () => {
+    served = withNotTestable(false);
+    const run = await runPress();
+    expect(saidTimes(run.assistant_text as string, served)).toEqual([1, 1]);
   });
 
   it('CONTRAST (served 5b6e5eb7 turn 01, a stale card): the card is not the current Run, so the reply keeps the line', async () => {
