@@ -23,7 +23,7 @@ import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { endsOfGraph, validatedDefinition, withHeldUserLinks } from './held-user-links.js';
 import { timeBetween } from './deadline-date.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
-import { extraShareLinkMoments, hirePaceIsOlumisOwn, momentsOfTeam, type TeamShare } from './event-by-date-share.js';
+import { baselineContributionMoments, capacityRatioScale, extraShareLinkMoments, hirePaceIsOlumisOwn, momentsOfTeam, ratioLinkMoments, type TeamShare } from './event-by-date-share.js';
 import { COMPUTE_SIGMA_FLOOR } from '../../cee/constants.js';
 
 type Rec = Record<string, unknown>;
@@ -153,6 +153,7 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
   const teams: string[] = [];
   const ratioParts: { readonly ratio: number; readonly link: Rec; readonly held: Rec }[] = [];
   let teamMoments: { readonly mean: number; readonly sd: number } | undefined;
+  let teamCoefficient: { readonly mean: number; readonly std: number } | undefined;
   const options = nodes.filter(n => n.kind === 'option');
   if (options.length === 0) return null;
   for (const e of inbound) {
@@ -181,6 +182,7 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
             || Math.abs(source.observed_state.std - expected.sd) > 0.0005)) return null;
       teams.push(source.id);
       teamMoments = expected;
+      teamCoefficient = { mean: held.strength.mean as number, std: held.strength.std as number };
       continue;
     }
     // The option's extra share rides on its switch -> goal STRENGTH, exactly
@@ -199,10 +201,12 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
     if (isRec(c) && c.capacity_ratio !== undefined) {
       if (c.deadline !== deadline || !isShareCalendarDate(c.reference_date) || c.unit !== `${unit} per month`
         || !finite(c.capacity_ratio) || c.capacity_ratio < 1 || c.monthly_share !== undefined
-        || !isRec(c.ratio_sizing) || c.ratio_sizing.rule !== 'marginal_exact' || !switchHeld
+        || !isRec(c.ratio_sizing) || c.ratio_sizing.rule !== 'marginal_normal' || !switchHeld
         || !finite(e.strength.mean) || !finite(e.strength.std) || !finite(held.strength.mean) || !finite(held.strength.std)
         || held.exists_probability !== 1) return null;
-      ratioParts.push({ ratio: c.capacity_ratio, link: e.strength as Rec, held: held.strength as Rec });
+      const k = capacityRatioScale(c.capacity_ratio, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high);
+      if (k === null) return null;
+      ratioParts.push({ ratio: k, link: e.strength as Rec, held: held.strength as Rec });
       continue;
     }
     if (!isRec(c) || c.deadline !== deadline || !isShareCalendarDate(c.reference_date)
@@ -221,10 +225,11 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
   // E5: an option may switch on several capacity parts ("two developers" start at different times); each part passed
   // its own checks above, and the per-option chance sums them (share-by-date-run.ts sharePartsForOption).
   if (teams.length !== 1) return null;
-  // A ratio part's link is (r−1) × the team's mean with sd √(r²−1) × the team's sd, so the option's goal has exactly the
-  // moments of r × the same team share (`withRatioCarrierSizes`); a stale or hand-edited size fails closed.
+  // A ratio part's link is the auxiliary X for the window's scale k beside the baseline contribution B = C·T
+  // (`withRatioCarrierSizes`, `ratioLinkMoments`): a Normal marginal match of k × B, never a shared draw. A stale or
+  // hand-edited size fails closed.
   for (const p of ratioParts) {
-    const mean = (p.ratio - 1) * teamMoments!.mean, sd = Math.sqrt(p.ratio * p.ratio - 1) * teamMoments!.sd;
+    const { mean, sd } = ratioLinkMoments(p.ratio, baselineContributionMoments(teamMoments!, teamCoefficient!));
     if (Math.abs((p.link.mean as number) - mean) > 0.0005 || !partSpreadMatches(p.link.std as number, sd)
       || Math.abs((p.held.mean as number) - mean) > 0.0005 || !partSpreadMatches(p.held.std as number, sd)) return null;
   }

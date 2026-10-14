@@ -2,7 +2,7 @@
 import { draftedTeamPartOf, eventShareCarrierOf, isEventShareForecast, unresolvedEventOptionIds } from './event-by-date-model.js';
 import { goalDeadlineFromRecord, shareByDateGoalOf, soleGoalOf, statedTeamShareOf } from './goal-kind.js';
 import { timeBetween, todayInLondon } from './deadline-date.js';
-import { extrasOf, gate, MAX_RANGED_PARTS, rangedPartCount, type ExtraShare, type ShareGate, type ShareParts } from './event-by-date-share.js';
+import { capacityRatioScale, extrasOf, gate, MAX_RANGED_PARTS, rangedPartCount, type ExtraShare, type ShareGate, type ShareParts } from './event-by-date-share.js';
 import { hiringTimesLabel } from './hiring-times.js';
 import type { GoalChanceDisplayRounding } from './goal-chance-display.js';
 
@@ -42,8 +42,12 @@ export function shareChanceRunBlock(graph: unknown): { reason_code: 'team_time_r
 /** Exact words for capacity metadata that cannot support the added option. */
 function capacityInputFailure(extra: Rec): string | null {
   if (typeof extra.capacity_ratio === 'number') {
+    // AIE 6175233964: an uncertain start, a ramp or a random ratio has no supported joint law here, so it fails closed.
+    if (extra.lead_low !== extra.lead_high) {
+      return "Not shown. This option's start is given as a range, and this forecast can't yet work out a capacity change with an uncertain start. Say when it would take full effect.";
+    }
     // A capacity-ratio carrier (L3): sized only from today's team time; until then, no chance rests on it.
-    return Number.isFinite(extra.capacity_ratio) && extra.capacity_ratio >= 1 && extra.ratio_sizing?.rule === 'marginal_exact' ? null
+    return Number.isFinite(extra.capacity_ratio) && extra.capacity_ratio >= 1 && extra.ratio_sizing?.rule === 'marginal_normal' ? null
       : "Not shown yet. This option's effect is worked out from today's team time to finish, which the model doesn't hold yet.";
   }
   if (typeof extra.lead_low !== 'number' || typeof extra.lead_high !== 'number'
@@ -135,8 +139,13 @@ export function sharePartsForOption(graph: unknown, optionId: string): SharePart
   if (active.length === 0) return { team };
   // One mechanism per option (DL ruling): a capacity-ratio part stands alone.
   const ratioParts = active.filter(n => typeof n?.observed_state?.extra_share_by_date?.capacity_ratio === 'number');
-  if (ratioParts.length > 0) return ratioParts.length === 1 && active.length === 1
-    ? { team, ratio: ratioParts[0]!.observed_state.extra_share_by_date.capacity_ratio as number } : null;
+  if (ratioParts.length > 0) {
+    if (ratioParts.length !== 1 || active.length !== 1) return null;
+    // The window's scale k for this fixed ratio and its start (AIE 6175233964); null (an uncertain start) shows no chance.
+    const c = ratioParts[0]!.observed_state.extra_share_by_date;
+    const k = capacityRatioScale(c.capacity_ratio, timeBetween(c.reference_date, share.deadline, 'months'), c.lead_low, c.lead_high);
+    return k === null ? null : { team, ratio: k };
+  }
   const extras = active.map(n => {
     const c = n.observed_state.extra_share_by_date;
     return { monthlyShare: c.monthly_share / 100,
@@ -215,15 +224,30 @@ export function shareOptionEstimateWords(graph: unknown, optionId: string, opts:
  * What a capacity-ratio chance rests on, after "using " (DL condition 3): the identity, as Olumi's reading unless the brief
  * states it, and each of the option's settings that is Olumi's proposal. Never calls Olumi's reading or setting the user's.
  */
+/**
+ * What a capacity-ratio chance rests on, each part attributed (AIE 6174736249 (d), 6175233964): the identity (the brief's, or
+ * Olumi's reading), any factor Olumi worked out rather than the brief stated (with the assumption it rests on), Olumi's
+ * proposed settings, and Olumi's provisional assumption that delivery pace changes in proportion to capacity from when the
+ * change takes full effect.
+ */
 export function capacityRatioWords(part: Rec | undefined): string {
-  const basis = part?.observed_state?.extra_share_by_date?.ratio_basis;
+  const c = part?.observed_state?.extra_share_by_date, basis = c?.ratio_basis;
   if (!basis || !Array.isArray(basis.factors)) return '';
   const q = (label: unknown): string => `‘${String(label)}’`;
+  const withUnit = (value: unknown, unit: unknown): string =>
+    `${months(Number(value))}${typeof unit === 'string' && unit !== '' ? (unit.startsWith('%') ? unit : ` ${unit}`) : ''}`;
   const identity = `${q(basis.capacity)} = ${basis.factors.map((f: Rec) => q(f.label)).join(' × ')}`;
-  const reading = basis.identity_stated === true ? `your brief’s ${identity}` : `Olumi’s reading that ${identity}`;
+  const derived = basis.factors.filter((f: Rec) => f.derived !== null && typeof f.derived === 'object').map((f: Rec) => f.derived.split_with !== undefined
+    ? `${q(f.label)} at ${withUnit(f.today, f.unit)} today, worked out on Olumi’s assumption that the time is split only between it and ${q(f.derived.split_with)}`
+    : `${q(f.label)} at ${withUnit(f.today, f.unit)} today, worked out by Olumi from ${q(f.derived.from)}`);
+  const reading = `${basis.identity_stated === true ? `your brief’s ${identity}` : `Olumi’s reading that ${identity}`}`
+    + (derived.length === 0 ? '' : ` (with ${derived.join('; ')})`);
   const olumis = (Array.isArray(basis.settings) ? basis.settings : []).filter((x: Rec) => x.olumis === true)
-    .map((x: Rec) => `${q(x.label)} at ${months(Number(x.value))}${typeof x.unit === 'string' && x.unit !== '' ? (x.unit.startsWith('%') ? x.unit : ` ${x.unit}`) : ''}`);
-  return olumis.length === 0 ? reading : `${reading}, and Olumi’s proposed setting of ${olumis.join(' and ')}`;
+    .map((x: Rec) => `${q(x.label)} at ${withUnit(x.value, x.unit)}`);
+  const lead = typeof c.lead_low === 'number' && c.lead_low > 0 ? `from ${months(c.lead_low)} months in` : 'from now';
+  const pace = `Olumi’s provisional assumption that delivery pace changes in proportion to ${q(basis.capacity)} ${lead}`;
+  return [reading, ...(olumis.length === 0 ? [] : [`Olumi’s proposed setting of ${olumis.join(' and ')}`]), pace]
+    .reduce((acc, w, i, all) => i === 0 ? w : `${acc}${i === all.length - 1 ? ', and ' : ', '}${w}`, '');
 }
 
 /** The options whose active part is a capacity-ratio carrier (one mechanism per option), in graph order. */
@@ -238,10 +262,11 @@ export function capacityRatioOptionIds(graph: unknown): string[] {
 /**
  * DL condition 2 (ruling (A)): a ratio option's link is drawn beside the team part, not as the same draw, so a run-by-run
  * comparison with any other option is distorted (it would let the option lose to carrying on, impossible when r > 1). The
- * win share and leader are withheld; this says why, once. The per-option chances are exact in their moments.
+ * win share and leader are withheld; this says why, once. Each option's own chance stays: under the model's Normal
+ * approximation it matches k × the team's share, for a fixed k (AIE 6175233964).
  */
 export const CAPACITY_RATIO_COMPARISON_NOTE = 'Which option comes out ahead most often isn’t shown: an option worked out from the team’s own '
   + 'capacity can’t yet be compared run by run with the others. Each option’s chance is unaffected.';
 /** PL L3: what a capacity-ratio chance leaves out, said once beside it. */
-export const CAPACITY_RATIO_ASSUMPTION_NOTE = 'For an option worked out from the team’s own capacity, the chance assumes the change takes effect now '
-  + 'and the team’s pace grows in step with its capacity; it leaves out any slowdown while the change beds in.';
+export const CAPACITY_RATIO_ASSUMPTION_NOTE = 'For an option worked out from the team’s own capacity, the chance leaves out any slowdown '
+  + 'while the change beds in.';

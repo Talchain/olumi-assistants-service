@@ -101,6 +101,31 @@ export function hirePaceIsOlumisOwn(node: unknown): boolean {
   return carrier.figures === undefined && carrier.statement === undefined;
 }
 
+/**
+ * AIE 6175233964 / 6174736249: a FIXED capacity ratio r, fully effective L months into an H-month window, scales the team's
+ * share by k = 1 + (r−1)·max(0, H−L)/H, under the same constant-pace and work-scope assumptions. An uncertain lead (a range),
+ * a ramp or a random ratio has no single k (its joint law is not supported): null, so the option fails closed with its reason.
+ * k < 1 (an option that slows the team) cannot be represented by an added independent part: null too.
+ */
+export function capacityRatioScale(r: number, H: number, leadLow: unknown, leadHigh: unknown): number | null {
+  if (!Number.isFinite(r) || r < 1 || !Number.isFinite(H) || H <= 0) return null;
+  if (typeof leadLow !== 'number' || !Number.isFinite(leadLow) || leadLow < 0 || leadHigh !== leadLow) return null;
+  return 1 + (r - 1) * Math.max(0, H - leadLow) / H;
+}
+/** The team's BASELINE CONTRIBUTION C·T (C = the team link's held coefficient): Var = μc²·sd² + σc²·(m² + sd²). */
+export function baselineContributionMoments(team: Moments, coefficient: { readonly mean: number; readonly std: number }): Moments {
+  return { mean: coefficient.mean * team.mean,
+    sd: Math.sqrt(coefficient.mean ** 2 * team.sd ** 2 + coefficient.std ** 2 * (team.mean ** 2 + team.sd ** 2)) };
+}
+/**
+ * The auxiliary ratio link X ~ N((k−1)·μB, (k²−1)·σB²), drawn independently beside the baseline contribution B. Under the
+ * model's Normal approximation B + X matches k·B in its univariate distribution, for a fixed k. It is NOT the same shared
+ * draw: anything paired or joint (win share, drivers, sensitivities) does not carry over (AIE 6175233964).
+ */
+export function ratioLinkMoments(k: number, baseline: Moments): Moments {
+  return { mean: (k - 1) * baseline.mean, sd: Math.sqrt(k * k - 1) * baseline.sd };
+}
+
 export function momentsOfTeam(t: TeamShare): Moments {
   return t.quantity === 'months_to_finish' ? teamShareMoments(t.D, t.low, t.high)
     : paceShareMoments(t.D, t.low, t.high);
@@ -175,10 +200,10 @@ export function normalChance(parts: ShareParts, threshold: number): number {
   const heldCoefficientVariance = 0.01 ** 2 * (team.mean ** 2 + team.sd ** 2);
   if (parts.ratio !== undefined) {
     if (!Number.isFinite(parts.ratio) || parts.ratio < 1 || extrasOf(parts).length > 0) throw new RangeError('Invalid capacity ratio');
-    // The ratio link (`withRatioCarrierSizes`): mean (r−1)·m, sd √(r²−1)·sd, drawn beside the team part, so the option's goal
-    // has mean r·m and variance r²·sd² (+ the team link's held coefficient), exactly "r × the same team draw" in moments.
-    const r = parts.ratio, ratioMean = team.mean + (r - 1) * team.mean;
-    const ratioSd = Math.sqrt(team.sd ** 2 + (r * r - 1) * team.sd ** 2 + heldCoefficientVariance);
+    // `parts.ratio` is the window's scale k (`capacityRatioScale`). The ratio link (`ratioLinkMoments`) beside the baseline
+    // contribution B = C·T gives mean k·μB and sd k·σB: the Normal approximation of k × B, for a fixed k.
+    const k = parts.ratio, B = { mean: team.mean, sd: Math.sqrt(team.sd ** 2 + heldCoefficientVariance) };
+    const ratioMean = k * B.mean, ratioSd = k * B.sd;
     return ratioSd === 0 ? (ratioMean >= threshold ? 1 : 0) : normalTail((threshold - ratioMean) / ratioSd);
   }
   const mean = team.mean + extraMean, sd = Math.sqrt(team.sd ** 2 + extraVariance + heldCoefficientVariance);

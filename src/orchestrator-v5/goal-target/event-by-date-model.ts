@@ -5,7 +5,7 @@ import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js
 import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
 import type { PressBlocker } from '../agent-lane/press-next-step.js';
 import { readStatedDeadline, sayDate, timeBetween } from './deadline-date.js';
-import { extraShareLinkMoments, hirePaceIsOlumisOwn, teamShareMoments } from './event-by-date-share.js';
+import { baselineContributionMoments, capacityRatioScale, extraShareLinkMoments, hirePaceIsOlumisOwn, ratioLinkMoments, teamShareMoments } from './event-by-date-share.js';
 import { denormalisedMagnitude, findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { CURRENCY_WORD_TO_CODE } from '../../utils/currency-alphabet.js';
 import { figureTheUserWroteForSpan } from '../agent-lane/stated-by-user.js';
@@ -371,7 +371,10 @@ export interface EventCapacityRatio {
   readonly ratio: number;
   /** The identity's outcome (the capacity), and each factor's value today and with the option. */
   readonly capacity: string;
-  readonly factors: readonly { readonly label: string; readonly today: number; readonly withOption: number }[];
+  readonly factors: readonly { readonly label: string; readonly today: number; readonly withOption: number; readonly unit?: string;
+    /** AIE 6174736249: a factor the brief did not state, worked out by Olumi through a drafted link from a set factor. A
+     * −1-per-1 link in the same unit is Olumi's two-way split assumption (`split_with`, e.g. feature time = 100% − legacy). */
+    readonly derived?: { readonly from: string; readonly split_with?: string } }[];
   /** True only when the drafter typed the identity as stated in the brief; otherwise it is Olumi's reading. */
   readonly identity_stated: boolean;
   /** The option's own settings the ratio rests on, each with whether it is Olumi's proposal. */
@@ -409,6 +412,10 @@ export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, Eve
     if (o.is_status_quo === true) return;
     const settings: Rec[] = Array.isArray(o.interventions) ? o.interventions : [];
     if (settings.some(iv => iv.value_kind !== 'absolute' || typeof iv.value !== 'number' || !Number.isFinite(iv.value))) return;
+    const derived = new Map<number, { from: string; split_with?: string }>();
+    const unitOf = (label: string): string | undefined => {
+      const u = factors.find(x => sameLabel(x.label, label))?.unit; return typeof u === 'string' && u.trim() !== '' ? u : undefined;
+    };
     const withOption = labels.map((label, k) => {
       const direct = settings.find(iv => sameLabel(iv.factor_label, label));
       if (direct) return direct.value as number;
@@ -418,7 +425,12 @@ export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, Eve
         const link = links.find(l => sameLabel(l.from, iv.factor_label) && sameLabel(l.to, label)
           && typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number' && l.effect_per_source_change !== 0);
         const from = baseline(iv.factor_label);
-        if (link && from !== undefined) value += (link.effect_amount / link.effect_per_source_change) * ((iv.value as number) - from);
+        if (link && from !== undefined) {
+          value += (link.effect_amount / link.effect_per_source_change) * ((iv.value as number) - from);
+          const stated = factors.find(x => sameLabel(x.label, label))?.provenance === 'explicit';
+          const split = link.effect_amount / link.effect_per_source_change === -1 && unitOf(label) !== undefined && unitOf(label) === unitOf(String(iv.factor_label));
+          if (!stated) derived.set(k, split ? { from: String(iv.factor_label), split_with: String(iv.factor_label) } : { from: String(iv.factor_label) });
+        }
       }
       return value;
     });
@@ -427,7 +439,8 @@ export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, Eve
     const ratio = product(withOption) / product(today as number[]);
     if (!Number.isFinite(ratio) || ratio <= 0 || ratio === 1) return;
     out.set(index, { ratio, capacity: String(identity.outcome),
-      factors: labels.map((label, k) => ({ label, today: today[k]!, withOption: withOption[k]! })),
+      factors: labels.map((label, k) => ({ label, today: today[k]!, withOption: withOption[k]!,
+        ...(unitOf(label) === undefined ? {} : { unit: unitOf(label) }), ...(derived.has(k) ? { derived: derived.get(k) } : {}) })),
       identity_stated: identity.provenance === 'explicit',
       settings: settings.map(iv => ({ label: String(iv.factor_label), value: iv.value as number,
         unit: typeof iv.unit === 'string' ? iv.unit : null, olumis: iv.provenance !== 'explicit' })) });
@@ -533,31 +546,38 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
 }
 
 /**
- * L3 (DL ruling (A), 14 Oct): each capacity-ratio carrier is sized from the team part's own share moments (m, sd), so the
- * option's goal has EXACTLY the mean (r·m) and variance (r²·sd²) of "r × the same team draw": link mean (r−1)·m and sd
- * √(r²−1)·sd. Without the team's moments (no time held, or a single estimate with no spread on the node) the link stays
- * explicitly defaulted and the option shows no chance. A ratio below 1 is never sized (admission already refused it).
+ * L3 (DL ruling (A); AIE 6175233964 amendment, 14 Oct): each capacity-ratio carrier is sized from the team's BASELINE
+ * CONTRIBUTION B = C·T (the team part's moments with the team link's held coefficient), for the window's fixed scale
+ * k = 1 + (r−1)·max(0, H−L)/H: link mean (k−1)·μB, sd √(k²−1)·σB (`ratioLinkMoments`). Under the model's Normal
+ * approximation the option's goal then matches k × B, for a fixed k; it is not the same shared draw. Without the team's
+ * moments, with an uncertain lead, or a ratio below 1, the link stays explicitly defaulted and the option shows no chance.
  */
 export function withRatioCarrierSizes(graph: Rec): Rec {
   const carrier = eventShareCarrierOf(graph)?.provenance?.share_by_date;
   if (!carrier || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return graph;
   const team = graph.nodes.find((n: Rec) => n.id === carrier.team_id)?.observed_state;
+  const coefficient = graph.edges.find((e: Rec) => e.from === carrier.team_id && e.to === carrier.goal_id)?.strength;
   const m = team?.value, sd = team?.std;
-  const held = typeof m === 'number' && Number.isFinite(m) && m >= 0 && typeof sd === 'number' && Number.isFinite(sd) && sd >= 0;
+  const held = typeof m === 'number' && Number.isFinite(m) && m >= 0 && typeof sd === 'number' && Number.isFinite(sd) && sd >= 0
+    && typeof coefficient?.mean === 'number' && Number.isFinite(coefficient.mean)
+    && typeof coefficient?.std === 'number' && Number.isFinite(coefficient.std) && coefficient.std >= 0;
   for (const edge of graph.edges.filter((e: Rec) => e.to === carrier.goal_id)) {
     const c = graph.nodes.find((n: Rec) => n.id === edge.from)?.observed_state?.extra_share_by_date;
     if (!c || typeof c.capacity_ratio !== 'number') continue;
     const r = c.capacity_ratio;
-    if (!held || !Number.isFinite(r) || r < 1) {
+    const H = isShareCalendarDate(c.reference_date) && isShareCalendarDate(c.deadline) ? timeBetween(c.reference_date, c.deadline, 'months') : NaN;
+    const k = capacityRatioScale(r, H, c.lead_low, c.lead_high);
+    if (!held || k === null) {
       edge.strength = { mean: 0.5, std: 0.125 }; edge.defaulted = true; delete c.ratio_sizing;
       if (edge.provenance) delete edge.provenance.natural_effect;
       continue;
     }
-    const mean = (r - 1) * m, std = Math.sqrt(r * r - 1) * sd;
+    const baseline = baselineContributionMoments({ mean: m, sd }, coefficient);
+    const { mean, sd: std } = ratioLinkMoments(k, baseline);
     // The team part's unit is the goal's (the share attestation requires it), so the goal record is not read again here.
     edge.strength = { mean, std };
     delete edge.defaulted;
-    c.ratio_sizing = { team_mean: m, team_sd: sd, rule: 'marginal_exact' };
+    c.ratio_sizing = { team_mean: m, team_sd: sd, coefficient: { mean: coefficient.mean, std: coefficient.std }, k, rule: 'marginal_normal' };
     edge.provenance = { ...(edge.provenance ?? {}), natural_effect: { amount: mean * 100, amount_unit: team.unit,
       per_source_change: 1, per_source_change_unit: 'switch', strength_mean: mean, strength_mean_frame: 'edge_strength' } };
   }
