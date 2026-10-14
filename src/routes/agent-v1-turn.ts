@@ -5955,6 +5955,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       ...(optionParticipation !== undefined ? { option_participation: optionParticipation } : {}),
       /**
+       * ⭐ IDENTITY-EXACT (DGAI #2774): the identities this Run's engine evaluated, the final read's
+       * `analysis_identity_evaluated_node_ids` (same fact, same gates as `analysis_result`), as a SIDECAR root key (the
+       * `option_participation` pattern). A Run press reaches the UI on this turn, so an evaluated identity's operand links
+       * read "Exact: …" at once, not only after a reload. `[]` = recorded, none evaluated; absent = not attested.
+       */
+      ...(identityEvaluated !== undefined ? { identity_evaluated_node_ids: [...identityEvaluated] } : {}),
+      /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *
        * ⛔ MEASURED: the estate's `Live user journey against deployed staging`
