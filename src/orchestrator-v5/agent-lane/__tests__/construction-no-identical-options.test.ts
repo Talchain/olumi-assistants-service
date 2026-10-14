@@ -269,6 +269,19 @@ const withCreditedType = (n: SNode, key: string): SNode => {
   if (typed.extractionType === undefined) typed.extractionType = type;
   return { ...n, observed_state: typed } as SNode;
 };
+/**
+ * #3045 (Paul's vocabulary, 14 Oct): the decision node SHOWS "Question: <metric>"; its id still slugs from "Decision: <metric>".
+ * The captures and base predate it, so it is their one known decision-node delta: exactly one decision node, its id unchanged,
+ * and only its title word moved back. Nothing else is touched.
+ */
+const beforeQuestionTitle = <G extends SGraph>(g: G): G => {
+  const decisions = g.nodes.filter((n) => n.kind === 'decision');
+  expect(decisions).toHaveLength(1);
+  const d = decisions[0]! as SNode & { label: string };
+  expect(d.label.startsWith('Question: ')).toBe(true);
+  expect(d.id.startsWith('decision_')).toBe(true);
+  return { ...g, nodes: g.nodes.map((n) => n === d ? { ...n, label: `Decision: ${d.label.slice('Question: '.length)}` } : n) } as G;
+};
 const after2355 = <G extends SGraph>(g: G, key: string, beforeMagnitudeSubtraction: SGraph): G => {
   const projected = asProjectedMeanCapture({
     ...g,
@@ -373,7 +386,8 @@ describe.each([
   });
 
   it('FIDELITY: the reconstruction registers the served graph exactly, apart from the Olumi-added test option', async () => {
-    const { graph: sizedGraph } = await build(draft());
+    const { graph: built } = await build(draft());
+    const sizedGraph = beforeQuestionTitle(built);
     exactlyTheVerifiedCase(sizedGraph, key);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     const graph = unsized(withoutG1(asServedBeforeOneForm(sizedGraph, run.brief.draft_graph), G1_WITH_HORIZON));
@@ -384,7 +398,8 @@ describe.each([
   });
 
   it('RED: everything else is byte-identical to what base registers — only the test option and its edges are gone', async () => {
-    const { graph } = await build(draft());
+    const { graph: built } = await build(draft());
+    const graph = beforeQuestionTitle(built);
     exactlyTheVerifiedCase(graph, key);
     const base = after2355(baseGraph(key), key, graph);
     expect(optionIds(base)).toContain(TEST_ID);
@@ -467,7 +482,7 @@ describe('controls — what the rule must never touch', () => {
     // The served graph and base's registration predate the mark; everything else is compared byte for byte, as before.
     const marked = (registered.nodes as { id: string; proposed_by?: unknown }[]).filter((n) => n.proposed_by !== undefined).map((n) => [n.id, n.proposed_by]);
     expect(marked).toEqual(key === 'f-20260926T001627Z' ? [[olumiId, 'olumi']] : []);
-    const graph = { ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => n) } as typeof registered;
+    const graph = beforeQuestionTitle({ ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => n) } as typeof registered);
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
