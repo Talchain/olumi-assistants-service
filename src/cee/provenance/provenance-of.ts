@@ -968,6 +968,9 @@ export function isEventByDateSwitchValue(node: unknown): boolean {
  * structural; anything else — missing, unrecognised (a legacy `user`) — `unknown`.
  */
 export function settingProvenanceOf(cell: unknown, target?: unknown): Provenance {
+  // A setting the drafter called the user's whose own quote did not verify (`quotedOptionSetting`): UNKNOWN, whatever the
+  // non-user stamp beside it, exactly as `observed_state.user_material_unverified` (capacity authorship, DL 14 Oct).
+  if (rec(cell)?.user_material_unverified === true) return P('unknown');
   const source = rec(cell)?.source;
   if (typeof source === 'string') {
     if (HUMAN_SETTING_STAMPS.has(source)) {
