@@ -30,6 +30,7 @@
  * `readCurrencyUnitWithQualifiers`, the reading `isAmountStatedInBrief` gives the same unit; a unit with no letter, or
  * one that is not money, is ×1 as before. So a scaled unit never reads the UNSCALED figure: 49 in £k is never "£49".
  */
+import { requestWasTyped } from '../../cee/provenance/provenance-of.js';
 import { launchWindowOf } from '../goal-target/goal-target-basis.js';
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
@@ -1115,11 +1116,8 @@ export function comparatorTheUserWroteFor(turnText: string | null | undefined, v
  * when it was first sent, if they were typed; any other source fails toward under-claiming.
  */
 export function typedByUser(body: Record<string, unknown>): boolean {
-  const kind = body['kind'];
-  const chip = body['chip'];
-  const source = body['source'];
-  return (kind === undefined || kind === 'message') && (chip === null || chip === undefined)
-    && (source === undefined || source === 'composer');
+  // System 3: whether the words were typed is the one authority's answer (`requestWasTyped`).
+  return requestWasTyped(body);
 }
 
 /**
