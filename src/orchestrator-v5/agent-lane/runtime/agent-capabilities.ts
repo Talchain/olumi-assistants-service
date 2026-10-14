@@ -9,7 +9,7 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
+import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords, validGoalReadingMembers, type GoalReadingMembers } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskHoldsNowCardWords, riskHoldsNowRecordedWords, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, riskStatedOccurrenceCardWords, riskStatedOccurrenceRecordedWords, SET_RISK_OCCURRENCE_OP,
   userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
@@ -4079,14 +4079,16 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const op = parent.operations[0]!;
     const pid = parent.proposal_id;
-    const v = (op.value ?? {}) as { expected_basis?: unknown; answer_words?: unknown; expected_goal?: unknown };
+    const v = (op.value ?? {}) as { expected_basis?: unknown; answer_words?: unknown; expected_goal?: unknown; members?: unknown };
     const expected = v.expected_basis;
     const answer = typeof v.answer_words === 'string' ? v.answer_words : undefined;
-    if (!isPlainRecord(expected) || !isPlainRecord(v.expected_goal) || opts.commitOptionLevels === undefined) {
+    // T1H: the members a user's verified statement sets (`proposeGoalStatement`), carried to the one writer as the card holds them.
+    const members = v.members !== undefined && validGoalReadingMembers(v.members) ? v.members : undefined;
+    if (!isPlainRecord(expected) || !isPlainRecord(v.expected_goal) || opts.commitOptionLevels === undefined || (v.members !== undefined && members === undefined)) {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
     }
     const approved = { goal_id: op.path, expected_basis: expected, ...(answer !== undefined ? { answer_words: answer } : {}),
-      expected_goal: v.expected_goal };
+      expected_goal: v.expected_goal, ...(members !== undefined ? { members } : {}) };
     const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
       turn_id: authorisationTurnId(pid), links: [], levels: [], goal_reading: approved });
     // A write that LANDED keeps this proposal's expected bytes, so a retry recovers through the writer's verified no-op instead
@@ -4113,9 +4115,13 @@ export function createAgentCapabilities(
     // The receipt says the card's reading, so the read-back holds the card's WHOLE projection (label, target, horizon, period
     // and reading): any member moved after the commit is never "confirmed" under the new words (Codex check r2 on #2995).
     const projection = check === null ? undefined : goalReadingProjectionOf(check.raw, op.path);
+    // With members, the card's projection moves by exactly those members: the read-back holds the writer's own postimage of it.
+    const written = members === undefined ? undefined : applyGoalReadingEdit(before.raw, approved);
+    const expectedProjection = members === undefined ? v.expected_goal
+      : written?.kind === 'mutated' ? goalReadingProjectionOf(written.mutatedGraph, op.path) : undefined;
     if (check === null || goal === undefined || basis === undefined || basis.open_question !== undefined
-      || !isDeepStrictEqual(goal.goal_target_basis, answeredBasisOf(expected))
-      || !isDeepStrictEqual(projection, v.expected_goal)) return notConfirmed;
+      || !isDeepStrictEqual(goal.goal_target_basis, answeredBasisOf(expected, members))
+      || expectedProjection === undefined || !isDeepStrictEqual(projection, expectedProjection)) return notConfirmed;
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(pid, receipts);
     const reading = goalReadingWords(projection) ?? `the target for ‘${String(goal.label)}’ as the model states it`;
@@ -6201,6 +6207,77 @@ export function createAgentCapabilities(
 
     /** THE USER approves the interpreted deadline and its actual source.
      * A chance goal holds a date, never a target percentage; approval binds the date and recorded reference. */
+    /**
+     * ⭐ T1H (DL 14 Oct 22:3xZ; served hiring r4): the user's own statement of HOW the goal is read, on S2's statement contract.
+     * Paul said "We measure productivity as story points completed per sprint." and "All of these effects would be fully in
+     * place by month 3."; neither had a writer (the goal record has no measure; `effects_at_period_end` was the drafter's
+     * alone). One verified statement (`verifyStatements`: a whole statement of the user's own typed words) sets ONE member of
+     * the goal's reading through its one writer (`goal-reading-write.ts`): the measure → what the % is a % of; the timing →
+     * whether every effect is in place by the period's end. Olumi's reading of the words is on the card; only the press records it.
+     */
+    async proposeGoalStatement(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const refuse = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
+      const member = args?.member === 'measure' || args?.member === 'effects_timing' ? args.member : undefined;
+      const quote = typeof args?.quote === 'string' ? args.quote.trim() : '';
+      if (member === undefined || quote === '') return refuse('statement_malformed', 'Give member (measure or effects_timing) and quote: the user\u2019s complete statement, copied exactly. Nothing was prepared.');
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const goals = g.nodes.filter((n) => n.kind === 'goal');
+      if (goals.length !== 1) return refuse('goal_not_resolved', 'The model does not have exactly one goal, so nothing was prepared. Ask the user which goal they mean.');
+      const goal = goals[0]!;
+      const node = (g.raw as { nodes?: unknown[] } | null)?.nodes?.find((n): n is Record<string, unknown> => isPlainRecord(n) && n.id === goal.id);
+      const stored = node?.goal_target_basis;
+      const basis = goalTargetBasisOf(node);
+      const projection = goalReadingProjectionOf(g.raw, String(goal.id));
+      if (!isPlainRecord(stored) || basis === undefined || projection === undefined) {
+        return refuse('no_goal_reading', 'The goal has no saved reading of its target for this to set, so nothing was prepared. Tell the user plainly.');
+      }
+      const texts = { now: ctx.user_turn_text, conversation: (ctx.verified_user_messages ?? []).join('\n'), unverified: ctx.unverified_user_text };
+      const figures = (q: string) => findLinkEffectAmounts(q).map((a) => ({ low: a.magnitude, high: a.magnitude }));
+      let members: GoalReadingMembers;
+      if (member === 'measure') {
+        const measure = typeof args?.measure_words === 'string' ? args.measure_words.trim() : '';
+        const v = verifyStatements([{ quote, form: 'holds_now' }], texts, { subject: { quantity: 'goal_measure', node_id: String(goal.id) }, unit: '', forms: ['holds_now'], figuresIn: figures });
+        if (v.kind === 'refused') return refuse(v.refusal, v.detail);
+        // The measure is the user's own words, whole, inside their statement: never Olumi's paraphrase.
+        if (measure === '' || measure.length > 100 || !wordsTheUserWrote(measure, quote)) {
+          return refuse('measure_not_in_quote', `measure_words must be the user\u2019s own words for the measure, copied from \u201c${quote}\u201d. Nothing was prepared.`);
+        }
+        // Only a change measured against today has a "% of today's …" to restate; a level target is read in its own unit.
+        if (basis.reference !== 'today' || basis.quantity_frame !== 'change') {
+          return refuse('measure_not_applicable', 'This goal\u2019s target is not a change measured against today, so its measure cannot be restated this way. Nothing was prepared.');
+        }
+        members = { denominator: `today\u2019s ${measure}`, ...(/^%\s*of\b/i.test(basis.effect_unit) ? { effect_unit: `% of today\u2019s ${measure}` } : {}) };
+      } else {
+        const month = Number(args?.month);
+        if (!Number.isFinite(month) || month <= 0) return refuse('statement_malformed', 'Give month: the month by which the user says the effects are fully in place. Nothing was prepared.');
+        // Olumi's reading that the statement covers EVERY effect is shown on the card; a partial statement sets nothing.
+        if (args?.covers_all_effects !== true) return refuse('not_all_effects', 'The statement must say that ALL the effects are in place by then; a statement about some of them cannot set the model\u2019s timing. Nothing was prepared.');
+        const v = verifyStatements([{ quote, form: 'upper_bound', value: month }], texts, { subject: { quantity: 'effects_in_place_by', node_id: String(goal.id) }, unit: 'months', forms: ['upper_bound'], figuresIn: figures });
+        if (v.kind === 'refused') return refuse(v.refusal, v.detail);
+        members = { effects_at_period_end: month <= basis.period_months };
+      }
+      const already = Object.entries(members).every(([k, val]) => (stored as Record<string, unknown>)[k] === val) && basis.open_question === undefined;
+      if (already) return { ok: true, mutated: false, already_saved: true, note: 'The goal\u2019s saved reading already says this. Tell the user it is recorded; nothing was prepared.' };
+      const after = goalReadingWords({ ...projection, reading: projection.reading === null ? null : { ...projection.reading, ...members } as never });
+      if (after === undefined) return refuse('reading_unsayable', 'The goal\u2019s reading cannot be shown exactly, so nothing was prepared.');
+      // AIE_TEXT_PENDING (T1H → AIE #94 6180079520): the card's words.
+      const label = `From your message: \u2018${quote}\u2019 Olumi reads this as: ${after}${member === 'effects_timing' ? (members.effects_at_period_end
+        ? `, with every effect fully in place by month ${args.month}` : `, with the effects not all in place until month ${args.month}`) : ''}. Do you want to record it as yours?`;
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: CONFIRM_GOAL_READING_OP, path: String(goal.id), value: { expected_basis: stored, expected_goal: projection, members,
+          ...(basis.open_question !== undefined ? { open_question: basis.open_question } : {}), answer_words: quote } }],
+        provenance: { authored_by: 'user_stated', basis: quote },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: label,
+      });
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash, members,
+        note: `Nothing has changed yet. Show the complete card: "${proposal.public_label}" \u2014 never the id. Call authorise_change with this proposal_id once they agree.` };
+    },
+
     async proposeGoalDeadline(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const words = typeof args?.deadline_words === 'string' ? args.deadline_words.trim() : '';

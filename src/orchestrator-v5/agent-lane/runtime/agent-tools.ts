@@ -545,6 +545,23 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     }, []),
   },
   {
+    // T1H (DL 14 Oct 22:3xZ): the user's own statement of how the goal is read (`proposeGoalStatement`). AIE_TEXT_PENDING (#94 6180079520).
+    type: 'function', name: 'propose_goal_statement',
+    description: 'Record the user\u2019s own statement of how the goal is read, as ONE card for them to approve. member "measure": they said what '
+      + 'the goal\u2019s quantity is measured as (for example "We measure productivity as story points completed per sprint"); give '
+      + 'measure_words, their exact words for the measure ("story points completed per sprint"). member "effects_timing": they said when '
+      + 'ALL the effects are fully in place (for example "All of these effects would be fully in place by month 3"); give month, and '
+      + 'covers_all_effects true only when the statement covers every effect. quote is their complete statement, copied exactly from any of '
+      + 'their messages. Olumi checks the quote is the user\u2019s and shows its reading on the card; nothing is recorded before approval.',
+    parameters: obj({
+      member: { type: 'string', enum: ['measure', 'effects_timing'] },
+      quote: { type: 'string', description: 'The user\u2019s complete statement, copied exactly from one of their messages.' },
+      measure_words: { type: 'string', description: 'For measure: the user\u2019s own words for the measure, inside the quote.' },
+      month: { type: 'number', exclusiveMinimum: 0, description: 'For effects_timing: the month the quote states.' },
+      covers_all_effects: { type: 'boolean', description: 'For effects_timing: true only when the quote says ALL the effects are in place by then.' },
+    }, ['member', 'quote']),
+  },
+  {
     // ⭐ AIE same-cohort law (science PR-4b, `goal-target/cohort-forecast-write.ts`): ONE option's cohort forecast, the user's words only.
     type: 'function', name: 'propose_cohort_forecast',
     description: 'Record ONE option\u2019s forecast of the people it reaches, so the chance of meeting a goal\u2019s two targets together '
@@ -933,7 +950,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_option_capacity_change', 'propose_cohort_forecast', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_goal_statement', 'propose_team_time', 'propose_hiring_times', 'propose_option_capacity_change', 'propose_cohort_forecast', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -1017,6 +1034,7 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months?: number; high_months?: number; statements?: readonly StatementArgs[] }): Promise<ToolResult>;
+  proposeGoalStatement?(ctx: AgentToolContext, args: { member?: string; quote?: string; measure_words?: string; month?: number; covers_all_effects?: boolean }): Promise<ToolResult>;
   proposeCohortForecast?(ctx: AgentToolContext, args: { option_label?: unknown; people?: unknown; conversion?: unknown; same_cohort?: unknown }): Promise<ToolResult>;
   /** E5: the user's hiring times per option, quoted, proposed on ONE card for approval. */
   proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string; months?: number }[] }[] }): Promise<ToolResult>;
@@ -1194,6 +1212,8 @@ async function dispatchToolUnbounded(
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
     case 'propose_team_time':
       return caps.proposeTeamTime !== undefined ? caps.proposeTeamTime(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
+    case 'propose_goal_statement':
+      return caps.proposeGoalStatement !== undefined ? caps.proposeGoalStatement(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_cohort_forecast':
       return caps.proposeCohortForecast !== undefined ? caps.proposeCohortForecast(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_hiring_times':

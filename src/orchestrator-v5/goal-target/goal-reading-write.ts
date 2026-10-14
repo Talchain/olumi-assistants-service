@@ -45,6 +45,28 @@ export interface ApprovedGoalReading {
    * unit, period or deadline does not always move the analysis hash, so the card is bound to all of it.
    */
   readonly expected_goal?: unknown;
+  /**
+   * ⭐ T1H (DL 14 Oct 22:3xZ; hiring r4): members the user's own verified statement sets (S2 `verifyStatements`): what the
+   * target is a % of ("We measure productivity as story points completed per sprint" → the denominator and effect unit), and
+   * whether every effect is in place by the period's end ("All of these effects would be fully in place by month 3"). Only
+   * these members move; the reading stays Olumi's (`source`), the words are the user's on the card and the receipt.
+   */
+  readonly members?: GoalReadingMembers;
+}
+
+/** The reading members a user's verified statement may set ({@link ApprovedGoalReading.members}). */
+export interface GoalReadingMembers {
+  readonly denominator?: string;
+  readonly effect_unit?: string;
+  readonly effects_at_period_end?: boolean;
+}
+/** A set of members the writer accepts: at least one, each within the reading's own bounds (one line, ≤120 characters). */
+export function validGoalReadingMembers(m: unknown): m is GoalReadingMembers {
+  if (!isRec(m)) return false;
+  const keys = Object.keys(m);
+  const text = (v: unknown): boolean => typeof v === 'string' && v.trim() !== '' && v.length <= 120 && !/[\r\n]/.test(v);
+  return keys.length > 0 && keys.every((k) => (k === 'denominator' || k === 'effect_unit') ? text(m[k])
+    : k === 'effects_at_period_end' ? typeof m[k] === 'boolean' : false);
 }
 
 /** The goal's complete saved reading: what the card says, and so all that it binds. */
@@ -74,7 +96,7 @@ export function goalReadingProjectionOf(graph: unknown, goalId: string): GoalRea
 }
 
 export type GoalReadingRefusal = 'invalid_graph' | 'goal_not_found' | 'not_a_goal' | 'no_open_question' | 'not_a_reading_question'
-  | 'reading_changed' | 'goal_changed';
+  | 'reading_changed' | 'goal_changed' | 'invalid_members';
 
 export type GoalReadingEditResult =
   | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[]; readonly confirmation: string }
@@ -83,9 +105,10 @@ export type GoalReadingEditResult =
   | { readonly kind: 'refused'; readonly reason: GoalReadingRefusal };
 
 /** The reading as the card showed it, without its question: what the approved write leaves (key order kept). */
-export function answeredBasisOf(expected: Readonly<Rec>): Rec {
+export function answeredBasisOf(expected: Readonly<Rec>, members?: GoalReadingMembers): Rec {
   const answered = structuredClone(expected) as Rec;
   delete answered.open_question;
+  if (members !== undefined) for (const [k, v] of Object.entries(members)) answered[k] = v;
   return answered;
 }
 
@@ -138,9 +161,11 @@ export function applyGoalReadingEdit(persistedGraph: unknown, approved: Approved
     return { kind: 'refused', reason: 'invalid_graph' };
   }
   const expected = approved.expected_basis;
-  if (!isRec(expected) || typeof expected.open_question !== 'string' || expected.open_question.trim() === '') {
-    return { kind: 'refused', reason: 'no_open_question' };
-  }
+  const members = approved.members;
+  if (members !== undefined && !validGoalReadingMembers(members)) return { kind: 'refused', reason: 'invalid_members' };
+  // An answer to the open question needs one; the user's statement of a member answers that question too when one is held.
+  const asked = isRec(expected) && typeof expected.open_question === 'string' && expected.open_question.trim() !== '';
+  if (!isRec(expected) || (!asked && members === undefined)) return { kind: 'refused', reason: 'no_open_question' };
   if (expected.open_question === CONDITIONS_NOT_KEPT) return { kind: 'refused', reason: 'not_a_reading_question' };
   const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.goal_id);
   if (matches.length !== 1) return { kind: 'refused', reason: 'goal_not_found' };
@@ -149,7 +174,7 @@ export function applyGoalReadingEdit(persistedGraph: unknown, approved: Approved
     return { kind: 'refused', reason: 'goal_changed' };
   }
   const held = matches[0]!.goal_target_basis;
-  const answered = answeredBasisOf(expected);
+  const answered = answeredBasisOf(expected, members);
   // ⭐ IDEMPOTENT: a retry after a write that landed finds the answered reading held — the approved outcome. Checked BEFORE
   // the stale gate, which the first write itself moved; the reading must still be the goal's own (its target unchanged).
   if (isDeepStrictEqual(held, answered)) {
@@ -177,7 +202,7 @@ export function applyGoalReadingEdit(persistedGraph: unknown, approved: Approved
       affected_entities: [{ kind: 'goal', label: label.slice(0, 120) }],
       graph_hash_before: beforeHash,
       graph_hash_after: afterHash,
-      safe_summary: 'Recorded your answer about how the target is read',
+      safe_summary: members !== undefined ? 'Recorded from your words how the target is read' : 'Recorded your answer about how the target is read',
       impact: 'low',
       rerun_recommended: true,
     },
