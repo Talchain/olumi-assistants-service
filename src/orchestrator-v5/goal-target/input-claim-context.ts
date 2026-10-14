@@ -213,17 +213,24 @@ export function linkBandSource(quote: unknown, band: InfluenceBand, conversation
   const messages = conversation.messages.map(plainQuote);
   const now = conversation.thisMessage === undefined ? -1 : messages.lastIndexOf(plainQuote(conversation.thisMessage));
   const reading = (i: number, text: string) => latestLinkBands(text, nodes, from, to, i === now ? { bound } : undefined);
+  // Copying is read more widely than credit: "<X> effects" in an earlier or unverified message also holds the band.
+  const copyReading = (i: number, text: string) => latestLinkBands(text, nodes, from, to, { bound: i === now ? bound : [] });
+  const labelOf = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+  const namesTheLink = (text: string): boolean => [labelOf(from), labelOf(to)].every((end) =>
+    factorTheUserNamed(end, text, { options: [], others: nodes.map((n) => n.label).filter((x) => x !== end) }));
   const said = typeof quote === 'string' ? plainQuote(quote) : '';
+  // A statement ends at . ! ? ; or a line; a colon does not end one ("Alice says: …" keeps its speaker).
   const whole = (message: string): boolean => said !== '' && quoteSpansIn(message, said).some((at) =>
-    /(?:^|[.!?;:\n])\s*$/.test(message.slice(0, at)) && (/[.!?;:]$/.test(said) || /^\s*(?:$|[.!?;:\n])/.test(message.slice(at + said.length))));
+    /(?:^|[.!?;\n])\s*$/.test(message.slice(0, at)) && (/[.!?;]$/.test(said) || /^\s*(?:$|[.!?;\n])/.test(message.slice(at + said.length))));
   let k = -1;
   for (let i = messages.length - 1; i >= 0 && k < 0; i -= 1) if (whole(messages[i]!)) k = i;
   const verified = k >= 0 && (reading(k, said)?.includes(band) ?? false) && (reading(k, messages[k]!)?.includes(band) ?? false)
-    && messages.slice(k + 1).every((m, j) => { const later = reading(k + 1 + j, m); return later === null || later.includes(band); });
-  // The still-operative reading: THIS message's first, else the latest of the earlier ones (a withdrawal or a later band
-  // supersedes); unverified words count too, since their origin is unknown.
-  const operative = (now >= 0 ? reading(now, messages[now]!) : null) ?? latestLinkBands(now >= 0 ? messages.slice(0, now) : messages, nodes, from, to);
-  const copied = !verified && ((operative?.includes(band) ?? false)
-    || (latestLinkBands(conversation.unverified, nodes, from, to)?.includes(band) ?? false));
+    // A later verified message that names this link without affirming THIS band (another band, a denial, a withdrawal)
+    // supersedes the quote.
+    && messages.slice(k + 1).every((m, j) => { const later = reading(k + 1 + j, m); return later === null ? !namesTheLink(m) : later.includes(band); });
+  // ANY verified message holding this band for this link, superseded or not (conflicting origin stays unknown, AIE), or
+  // unverified words holding it: copied or unknown material, never Olumi's own new estimate.
+  const copied = !verified && (messages.some((m, i) => copyReading(i, m)?.includes(band) ?? false)
+    || (latestLinkBands(conversation.unverified, nodes, from, to, { bound: [] })?.includes(band) ?? false));
   return { verified, copied };
 }

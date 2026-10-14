@@ -248,19 +248,21 @@ describe('T2A3: a later statement supersedes an earlier one for the same link', 
   // "strong": not quoted, old (T2A3) model_proposed → new origin unknown; quoted, old model_proposed → new user_stated. The
   // superseded "weak", even quoted, is never the user's (a later message states another band).
   it.each([
-    ['weak', undefined, 'model_proposed'], ['weak', 'Price has a weak effect on MRR.', 'model_proposed'],
+    // Buddy (fd148466): the superseded "weak" is still the user's earlier words, so proposing it is conflicting origin: old
+    // model_proposed → new origin unknown, quoted or not (AIE: conflicting origin stays unknown).
+    ['weak', undefined, 'unknown'], ['weak', 'Price has a weak effect on MRR.', 'unknown'],
     ['strong', undefined, 'unknown'], ['strong', 'Actually, Price has a strong effect on MRR.', 'user_stated'],
   ] as const)('"weak", then "Actually … strong": %s (from_words %s) is %s', async (strength, quote, want) => {
     const words = 'Price has a weak effect on MRR.\nActually, Price has a strong effect on MRR.';
     const overrides = { strength, ...(quote === undefined ? {} : { from_words: quote }) };
-    if (want === 'unknown') return expectUnknown('Price', overrides, words, { user_turn_text: 'Please prepare the link.' }, 0.3);
+    if (want === 'unknown') return expectUnknown('Price', overrides, words, { user_turn_text: 'Please prepare the link.' }, strength === 'weak' ? 0.55 : 0.3);
     const result = await journey('Price', overrides, words, { user_turn_text: 'Please prepare the link.' }, strength === 'weak' ? 0.55 : 0.3);
     expect(author(result)).toBe(want);
   });
-  it('this message’s shorthand for the selected link supersedes an earlier band', async () => {
-    const result = await journey('Price', { strength: 'weak' }, `${history}\nPrice is strong.`,
-      { ...priceReview, user_turn_text: 'Price is strong.' });
-    expect(author(result)).toBe('model_proposed');
+  // ⭐ T2A5 (buddy fd148466): EXPECTATION CHANGED, old model_proposed → new origin unknown: the superseded earlier "weak" is
+  // still the user's words, so Olumi proposing it is conflicting origin, never Olumi's own estimate.
+  it('this message’s shorthand for the selected link supersedes an earlier band; proposing the earlier band is origin unknown', async () => {
+    await expectUnknown('Price', { strength: 'weak' }, `${history}\nPrice is strong.`, { ...priceReview, user_turn_text: 'Price is strong.' });
   });
 });
 
@@ -326,11 +328,12 @@ describe('T2A3 (DL, PL 22:07Z): first-person claims after an attribution, and "<
     // T2A5 (AIE): not quoted, old (T2A3) model_proposed → new origin unknown, nothing prepared.
     ['this message: "Price effects are weak." credits the link leaving Price', 'Price effects are weak.', 'Price effects are weak.', 'unknown', undefined],
     ['this message, with the AI\u2019s quote: "Price effects are weak." credits the link leaving Price', 'Price effects are weak.', 'Price effects are weak.', 'user_stated', 'Price effects are weak'],
-    ['earlier history never supplies the target of a plural', 'Price effects are weak.', 'Please prepare the link.', 'model_proposed', 'Price effects are weak'],
+    // T2A5 (buddy fd148466): history still never CREDITS a plural, but it holds the band: old model_proposed → new origin unknown.
+    ['earlier history never supplies the target of a plural', 'Price effects are weak.', 'Please prepare the link.', 'unknown', 'Price effects are weak'],
     ['"Olumi says Price effects are weak." is Olumi\u2019s', 'Olumi says Price effects are weak.', 'Olumi says Price effects are weak.', 'model_proposed', 'Olumi says Price effects are weak'],
     ['a second entity named beside the plural gives no blanket credit', 'Quality matters, and Price effects are weak.', 'Quality matters, and Price effects are weak.', 'model_proposed', 'Quality matters, and Price effects are weak'],
   ] as const)('%s', async (_case, verified, turn, want, quote) => {
-    if (want === 'unknown') return expectUnknown('Price', {}, verified, { user_turn_text: turn });
+    if (want === 'unknown') return expectUnknown('Price', quote === undefined ? {} : { from_words: quote }, verified, { user_turn_text: turn });
     const result = await journey('Price', quote === undefined ? {} : { from_words: quote }, verified, { user_turn_text: turn });
     expect(author(result)).toBe(want);
     expect(result.edge.provenance.source).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
@@ -370,12 +373,14 @@ describe('T2A3 buddy review 3 (Codex, read-only, 35aae691): the band belongs to 
       expect(author(result), from).toBe('model_proposed');
     }
   });
-  it('withdrawing earlier estimates now stops history crediting EVERY link', async () => {
+  // ⭐ T2A5 (buddy fd148466): EXPECTATION CHANGED, old model_proposed → new origin unknown: the withdrawn statements are still
+  // the user's words, so Olumi proposing the same band is conflicting origin; nothing is credited either way.
+  it('withdrawing earlier estimates stops history crediting EVERY link; proposing the withdrawn band is origin unknown', async () => {
     const verified_user_messages = ['Price has a weak effect on MRR. Quality has a weak effect on MRR.', 'I withdraw all my earlier estimates.'];
     for (const from of ['Price', 'Quality']) {
-      const result = await journey(from, {}, verified_user_messages.join('\n'),
-        { verified_user_messages, user_turn_text: verified_user_messages[1] });
-      expect(author(result), from).toBe('model_proposed');
+      for (const overrides of [{}, { from_words: 'Price has a weak effect on MRR. Quality has a weak effect on MRR.' }]) {
+        await expectUnknown(from, overrides, verified_user_messages.join('\n'), { verified_user_messages, user_turn_text: verified_user_messages[1] });
+      }
     }
   });
   it('a selected reverse link cannot borrow an outgoing plural ("Price effects are strong." with MRR \u2192 Price selected)', () => {
@@ -457,6 +462,21 @@ describe('T2A5: the AI quotes the user\u2019s complete statement, the host verif
     const result = await journey('Price', { from_words: 'Price has a weak effect on MRR.' }, words, { user_turn_text: words });
     expect(author(result)).toBe('model_proposed');
     expect(result.edge.provenance.source).toBe('cee_hypothesis');
+  });
+  // Buddy review (Codex, read-only, fd148466): a colon keeps its speaker; a later denial supersedes; copying is read widely.
+  it('"Alice says: Price has a weak effect on MRR." quoted after the colon is not a receipt: origin unknown', async () => {
+    const words = 'Alice says: Price has a weak effect on MRR.';
+    await expectUnknown('Price', { from_words: 'Price has a weak effect on MRR.' }, words, { user_turn_text: words });
+  });
+  it('a later message denying the band supersedes the quoted earlier statement: origin unknown', async () => {
+    const verified_user_messages = ['Price has a weak effect on MRR.', 'Price does not have a weak effect on MRR.', 'Please size the link.'];
+    await expectUnknown('Price', { from_words: 'Price has a weak effect on MRR.' }, verified_user_messages.join('\n'), { verified_user_messages, user_turn_text: 'Please size the link.' });
+  });
+  it.each([
+    ['unverified "<X> effects"', { ...priceReview, unverified_user_text: 'Price effects are weak.' }, 'Please size the link.'],
+    ['an earlier verified "<X> effects"', { ...priceReview }, 'Price effects are weak.\nPlease size the link.'],
+  ] as const)('copying is read widely: %s holding the band, unquoted → origin unknown, never Olumi\u2019s', async (_case, interaction, verified) => {
+    await expectUnknown('Price', {}, verified, { ...interaction, user_turn_text: 'Please size the link.' });
   });
   it('a quote from UNVERIFIED words is never a receipt: origin unknown', async () => {
     await expectUnknown('Price', { from_words: 'Price has a weak effect on MRR' }, 'Please size the links.',
