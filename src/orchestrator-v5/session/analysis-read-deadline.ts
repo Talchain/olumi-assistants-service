@@ -7,6 +7,15 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // withheld), which is a worse user outcome than waiting. Tune from served latency evidence, not from a guess.
 export const ANALYSIS_REREAD_TIMEOUT_MS = 5_000;
 
+/**
+ * ⭐ THE READS ARE CUT BEFORE THE BUDGET ENDS, so a reader that degrades on its own can still answer inside it (S1, RCA
+ * 14 Oct 16:18Z). The in-process graph read runs inside this scope; its own analysis-fact read hung, the route degraded
+ * it to "analysis unavailable" and answered 200 with the saved model at 5,039 ms, 39 ms after the outer read had already
+ * thrown. That throw failed a turn whose model was saved. Cutting at 4.5 s leaves the reader 0.5 s to deliver its own
+ * degraded answer (served: ~85 ms); a read that still does not settle rejects at the unchanged 5 s.
+ */
+export const ANALYSIS_READ_SETTLE_MS = 500;
+
 export class AnalysisReadDeadlineError extends Error {
   constructor() {
     super('Canonical analysis reread timed out');
@@ -22,12 +31,17 @@ export async function withAnalysisReadDeadline<T>(read: (signal: AbortSignal) =>
   const existing = readSignal.getStore();
   if (existing !== undefined) return read(existing);
   const controller = new AbortController();
+  let cut: ReturnType<typeof setTimeout> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       // Promise.race installs rejection handlers even when a dependency settles after timeout.
-      readSignal.run(controller.signal, async () => read(controller.signal)),
+      // A read that fails because it was cut is a deadline, whatever its own error says.
+      readSignal.run(controller.signal, async () => read(controller.signal)).catch((error: unknown) => {
+        throw controller.signal.aborted ? new AnalysisReadDeadlineError() : error;
+      }),
       new Promise<never>((_resolve, reject) => {
+        cut = setTimeout(() => controller.abort(), ANALYSIS_REREAD_TIMEOUT_MS - ANALYSIS_READ_SETTLE_MS);
         timer = setTimeout(() => {
           reject(new AnalysisReadDeadlineError());
           controller.abort();
@@ -35,6 +49,7 @@ export async function withAnalysisReadDeadline<T>(read: (signal: AbortSignal) =>
       }),
     ]);
   } finally {
+    clearTimeout(cut);
     clearTimeout(timer);
   }
 }
