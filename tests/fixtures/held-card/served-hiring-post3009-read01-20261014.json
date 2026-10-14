@@ -1,0 +1,516 @@
+{
+ "_source": "live/runs/2026-10-14T043625Z-hiring-post3009/hiring/reads/01-06-before-approve.json (served /graph read before the link-strength approval of turn 05; CEE post-#3009), graph and brief verbatim",
+ "scenario_created_at": "2026-10-14T04:36:33.022411+00:00",
+ "brief": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+ "graph": {
+  "edges": [
+   {
+    "to": "hire_a_tech_lead",
+    "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "hire_two_developers",
+    "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "continue_as_now",
+    "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "tech_leads",
+    "from": "hire_a_tech_lead",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "onboarding_load",
+    "from": "hire_a_tech_lead",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "hiring_spend",
+    "from": "hire_a_tech_lead",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "mid_weight_developers",
+    "from": "hire_two_developers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "onboarding_load",
+    "from": "hire_two_developers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "hiring_spend",
+    "from": "hire_two_developers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "tech_leads",
+    "from": "continue_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "onboarding_load",
+    "from": "continue_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "hiring_spend",
+    "from": "continue_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "mid_weight_developers",
+    "from": "continue_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "productivity",
+    "from": "tech_leads",
+    "strength": {
+     "std": 0.17500000000000002,
+     "mean": 0.35000000000000003
+    },
+    "defaulted": true,
+    "provenance": {
+     "basis": "A dedicated technical leader is estimated to remove coordination and decision bottlenecks by the three-month horizon.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 7,
+      "amount_unit": "%",
+      "strength_mean": 0.35000000000000003,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "people"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "productivity",
+    "from": "mid_weight_developers",
+    "strength": {
+     "std": 0.5,
+     "mean": 1
+    },
+    "defaulted": true,
+    "provenance": {
+     "basis": "Each additional developer is estimated to add productivity at month three after partial ramp-up.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 4,
+      "amount_unit": "%",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "people"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "productivity",
+    "from": "onboarding_load",
+    "strength": {
+     "std": 0.05,
+     "mean": -0.1
+    },
+    "defaulted": true,
+    "provenance": {
+     "basis": "More team capacity diverted to recruiting and onboarding reduces productive capacity during the launch window.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": -0.1,
+      "amount_unit": "%",
+      "strength_mean": -0.1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "% of team capacity"
+     }
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "code_quality_degradation",
+    "from": "mid_weight_developers",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "productivity",
+    "from": "code_quality_degradation",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   }
+  ],
+  "nodes": [
+   {
+    "id": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "Should I hire a Tech lead or two developers to increase productivity by at…",
+    "provenance": "from_brief",
+    "description": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality?"
+   },
+   {
+    "id": "productivity",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Productivity",
+    "provenance": "from_brief",
+    "goal_direction": ">=",
+    "goal_threshold": 0.1,
+    "quantity_frame": "change",
+    "threshold_source": "brief_extraction",
+    "goal_target_basis": {
+     "source": "olumi_reading",
+     "reference": "today",
+     "target_raw": 10,
+     "denominator": "today's productivity",
+     "effect_unit": "% of today's productivity",
+     "period_kind": "at_end",
+     "target_frame": "change_abs",
+     "also_required": [
+      "maintaining code quality"
+     ],
+     "period_months": 3,
+     "quantity_frame": "change",
+     "effects_at_period_end": false
+    },
+    "goal_threshold_cap": 100,
+    "goal_threshold_raw": 10,
+    "goal_threshold_unit": "%",
+    "goal_threshold_frame": "change_abs",
+    "goal_deadline_as_stated": "three months",
+    "goal_threshold_cap_provenance": "metric_scale"
+   },
+   {
+    "id": "hire_a_tech_lead",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Hire a Tech lead",
+    "provenance": "from_brief",
+    "interventions": {
+     "tech_leads": {
+      "unit": "people",
+      "value": 0.2,
+      "source": "cee_hypothesis",
+      "raw_value": 1,
+      "target_match": {
+       "node_id": "tech_leads",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "hiring_spend": {
+      "unit": "GBP",
+      "value": 0.4,
+      "source": "cee_hypothesis",
+      "raw_value": 120000,
+      "target_match": {
+       "node_id": "hiring_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "onboarding_load": {
+      "unit": "% of team capacity",
+      "value": 0.1,
+      "source": "cee_hypothesis",
+      "raw_value": 10,
+      "target_match": {
+       "node_id": "onboarding_load",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "hire_two_developers",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Hire two developers",
+    "provenance": "from_brief",
+    "interventions": {
+     "hiring_spend": {
+      "unit": "GBP",
+      "value": 0.6,
+      "source": "cee_hypothesis",
+      "raw_value": 180000,
+      "target_match": {
+       "node_id": "hiring_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "onboarding_load": {
+      "unit": "% of team capacity",
+      "value": 0.3,
+      "source": "cee_hypothesis",
+      "raw_value": 30,
+      "target_match": {
+       "node_id": "onboarding_load",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "mid_weight_developers": {
+      "unit": "people",
+      "value": 0.32,
+      "source": "cee_hypothesis",
+      "raw_value": 8,
+      "target_match": {
+       "node_id": "mid_weight_developers",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "continue_as_now",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Continue as now",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "tech_leads",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Tech leads",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 5,
+    "observed_state": {
+     "unit": "people",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "mid_weight_developers",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Mid-weight developers",
+    "category": "controllable",
+    "provenance": "unverified_brief",
+    "observed_state": {
+     "cap": 25,
+     "unit": "people",
+     "value": 0.24,
+     "source": "cee_inference",
+     "raw_value": 6,
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "user_material_unverified": true
+    }
+   },
+   {
+    "id": "onboarding_load",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Onboarding load",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 100,
+    "observed_state": {
+     "unit": "% of team capacity",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "hiring_spend",
+    "ref": "F4",
+    "kind": "factor",
+    "label": "Hiring spend",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 300000,
+    "observed_state": {
+     "unit": "GBP",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "code_quality_degradation",
+    "ref": "R1",
+    "kind": "risk",
+    "label": "Code quality degradation",
+    "provenance": "from_brief"
+   }
+  ],
+  "ref_high_water": {
+   "D": 1,
+   "F": 4,
+   "G": 1,
+   "O": 3,
+   "R": 1
+  },
+  "goal_constraints": [
+   {
+    "unit": "GBP",
+    "label": "Hiring spend",
+    "value": 200000,
+    "node_id": "hiring_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:hiring_spend:<="
+   }
+  ]
+ }
+}

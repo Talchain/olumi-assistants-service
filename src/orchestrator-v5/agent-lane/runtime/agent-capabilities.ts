@@ -9,7 +9,7 @@ import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
-import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
@@ -253,6 +253,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
+import { deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
@@ -3817,6 +3818,12 @@ export function createAgentCapabilities(
     if (heldNow !== v.expected_deadline && heldNow !== v.deadline) {
       return notApplied('model_changed_since_approval', 'The goal\u2019s deadline changed after this was offered, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
     }
+    // The card's recorded subject (its goal's complete projection) is the press's and the lapse's rule too: any change to the
+    // goal since the card was made (a renamed goal, a new target, period or reading) writes nothing. A card made before its
+    // subject was recorded keeps the date gate above.
+    if (deadlineSubjectHolds(op, approvedRead.raw) === false) {
+      return notApplied('model_changed_since_approval', 'The goal changed after this was offered, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
+    }
     if (opts.commitOptionLevels === undefined) {
       return notApplied('deadline_writer_unavailable', 'This deadline could not be recorded here, so nothing was recorded.');
     }
@@ -4221,6 +4228,9 @@ export function createAgentCapabilities(
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_goal_deadline', path: goal.id,
           value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words,
+            // The card's SUBJECT (DL 14 Oct): the goal's complete projection as it stands now. One rule reads it at press, at
+            // lapse and at the writer (`still-applies.ts`), so an unrelated change never lapses the card and any goal change does.
+            ...(deadlineCardSubjectOf(g.raw, goal.id) !== undefined ? { expected_goal: deadlineCardSubjectOf(g.raw, goal.id) } : {}),
             ...(reference !== undefined ? { reference } : {}),
             ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
         provenance: { authored_by: authoredBy, basis: String(args.rationale ?? '') },
@@ -6756,9 +6766,9 @@ export function createAgentCapabilities(
         typed_approval_of: ctx.typed_approval_of,
         // EBD: a team-time card is stale only when what it read changed (hiring times landing never stale it).
         // E5: likewise a hiring-times card, while its own parts, carriers and deadline stand (the team time landing never stales it).
-        scoped_precondition_holds: (p) => teamTimeReadHolds(p, before.raw)
-          || (p.operations.length === 1 && p.operations[0]!.op === SET_HIRING_TIMES
-            && hiringTimesStillApply(p.operations[0]!.value as ApprovedHiringTimes, before.raw)),
+        // A deadline card, while its goal holds the date it was made against (hiring witness 35a66525: link strengths moved the
+        // model). The same rule decides its lapse (`heldCardStillApplies`, `lifecycle.ts`).
+        scoped_precondition_holds: (p) => heldCardStillApplies(p, before.raw),
       });
       if (decision.status === 'already_applied') {
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so
