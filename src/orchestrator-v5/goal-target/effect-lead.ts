@@ -132,15 +132,15 @@ const months = (x: number): string => (x === 1 ? '1 month' : `${x} months`);
 const said = (p: LeadPart): string => (p.low === p.high ? months(p.low) : `${p.low}–${months(p.high)}`);
 /**
  * AIE_TEXT_PENDING (DL relays): the lead as a card says it, each figure with whose it is, and the one assumption joining them.
- * "Full effect 3 months from now: your start in 2 months, then your onboarding of about 1 month (Olumi’s reading of ‘about’). Olumi
- * assumes the change is fully in place once onboarding ends."
+ * "Full effect 3 months from now: your start in 2 months, then your settling-in time of about 1 month (Olumi’s reading of your
+ * words). Olumi assumes the change is fully in place once that settling-in ends." (A hire's onboarding, a change's bedding in.)
  */
 export function effectLeadWords(lead: EffectLead): string {
   const { start, onboarding } = lead.lead_reading;
   const total = lead.lead_low === lead.lead_high ? months(lead.lead_low) : `${lead.lead_low}–${months(lead.lead_high)}`;
   const startWords = start.role === 'olumi_estimate' ? 'starting now (Olumi’s assumption)'
     : `your start in ${start.role === 'derived' ? `about ${said(start)} (Olumi’s reading of your words)` : said(start)}`;
-  const onboardingWords = onboarding.role === 'olumi_estimate' ? 'with no onboarding time (Olumi’s assumption)'
-    : `then your onboarding of ${onboarding.role === 'derived' ? `about ${said(onboarding)} (Olumi’s reading of your words)` : said(onboarding)}`;
-  return `Full effect ${total} from now: ${startWords}, ${onboardingWords}. Olumi assumes the change is fully in place once onboarding ends.`;
+  const onboardingWords = onboarding.role === 'olumi_estimate' ? 'with no settling-in time (Olumi’s assumption)'
+    : `then your settling-in time of ${onboarding.role === 'derived' ? `about ${said(onboarding)} (Olumi’s reading of your words)` : said(onboarding)}`;
+  return `Full effect ${total} from now: ${startWords}, ${onboardingWords}. Olumi assumes the change is fully in place once that settling-in ends.`;
 }

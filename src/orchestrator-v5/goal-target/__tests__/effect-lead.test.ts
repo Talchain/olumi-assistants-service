@@ -22,8 +22,8 @@ describe('the lead from the user’s own words: start + onboarding, on the S2 co
       [{ quantity: 'effect_start', option_id: OPTION }, 'point', 2, 2, SAID, 'user', 'olumi'],
       [{ quantity: 'onboarding', option_id: OPTION }, 'point', 1, 1, SAID, 'user', 'olumi']]);
     expect(capacityRatioScale(1.13, 6, v.lead.lead_low, v.lead.lead_high)).toBeCloseTo(1 + 0.13 * (6 - 3) / 6, 12);
-    expect(effectLeadWords(v.lead)).toBe('Full effect 3 months from now: your start in 2 months, then your onboarding of about 1 month '
-      + '(Olumi’s reading of your words). Olumi assumes the change is fully in place once onboarding ends.');
+    expect(effectLeadWords(v.lead)).toBe('Full effect 3 months from now: your start in 2 months, then your settling-in time of about 1 month '
+      + '(Olumi’s reading of your words). Olumi assumes the change is fully in place once that settling-in ends.');
     expect(savedEffectLead({ capacity_ratio: 1.13, ...v.lead })).toEqual(v.lead);
   });
 

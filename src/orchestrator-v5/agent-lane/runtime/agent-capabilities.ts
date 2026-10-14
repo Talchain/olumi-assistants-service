@@ -31,7 +31,8 @@ import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } f
 import { heldTeamTimeStatements, quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeFromStatements, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { deliverableWrittenIn, draftedTeamPartOf, eventModelAsk, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
-  planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
+  planStarts, quoteStatedFor, ratioPartOf, withHiringTimes, type ApprovedHiringTimes, type PlannedLead, type PlannedOption } from '../../goal-target/hiring-times.js';
+import { effectLeadFromStatements, effectLeadWords } from '../../goal-target/effect-lead.js';
 import { goalOutOfReachFact, outOfReachWhyOf } from '../out-of-reach-why.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
@@ -208,6 +209,9 @@ const NOT_A_FACTOR_NOTE =
 
 /** E5: the hiring-times op (its union member and `record.ts` entry are EBD's one-writer edits to `proposal.ts`; DL, 12 Oct). */
 const SET_HIRING_TIMES: StructuredProposal['operations'][number]['op'] = 'set_hiring_times';
+/** AIE_TEXT_PENDING (DL relays): one option's lead on the card: the user's words, then Olumi's reading of them (`effectLeadWords`). */
+const leadCardLine = (l: PlannedLead): string => `Use this timing for ‘${l.label}’? You said “${l.quotes.join('” and “')}”. ${effectLeadWords(l.lead)}`
+  + (l.lead.lead_low === l.lead.lead_high ? '' : ' Olumi can’t show a chance for it until this is one time: say when it would take full effect.');
 /** E5: the applied hiring-times card's follow-up (DL ACK of SYS1-E5-STRINGS §3 pending). */
 const HIRING_TIMES_APPLIED = "These hiring assumptions are saved, with your inputs and Olumi's estimates distinguished. Run the analysis so it uses them; do not state a chance before it returns.";
 
@@ -6270,13 +6274,27 @@ export function createAgentCapabilities(
       if (part === null || deadline === undefined || reference >= deadline) {
         return refuse('deadline_not_held', 'The deadline must be confirmed before these timings can be applied. Keep the supplied timings and prepare them once the deadline is confirmed.');
       }
-      const goalId = String(part.goal.id), planned: PlannedOption[] = [];
+      const goalId = String(part.goal.id), planned: PlannedOption[] = [], leads: PlannedLead[] = [];
       for (const o of asked) {
         const id = typeof o?.option_id === 'string' ? o.option_id : '';
         const option = g.nodes.find(n => n.id === id && n.kind === 'option');
         if (option === undefined) return refuse('unknown_option', `"${id}" is not an option in this model. Nothing was prepared.`);
         const label = String(option.label);
-        if (planned.some(p => p.option_id === id)) return unusable();
+        if (planned.some(p => p.option_id === id) || leads.some(l => l.option_id === id)) return unusable();
+        /**
+         * ⭐ S2 THE LEAD (DL boundary ruling 21:43Z 14 Oct): an option whose one capacity part is a RATIO carrier takes the user's
+         * start + onboarding, from their whole statements, as ONE lead L that the window's scale k reads (`effect-lead.ts`).
+         */
+        const ratio = ratioPartOf(g.raw, id, goalId);
+        if (ratio !== undefined) {
+          const said = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => (typeof st?.quote === 'string' ? st.quote.trim() : ''))
+            .filter((q: string) => q !== '');
+          const v = effectLeadFromStatements({ now: ctx.user_turn_text, conversation: ctx.user_text,
+            unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') }, id, said);
+          if (v.kind === 'refused') return refuse(v.refusal, v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail);
+          leads.push({ option_id: id, label, part_id: String(ratio.id), expected: ratio.observed_state.extra_share_by_date, lead: v.lead, quotes: said });
+          continue;
+        }
         const held = capacityPartsOf(g.raw, id, goalId), estimate = olumiEstimateOf(held);
         if (held.length === 0 || estimate === null) return refuse('adds_no_people', `‘${label}’ adds no people in this model, so it has no start time. Nothing was prepared.`);
         const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
@@ -6336,15 +6354,17 @@ export function createAgentCapabilities(
         planned.push({ option_id: id, label, part_ids: held.map(n => String(n.id)), expected: held.map(n => n.observed_state.extra_share_by_date),
           olumi_estimate: estimate, parts: plan.parts, quotes });
       }
-      const a: ApprovedHiringTimes = { goal_id: goalId, deadline, reference_date: reference, options: planned };
+      const a: ApprovedHiringTimes = { goal_id: goalId, deadline, reference_date: reference, options: planned, ...(leads.length > 0 ? { leads } : {}) };
       if (hiringTimesHeld(g.raw, a)) return refuse('already_held', 'Those hiring times are already in the model. Nothing was changed.');
       // The postimage must hold exactly what the card says before it is offered, never only after the press.
       if (!hiringTimesHeld(withHiringTimes(g.raw, a), a)) return unusable();
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_HIRING_TIMES, path: goalId, value: a }],
-        provenance: { authored_by: planned.some(o => o.parts.some(p => p.statement.source === 'model_proposed' || p.statement.pairing?.authored_by === 'model_proposed')) ? 'model_proposed' : 'user_stated', basis: planned.flatMap(p => p.quotes).join(' | ') },
+        // A lead's sum and its full-effect assumption are Olumi's reading of the user's words, so its card is Olumi's proposal.
+        provenance: { authored_by: leads.length > 0 || planned.some(o => o.parts.some(p => p.statement.source === 'model_proposed' || p.statement.pairing?.authored_by === 'model_proposed')) ? 'model_proposed' : 'user_stated',
+          basis: [...planned.flatMap(p => p.quotes), ...leads.flatMap(l => l.quotes)].join(' | ') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: hiringTimesCard(a, part.deliverable) });
+        public_label: [...(planned.length > 0 ? [hiringTimesCard(a, part.deliverable)] : []), ...leads.map(leadCardLine)].join(' ') });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
         if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === SET_HIRING_TIMES)) proposals.discard(pending.proposal_id);
       }

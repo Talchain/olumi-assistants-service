@@ -17,13 +17,14 @@
  * "another M later" (the coupled law is DEFERRED, DL (c): the two starts would be one draw), an "at least N" beyond Olumi's
  * latest or a "within N" below Olumi's soonest (DL CUT). The pace stays Olumi's estimate, split equally across the starts.
  */
-import { extraShareMoments } from './event-by-date-share.js';
+import { capacityRatioScale, extraShareMoments } from './event-by-date-share.js';
 import { timeBetween } from './deadline-date.js';
 import { withEventShareDate } from './event-by-date-model.js';
 import { goalDeadlineFromRecord } from './goal-kind.js';
 import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
 import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../cee/transforms/provenance-display.js';
 import { isDeepStrictEqual } from 'node:util';
+import type { EffectLead } from './effect-lead.js';
 
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -62,12 +63,35 @@ export interface PlannedOption {
   readonly parts: readonly PlannedPart[];
   readonly quotes: readonly string[];
 }
+/**
+ * ⭐ S2 THE LEAD BEFORE A CAPACITY CHANGE IS FULL (DL boundary ruling 21:43Z 14 Oct): an option whose one capacity part is a
+ * RATIO carrier (HIRING's `capacity_ratio`, the window's scale k) takes the user's start + onboarding as ONE lead L
+ * (`effect-lead.ts`), written onto that carrier beside its ratio; k is then recomputed by the event model's own materialiser.
+ */
+export interface PlannedLead {
+  readonly option_id: string;
+  readonly label: string;
+  /** The ratio carrier's node, and its carrier exactly as offered (a change to it supersedes the card). */
+  readonly part_id: string;
+  readonly expected: unknown;
+  readonly lead: EffectLead;
+  readonly quotes: readonly string[];
+}
 export interface ApprovedHiringTimes {
   readonly goal_id: string;
   readonly deadline: string;
   readonly reference_date: string;
   readonly options: readonly PlannedOption[];
+  readonly leads?: readonly PlannedLead[];
 }
+
+/** The option's ONE capacity part when it is a ratio carrier (`capacity_ratio`), or `undefined`. */
+export function ratioPartOf(graph: unknown, optionId: string, goalId: string): Rec | undefined {
+  const parts = capacityPartsOf(graph, optionId, goalId);
+  return parts.length === 1 && typeof parts[0]!.observed_state.extra_share_by_date.capacity_ratio === 'number' ? parts[0] : undefined;
+}
+const leadFieldsOf = (lead: EffectLead): Rec => JSON.parse(JSON.stringify({ lead_low: lead.lead_low, lead_high: lead.lead_high,
+  lead_statements: lead.lead_statements, lead_reading: lead.lead_reading }));
 
 export const MAX_STARTS_PER_OPTION = 2;
 
@@ -279,6 +303,11 @@ export function withHiringTimes(graph: unknown, a: ApprovedHiringTimes): unknown
       }
     });
   }
+  for (const l of a.leads ?? []) {
+    const node = out.nodes.find((n: Rec) => n.id === l.part_id);
+    if (node === undefined || !rec(node.observed_state?.extra_share_by_date)) continue;
+    node.observed_state.extra_share_by_date = { ...node.observed_state.extra_share_by_date, ...leadFieldsOf(l.lead) };
+  }
   return withEventShareDate(out, a.deadline, a.reference_date);
 }
 
@@ -297,6 +326,9 @@ export function hiringTimesStillApply(a: ApprovedHiringTimes, graph: unknown): b
     const held = capacityPartsOf(graph, o.option_id, a.goal_id);
     return held.length === o.part_ids.length
       && held.every((n, i) => n.id === o.part_ids[i] && isDeepStrictEqual(n.observed_state.extra_share_by_date, o.expected[i]));
+  }) && (a.leads ?? []).every((l) => {
+    const part = ratioPartOf(graph, l.option_id, a.goal_id);
+    return part?.id === l.part_id && isDeepStrictEqual(part.observed_state.extra_share_by_date, l.expected);
   });
 }
 
@@ -306,7 +338,19 @@ export function hiringTimesStillApply(a: ApprovedHiringTimes, graph: unknown): b
  */
 export function hiringTimesHeld(after: unknown, a: ApprovedHiringTimes): boolean {
   if (!rec(after) || !Array.isArray(after.edges)) return false;
-  return a.options.every((o) => {
+  // A lead is held when its ratio carrier holds exactly the lead fields; where k is licensed, the link is sized by THAT k.
+  const leadsHeld = (a.leads ?? []).every((l) => {
+    const part = ratioPartOf(after, l.option_id, a.goal_id);
+    const c = part?.observed_state.extra_share_by_date;
+    if (part?.id !== l.part_id || !rec(c) || c.deadline !== a.deadline) return false;
+    const fields = leadFieldsOf(l.lead);
+    if (!Object.keys(fields).every((k) => isDeepStrictEqual(c[k], fields[k]))) return false;
+    const H = typeof c.reference_date === 'string' ? timeBetween(c.reference_date, c.deadline, 'months') : NaN;
+    const k = capacityRatioScale(c.capacity_ratio, H, l.lead.lead_low, l.lead.lead_high);
+    const link = after.edges.find((e: Rec) => e.from === part.id && e.to === a.goal_id);
+    return k === null ? link?.defaulted === true : !rec(c.ratio_sizing) || c.ratio_sizing.k === k;
+  });
+  return leadsHeld && a.options.every((o) => {
     const held = capacityPartsOf(after, o.option_id, a.goal_id);
     return held.length === o.parts.length && held.every((node, i) => {
       const c = node.observed_state.extra_share_by_date, p = o.parts[i]!;
