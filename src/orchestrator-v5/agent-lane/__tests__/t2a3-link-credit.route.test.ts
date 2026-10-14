@@ -95,7 +95,10 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
       const answered = thisTurn.some((i) => i.type === 'function_call_output');
       if (!answered && proposeOn !== null && lastUserText(body) === proposeOn.message) {
         return reply([{ type: 'function_call', name: 'propose_link_strengths', call_id: 'fixture_link_set',
-          arguments: JSON.stringify({ links: proposeOn.links, rationale: 'The user asked for these link strengths.' }) }]);
+          // ⛔ INPUT CHANGE (#3002 r2): each link carries the AI's claim `user_stated`: true when it quotes the user; false with Olumi's own basis when not.
+          arguments: JSON.stringify({ links: proposeOn.links.map((l) => typeof (l as { from_words?: unknown }).from_words === 'string'
+            ? { user_stated: true, ...l } : { user_stated: false, basis: 'Olumi\u2019s own estimate from the model', ...l }),
+            rationale: 'The user asked for these link strengths.' }) }]);
       }
       return reply([{ type: 'message', content: [{ type: 'output_text', text: 'Noted.' }] }]);
     }));
@@ -163,16 +166,19 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
   // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message.
   // EXPECTATION CHANGED: "Monthly churn is strong." unquoted, old user_stated → new model_proposed; its quoted twin keeps it.
   it.each([
-    ['Pro plan price is strong.', [CHURN_EDGE], 'model_proposed', 'Pro plan price is strong'],
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): a quote the host cannot verify is UNKNOWN, never Olumi's (old
+    // model_proposed → new origin unknown, nothing prepared). Same for the ambiguous two-link selection below.
+    ['Pro plan price is strong.', [CHURN_EDGE], 'unknown', 'Pro plan price is strong'],
     // ⭐ T2A5 (AIE 6157593360): EXPECTATION CHANGED, old (T2A3) model_proposed → new origin unknown: no quote of the user's
     // own words is ever relabelled Olumi's estimate.
     ['Monthly churn is strong.', [CHURN_EDGE], 'unknown', undefined],
     ['Monthly churn is strong.', [CHURN_EDGE], 'user_stated', 'Monthly churn is strong'],
     // PL 22:07Z: two selected links are an ambiguous selection: no link is credited, even the one whose end is named.
-    ['Monthly churn is strong.', [CHURN_EDGE, NEW_EDGE], 'model_proposed', 'Monthly churn is strong'],
+    ['Monthly churn is strong.', [CHURN_EDGE, NEW_EDGE], 'unknown', 'Monthly churn is strong'],
   ] as const)('blocking 1: "%s" with %j selected → %s, on the card and in the saved graph (from_words %s)', async (message, selected, author, quote) => {
     expect(edgeNow(...CHURN).provenance.source, 'precondition: Olumi’s placeholder').toBe('cee_hypothesis');
-    if (author === 'unknown') return proposeRefused(`t2a3-${randomUUID()}`, message, { selected_elements: selected }, churnLink('strong'));
+    if (author === 'unknown') return proposeRefused(`t2a3-${randomUUID()}`, message, { selected_elements: selected },
+      { ...churnLink('strong'), ...(quote === undefined ? {} : { from_words: quote }) });
     const { op, label, ctx } = await proposeAndApprove(`t2a3-${randomUUID()}`, message, { selected_elements: selected },
       { ...churnLink('strong'), ...(quote === undefined ? {} : { from_words: quote }) }, CHURN.join('::'));
     expect(ctx.grounded_links, 'the UI selection reaches the door as the host-resolved links')

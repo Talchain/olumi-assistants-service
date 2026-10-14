@@ -347,7 +347,8 @@ it('Science 393023 identity-bound CONTROL: independently olumi_estimate-sized pr
   const target = linkTargetOf(graph, PROSPECT.from, PROSPECT.to)!;
   expect(target).toMatchObject({ from_id: PROSPECT.from, to_id: PROSPECT.to, band: 'strong' });
   const result = await capsFor(graph).proposeLinkStrengths!(scienceCtx, {
-    links: [{ from_label: target.from_label, to_label: target.to_label, strength: target.band! }], rationale: 'Independent synthetic estimate',
+    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
+    links: [{ user_stated: false, basis: 'Olumi’s own estimate from the model', from_label: target.from_label, to_label: target.to_label, strength: target.band! }], rationale: 'Independent synthetic estimate',
   });
   expect(result.ok, JSON.stringify(result)).toBe(true);
   expect(result.public_label).toContain('as strong, Olumi’s estimate');

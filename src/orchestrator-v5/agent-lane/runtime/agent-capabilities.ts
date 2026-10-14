@@ -4905,6 +4905,8 @@ export function createAgentCapabilities(
       const shown: Shown[] = [];
       const already: string[] = [];
       const definitional: string[] = [];
+      /** Links whose band's origin stays UNKNOWN (the three tiers): left out and said, the rest of the set still offered. */
+      const unknownOrigin: string[] = [];
       // ⭐ F1: links left out because they hold the user's own figure, each in the refusal's own words.
       const heldFigures: string[] = [];
       const seen = new Set<string>();
@@ -5006,8 +5008,26 @@ export function createAgentCapabilities(
         const source = linkBandSource(l.from_words, band, { messages: typed.trim() !== '' && said[said.length - 1] !== typed ? [...said, typed] : said,
           ...(typed.trim() !== '' ? { thisMessage: typed } : {}), ...(ctx.unverified_user_text !== undefined ? { unverified: ctx.unverified_user_text } : {}) },
           g.nodes, from.id, to.id, bound);
-        const origin = statementOrigin(source.verified, source.copied);
-        if (origin === 'unknown') return refuseSet('origin_unknown', UNKNOWN_ORIGIN_DETAIL);
+        /**
+         * ⭐ THE THREE TIERS (DL on Codex CHECK-3002-a3b352af): the Agent says whose band it is (`user_stated`), the host
+         * verifies, and an unverified claim is never anyone's.
+         *  · USER: `user_stated` true AND the quote verifies (`linkBandSource`).
+         *  · OLUMI: `user_stated` false, NO quote, Olumi's OWN `basis` (DL amendment, PL #94 05:12Z), and the conversation does
+         *    not read this band for this link: Olumi's own new estimate, explicitly declared (`statementOrigin`'s own-estimate rule).
+         *  · UNKNOWN: anything else. That includes an absent claim, `user_stated` false without a basis, a quote that does not
+         *    verify (truncated history too), a quote the Agent says is not the user's ("Alice supplied these…"), and a copied
+         *    band. The AI's non-user claim is never overridden, and a known source stays the link's: nothing is written.
+         */
+        const claimed = l.user_stated;
+        const quoted = typeof l.from_words === 'string' && l.from_words.trim() !== '';
+        const ownBasis = typeof l.basis === 'string' && l.basis.trim() !== '';
+        const origin = claimed === true && source.verified ? 'human'
+          : claimed === false && !quoted && ownBasis ? statementOrigin(false, source.copied, ctx.user_text_complete !== false, true)
+            : 'unknown';
+        // An UNKNOWN band is left out and said, never written; the links whose origin IS known are still offered (Paul's
+        // served set: his named links are his, "all other listed effects to moderate" names no link, so those stay unknown).
+        // A band the user's OWN strength already sits in changes nothing whoever names it: it goes on to "already" below.
+        if (origin === 'unknown' && !(keepsUsers && linkSizing(edge) === 'user')) { unknownOrigin.push(name); continue; }
         const stated = origin === 'human' ? [band] : null;
         if (stated?.includes(band) === true) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
@@ -5050,13 +5070,18 @@ export function createAgentCapabilities(
         shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, wasEdge: edge,
           sizedBefore: linkSizing(edge), sizedAfterApproval });
       }
+      const unknownLeftOut = unknownOrigin.length > 0 ? { left_out_unknown_origin: unknownOrigin } : {};
+      if (ops.length === 0 && unknownOrigin.length > 0 && heldFigures.length === 0 && definitional.length === 0) {
+        return { ok: false, mutated: false, refusal: 'origin_unknown', link: unknownOrigin[0], ...unknownLeftOut, ...(already.length > 0 ? { already } : {}),
+          detail: `${UNKNOWN_ORIGIN_DETAIL} Nothing was prepared for any of the links.` };
+      }
       if (ops.length === 0) {
         if (heldFigures.length > 0 && definitional.length === 0) {
-          return { ok: false, mutated: false, refusal: 'user_figure_held', left_out_user_figures: heldFigures, ...(already.length > 0 ? { already } : {}),
+          return { ok: false, mutated: false, refusal: 'user_figure_held', left_out_user_figures: heldFigures, ...unknownLeftOut, ...(already.length > 0 ? { already } : {}),
             detail: 'Nothing was prepared: every link left holds the user\u2019s own figure. Tell the user exactly what `left_out_user_figures` says, and never offer a band as their estimate for those links.' };
         }
         if (definitional.length > 0) {
-          return { ok: false, mutated: false, refusal: 'definitional_link', definitional, ...(already.length > 0 ? { already } : {}),
+          return { ok: false, mutated: false, refusal: 'definitional_link', definitional, ...unknownLeftOut, ...(already.length > 0 ? { already } : {}),
             ...(heldFigures.length > 0 ? { left_out_user_figures: heldFigures } : {}),
             detail: 'Nothing was prepared: every link left is defined by a calculation the model declares. Tell the user exactly what `definitional` says. Never offer to change those links.' };
         }
@@ -5128,7 +5153,10 @@ export function createAgentCapabilities(
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
         ...(heldFigures.length > 0 ? { left_out_user_figures: heldFigures } : {}),
+        ...unknownLeftOut,
         note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
+          // AIE_TEXT_PENDING (#3002 r2): the left-out unknown links, said.
+          + (unknownOrigin.length > 0 ? 'Some links were left out because the source of their band is not verified (`left_out_unknown_origin`): their origin stays unknown and nothing was prepared for them. Ask the user for that source, and never call those bands Olumi\u2019s estimate or the user\u2019s. ' : '')
           + (definitional.length > 0 ? 'Some links were left out because a calculation the model declares defines them (`left_out_definitional`): say so in those words, and never offer to change them. ' : '')
           + (heldFigures.length > 0 ? 'Some links were left out because they hold the user\u2019s own figure (`left_out_user_figures`): say exactly those words for them. ' : '')
           + (olumis > 0

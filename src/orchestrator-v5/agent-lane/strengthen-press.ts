@@ -24,7 +24,8 @@ export const STRENGTHEN_CARD_RATIONALE = 'This link has no size yet; ask how muc
 
 /** A sized link supplies a proposed band. An unsized target supplies only its labels for a size ask. */
 export interface LinkStrengthsCardArgs {
-  readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength?: StrengthenPlaceholderTarget['band'] }];
+  readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength?: StrengthenPlaceholderTarget['band'];
+    readonly user_stated?: false; readonly basis?: string }];
   readonly rationale: string;
 }
 
@@ -38,8 +39,9 @@ export function linkStrengthsCardArgs(
   link: Pick<StrengthenPlaceholderTarget, 'from_label' | 'to_label' | 'band'>,
   rationale: string,
 ): LinkStrengthsCardArgs {
+  // #3002 r2 (the three tiers): the host's own card is Olumi's explicit estimate, grounded on the band the model holds.
   return { links: [{ from_label: link.from_label, to_label: link.to_label,
-    ...(link.band === undefined ? {} : { strength: link.band }) }], rationale };
+    ...(link.band === undefined ? {} : { strength: link.band, user_stated: false, basis: rationale }) }], rationale };
 }
 
 export interface StrengthenCard {

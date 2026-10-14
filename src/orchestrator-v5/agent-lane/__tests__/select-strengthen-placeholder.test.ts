@@ -140,7 +140,8 @@ describe('handoff: only a sized target supplies a propose_link_strengths band', 
     const t = linkTargetOf(g, AI.from, AI.to)!;
     const tool = AGENT_TOOLS.find((x) => x.name === 'propose_link_strengths')!;
     const params = tool.parameters as { required: string[]; properties: { links: { maxItems: number; items: { required: string[]; properties: { strength: { enum: string[] } } } } } };
-    const call = { links: [{ from_label: t.from_label, to_label: t.to_label, strength: t.band }] };
+    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
+    const call = { links: [{ user_stated: false, basis: 'Olumi’s own estimate from the model', from_label: t.from_label, to_label: t.to_label, strength: t.band }] };
     expect(call.links).toHaveLength(1);
     for (const key of params.properties.links.items.required) expect(call.links[0]).toHaveProperty(key);
     expect(params.properties.links.items.properties.strength.enum).toContain(t.band);

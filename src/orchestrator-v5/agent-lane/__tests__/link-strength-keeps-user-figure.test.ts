@@ -49,7 +49,10 @@ async function call(tool: 'propose_link_strength' | 'propose_link_strengths', ar
   store.put = (p) => { puts.push(p as never); return put(p); };
   const caps = createAgentCapabilities(d, store);
   const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400c3', authenticated_user_id: null, request_id: 'r', user_text: message, user_turn_text: message };
-  return { r: (await dispatchTool(tool, JSON.stringify(args), ctx as never, caps)) as Record<string, unknown>, puts };
+  // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
+  const sent = tool === 'propose_link_strengths' && Array.isArray(args.links)
+    ? { ...args, links: (args.links as Record<string, unknown>[]).map((l) => ({ user_stated: typeof l.from_words === 'string', ...(typeof l.from_words === 'string' ? {} : { basis: 'Olumi’s own estimate from the model' }), ...l })) } : args;
+  return { r: (await dispatchTool(tool, JSON.stringify(sent), ctx as never, caps)) as Record<string, unknown>, puts };
 }
 
 const LINK = { from_label: 'Cost overrun risk', to_label: 'MRR' };
@@ -164,7 +167,10 @@ describe('⭐ F1: propose_link_strengths leaves the user’s figure out and says
     const msg = 'Make the link from Cost overrun risk to MRR weak, and Feature development spend to Pro plan feature value weak.';
     const { r, puts } = await call('propose_link_strengths', { links: [
       { ...LINK, strength: 'weak', from_words: 'Cost overrun risk to MRR weak' },
-      { from_label: 'Feature development spend', to_label: 'Pro plan feature value', strength: 'weak', from_words: 'Feature development spend to Pro plan feature value weak' },
+      // ⛔ INPUT CHANGE (#3002 r2): this row is F1 (the held link left out), not authorship. Its fragment quote never verified
+      // (a fragment is not a receipt), and an unverified quote is now UNKNOWN and left out, so the other link is sent as the
+      // AI's own explicit estimate (no quote; user_stated false with a basis, the stub default). Every expectation is unchanged.
+      { from_label: 'Feature development spend', to_label: 'Pro plan feature value', strength: 'weak' },
     ], rationale: msg }, msg, withFigure('user_stated'));
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, left_out_user_figures: [refusal('slight')] }));
     expect(puts).toHaveLength(1);

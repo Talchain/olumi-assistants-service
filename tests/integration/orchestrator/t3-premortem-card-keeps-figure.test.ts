@@ -129,7 +129,9 @@ describe('T3 pre-mortem card on the SERVED D1 graph, through the real door', () 
     if (card?.tool !== 'propose_link_strengths') return;
     const before = JSON.parse(JSON.stringify(edgeOf(FROM, TO))) as Edge;
     const { caps, ctx } = agent('Run a pre-mortem on ‘AI Reporting Module Sprint’.');
-    const p = await caps.proposeLinkStrengths!(ctx, card.args as never);
+    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
+    const withClaim = { ...card.args, links: card.args.links.map((l) => ({ user_stated: typeof (l as { from_words?: unknown }).from_words === 'string', ...(typeof (l as { from_words?: unknown }).from_words === 'string' ? {} : { basis: 'Olumi’s own estimate from the model' }), ...l })) };
+    const p = await caps.proposeLinkStrengths!(ctx, withClaim as never);
     expect(p.ok, JSON.stringify(p)).toBe(true);
     expect(String(p.public_label)).toContain(`"${card.args.links[0].from_label}" → "${card.args.links[0].to_label}" as ${CANVAS_BAND_WORD.strong}`);
     expect(String(p.public_label)).toContain('Olumi’s estimate');

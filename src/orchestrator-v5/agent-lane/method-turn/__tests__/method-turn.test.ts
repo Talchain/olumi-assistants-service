@@ -457,7 +457,10 @@ describe('the ONE change card, through the existing door (RC action_target; HARN
       if (isPlaceholderLink(edge)) { expect(card, item.id).toBeNull(); continue; }
       expect(card?.tool).toBe('propose_link_strengths');
       if (card?.tool !== 'propose_link_strengths') return;
-      expect(card.args.links).toEqual([{ from_label: nodeLabel(edge.from), to_label: nodeLabel(edge.to), strength: edgeBandFromMagnitude(Math.abs(edge.strength.mean)) }]);
+      // ⛔ EXPECTATION CHANGED (#3002 r2, the three tiers): the host's own card is Olumi's explicit estimate, so it carries
+      // user_stated:false and its basis (the card's rationale); without them the door would leave it unknown.
+      expect(card.args.links).toEqual([{ from_label: nodeLabel(edge.from), to_label: nodeLabel(edge.to), strength: edgeBandFromMagnitude(Math.abs(edge.strength.mean)),
+        user_stated: false, basis: 'Run a pre-mortem' }]);
       expect([nodeLabel(edge.from), nodeLabel(edge.to)]).toEqual(item.labels);
       expect(bandEnum).toContain(card.args.links[0].strength);
       expect(Object.keys(card.args.links[0])).not.toContain('from_words');

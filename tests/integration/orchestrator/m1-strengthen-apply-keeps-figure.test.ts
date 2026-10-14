@@ -138,7 +138,9 @@ describe('M1: placeholder Strengthen asks for a size; a sized-link card Apply ho
     });
     // A chip press: no typed words (`user_turn_text` empty), exactly as the route binds it.
     const ctx = { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: '', user_turn_text: '' };
-    const p = await caps.proposeLinkStrengths!(ctx, card.args as never);
+    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
+    const withClaim = { ...card.args, links: card.args.links.map((l) => ({ user_stated: typeof (l as { from_words?: unknown }).from_words === 'string', ...(typeof (l as { from_words?: unknown }).from_words === 'string' ? {} : { basis: 'Olumi’s own estimate from the model' }), ...l })) };
+    const p = await caps.proposeLinkStrengths!(ctx, withClaim as never);
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);

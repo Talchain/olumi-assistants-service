@@ -117,7 +117,10 @@ const seedGraph = (): G => ({ nodes: [
 
 let script: ((body: Record<string, unknown>) => unknown)[] = [];
 let openAiCalls = 0;
-const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${openAiCalls}`, arguments: JSON.stringify(args) }] });
+// ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
+const withLinkClaim = (name: string, args: Record<string, unknown>): Record<string, unknown> => name === 'propose_link_strengths' && Array.isArray(args.links)
+  ? { ...args, links: (args.links as Record<string, unknown>[]).map((l) => ({ user_stated: typeof l.from_words === 'string', ...(typeof l.from_words === 'string' ? {} : { basis: 'Olumi’s own estimate from the model' }), ...l })) } : args;
+const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${openAiCalls}`, arguments: JSON.stringify(withLinkClaim(name, args)) }] });
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 
 describe('S-D slice 2 Agent proposals', () => {

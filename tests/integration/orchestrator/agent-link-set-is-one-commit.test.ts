@@ -104,6 +104,8 @@ const L = {
 } as const;
 type Key = keyof typeof L;
 const STRONG: Key[] = ['capacityQuality', 'workloadHours', 'qualityHours', 'hoursFocus'];
+/** A link as the door names it in `left_out_unknown_origin`. */
+const pairName = (k: Key): string => `"${L[k][0]}" \u2192 "${L[k][1]}"`;
 const MODERATE: Key[] = ['capacityOverhead', 'aiUseQuality', 'riskQuality', 'overheadQuality'];
 const setOf = (keys: readonly Key[]) => keys.map((k) => ({
   from_label: L[k][0], to_label: L[k][1], strength: STRONG.includes(k) ? 'strong' : 'moderate' }));
@@ -130,6 +132,12 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => { doorCalls += 1; return commitOptionLevelsInProcess(input, 'req-agent'); },
     });
+    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following
+    // AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
+    const realPropose = caps.proposeLinkStrengths!.bind(caps);
+    caps.proposeLinkStrengths = (c, a) => realPropose(c, { ...a, links: Array.isArray(a.links)
+      ? a.links.map((l) => typeof (l as { from_words?: unknown }).from_words === 'string' ? { user_stated: true, ...l }
+        : { user_stated: false, basis: 'Olumi\u2019s own estimate from the model', ...l }) : a.links } as never);
     return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText, ...interaction } };
   };
 
@@ -457,6 +465,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     for (const k of NAMED_PLACEHOLDERS) expect(linkSizing(edge(k)), `${k}: precondition`).toBe('placeholder');
     expect(linkSizing(edge('capacityQuality')), 'precondition: not a placeholder').not.toBe('placeholder');
     const reviewedBefore = { mean: edge('capacityQuality').strength.mean, source: edge('capacityQuality').provenance?.source, defaulted: edge('capacityQuality').defaulted };
+    const before = Object.fromEntries(MODERATE.map((k) => [k, { mean: edge(k).strength.mean, source: edge(k).provenance?.source }]));
     const p = await caps.proposeLinkStrengths!(ctx, { links: links as never, rationale: 'the user named the bands' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     for (const k of NAMED_PLACEHOLDERS) expect(String(p.public_label), k).toContain(`"${L[k][0]}" \u2192 "${L[k][1]}" as strong, your estimate`);
@@ -471,10 +480,13 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
       expect(edge(k).strength.mean, k).toBe(0.55);
       expect(linkSizing(edge(k)), k).toBe('user');
     }
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): "all other listed effects to moderate" names no link, so its band's
+    // origin is UNKNOWN: old Olumi's estimate written at 0.3 → new left out and said (`left_out_unknown_origin`), each link
+    // unchanged. His three named links are still his (unchanged below).
+    expect((p as { left_out_unknown_origin?: string[] }).left_out_unknown_origin).toEqual(MODERATE.map(pairName));
     for (const k of MODERATE) {
-      expect(Math.abs(edge(k).strength.mean), k).toBe(0.3);
-      expect(edge(k).provenance?.source, k).toBe('cee_hypothesis');
-      expect(edge(k).defaulted, k).toBe(true);
+      expect(edge(k).strength.mean, k).toBe(before[k]!.mean);
+      expect(edge(k).provenance?.source, k).toBe(before[k]!.source);
     }
     // Credited by identity: exactly his three named placeholders (no confirm, no unnamed band); two of them are material.
     expect(confidenceUserStated(), 'only the three placeholders he named are his').toBe(confidence0 + NAMED_PLACEHOLDERS.length);
@@ -489,11 +501,16 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { caps, ctx, store } = agent(words);
     const p = await caps.proposeLinkStrengths!(ctx, { links: keys.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong',
       ...(quote === undefined ? {} : { from_words: quote }) })) as never, rationale: words });
-    expect(p.ok, JSON.stringify(p)).toBe(true);
+    // #3002 r2: a link whose band's origin is UNKNOWN is left out and said; with none left, the set is refused, nothing written.
+    const leftOut = (p as { left_out_unknown_origin?: string[] }).left_out_unknown_origin ?? [];
+    if (p.ok !== true) {
+      expect(p, JSON.stringify(p)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+      return { authors: {} as Record<string, string>, leftOut, credited: censusConfidenceParameters(persisted).confidence_parameters_user_stated - confidence0 };
+    }
     const authors = Object.fromEntries(store.get(String(p.proposal_id))!.operations.map((op) => [op.path, (op.value as { author: string }).author]));
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
-    return { authors, credited: censusConfidenceParameters(persisted).confidence_parameters_user_stated - confidence0 };
+    return { authors, leftOut, credited: censusConfidenceParameters(persisted).confidence_parameters_user_stated - confidence0 };
   };
   const pathOf = (k: Key): string => `${L[k][2]}::${L[k][3]}`;
   // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message.
@@ -505,24 +522,35 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const words = 'set human capacity\u2019s effect on delegation quality to strong';
     const { caps, ctx } = agent(words);
     const p = await caps.proposeLinkStrengths!(ctx, { links: ['capacityQuality', 'capacityOverhead'].map((k) => ({ from_label: L[k as Key][0], to_label: L[k as Key][1], strength: 'strong' })) as never, rationale: words });
-    expect(p).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    // ⛔ EXPECTATION CHANGED (#3002 r2): the copied link is left out and said (UNKNOWN), never relabelled; old whole-set refusal →
+    // new: the other link, with the AI's explicit Olumi claim and basis, is still offered as Olumi's.
+    expect((p as { left_out_unknown_origin?: string[] }).left_out_unknown_origin).toEqual([pairName('capacityQuality')]);
+    expect(JSON.stringify((p as { links?: unknown }).links ?? [])).not.toContain(L.capacityQuality[1]);
     expect(linkSizing(edge('capacityQuality'))).not.toBe('user');
   });
   it.each([['set human capacity\u2019s effect on delegation quality to strong', 'user_stated']] as const)('T2A3 plural: the singular "X\u2019s effect on Y" credits only X → Y, never X\u2019s other link (from_words %s)', async (quote, want) => {
-    const { authors } = await pluralRun('set human capacity\u2019s effect on delegation quality to strong', ['capacityQuality', 'capacityOverhead'], quote);
-    expect(authors).toEqual({ [pathOf('capacityQuality')]: want, [pathOf('capacityOverhead')]: 'model_proposed' });
+    const { authors, leftOut } = await pluralRun('set human capacity\u2019s effect on delegation quality to strong', ['capacityQuality', 'capacityOverhead'], quote);
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): the other link's quote does not verify, so it is UNKNOWN: old
+    // model_proposed → new left out and said. X → Y is still credited.
+    expect(authors).toEqual({ [pathOf('capacityQuality')]: want });
+    expect(leftOut).toEqual([pairName('capacityOverhead')]);
     expect(linkSizing(edge('capacityOverhead'))).not.toBe('user');
   });
   it('T2A3 plural: a second entity named beside the plural ("… effects on delegation quality") gives no blanket credit', async () => {
     // The AI quoting the whole message (the adverse case since the T2A3 ruling): the host's veto keeps it Olumi's.
-    const { authors } = await pluralRun('set human capacity effects on delegation quality to strong', ['capacityQuality', 'capacityOverhead'],
+    const { authors, leftOut } = await pluralRun('set human capacity effects on delegation quality to strong', ['capacityQuality', 'capacityOverhead'],
       'set human capacity effects on delegation quality to strong');
-    expect(authors[pathOf('capacityOverhead')]).toBe('model_proposed');
+    // ⛔ EXPECTATION CHANGED (#3002 r2): old model_proposed → new UNKNOWN, left out and said; never the user's.
+    expect(authors[pathOf('capacityOverhead')]).toBeUndefined();
+    expect(leftOut).toContain(pairName('capacityOverhead'));
     expect(linkSizing(edge('capacityOverhead'))).not.toBe('user');
   });
   it('T2A3 plural: "Olumi says … effects are strong" credits none of the listed links', async () => {
-    const { authors, credited } = await pluralRun(`Olumi says ${PAUL_STRONG}`, STRONG, `Olumi says ${PAUL_STRONG}`);
-    expect(Object.values(authors)).toEqual(STRONG.map(() => 'model_proposed'));
+    const { authors, leftOut, credited } = await pluralRun(`Olumi says ${PAUL_STRONG}`, STRONG, `Olumi says ${PAUL_STRONG}`);
+    // ⛔ EXPECTATION CHANGED (#3002 r2): the quote does not verify for any link, so every band is UNKNOWN: old model_proposed →
+    // new refused, nothing written.
+    expect(authors).toEqual({});
+    expect(leftOut).toEqual(STRONG.map(pairName));
     expect(credited, 'nothing is the user\u2019s').toBe(0);
     for (const k of ['workloadHours', 'qualityHours', 'hoursFocus'] as const) expect(linkSizing(edge(k)), k).not.toBe('user');
   });
@@ -596,14 +624,11 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { caps, ctx, store } = agent(words);
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue',
       strength: 'strong', from_words: words }], rationale: words });
-    expect(p.ok, JSON.stringify(p)).toBe(true);
-    expect(store.get(String(p.proposal_id))!.operations).toEqual([expect.objectContaining({
-      value: expect.objectContaining({ author: 'model_proposed', intent: 'confirm_current', magnitude: 0.5 }),
-    })]);
-    expect(p.public_label).toBe('Record 1 review: "Price" → "Revenue", whose strength nobody has set yet (kept as it is)');
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): the quote binds one named end only, so it does not verify: old Olumi's
+    // review (model_proposed, kept as it is) → new UNKNOWN, refused, nothing prepared or written. Still never the user's.
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(p, 'nothing prepared').not.toHaveProperty('proposal_id'); void store;
     expect(JSON.stringify(edge('capacityQuality'))).toBe(before);
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
-    expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(linkSizing(edge('capacityQuality'))).toBe('placeholder');
     expect(earnsAuthorshipCredit(edgeStrengthProvenance(edge('capacityQuality')))).toBe(false);
   });
@@ -648,9 +673,9 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const links = [...STRONG, ...MODERATE].map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: STRONG.includes(k) ? 'strong' : 'moderate',
       from_words: 'the strong and moderate calls look right' }));
     const p = await caps.proposeLinkStrengths!(ctx, { links: links as never, rationale: said });
-    expect(p.ok, JSON.stringify(p)).toBe(true);
-    expect(String(p.public_label)).not.toContain('your estimate');
-    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): the quote names no link, so every band is UNKNOWN: old Olumi's estimates
+    // applied → new refused, nothing written. Still no link is the user's.
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     for (const k of [...STRONG, ...MODERATE]) expect(edge(k).provenance?.source, k).not.toBe('user_specified');
     expect(await userStated()).toBe(0);
   });
