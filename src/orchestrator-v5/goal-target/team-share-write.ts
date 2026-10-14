@@ -91,8 +91,8 @@ export const TEAM_TIME_LOW_CONFIDENCE = new RegExp(String.raw`\b(?:low|little|li
   + String.raw`|\bnot\s+(?:very\s+|that\s+|so\s+|really\s+|fully\s+|too\s+)?(?:confident|sure|certain)\s+(?:in|about|of)\s+${FORECAST_OBJECT}`
   + String.raw`|\b(?:unsure|uncertain|sceptical|skeptical|doubtful)\s+(?:about|of)\s+${FORECAST_OBJECT}`
   + String.raw`|\bI\s+doubt\s+${FORECAST_OBJECT}|\b(?:don['’]t|do\s+not)\s+(?:trust|believe)\s+${FORECAST_OBJECT}`, 'iu');
-export type TeamTimeRangeRule = keyof typeof TEAM_TIME_WIDENING | 'likely_end';
-export function widenedTeamTime(p: number, rule: keyof typeof TEAM_TIME_WIDENING): { low_months: number; high_months: number } {
+export type TeamTimeRangeRule = keyof typeof TEAM_TIME_WIDENING;
+export function widenedTeamTime(p: number, rule: TeamTimeRangeRule): { low_months: number; high_months: number } {
   const f = TEAM_TIME_WIDENING[rule], step = p >= 1 ? 10 : 100;
   // Factors as whole hundredths, so binary floating point never moves a rounded end (13 × 0.75 = 9.75 → 9.8).
   const end = (factor: number): number => Math.round(p * step * Math.round(factor * 100) / 100) / step;
@@ -111,8 +111,10 @@ export interface BoundTeamTime {
   readonly range_rule?: TeamTimeRangeRule;
   /** S2: the user's verified statements the time was read from (`teamTimeFromStatements`), kept whole beside it. */
   readonly statements?: readonly UserStatement[];
-  /** S2 (PL #94 6135017311): ONE end the user gave, recorded as that end, never a point; the model still needs the other. */
+  /** S2 (PL #94 6135017311): a HARD end the user gave, recorded as that end, never a point. */
   readonly held_bound?: { readonly end: 'lower' | 'upper'; readonly months: number };
+  /** S2 (AIE #94 6174707160): the forecast is kept as stated; this is the ONE hard end still needed for a chance. */
+  readonly held_needs?: 'upper' | 'lower';
 }
 /** AIE 6122738619, verbatim: the Agent re-reads what the user already said, and asks only if the forecast is missing or unclear. */
 export const TEAM_TIME_NOT_STATED = "No change was prepared. Re-read the verified human messages and quote the words that give the current team's time to finish. Ask for that forecast only if the user has not supplied it or its meaning is still ambiguous.";
@@ -198,39 +200,27 @@ export function withAssumedTeamRange(stated: BoundTeamTime, words: string, sente
 }
 
 /**
- * ⭐ S2 — TODAY'S TEAM TIME FROM THE USER'S STATEMENTS (RCA-PAUL-TEST-1617Z Symptom 2; AIE #94 6173489813). Paul said "At least
- * 7 months", then "8 months" when Olumi asked for the likely upper end; the one-quote door turned each into a single forecast
- * with Olumi's 6–10, below his own minimum, and nothing was saved. Each statement is verified by the one shared contract
- * (`verifyStatements`) and the ends combine (`combineStatementEnds`):
+ * ⭐ S2 — TODAY'S TEAM TIME FROM THE USER'S STATEMENTS (RCA-PAUL-TEST-1617Z Symptom 2; AIE #94 6173489813, 6174707160). Paul said
+ * "At least 7 months", then "8 months" when Olumi asked for the likely upper end; the one-quote door turned each into a single
+ * forecast with Olumi's 6–10, below his own minimum, and nothing was saved. Each statement is verified by the one shared
+ * contract (`verifyStatements`) and the ends combine (`combineStatementEnds`):
  *   · a lone figure keeps the E2 (a) convention, unchanged (the user's forecast, Olumi's labelled assumed range);
- *   · two hard ends ("at least 7", "no more than 9") are the user's own range, as given;
- *   · a QUALIFIED end ("likely upper end 8") is not a hard limit (AIE, via the DL 14 Oct). The engine receives the team's share
- *     done by the deadline as a MEAN and SD (`teamShareMoments`: the moments of D / T, D the months to the deadline and T the
- *     time to finish taken as uniform between the range's two ends) and samples that as a bell curve. So Olumi puts the
- *     user's likely end at the `share_within` point of T (AIE 6174458722: 8 in 10), which places the range's end beyond it;
- *     that range is labelled as Olumi's on the card and adopted only by the press. The user's hard end never moves; nothing is
- *     clipped to fit;
- *   · a lone bound, or two statements that disagree, prepares nothing: the Agent asks only for what is missing.
+ *   · two HARD ends ("at least 7", "no more than 9") are the user's own range, as given;
+ *   · anything else (a lone bound, a QUALIFIED end such as "8 months as a likely upper end") is kept AS STATED on its own card,
+ *     with its words and question context (AIE 6174707160). No percentile is assumed for "likely", no end is chosen for the
+ *     user and no number is picked to open the Run: the engine receives the team's share done by the deadline as a mean and
+ *     sd (`teamShareMoments`, the moments of D / T with T uniform between two hard ends), which cannot represent a likely end.
+ *     Readiness then asks the ONE hard end still missing (`teamTimeAsk`), new information, never a repeat;
+ *   · two statements that disagree prepare nothing: the Agent asks which holds.
  */
-export const TEAM_TIME_LIKELY_END = { share_within: 0.8 } as const;
 export const TEAM_TIME_FORMS: readonly StatementForm[] = ['point', 'range', 'lower_bound', 'upper_bound'];
-/** Olumi's assumed hard ends for a range whose qualified end(s) the user's time stays within `share_within` of the time. */
-export function likelyEndRange(low: number, high: number, lowQualified: boolean, highQualified: boolean): { low_months: number; high_months: number } {
-  const tail = 1 - TEAM_TIME_LIKELY_END.share_within;
-  const tLow = lowQualified ? tail : 0, tHigh = highQualified ? tail : 0;
-  const width = (high - low) / (1 - tLow - tHigh);
-  const a = low - tLow * width, b = high + tHigh * width;
-  if (lowQualified && a <= 0) return likelyEndRange(low, high, false, highQualified);
-  // Two decimals, rounded outward: an assumed end never crosses the user's own.
-  return { low_months: Math.min(low, Math.floor(a * 100 + 1e-9) / 100), high_months: Math.max(high, Math.ceil(b * 100 - 1e-9) / 100) };
-}
 export type TeamTimeFromStatements =
   | { readonly kind: 'found'; readonly time: BoundTeamTime; readonly confirmation: TeamTimeConfirmation }
   | { readonly kind: 'refused'; readonly refusal: string; readonly detail: string };
-/** The statements a held bound was recorded from (`teamObservedState`), so a later answer combines with them unrepeated. */
+/** The statements a held forecast was recorded from (`teamObservedState`), so a later answer combines with them unrepeated. */
 export function heldTeamTimeStatements(graph: unknown): readonly UserStatement[] {
   const held = eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time;
-  return held?.held_bound !== undefined && Array.isArray(held.statements)
+  return (held?.needs !== undefined || held?.held_bound !== undefined) && Array.isArray(held.statements)
     ? (held.statements as unknown[]).map(userStatementOf).filter((x): x is UserStatement => x !== undefined) : [];
 }
 export function teamTimeFromStatements(texts: StatementTexts, raw: unknown, held: readonly UserStatement[] = []): TeamTimeFromStatements {
@@ -238,30 +228,28 @@ export function teamTimeFromStatements(texts: StatementTexts, raw: unknown, held
     figuresIn: (q) => teamTimesInQuote(q).map((r) => ({ low: r.low_months, high: r.high_months })),
     sameFigure: (q, given, stated) => teamTimeArgumentsMatch(q, { low_months: given, high_months: given }, { low_months: stated, high_months: stated }) });
   if (v.kind === 'refused') return { kind: 'refused', refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'team_time_not_stated', detail: v.detail };
-  // PL #94 6135017311: an end already recorded (its own press) combines with what the user says now; it is never asked again.
-  const key = (x: UserStatement): string => `${x.form}|${x.low ?? ''}|${x.high ?? ''}|${plainWords(x.quote)}`;
+  // PL #94 6135017311: what is already recorded (its own press) combines with what the user says now; it is never asked again.
+  const key = (x: UserStatement): string => `${x.form}|${x.low ?? ''}|${x.high ?? ''}|${x.qualifier ?? ''}|${plainWords(x.quote)}`;
   const statements = [...held.filter((h) => !v.statements.some((x) => key(x) === key(h))), ...v.statements];
   const ends = combineStatementEnds(statements);
   if (ends.kind === 'conflict') return { kind: 'refused', refusal: 'team_time_statements_conflict', detail: `No change was prepared. ${ends.detail}` };
-  if (ends.kind === 'one_end') {
-    // PL #94 6135017311: ONE end is recorded as that end (its own card), so readiness and the next step ask only for the other.
-    if (held.some((h) => key(h) === key(ends.statement))) {
-      return { kind: 'refused', refusal: 'team_time_needs_other_end', detail: `No change was prepared. ${statementReadingWords(ends.statement, 'months')} is already recorded. `
-        + `Ask only for the ${ends.have === 'lower' ? 'latest' : 'soonest'} time with today's team, never for what the user already said.` };
+  const confirmation = { source: [...new Set(statements.map((s) => s.source))].join('\n'), quote: statements.map((s) => s.quote).join('\n') };
+  if (ends.kind === 'held') {
+    const missing = ends.needs === 'upper' ? 'the longest it could realistically take' : 'the soonest it could realistically finish';
+    if (v.statements.every((x) => held.some((h) => key(h) === key(x)))) {
+      return { kind: 'refused', refusal: 'team_time_needs_other_end', detail: 'No change was prepared. What the user said is already kept as stated. '
+        + `Ask only for ${missing} with today's team, never for what they already said.` };
     }
-    const s = ends.statement;
-    return { kind: 'found', confirmation: { source: s.source, quote: s.quote },
-      time: { low_months: ends.value, high_months: ends.value, held_bound: { end: ends.have, months: ends.value }, statements } };
+    const months = ends.hard_end?.months ?? statements.map((s) => s.low ?? s.high).find((n): n is number => n !== undefined)!;
+    return { kind: 'found', confirmation, time: { low_months: months, high_months: months, held_needs: ends.needs,
+      ...(ends.hard_end !== undefined ? { held_bound: ends.hard_end } : {}), statements } };
   }
   if (ends.kind === 'point') {
     const s = ends.statement;
     return { kind: 'found', confirmation: { source: s.source, quote: s.quote }, time: { ...withAssumedTeamRange({ low_months: ends.value, high_months: ends.value },
       s.quote, sentencesHolding(plainWords(s.source), plainWords(s.quote))), statements } };
   }
-  const confirmation = { source: [...new Set(statements.map((s) => s.source))].join('\n'), quote: statements.map((s) => s.quote).join('\n') };
-  if (!ends.low_qualified && !ends.high_qualified) return { kind: 'found', confirmation, time: { low_months: ends.low, high_months: ends.high, statements } };
-  return { kind: 'found', confirmation, time: { ...likelyEndRange(ends.low, ends.high, ends.low_qualified, ends.high_qualified),
-    range_origin: 'olumi_estimate', range_rule: 'likely_end', statements } };
+  return { kind: 'found', confirmation, time: { low_months: ends.low, high_months: ends.high, statements } };
 }
 
 export interface ApprovedTeamTime {
@@ -285,8 +273,10 @@ export interface ApprovedTeamTime {
   readonly read_digest?: string;
   /** S2: the user's verified statements (`teamTimeFromStatements`), stored whole with the time they give. */
   readonly statements?: readonly UserStatement[];
-  /** S2: the one end the user gave, held as that end on the carrier (`teamObservedState`); never a level. */
+  /** S2: a hard end the user gave, held as that end on the carrier (`teamObservedState`); never a level. */
   readonly held_bound?: { readonly end: 'lower' | 'upper'; readonly months: number };
+  /** S2: the forecast kept as stated, and the one hard end still needed (`teamTimeAsk`). */
+  readonly held_needs?: 'upper' | 'lower';
 }
 
 /**
@@ -310,7 +300,8 @@ export function teamTimeReadHolds(p: { readonly operations: readonly { readonly 
   return typeof read === 'string' && read === teamTimeReadDigest(graph);
 }
 export function teamObservedState(a: ApprovedTeamTime, unit: string): Rec {
-  if (a.held_bound !== undefined) return { quantity: 'months_to_finish', held_bound: a.held_bound, unit: 'months', deadline: a.deadline,
+  if (a.held_needs !== undefined || a.held_bound !== undefined) return { quantity: 'months_to_finish', ...(a.held_bound !== undefined ? { held_bound: a.held_bound } : {}),
+    needs: a.held_needs ?? (a.held_bound?.end === 'lower' ? 'upper' : 'lower'), unit: 'months', deadline: a.deadline,
     reference_date: a.reference_date, ...(a.statements !== undefined ? { statements: a.statements } : {}),
     ...(a.confirmation !== undefined ? { selection: confirmedSelection(a.confirmation) } : {}) };
   if (a.low_months === a.high_months) return { quantity: 'months_to_finish', most_likely: a.low_months,
@@ -326,8 +317,6 @@ export function teamObservedState(a: ApprovedTeamTime, unit: string): Rec {
         forecast: a.forecast_months, forecast_origin: a.confirmation !== undefined ? 'user_confirmed' : 'user',
         ...(a.forecast_words !== undefined ? { forecast_words: a.forecast_words } : {}),
         range_origin: 'olumi_estimate', range_rule: a.range_rule } : {}),
-      // S2: a range Olumi assumed past the user's qualified end is Olumi's (`range_origin`), apart from their statements.
-      ...(a.range_rule === 'likely_end' ? { range_origin: 'olumi_estimate', range_rule: 'likely_end' } : {}),
       ...(a.statements !== undefined ? { statements: a.statements } : {}),
       ...(a.confirmation !== undefined ? { selection: confirmedSelection(a.confirmation) } : {}) } };
 }
@@ -340,8 +329,8 @@ export function teamTimeIsHeld(team: Rec, a: ApprovedTeamTime, unit: string, gra
  * its confirmation the explanation (never a split of the joined text).
  */
 export function teamTimeCardParts(a: ApprovedTeamTime, _unit: string, deliverable: string): { readonly question: string; readonly explanation: string } {
-  if (a.held_bound !== undefined) return { question: `Record ${heldBoundWords(a.held_bound)} for today's team?`,
-    explanation: `The chance stays withheld until you give the ${a.held_bound.end === 'lower' ? 'latest' : 'soonest'} time too.` };
+  if (a.held_needs !== undefined || a.held_bound !== undefined) return { question: 'Keep your forecast for today\'s team as stated?',
+    explanation: `The chance stays withheld until you give the ${(a.held_needs ?? (a.held_bound?.end === 'lower' ? 'upper' : 'lower')) === 'upper' ? 'longest' : 'soonest'} time it could realistically take.` };
   if (a.low_months === a.high_months) return { question: `Use about ${a.low_months} months as your most likely time with today's team?`,
     explanation: 'The chance stays withheld until you give the soonest and latest times.' };
   // ⭐ EBD E2, AIE 6125204695 (b1) verbatim: ONE card for a single forecast. The forecast, its words and the qualifier stay the
@@ -361,8 +350,7 @@ export function teamTimeCardParts(a: ApprovedTeamTime, _unit: string, deliverabl
  * AIE's ACK, `recovery/bB/B-STRINGS-FOR-AIE.md`), and Olumi's range alone if even that is too long.
  */
 export function teamTimeSummary(a: ApprovedTeamTime, unit: string, deliverable: string): string {
-  if (a.held_bound !== undefined) return `Team time: ${heldBoundWords(a.held_bound)}, the other end still needed`;
-  if (a.range_rule === 'likely_end') return `Team time: from your statements, Olumi’s assumed ${a.low_months}–${a.high_months}-month range`;
+  if (a.held_needs !== undefined || a.held_bound !== undefined) return 'Team time: your forecast, kept as stated';
   if (a.statements !== undefined && a.forecast_months === undefined) return `Team time: ${a.low_months}–${a.high_months} months from your statements`;
   if (a.forecast_months !== undefined && a.range_origin === 'olumi_estimate') {
     const both = `Team time: your ${a.forecast_months}-month forecast, Olumi’s assumed ${a.low_months}–${a.high_months}-month range`;
@@ -392,36 +380,47 @@ export function teamTimeConfirmationCardParts(a: ApprovedTeamTime, deliverable: 
 }
 /**
  * S2: the card for a time read from the user's statements. Each statement's own line is quoted; Olumi's reading of it (its
- * form and qualifier) is said once, as theirs to adopt; an end Olumi assumed past a likely end is Olumi's, with its basis.
+ * form and qualifier) is said once, as theirs to adopt. Nothing Olumi did not read from their words is added.
  */
-/** Olumi's added assumption for each qualified end, in plain words ("8 in 10 chances it's done within 8 months"). */
-function likelyEndWords(statements: readonly UserStatement[]): string {
-  const chances = `${Math.round(TEAM_TIME_LIKELY_END.share_within * 10)} in 10 chances`;
-  const used = statements.filter((s) => s.negated !== true && s.qualifier !== undefined);
-  const high = used.find((s) => (s.form === 'upper_bound' || s.form === 'range') && s.high !== undefined)?.high;
-  const low = used.find((s) => (s.form === 'lower_bound' || s.form === 'range') && s.low !== undefined)?.low;
-  return [high === undefined ? '' : `${chances} it’s done within ${high} months`, low === undefined ? '' : `${chances} it takes at least ${low} months`]
-    .filter((x) => x !== '').join(' and ');
-}
 const heldBoundWords = (b: { readonly end: 'lower' | 'upper'; readonly months: number }): string =>
   `your ${b.end === 'lower' ? 'lower' : 'upper'} end of ${b.months} months`;
+/** Olumi's reading of each kept statement, AIE #94 6174707160's words: "no sooner than 7 months", "8 months as a likely upper end, …". */
+function keptReading(s: UserStatement): string | null {
+  const q = s.qualifier;
+  if (s.form === 'lower_bound') return q === undefined ? `no sooner than ${s.low} months` : `${s.low} months as a ${q} lower end, not the soonest possible time`;
+  if (s.form === 'upper_bound') return q === undefined ? `no later than ${s.high} months` : `${s.high} months as a ${q} upper end, not the latest possible time`;
+  if (s.form === 'range') return `${q === undefined ? '' : `${q} `}${s.low}–${s.high} months`;
+  if (s.form === 'point') return `${q === undefined ? 'about' : q} ${s.low} months`;
+  return null;
+}
 function statementsCardParts(a: ApprovedTeamTime, deliverable: string): { readonly quoteLine: string; readonly question: string; readonly disclosure: string } {
   const statements = a.statements ?? [];
-  if (a.held_bound !== undefined) {
-    const said = statements.find((s) => s.form === (a.held_bound!.end === 'lower' ? 'lower_bound' : 'upper_bound') && (s.low ?? s.high) === a.held_bound!.months);
-    return { quoteLine: said === undefined ? '' : `From your message: ‘${said.source}’`,
-      question: `Do you want to record ${said === undefined ? heldBoundWords(a.held_bound) : statementReadingWords(said, 'months').replace(/^a /, 'your ')} for today's team to finish ${deliverable}?`,
+  const used = statements.filter((s) => s.negated !== true);
+  const held = a.held_needs !== undefined || a.held_bound !== undefined;
+  // A lone hard bound keeps #3095's card: that end, and what the model still needs.
+  if (held && a.held_bound !== undefined && used.length === 1 && used[0]!.qualifier === undefined) {
+    const said = used[0]!;
+    return { quoteLine: `From your message: ‘${said.source}’`,
+      question: `Do you want to record ${statementReadingWords(said, 'months').replace(/^a /, 'your ')} for today's team to finish ${deliverable}?`,
       disclosure: `The model still needs the ${a.held_bound.end === 'lower' ? 'latest' : 'soonest'} time before it can run; Olumi will not assume it.` };
+  }
+  if (held) {
+    // ⭐ AIE #94 6174707160, exact: the statements with their question context, Olumi's reading, and what it is NOT turned into.
+    const quoted = [...new Map(used.map((s) => [s.source, s] as const)).values()]
+      .map((s) => `“${s.source}”${s.answering !== undefined ? `, in answer to the question about ${s.answering}` : ''}`);
+    const lead = quoted.length === 0 ? '' : `From your message${quoted.length > 1 ? 's' : ''}: ${quoted.length > 1
+      ? `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}` : quoted[0]}.`;
+    const readings = used.map(keptReading).filter((r): r is string => r !== null);
+    const figures = used.flatMap((s) => [s.low, s.high]).filter((n): n is number => n !== undefined);
+    const lo = Math.min(...figures), hi = Math.max(...figures);
+    return { quoteLine: lead,
+      question: `Olumi reads this as ${readings[0]}${readings.length > 1 ? `, with ${readings.slice(1).join(', and ')}` : ''}. Keep that forecast as stated?`,
+      disclosure: figures.length > 1 && lo < hi ? `Your words have not been assigned a probability or turned into a fixed ${lo}–${hi}-month range.`
+        : 'Your words have not been assigned a probability.' };
   }
   const lines = [...new Set(statements.map((s) => s.source))].map((l) => `‘${l}’`);
   const quoteLine = lines.length === 0 ? '' : `From your message${lines.length > 1 ? 's' : ''}: ${lines.join(' and ')}`;
-  const readings = statements.filter((s) => s.negated !== true).map((s) => statementReadingWords(s, 'months').replace(/^a /, 'your ')).join(' and ');
-  if (a.range_rule === 'likely_end') {
-    return { quoteLine,
-      question: `Do you want to use Olumi’s provisional model for today's team to finish ${deliverable}, based on ${readings}?`,
-      disclosure: `A likely end is not a hard limit: Olumi assumes ${likelyEndWords(statements)}, so its range is ${a.low_months} to ${a.high_months} months. `
-        + 'It informs this approximate calculation; modelled outcomes can fall outside those time bounds.' };
-  }
+  const readings = used.map((s) => statementReadingWords(s, 'months').replace(/^a /, 'your ')).join(' and ');
   return { quoteLine,
     question: `Do you want to use ${a.low_months}–${a.high_months} months for today's team to finish ${deliverable}, from ${readings}?`,
     disclosure: 'The calculation uses bell-curve approximations of progress and can include outcomes outside those time bounds.' };

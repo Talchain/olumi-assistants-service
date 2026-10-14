@@ -41,6 +41,8 @@ export interface UserStatement {
   readonly qualifier_in_quote?: boolean;
   readonly negated?: true;
   readonly conditions?: string;
+  /** The question Olumi asked that this statement answers ("the likely upper end"), in Olumi's words: context, never the user's. */
+  readonly answering?: string;
   /** The form and figure are Olumi's reading of the words until the user's press adopts it. */
   readonly reading: 'olumi';
 }
@@ -55,6 +57,7 @@ export interface StatementArgs {
   readonly qualifier?: unknown;
   readonly negated?: unknown;
   readonly conditions?: unknown;
+  readonly answering?: unknown;
 }
 
 export interface StatementTexts {
@@ -111,11 +114,13 @@ export function verifyStatements(raw: unknown, texts: StatementTexts, rules: Sta
     const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;
     const qualifier = trimmed(given?.qualifier, 80);
     const conditions = trimmed(given?.conditions, 160);
+    const answering = trimmed(given?.answering, 120);
     const negated = given?.negated === true;
     const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: rules.unit,
       ...(rules.reference !== undefined ? { reference: rules.reference } : {}), ...(rules.period !== undefined ? { period: rules.period } : {}),
       ...(qualifier !== undefined ? { qualifier, qualifier_in_quote: plainQuoteWords(quote).toLowerCase().includes(plainQuoteWords(qualifier).toLowerCase()) } : {}),
-      ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}), reading: 'olumi' as const };
+      ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
+      ...(answering !== undefined ? { answering } : {}), reading: 'olumi' as const };
     if (form === 'holds_now') { out.push(base); continue; }
     const stated = rules.figuresIn(quote);
     if (form === 'range') {
@@ -141,36 +146,46 @@ export function verifyStatements(raw: unknown, texts: StatementTexts, rules: Sta
 }
 
 export type CombinedEnds =
-  /** Both ends come from the user's statements; a qualified end ("likely") is not a hard limit. */
-  | { readonly kind: 'range'; readonly low: number; readonly high: number; readonly low_qualified: boolean; readonly high_qualified: boolean }
-  /** One figure and no bound: the only case where a tool may add its own labelled spread. */
+  /** Both ends are HARD ends the user gave ("at least 7", "no more than 9"): the user's own range. */
+  | { readonly kind: 'range'; readonly low: number; readonly high: number }
+  /** One figure and no end at all: the only case where a tool may add its own labelled spread. */
   | { readonly kind: 'point'; readonly value: number; readonly statement: UserStatement }
-  /** One end is the user's; the other is not stated. Never filled by a point or by Olumi's spread. */
-  | { readonly kind: 'one_end'; readonly have: 'lower' | 'upper'; readonly value: number; readonly statement: UserStatement }
+  /**
+   * ⭐ AIE #94 6174707160: what the user said is kept AS STATED, but it is not two hard ends: a lone bound, or a qualified end
+   * ("8 months as a likely upper end, not the latest possible time"). No end is chosen for them, no percentile is assumed and
+   * no number is picked to open the Run; `needs` is the one hard end still missing, the next useful question.
+   */
+  | { readonly kind: 'held'; readonly needs: 'upper' | 'lower'; readonly hard_end?: { readonly end: 'lower' | 'upper'; readonly months: number } }
   | { readonly kind: 'conflict'; readonly detail: string };
 
-/** The ends the statements give. A negated statement ("not 7 months") gives no end. */
+/** The ends the statements give, hard apart from qualified. A negated statement ("not 7 months") gives no end. */
 export function combineStatementEnds(statements: readonly UserStatement[]): CombinedEnds {
   const used = statements.filter((s) => s.negated !== true && s.form !== 'holds_now');
-  const lows = used.filter((s) => (s.form === 'lower_bound' || s.form === 'range') && s.low !== undefined);
-  const highs = used.filter((s) => (s.form === 'upper_bound' || s.form === 'range') && s.high !== undefined);
-  const points = used.filter((s) => s.form === 'point' && s.low !== undefined);
+  const isLow = (s: UserStatement): boolean => (s.form === 'lower_bound' || s.form === 'range') && s.low !== undefined;
+  const isHigh = (s: UserStatement): boolean => (s.form === 'upper_bound' || s.form === 'range') && s.high !== undefined;
+  const hard = (s: UserStatement): boolean => s.qualifier === undefined;
   const distinct = (xs: readonly UserStatement[], end: 'low' | 'high'): number[] => [...new Set(xs.map((s) => s[end]!))];
-  const lowValues = distinct(lows, 'low'), highValues = distinct(highs, 'high'), pointValues = distinct(points, 'low');
-  if (lowValues.length > 1) return { kind: 'conflict', detail: `The user's words give two different lower ends (${lowValues.join(' and ')}). Ask which one holds.` };
-  if (highValues.length > 1) return { kind: 'conflict', detail: `The user's words give two different upper ends (${highValues.join(' and ')}). Ask which one holds.` };
-  const low = lowValues[0], high = highValues[0];
+  const two = (xs: number[], what: string): CombinedEnds | null => (xs.length > 1
+    ? { kind: 'conflict', detail: `The user's words give two different ${what} (${xs.join(' and ')}). Ask which one holds.` } : null);
+  const hardLows = distinct(used.filter((s) => isLow(s) && hard(s)), 'low'), softLows = distinct(used.filter((s) => isLow(s) && !hard(s)), 'low');
+  const hardHighs = distinct(used.filter((s) => isHigh(s) && hard(s)), 'high'), softHighs = distinct(used.filter((s) => isHigh(s) && !hard(s)), 'high');
+  const points = distinct(used.filter((s) => s.form === 'point' && s.low !== undefined), 'low');
+  const clash = two(hardLows, 'lower ends') ?? two(hardHighs, 'upper ends') ?? two(softLows, 'likely lower ends') ?? two(softHighs, 'likely upper ends');
+  if (clash !== null) return clash;
+  const low = hardLows[0], high = hardHighs[0];
   if (low !== undefined && high !== undefined && !(low < high)) {
     return { kind: 'conflict', detail: `The user's lower end (${low}) is not below their upper end (${high}). Ask which one holds.` };
   }
-  const outside = pointValues.find((p) => (low !== undefined && p < low) || (high !== undefined && p > high));
+  // Every other figure the user gave must sit inside their own hard ends.
+  const outside = [...points, ...softLows, ...softHighs].find((p) => (low !== undefined && p < low) || (high !== undefined && p > high));
   if (outside !== undefined) return { kind: 'conflict', detail: `The user's figure ${outside} falls outside their own bound. Ask which one holds.` };
-  const qualified = (xs: readonly UserStatement[]): boolean => xs.some((s) => s.qualifier !== undefined);
-  if (low !== undefined && high !== undefined) return { kind: 'range', low, high, low_qualified: qualified(lows), high_qualified: qualified(highs) };
-  if (low !== undefined) return { kind: 'one_end', have: 'lower', value: low, statement: lows[0]! };
-  if (high !== undefined) return { kind: 'one_end', have: 'upper', value: high, statement: highs[0]! };
-  if (pointValues.length > 1) return { kind: 'conflict', detail: `The user's words give different figures (${pointValues.join(' and ')}). Ask which one holds.` };
-  if (pointValues.length === 1) return { kind: 'point', value: pointValues[0]!, statement: points[0]! };
+  if (low !== undefined && high !== undefined) return { kind: 'range', low, high };
+  if (low !== undefined || high !== undefined || softLows.length > 0 || softHighs.length > 0) {
+    return { kind: 'held', needs: high === undefined ? 'upper' : 'lower',
+      ...(low !== undefined ? { hard_end: { end: 'lower' as const, months: low } } : high !== undefined ? { hard_end: { end: 'upper' as const, months: high } } : {}) };
+  }
+  if (points.length > 1) return { kind: 'conflict', detail: `The user's words give different figures (${points.join(' and ')}). Ask which one holds.` };
+  if (points.length === 1) return { kind: 'point', value: points[0]!, statement: used.find((s) => s.form === 'point')! };
   return { kind: 'conflict', detail: 'None of these statements gives a figure. Quote the words that state one.' };
 }
 
@@ -195,7 +210,8 @@ export function userStatementOf(v: unknown): UserStatement | undefined {
     ...(optional('unit') !== undefined ? { unit: optional('unit') } : {}), ...(optional('reference') !== undefined ? { reference: optional('reference') } : {}),
     ...(optional('period') !== undefined ? { period: optional('period') } : {}),
     ...(qualifier !== undefined ? { qualifier, ...(typeof r.qualifier_in_quote === 'boolean' ? { qualifier_in_quote: r.qualifier_in_quote } : {}) } : {}),
-    ...(r.negated === true ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}) };
+    ...(r.negated === true ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
+    ...(optional('answering') !== undefined ? { answering: optional('answering') } : {}) };
 }
 
 /** How a statement's reading reads on a card: "at least 7 months", "a likely upper end of 8 months". */

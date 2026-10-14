@@ -290,11 +290,25 @@ export function draftedTeamPartOf(graph: unknown): { goal: Rec; team: Rec; deliv
 export function teamTimeAsk(graph: unknown): string | null {
   const part = draftedTeamPartOf(graph);
   if (part === null || goalDeadlineFromRecord(graph, part.goal.id) === undefined || part.team.observed_state?.value !== undefined) return null;
-  // S2 (PL #94 6135017311): one end the user gave is held as that end, so this asks ONLY for the other, never the whole time again.
-  const bound = eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time?.held_bound;
-  if ((bound?.end === 'lower' || bound?.end === 'upper') && Number.isFinite(bound.months)) {
-    return bound.end === 'lower' ? `What is the latest it could take with the team you have now? You said at least ${bound.months} months.`
-      : `What is the soonest the team you have now could finish? You said no more than ${bound.months} months.`;
+  // S2 (PL #94 6135017311; AIE #94 6174707160): what the user said is kept as stated, so this asks ONLY the one hard end still
+  // missing, with the actual reason: new information, never the whole time again.
+  const held = eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time;
+  const bound = held?.held_bound;
+  const needs = held?.needs === 'upper' || held?.needs === 'lower' ? held.needs
+    : bound?.end === 'lower' ? 'upper' : bound?.end === 'upper' ? 'lower' : undefined;
+  if (needs !== undefined) {
+    const kept: Rec[] = Array.isArray(held?.statements) ? held.statements.filter(rec) : [];
+    const soft = kept.find((x) => typeof x.qualifier === 'string' && typeof (needs === 'upper' ? x.high : x.low) === 'number'
+      && (x.form === 'range' || x.form === (needs === 'upper' ? 'upper_bound' : 'lower_bound')));
+    const ask = needs === 'upper' ? 'what\'s the longest it could realistically take with the team you have now?'
+      : 'what\'s the soonest the team you have now could realistically finish?';
+    if (soft !== undefined) {
+      const n = needs === 'upper' ? soft.high : soft.low;
+      return `Your ${n} months is a ${soft.qualifier} ${needs} end, not the ${needs === 'upper' ? 'latest' : 'soonest'} possible time, so the chance `
+        + `needs one more figure: ${ask}`;
+    }
+    const said = bound !== undefined && Number.isFinite(bound.months) ? ` You said ${bound.end === 'lower' ? 'at least' : 'no more than'} ${bound.months} months.` : '';
+    return `${ask.charAt(0).toUpperCase()}${ask.slice(1)}${said}`;
   }
   return Number.isFinite(eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time?.most_likely)
     ? 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?'

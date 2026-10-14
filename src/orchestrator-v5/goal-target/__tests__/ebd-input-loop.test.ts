@@ -567,37 +567,53 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
    */
   const PAUL_LOWER = 'At least 7 months', PAUL_UPPER = '8 months';
   const paulTurn = (): Rec => ({ ...ctx(PAUL_UPPER), user_text: [PAUL_LOWER, PAUL_UPPER].join('\n') });
-  const PAUL_STATEMENTS = [{ quote: PAUL_LOWER, form: 'lower_bound', value: 7 }, { quote: PAUL_UPPER, form: 'upper_bound', value: 8, qualifier: 'likely' }];
-  it('S2 RED→GREEN: Paul\'s "At least 7 months" + "8 months" (likely upper end) → ONE card quoting both → his press → the Run admits; 7 stays his floor, 8 is never a point or a cap', async () => {
+  const PAUL_STATEMENTS = [{ quote: PAUL_LOWER, form: 'lower_bound', value: 7 },
+    { quote: PAUL_UPPER, form: 'upper_bound', value: 8, qualifier: 'likely', answering: 'the likely upper end' }];
+  // AIE #94 6174707160, exact: his words with their question context, Olumi's reading, and what they are NOT turned into.
+  const PAUL_KEPT_CARD = `From your messages: “${PAUL_LOWER}” and “${PAUL_UPPER}”, in answer to the question about the likely upper end. `
+    + 'Olumi reads this as no sooner than 7 months, with 8 months as a likely upper end, not the latest possible time. Keep that forecast as stated? '
+    + 'Your words have not been assigned a probability or turned into a fixed 7–8-month range.';
+  const LONGEST_ASK = 'Your 8 months is a likely upper end, not the latest possible time, so the chance needs one more figure: '
+    + 'what\'s the longest it could realistically take with the team you have now?';
+  it('S2 RED→GREEN (AIE 6174707160): Paul\'s "At least 7 months" + "8 months" (likely upper end) → kept AS STATED, no range or probability of Olumi\'s → the ONE missing figure is asked → his own latest time opens the Run', async () => {
     const w = world();
     const before = JSON.stringify(w.graph());
     const card = await w.caps.proposeTeamTime!(paulTurn() as never, { statements: PAUL_STATEMENTS }) as Rec;
     expect(card.ok).toBe(true);
-    expect(card.public_label).toBe(`From your messages: ‘${PAUL_LOWER}’ and ‘${PAUL_UPPER}’ Do you want to use Olumi’s provisional model for today's team to finish `
-      + 'next feature launch, based on your lower end of 7 months and your likely upper end of 8 months? A likely end is not a hard limit: Olumi assumes '
-      + '8 in 10 chances it’s done within 8 months, so its range is 7 to 8.25 months. It informs this approximate calculation; modelled outcomes can fall '
-      + 'outside those time bounds.');
-    // Never a point of 8, never Olumi's 6–10: his floor is the range's low end, and his likely upper end is not its cap.
-    expect(card.team_time).toMatchObject({ low_months: 7, high_months: 8.25, range_origin: 'olumi_estimate', range_rule: 'likely_end' });
+    expect(card.public_label).toBe(PAUL_KEPT_CARD);
+    // No percentile, no assumed end, no number picked to open the Run: 7 is his lower bound, 8 his likely end, never a cap.
+    expect(card.team_time).toMatchObject({ held_needs: 'upper', held_bound: { end: 'lower', months: 7 } });
+    expect(card.team_time).not.toHaveProperty('range_origin');
     expect(card.team_time).not.toHaveProperty('forecast_months');
-    expect((card.team_time as Rec).statements.map((x: Rec) => [x.quote, x.form, x.low, x.high, x.qualifier, x.qualifier_in_quote, x.speaker, x.reading]))
-      .toEqual([[PAUL_LOWER, 'lower_bound', 7, undefined, undefined, undefined, 'user', 'olumi'], [PAUL_UPPER, 'upper_bound', undefined, 8, 'likely', false, 'user', 'olumi']]);
-    expect(resolveRunAdmission(w.graph()).willProceed, 'nothing opens the Run before the press').toBe(false);
+    expect((card.team_time as Rec).statements.map((x: Rec) => [x.quote, x.form, x.low, x.high, x.qualifier, x.qualifier_in_quote, x.answering, x.speaker, x.reading]))
+      .toEqual([[PAUL_LOWER, 'lower_bound', 7, undefined, undefined, undefined, undefined, 'user', 'olumi'],
+        [PAUL_UPPER, 'upper_bound', undefined, 8, 'likely', false, 'the likely upper end', 'user', 'olumi']]);
     expect(await noPress(w, card.proposal_id)).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
     expect(JSON.stringify(w.graph())).toBe(before);
     expect(await approve(w, card.proposal_id)).toMatchObject({ ok: true, applied: true });
-    const g = w.graph();
-    const time = draftedTeamPartOf(g)!.team.observed_state.stated_time;
-    expect(time).toMatchObject({ quantity: 'months_to_finish', low: 7, high: 8.25, range_origin: 'olumi_estimate', range_rule: 'likely_end',
-      selection: { by: 'user_press', interpretation: 'olumi', source: `${PAUL_LOWER}\n${PAUL_UPPER}`, quote: `${PAUL_LOWER}\n${PAUL_UPPER}` } });
-    expect(time.statements.map((x: Rec) => [x.quote, x.form, x.subject])).toEqual([[PAUL_LOWER, 'lower_bound', { quantity: 'months_to_finish', node_id: draftedTeamPartOf(g)!.team.id }],
-      [PAUL_UPPER, 'upper_bound', { quantity: 'months_to_finish', node_id: draftedTeamPartOf(g)!.team.id }]]);
-    // Approval never makes Olumi's assumed range the user's.
-    expect(time).not.toHaveProperty('forecast_origin');
-    expect(resolveRunAdmission(g).willProceed).toBe(true);
-    expect((buildCanonicalAnalysisReadyFromGraph(g) as Rec).may_run).toBe(true);
+    // Kept on the carrier as stated: no level, the Run withheld, and readiness asks ONLY the one figure still missing, with why.
+    const g1 = w.graph();
+    expect(draftedTeamPartOf(g1)!.team.observed_state?.value).toBeUndefined();
+    expect(resolveRunAdmission(g1).willProceed).toBe(false);
+    expect(eventModelAsk(g1)).toBe(LONGEST_ASK);
+    // Asking to keep the same words again prepares nothing; they are never asked again.
+    expect(await w.caps.proposeTeamTime!(paulTurn() as never, { statements: PAUL_STATEMENTS })).toMatchObject({ ok: false, refusal: 'team_time_needs_other_end' });
+    // His answer to that question alone: two hard ends (7 and his 10), his own range, with his likely 8 kept beside it.
+    const LATEST = 'No more than 10 months.';
+    const range = await w.caps.proposeTeamTime!({ ...ctx(LATEST), user_text: [PAUL_LOWER, PAUL_UPPER, LATEST].join('\n') } as never,
+      { statements: [{ quote: LATEST, form: 'upper_bound', value: 10 }] }) as Rec;
+    expect(range.ok, String(range.detail)).toBe(true);
+    expect(range.team_time).toMatchObject({ low_months: 7, high_months: 10 });
+    expect(range.team_time).not.toHaveProperty('range_origin');
+    expect((range.team_time as Rec).statements.map((x: Rec) => x.quote)).toEqual([PAUL_LOWER, PAUL_UPPER, LATEST]);
+    expect(await approve(w, range.proposal_id)).toMatchObject({ ok: true, applied: true });
+    const g2 = w.graph();
+    expect(draftedTeamPartOf(g2)!.team.observed_state.stated_time).toMatchObject({ low: 7, high: 10 });
+    expect(draftedTeamPartOf(g2)!.team.observed_state.stated_time).not.toHaveProperty('range_origin');
+    expect(resolveRunAdmission(g2).willProceed).toBe(true);
+    expect((buildCanonicalAnalysisReadyFromGraph(g2) as Rec).may_run).toBe(true);
   });
-  it('S2 (PL #94 6135017311): his lone "At least 7 months" is recorded AS a lower end → readiness asks ONLY the latest → his "8 months" alone completes it, never repeated', async () => {
+  it('S2 (PL #94 6135017311): his lone "At least 7 months" is recorded AS a lower end → readiness asks ONLY the longest → his likely "8 months" is kept with it, never a cap', async () => {
     const w = world();
     const lone = await w.caps.proposeTeamTime!(ctx(PAUL_LOWER) as never, { statements: [PAUL_STATEMENTS[0]] }) as Rec;
     expect(lone.ok).toBe(true);
@@ -607,20 +623,20 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     expect(lone.team_time).not.toHaveProperty('range_origin');
     expect(lone.team_time).not.toHaveProperty('forecast_months');
     expect(await approve(w, lone.proposal_id)).toMatchObject({ ok: true, applied: true });
-    // Held as that end, never a point or a level: the Run stays withheld, and its ONE question is the other end only.
+    // Held as that end, never a point or a level: the Run stays withheld, and its ONE question is the longest time.
     const g1 = w.graph();
     expect(draftedTeamPartOf(g1)!.team.observed_state?.value).toBeUndefined();
     expect(resolveRunAdmission(g1).willProceed).toBe(false);
-    expect(eventModelAsk(g1)).toBe('What is the latest it could take with the team you have now? You said at least 7 months.');
+    expect(eventModelAsk(g1)).toBe('What\'s the longest it could realistically take with the team you have now? You said at least 7 months.');
     // The same end again prepares nothing and is never asked again.
     expect(await w.caps.proposeTeamTime!(ctx(PAUL_LOWER) as never, { statements: [PAUL_STATEMENTS[0]] })).toMatchObject({ ok: false, refusal: 'team_time_needs_other_end' });
-    // His next answer alone: the held lower end combines with it, the one card quotes both, and his press opens the Run.
+    // His likely "8 months" alone: combined with the held 7, kept as stated (the AIE card), and the longest is still asked.
     const both = await w.caps.proposeTeamTime!(paulTurn() as never, { statements: [PAUL_STATEMENTS[1]] }) as Rec;
     expect(both.ok).toBe(true);
-    expect(both.team_time).toMatchObject({ low_months: 7, high_months: 8.25, range_rule: 'likely_end' });
-    expect(String(both.public_label).startsWith(`From your messages: ‘${PAUL_LOWER}’ and ‘${PAUL_UPPER}’ `)).toBe(true);
+    expect(both.public_label).toBe(PAUL_KEPT_CARD);
     expect(await approve(w, both.proposal_id)).toMatchObject({ ok: true, applied: true });
-    expect(resolveRunAdmission(w.graph()).willProceed).toBe(true);
+    expect(resolveRunAdmission(w.graph()).willProceed).toBe(false);
+    expect(eventModelAsk(w.graph())).toBe(LONGEST_ASK);
   });
   it('S2: two hard ends are his own range; disagreeing ends ask which holds', async () => {
     const w = world(), before = JSON.stringify(w.graph());
