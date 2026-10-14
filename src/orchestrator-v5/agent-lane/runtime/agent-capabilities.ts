@@ -14,7 +14,7 @@ import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords,
   SET_RISK_OCCURRENCE_OP, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import type { EventRiskV1T } from '../../../schemas/event-risk.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
-import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeFromStatements, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { heldTeamTimeStatements, quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeFromStatements, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { deliverableWrittenIn, draftedTeamPartOf, eventModelAsk, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
@@ -5871,8 +5871,11 @@ export function createAgentCapabilities(
     async proposeTeamTime(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       // S2: the user's statements, from any of their messages, through the one shared contract (`teamTimeFromStatements`).
+      // PL #94 6135017311: an end already recorded combines with what the user says now (`heldTeamTimeStatements`), unrepeated.
+      const early = Array.isArray(args?.statements) ? await readGraph(ctx.scenario_id) : undefined;
       const fromStatements = Array.isArray(args?.statements)
-        ? teamTimeFromStatements({ now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text }, args.statements) : undefined;
+        ? teamTimeFromStatements({ now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text }, args.statements,
+          early === null || early === undefined ? [] : heldTeamTimeStatements(early.raw)) : undefined;
       if (fromStatements?.kind === 'refused') {
         return { ok: false, mutated: false, refusal: fromStatements.refusal, detail: fromStatements.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : fromStatements.detail };
       }
@@ -5892,7 +5895,7 @@ export function createAgentCapabilities(
       if (quoted?.kind === 'refused') return { ok: false, mutated: false, refusal: 'team_time_not_stated', detail: quoted.detail };
       const stated = typedNow ?? (quoted as Extract<NonNullable<typeof quoted>, { kind: 'found' }>).time;
       const confirmation = quoted?.kind === 'found' ? quoted.confirmation : undefined;
-      const g = await readGraph(ctx.scenario_id);
+      const g = early ?? await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
