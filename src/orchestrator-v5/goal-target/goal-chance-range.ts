@@ -260,7 +260,10 @@ export function unsupportedEventOptionWhy(graph: unknown, optionId: string): str
     .map(n => [n.id, n.label as string] as const));
   const parts = [...new Set((Array.isArray(g?.edges) ? g!.edges : []).filter(e => e.from === optionId && kept.has(e.to))
     .map(e => kept.get(e.to)!))];
-  if (parts.length === 0) return "This option's effect on the deadline is not yet modelled. Say what it changes.";
+  if (parts.length === 0) {
+    return "No chance is shown for this option yet: the model doesn't say how it would change the team's pace. "
+      + 'Worth discussing: how much it would speed up the work, and from when.';
+  }
   const named = parts.map(p => `‘${p}’`);
   const list = named.length === 1 ? named[0] : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
   return `No chance is shown for this option yet: it changes ${list}, which this deadline forecast doesn't use yet. `

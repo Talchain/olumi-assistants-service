@@ -52,6 +52,7 @@ describe('an event option with no lever never shows a chance (Paul, c1494f4d)', 
     const g = withTeamTime();
     g.edges = g.edges.filter((e: Rec) => !(e.from === LEGACY && String(e.to).startsWith('event_context_')));
     const w = withheldFor(withShareByDateChanceGate(envelope(), g, 'event_goal') as Rec, LEGACY);
-    expect(w?.message).toBe("This option's effect on the deadline is not yet modelled. Say what it changes.");
+    expect(w?.message).toBe("No chance is shown for this option yet: the model doesn't say how it would change the team's pace. "
+      + 'Worth discussing: how much it would speed up the work, and from when.');
   });
 });
