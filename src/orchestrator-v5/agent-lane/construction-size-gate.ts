@@ -153,6 +153,22 @@ export function keepsEveryUserStatedIdentity(before: ConstructionSizeVerdict, af
     && before.brief_stated_keys.limits.every((k) => l.has(k));
 }
 
+/**
+ * The same check for a redraft that RE-CHOSE an unattested event goal (`unattestedEventGoal`, build-model.ts; DL ruling 14 Oct).
+ * The first draft's goal node is the drafter's unattested claim, so its identity alone is not required. A user's limit is
+ * kept either as a limit or as the redraft goal's own target, with the same comparator, figure, unit and frame: the
+ * user's figure is never lost. Every other node, relationship and limit by identity, exactly as above.
+ */
+export function keepsEveryUserStatedIdentityWhenGoalRechosen(before: ConstructionSizeVerdict, after: ConstructionSizeVerdict,
+  retryGoal: { readonly operator: string; readonly value: number | null; readonly unit?: string | null; readonly frame?: string | null }): boolean {
+  const n = new Set(after.brief_stated_keys.nodes);
+  const e = new Set(after.brief_stated_keys.edges);
+  const l = new Set(after.brief_stated_keys.limits);
+  const asGoal = [retryGoal.operator, retryGoal.value, retryGoal.unit ?? '', retryGoal.frame ?? ''].join('|');
+  return before.brief_stated_keys.nodes.every((k) => k.startsWith('goal:') || n.has(k)) && before.brief_stated_keys.edges.every((k) => e.has(k))
+    && before.brief_stated_keys.limits.every((k) => l.has(k) || (retryGoal.value !== null && k.slice(k.indexOf('|') + 1) === asGoal));
+}
+
 /** An admitted edge the user themselves stated. */
 const isBriefStatedEdge = (e: unknown): boolean =>
   typeof e === 'object' &&
