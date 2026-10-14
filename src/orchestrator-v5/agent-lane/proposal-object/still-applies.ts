@@ -11,9 +11,9 @@
  *  · a hiring-times card: its parts, carriers and deadline stand (`hiringTimesStillApply`);
  *  · a deadline card: the goal's COMPLETE projection (`goalReadingProjectionOf`: label, target, horizon, period, reading; DL 14 Oct,
  *    the PL's "reuse the complete current goal/reading") is exactly the one the card was made against, so ANY change to the goal
- *    lapses it (conservative) and an unrelated link edit does not. A retry after the card's own write landed is the writer's
- *    own landed-retry contract (the write may relabel an event goal with its date). A card made before its subject was
- *    recorded keeps the whole-model rule.
+ *    lapses it (conservative) and an unrelated link edit does not. The rule is strict: a retry after the card's own write
+ *    is continued by the press and the writer from that proposal's own write identity, never from an equal date. A card made
+ *    before its subject was recorded keeps the whole-model rule.
  * Initial build: session 4's staged work (`/private/tmp/b-lapse`, 14 Oct), extended to the complete goal subject.
  * Any other card keeps the whole-model rule.
  */
@@ -43,18 +43,21 @@ export function deadlineSubjectHolds(op: StructuredProposal['operations'][number
   const v = op.value as { deadline?: unknown; expected_deadline?: unknown; expected_goal?: unknown } | null | undefined;
   if (!isRec(v?.expected_goal)) return undefined;
   if (typeof v.deadline !== 'string' || (v.expected_deadline !== null && typeof v.expected_deadline !== 'string')) return false;
+  return deadlineGoalStillBound(graph, op.path, v.expected_deadline, v.expected_goal);
+}
+
+/**
+ * The goal exactly as a deadline card bound it, its date NOT yet written: the one check the press, the lapse, the commit seams
+ * and the store-reading writer all read. Strict: an equal date set by anyone is never taken for the card's own landed write
+ * (Codex r1 on #3024); a retry continues only from THIS proposal's own write identity, which only the press and the writer
+ * hold (its partial progress, its own commit), never this rule.
+ */
+export function deadlineGoalStillBound(graph: unknown, goalId: string, expectedDeadline: string | null, expectedGoal: unknown): boolean {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
-  if (nodes.filter((n) => n.id === op.path).length !== 1 || !nodes.some((n) => n.id === op.path && n.kind === 'goal')) return false;
-  const now = deadlineCardSubjectOf(graph, op.path);
+  if (nodes.filter((n) => n.id === goalId).length !== 1 || !nodes.some((n) => n.id === goalId && n.kind === 'goal')) return false;
+  const now = deadlineCardSubjectOf(graph, goalId);
   if (now === undefined) return false;
-  const heldNow = goalDeadlineFromRecord(graph, op.path) ?? null;
-  // Not yet written: the goal is exactly the one the card was made against, its date included.
-  if (heldNow === v.expected_deadline) return isDeepStrictEqual(now, v.expected_goal);
-  // A retry of the card's own write that landed: its date is held, and the writer's own landed-retry contract decides
-  // (`applyGoalHorizonEdit` / `goalHorizonLandedWriteIsScoped`). The write itself may relabel the goal (an event goal's label
-  // takes the date, `withEventShareDate`), so the projection is not compared here.
-  if (heldNow === v.deadline) return true;
-  return false;
+  return (goalDeadlineFromRecord(graph, goalId) ?? null) === expectedDeadline && isDeepStrictEqual(now, expectedGoal);
 }
 
 export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, graph: unknown): boolean {

@@ -3821,7 +3821,11 @@ export function createAgentCapabilities(
     // The card's recorded subject (its goal's complete projection) is the press's and the lapse's rule too: any change to the
     // goal since the card was made (a renamed goal, a new target, period or reading) writes nothing. A card made before its
     // subject was recorded keeps the date gate above.
-    if (deadlineSubjectHolds(op, approvedRead.raw) === false) {
+    // A retry is continued only from THIS proposal's own landed write (Codex r1 on #3024): its partial progress, or its own
+    // deadline commit in the scenario's ledger (durable across a restart). An equal date set by anyone else is not that.
+    const ownWriteLanded = proposals.partialProgressOf(parent.proposal_id) !== undefined || (opts.readCommittedTurnLedger !== undefined
+      && await opts.readCommittedTurnLedger(ctx.scenario_id).then((l) => l.write_turn_ids.includes(authorisationTurnId(`${parent.proposal_id}#deadline`)), () => false));
+    if (!ownWriteLanded && deadlineSubjectHolds(op, approvedRead.raw) === false) {
       return notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
     }
     if (opts.commitOptionLevels === undefined) {
@@ -3836,7 +3840,10 @@ export function createAgentCapabilities(
       levels: [],
       goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
         reference_date: (op.value as { reference?: string }).reference,
-        stated_months: (op.value as { stated_months?: number }).stated_months },
+        stated_months: (op.value as { stated_months?: number }).stated_months,
+        // The store-reading writer reads the same rule on the base it writes (Codex r1 on #3024).
+        ...((op.value as { expected_goal?: unknown }).expected_goal !== undefined
+          ? { expected_goal: (op.value as { expected_goal?: unknown }).expected_goal, own_write_landed: ownWriteLanded } : {}) },
     });
     // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
     if ((res.status === 'committed' || res.status === 'unconfirmed') ) {

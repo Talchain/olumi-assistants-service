@@ -3473,7 +3473,9 @@ export type CommitOptionLevelsInput = {
    * outside the analysis hash, so it is the writer's own stale gate. A refusal comes back as `refused` with
    * `reason: 'deadline_<reason>'`; nothing is written.
    */
-  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string; readonly stated_months?: number };
+  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string; readonly stated_months?: number;
+    /** The card's bound goal (`still-applies.ts`) and whether THIS proposal's own write already landed. */
+    readonly expected_goal?: unknown; readonly own_write_landed?: boolean };
   /** ⭐ G: ONE approved answer to the goal's open question — `expected_basis` is the stored reading the card showed. Alone. */
   readonly goal_reading?: ApprovedGoalReading;
   readonly goal_steady?: ApprovedGoalSteady;
@@ -3586,7 +3588,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.goal_reading.expected_goal !== undefined ? { expected_goal: input.goal_reading.expected_goal } : {}) } } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
-      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months } } : {}),
+      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months,
+      ...(input.goal_horizon.expected_goal !== undefined ? { expected_goal: input.goal_horizon.expected_goal, own_write_landed: input.goal_horizon.own_write_landed === true } : {}) } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) {
     rethrowRevisionConflict(r.graphConflict);

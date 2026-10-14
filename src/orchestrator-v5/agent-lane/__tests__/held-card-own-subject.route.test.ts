@@ -34,6 +34,8 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { heldCardStillApplies } from '../proposal-object/still-applies.js';
+import { proposalPendingAction } from '../durable-proposal.js';
+import { readExecutableHeldProposalOffers } from '../held-approval-offers.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
 type Rec = Record<string, any>;
@@ -187,14 +189,15 @@ describe('held deadline card: an unrelated approval never lapses it; any change 
 });
 
 describe('the one rule (`heldCardStillApplies`), read at press, at lapse and by the writer', () => {
-  const caps = () => {
+  const caps = (beforeCommit?: (w: ReturnType<typeof world>) => void) => {
     const w = world(); const proposals = new ProposalStore();
     const dispatch: InternalDispatch = async path => {
       if (path.endsWith('/graph')) return { status: 200, json: w.graphWire() };
       if (path.endsWith('/versions')) return { status: 200, json: w.versions() };
       throw new Error(`Unexpected local dispatch ${path}`);
     };
-    const c = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'held-card') });
+    const c = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined,
+      { commitOptionLevels: input => { beforeCommit?.(w); return commitOptionLevelsInProcess(input, 'held-card'); } });
     return { w, proposals, c, ctx: (user: string | null) => ({ scenario_id: w.sid, authenticated_user_id: user, request_id: 'held-card', user_text: DEADLINE_ARGS.rationale, user_turn_text: DEADLINE_ARGS.rationale }) };
   };
   const linkMoved = (g: Rec): Rec => { const e = (g.edges as Rec[]).find((x) => x.from === 'mid_weight_developers' || typeof x.strength?.mean === 'number')!; e.strength = { ...e.strength, mean: 0.25 }; return g; };
@@ -231,6 +234,51 @@ describe('the one rule (`heldCardStillApplies`), read at press, at lapse and by 
     const pid2 = String((await c2.proposeGoalDeadline!(ctx2(null), DEADLINE_ARGS) as Rec).proposal_id);
     expect(await c2.authoriseChange!({ ...ctx2(null), typed_approval_of: pid2 } as never, { proposal_id: pid2 })).toMatchObject({ ok: true, mutated: true });
     expect(goal(w2.read()).goal_horizon).toMatchObject({ deadline: DEADLINE });
+  });
+
+  // ⛔ Codex r1 on #3024 (`/private/tmp/check3024-evidence/check3024-independent.test.ts`), adopted RED → GREEN.
+  it('⛔ Codex r1 STALE WRITE: renamed between the approval read and the writer’s read (the hash unchanged) → the writer refuses, 0 graph writes', async () => {
+    const { w, c, ctx } = caps((x) => { const g = x.read(); const h = hash(g); goal(g).label = 'Different approved subject'; expect(hash(g)).toBe(h); x.replace(g); });
+    const pid = String((await c.proposeGoalDeadline!(ctx(null), DEADLINE_ARGS) as Rec).proposal_id);
+    const pressed = await c.authoriseChange!({ ...ctx(null), typed_approval_of: pid } as never, { proposal_id: pid }) as Rec;
+    expect(pressed).toMatchObject({ ok: false, mutated: false });
+    expect(goal(w.read()).goal_horizon).toBeUndefined();
+    expect(w.writes.filter((x) => x.graph)).toHaveLength(0);
+  });
+
+  it('⛔ Codex r1 FALSE RETRY: the same date set elsewhere and the target changed before the first press → no own write, so it lapses; 0 graph writes', async () => {
+    const { w, c, ctx, proposals } = caps();
+    const pid = String((await c.proposeGoalDeadline!(ctx(null), DEADLINE_ARGS) as Rec).proposal_id);
+    const g = w.read(); goal(g).goal_threshold_raw = 15; goal(g).goal_horizon = { deadline: DEADLINE }; w.replace(g);
+    expect(proposals.partialProgressOf(pid)).toBeUndefined();
+    expect(heldCardStillApplies(proposals.get(pid)!, w.read())).toBe(false);
+    const pressed = await c.authoriseChange!({ ...ctx(null), typed_approval_of: pid } as never, { proposal_id: pid }) as Rec;
+    expect(pressed).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes.filter((x) => x.graph)).toHaveLength(0);
+    // CONTRAST: the same date set elsewhere ALONE (the goal otherwise as bound) is still not this card's own write: refused.
+    const b = caps();
+    const pid2 = String((await b.c.proposeGoalDeadline!(b.ctx(null), DEADLINE_ARGS) as Rec).proposal_id);
+    const g2 = b.w.read(); goal(g2).goal_horizon = { deadline: DEADLINE }; b.w.replace(g2);
+    expect(await b.c.authoriseChange!({ ...b.ctx(null), typed_approval_of: pid2 } as never, { proposal_id: pid2 })).toMatchObject({ ok: false, mutated: false });
+    expect(b.w.writes.filter((x) => x.graph)).toHaveLength(0);
+  });
+
+  it('Codex r1 (non-blocking): the held-offer reader agrees with the rule — after an unrelated change the waiting card is still offered', async () => {
+    const { w, c, ctx, proposals } = caps();
+    const out = await c.proposeGoalDeadline!(ctx(null), DEADLINE_ARGS) as Rec;
+    const pid = String(out.proposal_id), p = proposals.get(pid)!;
+    const chip = { id: approvalChipIdFor(pid), label: String(out.public_label), message: String(out.public_message ?? 'Yes') };
+    const pa = proposalPendingAction(p, chip, { scenario_id: w.sid, emitted_at_iso: new Date().toISOString() });
+    const moved = linkMoved(w.read());
+    expect(heldCardStillApplies(p, moved)).toBe(true);
+    const offered = await readExecutableHeldProposalOffers({ scenarioId: w.sid, userId: null, graphHash: hash(moved), graph: moved,
+      latest: [pa], rows: [{ turn_id: 'offered' }], store: { readCommittedTurn: async () => ({ pending_actions: [pa] }) } } as never);
+    expect(offered.map((x: Rec) => x.proposal_id)).toEqual([pid]);
+    // CONTRAST: its goal renamed → not offered.
+    const renamed = w.read(); goal(renamed).label = 'Team productivity';
+    const none = await readExecutableHeldProposalOffers({ scenarioId: w.sid, userId: null, graphHash: hash(renamed), graph: renamed,
+      latest: [pa], rows: [{ turn_id: 'offered' }], store: { readCommittedTurn: async () => ({ pending_actions: [pa] }) } } as never);
+    expect(none).toEqual([]);
   });
 
   it('PERMISSION: another user’s press is refused, even on an unchanged model; nothing is written', async () => {
