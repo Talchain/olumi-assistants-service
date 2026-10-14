@@ -2712,11 +2712,14 @@ function setAsideEstimatesOf(loss: readonly unknown[]): SetAsideEstimate[] {
 /**
  * ⭐ GEN #2 BY ENTITY (DL ruling 14 Oct 02:0xZ; the #3000 Codex check failed the number match twice: "60% churn", "£60
  * support" and "60 new customers" vanished beside Olumi's withheld 60, and a user-value exemption let a set-aside link's
- * question back). When the draft says what each question is ABOUT (`unknown_concerns`: the question, copied exactly, and
- * the exact labels it concerns, a link as "<from> → <to>"), a question is left out only when its own entry names a link
- * Olumi set aside, by that link's labels: it is asked once, in the contract's words. Nothing is matched by number; a
- * question with no entry, or no such link among its concerns, is asked. A draft without the field keeps the rule below,
- * until the drafter sends it (its producer is PROMPT's constructor text; retiring this fallback is a switch-off for then).
+ * question back). When the draft says what each question is ABOUT (`unknown_concerns`, #3004: `unknown` the question copied
+ * exactly, `concerns` the exact labels it is about, a link as "<from> → <to>"), a question is left out only when EVERY one
+ * of its concerns is a link Olumi set aside, by that link's labels: it is then asked once, in the contract's words. The
+ * AIE's text calls these "proposed bindings, not evidence that a question is resolved or may be removed", and served
+ * drafts bind one question to several referents ("… from an agency campaign, a small internal campaign, and a partner
+ * launch" → three links), so a question that is also about anything else is asked. Nothing is matched by number; a
+ * question with no entry, an empty list, or an entry that is not all labels is asked. A draft without the field keeps the
+ * rule below (retiring that fallback is a switch-off once every served draft sends the field).
  */
 function withoutSetAsideQuestions(questions: string[], setAside: readonly SetAsideEstimate[], concerns: unknown,
   nodes: readonly { readonly id: string; readonly label?: unknown }[]): string[] {
@@ -2730,16 +2733,20 @@ function withoutSetAsideQuestions(questions: string[], setAside: readonly SetAsi
   if (asideLinks.size === 0) return questions;
   const about = new Map<string, readonly string[]>();
   for (const entry of concerns) {
-    const e = entry as { question?: unknown; concerns?: unknown } | null;
-    if (e === null || typeof e !== 'object' || typeof e.question !== 'string' || !Array.isArray(e.concerns)) continue;
-    about.set(e.question.trim(), e.concerns.filter((c): c is string => typeof c === 'string'));
+    const e = entry as { unknown?: unknown; concerns?: unknown } | null;
+    if (e === null || typeof e !== 'object' || typeof e.unknown !== 'string' || !Array.isArray(e.concerns)
+      || !e.concerns.every((c) => typeof c === 'string')) continue;
+    about.set(e.unknown.trim(), e.concerns as string[]);
   }
   const namesAsideLink = (c: string): boolean => {
     const ends = /^(.+?)\s*(?:\u2192|->)\s*(.+)$/u.exec(c.trim());
     const from = ends === null ? undefined : idOf(ends[1]!), to = ends === null ? undefined : idOf(ends[2]!);
     return from !== undefined && to !== undefined && asideLinks.has(`${from}\u0000${to}`);
   };
-  return questions.filter((q) => !(about.get(q.trim()) ?? []).some(namesAsideLink));
+  return questions.filter((q) => {
+    const aboutQ = about.get(q.trim()) ?? [];
+    return !(aboutQ.length > 0 && aboutQ.every(namesAsideLink));
+  });
 }
 
 /** The drafter's questions, less any that writes the amount of a size Olumi set aside (it is asked in the contract's words). */

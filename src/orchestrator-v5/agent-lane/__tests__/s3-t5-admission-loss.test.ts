@@ -197,7 +197,7 @@ describe('GEN #2 by entity: a drafter question is left out only when it is ABOUT
   const withConcerns = (extra: readonly string[], tags: Record<string, readonly string[]>): Episode => {
     const r = raw();
     r.unknowns = [...r.unknowns, ...extra];
-    r.unknown_concerns = Object.entries(tags).map(([question, concerns]) => ({ question, concerns }));
+    r.unknown_concerns = Object.entries(tags).map(([unknown, concerns]) => ({ unknown, concerns }));
     return { ...RAW, calls: [{ ...RAW.calls[0]!, text: JSON.stringify(r) }, ...RAW.calls.slice(1)] };
   };
 
@@ -216,6 +216,16 @@ describe('GEN #2 by entity: a drafter question is left out only when it is ABOUT
     expect(questions).not.toContain(ASIDE_Q);
     expect(questions).not.toContain(ASIDE_NO_FIGURE);
     for (const q of [MRR!, CHURN!, CHURN_60, SUPPORT_60, NEW_60]) expect(questions, q).toContain(q);
+  });
+
+  it('a question ALSO about something else is asked: proposed bindings never remove a question\'s other parts (served D2: one question, three links)', async () => {
+    const { questions } = await build(withConcerns([ASIDE_Q], { [ASIDE_Q]: [ASIDE_LINK, 'Monthly customer churn'] }));
+    expect(questions).toContain(ASIDE_Q);
+  });
+
+  it('an entry whose concerns are not all labels binds nothing: the question is asked', async () => {
+    const { questions } = await build(withConcerns([ASIDE_Q], { [ASIDE_Q]: [ASIDE_LINK, 7 as unknown as string] }));
+    expect(questions).toContain(ASIDE_Q);
   });
 
   it('a concern naming no node by its exact label is not about the set-aside link: the question is asked', async () => {
