@@ -310,7 +310,16 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     const conflict = structuredClone(G); goalOf(conflict).goal_horizon_months = 6;
     const c = await world(conflict).caps.proposeAssumptions(ctx(SAID) as never, holdsNow(SAID) as never) as Rec;
     expect(c).toMatchObject({ ok: false, refusal: 'holds_now_not_recordable' });
-    expect(c.detail).toContain('the goal does not have one clear time window yet');
+    // AIE 6178729504 + SCIENCE 22:40Z: the blocker is the figure's write, said once; never that it is not true now.
+    expect(c.detail).toContain('‘Code quality deterioration’ being true now is the user’s own statement: keep it as theirs');
+    expect(c.detail).toContain('the goal does not have one clear period yet');
+    expect(c.detail).not.toMatch(/cannot be recorded as already true now/);
+    // A window counted from a LAUNCH: true now does not show it holds then, so no p = 1 is offered over it.
+    const launch = structuredClone(G); goalOf(launch).goal_target_basis.reference = 'launch';
+    const l = await world(launch).caps.proposeAssumptions(ctx(SAID) as never, holdsNow(SAID) as never) as Rec;
+    expect(l).toMatchObject({ ok: false, refusal: 'holds_now_not_recordable' });
+    expect(l.detail).toContain('the goal’s period counts from the launch, and being true now does not show it still holds then');
+    expect(l).not.toHaveProperty('risk_holds_now');
     expect(JSON.stringify(w.graph())).toBe(before);
     expect(w.commits()).toBe(0);
     // The writer: a user block needs its verified statement, and a statement never carries Olumi's range.

@@ -38,7 +38,7 @@ import {
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 // ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
 import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
-import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceIsCurrent, riskOccurrenceSubject } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
+import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceGoalLabel, riskOccurrenceIsCurrent, riskOccurrenceSubject, riskOccurrenceWindowFromToday } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
@@ -1377,12 +1377,27 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
   // one current goal period, `riskOccurrenceSubject`, the card's own eligibility), the question is its occurrence within that
   // window, never a level "today". Every other risk keeps its ask, byte for byte.
   const eventPath = gap.kind === 'risk' ? riskOccurrenceSubject(rawGraph, gap.id) : undefined;
-  // ⭐ S2 holds now, from the brief (DL 14 Oct, marketing de659cfd): the brief already says it holds, so its own sentence is
-  // quoted for the user to confirm, never asked again as an occurrence; its card records it (`brief-holds-now` issuer).
-  const said = eventPath?.kind === 'eligible' ? alreadyTrueQuoteOf(eventPath.node) : undefined;
+  /**
+   * ⭐ S2 holds now, from the brief (DL 14 Oct, marketing de659cfd; AIE 6178729504, exact): the brief already says it holds, so its
+   * own sentence is quoted and kept as a current condition, never asked again as an occurrence. The card is named only where the
+   * route offers it (`briefHoldsNowArgs`: the event path, over a window from today); otherwise the reading stays and the ACTUAL
+   * remaining blocker is said once. No "can’t run the numbers" promise: recording it can leave its effect unresolved.
+   */
+  const riskNode = gap.kind === 'risk' && rawGraph !== null && typeof rawGraph === 'object' && Array.isArray((rawGraph as { nodes?: unknown }).nodes)
+    ? ((rawGraph as { nodes: unknown[] }).nodes).find((n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === gap.id) : undefined;
+  const said = alreadyTrueQuoteOf(riskNode);
   if (said !== undefined) {
-    return `Your brief says: “${said}” Olumi reads this as ‘${gap.label.trim()}’ already being true now; confirm it to record it from your words. `
-      + 'Olumi can’t run the numbers until this risk has a figure.';
+    const reading = `Your brief says: “${said}”${/[.!?…]$/.test(said) ? '' : '.'} Olumi reads this as ‘${gap.label.trim()}’ already being true now.`;
+    if (eventPath?.kind === 'eligible' && riskOccurrenceWindowFromToday(rawGraph)) {
+      return `${reading} Confirm or change that reading on the card; how strongly it affects ‘${riskOccurrenceGoalLabel(rawGraph, eventPath.goal_id).trim()}’ is a separate assumption.`;
+    }
+    if (eventPath?.kind === 'eligible') {
+      return `${reading} Whether it still holds during your goal’s period, which counts from the launch, is a separate question. `
+        + 'Ask Olumi to suggest a starting estimate for you to review.';
+    }
+    if (eventPath?.kind === 'ineligible' && eventPath.reason === 'no_window') {
+      return `${reading} To use it in the analysis, your goal needs one clear time period first.`;
+    }
   }
   // S2 (SCIENCE item (2), AIE #94 6173489813): on the event path a risk may be a condition that already holds ("I'm not that
   // experienced with marketing"), so the ask offers that reading first and never assumes it is an event still to happen.

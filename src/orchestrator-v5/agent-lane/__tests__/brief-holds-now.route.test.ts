@@ -25,6 +25,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { briefHoldsNowArgs } from '../held-figure-confirm.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
@@ -40,6 +41,10 @@ const ROUTE_MS = 60_000;
 const riskOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.id === RISK)!;
 /** The served model with the drafter's reading, as admission keeps it. */
 const withQuote = (body: Rec, quote = SENTENCE): Rec => { const b = structuredClone(body); riskOf(b.graph).already_true_quote = quote; return b; };
+/** The served goal counts its 3 months from the LAUNCH; this variant counts them from today (AIE 6178729504's licensed case). */
+const fromToday = (body: Rec): Rec => { const b = structuredClone(body); goalOf(b.graph).goal_target_basis.reference = 'today'; return b; };
+const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+const READING = `Your brief says: “${SENTENCE}” Olumi reads this as ‘${LABEL}’ already being true now.`;
 const asks = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[])
   .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === RISK).map((i) => i.message as string);
 
@@ -72,11 +77,22 @@ describe('S2 holds now from the brief: the drafter reads it, admission keeps onl
     expect(admittedRisk(null)).not.toHaveProperty('already_true_quote');
   });
 
-  it('readiness quotes his sentence for him to confirm, never the occurrence question; a risk without it keeps the occurrence ask', () => {
-    expect(asks(withQuote(SERVED).graph)).toEqual([`Your brief says: “${SENTENCE}” Olumi reads this as ‘${LABEL}’ already being true now; `
-      + 'confirm it to record it from your words. Olumi can’t run the numbers until this risk has a figure.']);
-    expect(asks(withQuote(SERVED).graph).join(' ')).not.toMatch(/How likely/);
+  it('readiness quotes his sentence as a current condition, never the occurrence question; the card is named only where it is offered', () => {
+    // AIE 6178729504, exact, where the card is offered: a window from today.
+    expect(asks(fromToday(withQuote(SERVED)).graph)).toEqual([`${READING} Confirm or change that reading on the card; how strongly it affects `
+      + '‘New customers’ is a separate assumption.']);
+    // Served: his goal's 3 months count from the LAUNCH. True now does not show it holds then; no card is named, the real next step is.
+    expect(asks(withQuote(SERVED).graph)).toEqual([`${READING} Whether it still holds during your goal’s period, which counts from the launch, `
+      + 'is a separate question. Ask Olumi to suggest a starting estimate for you to review.']);
+    const noPeriod = withQuote(SERVED); delete goalOf(noPeriod.graph).goal_target_basis;
+    expect(asks(noPeriod.graph)).toEqual([`${READING} To use it in the analysis, your goal needs one clear time period first.`]);
+    for (const b of [fromToday(withQuote(SERVED)), withQuote(SERVED), noPeriod]) expect(asks(b.graph).join(' ')).not.toMatch(/How likely|can’t run the numbers/);
     expect(asks(SERVED.graph).join(' ')).toContain(OCCURRENCE);
+  });
+
+  it('the route issues the holds-now card only over a window from today (its own gate, before the capability’s)', () => {
+    expect(briefHoldsNowArgs(fromToday(withQuote(SERVED)).graph)).toEqual({ assumptions: [expect.objectContaining({ factor_label: LABEL, holds_now: { quote: SENTENCE } })] });
+    expect(briefHoldsNowArgs(withQuote(SERVED).graph)).toBeUndefined();
   });
 });
 
@@ -139,7 +155,7 @@ const graphWrites = (w: ReturnType<typeof world>) => w.writes.filter((x) => x.gr
 
 describe('S2 holds now from the brief, on the real route: ONE card quoting his sentence, ONE press', () => {
   it('RED→GREEN: his typed brief → the holds-now card quoting it → the press → the risk holds now as HIS; its ask is gone', async () => {
-    const w = world(withQuote(SERVED));
+    const w = world(fromToday(withQuote(SERVED)));
     const turn = await route(w);
     const said = await turn({ message: SERVED.brief_text, source: 'composer' });
     const cards = approvals(said);
@@ -154,6 +170,15 @@ describe('S2 holds now from the brief, on the real route: ONE card quoting his s
     expect(graphWrites(w)).toBe(1);
     expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
     expect(asks(w.graph())).toEqual([]);
+  }, ROUTE_MS);
+
+  it('AIE 6178729504: over a window counted from the LAUNCH (served), no card and no p = 1 write; his reading is still quoted', async () => {
+    const w = world({ ...withQuote(SERVED), scenario_id: randomUUID() });
+    const turn = await route(w);
+    expect(approvals(await turn({ message: SERVED.brief_text, source: 'composer' }))).toEqual([]);
+    expect(graphWrites(w)).toBe(0);
+    expect(riskOf(w.graph())).not.toHaveProperty('event_risk');
+    expect(asks(w.graph()).join(' ')).toContain(`${READING} Whether it still holds during your goal’s period, which counts from the launch`);
   }, ROUTE_MS);
 
   it('CONTRAST: the same risk with no reading from the brief gets no card, and keeps the occurrence ask', async () => {

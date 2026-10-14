@@ -13,7 +13,7 @@ import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalRea
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskHoldsNowCardWords, riskHoldsNowRecordedWords, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, riskStatedOccurrenceCardWords, riskStatedOccurrenceRecordedWords, SET_RISK_OCCURRENCE_OP,
   riskEffectBasisWords, riskOccurrenceGoalLabel, riskOccurrencePostimageNode,
-  userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+  riskOccurrenceWindowFromToday, userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import { typedOccurrenceArgs, verifyOccurrenceStatement, type OccurrenceContext } from '../risk-occurrence-statement.js';
 /** What binds a user's risk chance to one risk beside their words: their canvas selection, and Olumi's preceding question. */
 const occurrenceContextOf = (ctx: AgentToolContext): OccurrenceContext => ({ ...(ctx.grounded_selection !== undefined ? { selection: ctx.grounded_selection } : {}),
@@ -6670,13 +6670,25 @@ export function createAgentCapabilities(
           const holdsNowAsked = isPlainRecord(a?.holds_now) && !chanceAsHoldsNow;
           const userStatesChance = chanceAsHoldsNow || (a?.user_stated === true && Array.isArray(a?.statements) && !isPlainRecord(a?.holds_now));
           const chanceStatements = chanceAsHoldsNow ? [{ quote: holdsNowQuote }] : a?.statements;
-          if (subject?.kind === 'ineligible' && (holdsNowAsked || userStatesChance)) {
-            const why = subject.reason === 'holds_a_level' ? 'it already holds a likelihood or level'
-              : subject.reason === 'has_a_cause' ? 'another factor in the model drives it, so it cannot be set directly'
-              : subject.reason === 'no_window' ? 'the goal does not have one clear time window yet' : 'the model could not be read for it';
+          /**
+           * AIE 6178729504 + SCIENCE 22:40Z (marketing judge row 5): the user's "true now" never depends on a window. What cannot
+           * happen yet is only its write as a figure, so the detail names that blocker once and never denies the condition holds now.
+           * Nor is it written over a window counted from a launch: true now does not show it still holds then.
+           */
+          const holdsNowLaunchWindow = subject?.kind === 'eligible' && holdsNowAsked && !riskOccurrenceWindowFromToday(g.raw);
+          if ((subject?.kind === 'ineligible' && (holdsNowAsked || userStatesChance)) || holdsNowLaunchWindow) {
+            const why = subject?.kind === 'eligible' ? 'the goal’s period counts from the launch, and being true now does not show it still holds then'
+              : subject?.reason === 'holds_a_level' ? 'it already holds a likelihood or level'
+              : subject?.reason === 'has_a_cause' ? 'another factor in the model drives it, so it cannot be set directly'
+              : subject?.reason === 'no_window' ? (userStatesChance ? 'the goal does not have one clear time window yet'
+                : 'the model holds a risk over the goal’s time period, and the goal does not have one clear period yet') : 'the model could not be read for it';
             return { ok: false, mutated: false, refusal: userStatesChance ? 'occurrence_not_recordable' : 'holds_now_not_recordable',
-              detail: `‘${res.node.label}’ cannot be recorded ${userStatesChance ? 'with the user’s chance of it happening' : 'as already true now'}, `
-                + `because ${why}. Nothing was prepared. Say so plainly, keep what the user said in this conversation, and do not ask them to repeat it.` };
+              detail: userStatesChance
+                ? `‘${res.node.label}’ cannot be recorded with the user’s chance of it happening, because ${why}. Nothing was prepared. `
+                  + 'Say so plainly, keep what the user said in this conversation, and do not ask them to repeat it.'
+                : `‘${res.node.label}’ being true now is the user’s own statement: keep it as theirs, and never say it is not true or not current. `
+                  + `It is not written into the model as a figure yet, because ${why}. Nothing was prepared. Say that once, keep what the user `
+                  + 'said in this conversation, and do not ask them to repeat it.' };
           }
           /**
            * ⭐ S2 THE USER'S OWN OCCURRENCE (DL 21:15Z 14 Oct): their complete statement of how likely this risk is
