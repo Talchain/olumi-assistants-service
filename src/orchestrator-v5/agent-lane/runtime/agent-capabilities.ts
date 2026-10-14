@@ -4587,7 +4587,12 @@ export function createAgentCapabilities(
         : sayDeadlineFromToday(stated).replace('from today', `from ${sayDate(reference)}`);
       const question = `Is your deadline ${date} (${fromToday})?`;
       const rationale = typeof args.rationale === 'string' ? args.rationale : '';
-      const sourceDetail = rationale.trim() === '' ? '' : ` Basis supplied for this interpretation: ${rationale}`;
+      // ⛔ ONE TRUE THING (DL 14 Oct; served hiring e2e 8f52bfd5 turn 01: "Is your deadline 14 January 2027 (3 months from
+      // 14 October 2026)? … Basis supplied for this interpretation: … No calendar reference date was supplied, so this retains
+      // the relative three-month timing rather than converting it to a date."). The AI's rationale is the basis of an
+      // INTERPRETATION, so the card shows it only when the card is Olumi's interpretation (`model_proposed`). When the user's
+      // own words resolve to this date against the shown reference, the card says that alone; the rationale stays in provenance.
+      const sourceDetail = authoredBy !== 'model_proposed' || rationale.trim() === '' ? '' : ` Basis supplied for this interpretation: ${rationale}`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
       const quoted = readFrom === undefined || readFrom.trim() === stated.words.trim() ? '' : ` in “${readFrom.trim().replace(/[.!?]+$/, '')}”`;
       const proposal = createProposal({
