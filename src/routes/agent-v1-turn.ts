@@ -129,6 +129,7 @@ import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText, identityPartFiguresToIssue, identityReadingOf } from '../orchestrator-v5/agent-lane/identity-card.js';
+import { heldFigureAskToConfirm, heldFigureConfirmArgs } from '../orchestrator-v5/agent-lane/held-figure-confirm.js';
 import { identityCardOfferable } from '../orchestrator-v5/system-events/identity-confirm-edit.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
@@ -4679,6 +4680,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         : reoffer
         ? 'agent-lane: identity card re-offered by the route (the reading is unconfirmed, nothing else was proposed)'
         : 'agent-lane: identity card issued by the route after the Run');
+    }
+    // ⭐ S2 CONFIRM, ONE PRESS (DL 20:09Z 14 Oct; served 2a35ff31 pricing turn 02): when this turn's Run asked to confirm a
+    // figure the user wrote ("Is your £49 … today's ‘Pro plan price’?") and nothing was proposed, the route issues #3113's
+    // confirm card itself, quoting the brief's one sentence that states it: the SAME tool, once, writing nothing.
+    const heldAsk = fastPath === 'approve' ? undefined : heldFigureAskToConfirm({ toolCalls: result.tool_calls, toolResults: result.tool_results,
+      mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, heldWaiting: liveHolds.length > 0 });
+    const heldConfirm = heldAsk === undefined || readbackGraph == null ? undefined : heldFigureConfirmArgs(readbackGraph, identityOfferBrief, heldAsk);
+    if (heldConfirm !== undefined) {
+      const issued = await dispatchTool('propose_assumptions', JSON.stringify(heldConfirm), toolCtx, capabilities, mode);
+      result = { ...result,
+        tool_calls: [...result.tool_calls, { name: 'propose_assumptions', ok: issued.ok === true, mutated: false,
+          ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
+        tool_results: [...result.tool_results, issued] };
+      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: confirm card for the user\'s own figure issued by the route after the Run');
     }
     const results = result.tool_results;
     const chipApprovals = fastPath === 'approve'
