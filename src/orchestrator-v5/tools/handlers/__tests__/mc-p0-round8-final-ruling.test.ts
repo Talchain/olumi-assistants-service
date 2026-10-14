@@ -369,7 +369,8 @@ it('RD-1/RD-2 LICENCE (a): as-served fa027 door constants withhold, exact names 
   // Science 393023 LICENCE (a)/(b), 7 Oct: the shadow records the placeholder-path withhold.
   expect(shadow.verdict).toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: 'goal_figures_withheld' });
   // Science 393023 LICENCE (a)/(b), 7 Oct: the summary keeps the existing no-leader fallback and disclosure tails.
-  expect(r.summary).toBe("Ran analysis on your current scenario. 'Continue Current Plan' was analysed as no change — the factors it compares against were held at the values your model records today. I supplied 17 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies.");
+  // #3077: the count drops values on options the Run did not send (proof: with only that filter undone, 17 passes).
+  expect(r.summary).toBe("Ran analysis on your current scenario. 'Continue Current Plan' was analysed as no change — the factors it compares against were held at the values your model records today. I supplied 15 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies.");
   expect(isAllowedRunAnalysisAssistantText(r.summary)).toBe(true);
   const persisted = await saveAndReload(saved.graph, [{ fact_type: 'run_analysis', fact_version: 1, noop: false, result: r }]);
   reads.facts = persisted.facts;
