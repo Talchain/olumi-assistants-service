@@ -167,8 +167,10 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       if (!String(url).includes('openai')) throw new Error(`non-OpenAI network call: ${String(url)}`);
       openAiCalls += 1;
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
-      // Both widening passes open with widen-draft's DRAFT_WIDENING_PREAMBLE (not imported: it reorders this file's mocks).
-      if (wideningAnswer !== undefined && String(body['instructions'] ?? '').startsWith("This is Olumi's own check of a first draft;")) {
+      // Both widening passes open with widen-draft's DRAFT_WIDENING_PREAMBLE, read by identity at call time (a static import
+      // reorders this file's mocks). #3045 put Olumi's purpose lines first, so the old opening words no longer start it.
+      const { DRAFT_WIDENING_PREAMBLE } = await import('../runtime/widen-draft.js');
+      if (wideningAnswer !== undefined && String(body['instructions'] ?? '').startsWith(DRAFT_WIDENING_PREAMBLE)) {
         const sent = JSON.parse(String(body['input'])) as { graph: { nodes: { id: string; kind: string; label: string }[] } };
         return new Response(JSON.stringify(say(JSON.stringify(wideningAnswer(sent.graph)))), { status: 200 });
       }
