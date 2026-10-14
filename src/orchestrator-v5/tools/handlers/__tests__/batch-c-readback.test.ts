@@ -340,10 +340,11 @@ const hiringAnswer = (request: Rec): Rec[] => [
   answered(idOf(request, 'Hire two developers'), 0.31, { mean: 8, std: 4, p10: 3, p50: 8, p90: 13 }),
   answered(idOf(request, 'Carry on with the current team'), 0, { mean: 0, std: 0, p10: 0, p50: 0, p90: 0 }),
 ];
-/** AMENDED (AIE #94 6160089127; was "Doing nothing: no change to ‘<goal>’ in this model, by assumption."): a CHANGE goal's
+/** AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): a CHANGE goal's
  * status-quo row is the AIE's generic line. */
-const DOING_NOTHING = (label: string): string => `Carrying on as now: this Run uses ‘${label}’ as its unchanged reference, by assumption. `
-  + `Its own chance of meeting the recorded target is not shown. You can review what could make ‘${label}’ change if you carried on as now.`;
+const DOING_NOTHING = (label: string): string => `This Run cannot give a chance for carrying on as now: it uses ‘${label}’ as its unchanged reference, by `
+  + `assumption. Review the evidence for how ‘${label}’ could change over this Run’s goal period without an `
+  + `intervention, including any forecast or uncertainty already retained in the model.`;
 
 describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "% higher than today", the status quo by assumption, Olumi\'s sizes named', () => {
   it('RED: the stored Run licenses each option on the ruled sentence; the status quo is "no change, by assumption" with no figure or interval', async () => {
@@ -558,11 +559,13 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
     expect(licence.chance_words).toBe('chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months');
     // D2 CONTRAST (DL ruling A, 12 Oct, Batch D): a change target on a level quantity never records the frame it scored in
     // (its threshold is a change, its samples are levels), so carrying on is read on no frame: no "no change, by assumption"
-    // and no "doesn't match today". It keeps its existing typed zero-spread line, verbatim, never a blank or a new withhold.
+    // and no "doesn't match today". It keeps its typed zero-spread reason and side, with the one line that says no future
+    // event (capacity post3010 row 3), never a blank or a new withhold.
     expect(licence.status_quo).toBeUndefined();
     expect(licence.withheld_option_ids).toContain('carry_on_with_the_current_team');
     expect(licence.withheld_reason_by_option?.carry_on_with_the_current_team).toEqual({ reason: 'zero_spread', side: 'falls_short',
-      line: 'Falls short of 10% if today’s figures hold.' });
+      line: 'Chance not shown: the recorded results for this option do not establish that it is certain to meet or miss your goal. '
+        + 'You can review whether the model reflects the uncertainties that matter for this option.' });
     expect(JSON.stringify(licence)).not.toMatch(/by assumption|doesn’t match/);
     // Its row is the Run's own, intervals kept: none is removed for an assumption that is not claimed.
     expect((result.enrichment.option_comparison as Rec[]).find((r) => r.option_id === 'carry_on_with_the_current_team')!.outcome)

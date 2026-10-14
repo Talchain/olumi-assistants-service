@@ -22,13 +22,15 @@ const SQ = 'keep_current_staffing';
 const SPECIALIST = 'add_one_specialist';
 const SERVED_LINE = (FX.served_licence.withheld_reason_by_option as Record<string, { line: string }>)[SQ]!.line;
 /**
- * AMENDED (AIE #94 6160089127; was "Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption."): the
+ * AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): the
  * status-quo row's LEVEL line. This goal holds today's 80 and a target of at least 100 in one unit, spelt as each served graph
  * holds it. These rows are about the Run's frame; the words are pinned in `status-quo-row-words.test.ts`.
  */
-const byAssumptionIn = (unit: string): string => `Carrying on as now: this Run uses ‘Weekly support capacity’ as its unchanged reference. `
-  + `The model's held reference value is 80 ${unit}; the target for this Run is at least 100 ${unit}. This option's own chance of `
-  + `meeting that target is not shown. You can review what could make ‘Weekly support capacity’ change if you carried on as now.`;
+const byAssumptionIn = (unit: string): string => `This Run cannot give a chance for carrying on as now: it uses ‘Weekly support capacity’ as its `
+  + `unchanged reference, by assumption. The model’s held reference value is 80 ${unit}; the target for this `
+  + `Run is at least 100 ${unit}. Review the evidence for how ‘Weekly support capacity’ could change over `
+  + `this Run’s goal period without an intervention, including any forecast or uncertainty already retained `
+  + `in the model.`;
 const BY_ASSUMPTION = byAssumptionIn('tickets per week');
 /** The run-4 served graph (`FLOAT`) spells the same unit "tickets / week". */
 const FLOAT_BY_ASSUMPTION = byAssumptionIn('tickets / week');

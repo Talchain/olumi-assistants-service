@@ -18,15 +18,17 @@ import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysi
 import { withholdOptionLimitScores } from '../../../orchestrator/context/constraint-feasibility.js';
 
 /**
- * AMENDED (AIE #94 6160089127; were "Doing nothing: no change to ‘<goal>’ in this model, by assumption."): the status-quo row's
+ * AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): the status-quo row's
  * two exact lines. Hiring's ‘Productivity’ is a CHANGE goal: the generic line. ‘Development capacity’ is a LEVEL goal holding
  * today's 75% and a target of at least 85% in one unit: the LEVEL line, naming both as recorded values (never "meets").
  */
-const SQ_GENERIC_PRODUCTIVITY = 'Carrying on as now: this Run uses ‘Productivity’ as its unchanged reference, by assumption. Its own '
-  + 'chance of meeting the recorded target is not shown. You can review what could make ‘Productivity’ change if you carried on as now.';
-const SQ_LEVEL_CAPACITY = 'Carrying on as now: this Run uses ‘Development capacity’ as its unchanged reference. The model\'s held '
-  + 'reference value is 75%; the target for this Run is at least 85%. This option\'s own chance of meeting that target is not shown. '
-  + 'You can review what could make ‘Development capacity’ change if you carried on as now.';
+const SQ_GENERIC_PRODUCTIVITY = 'This Run cannot give a chance for carrying on as now: it uses ‘Productivity’ as its unchanged '
+  + 'reference, by assumption. Review the evidence for how ‘Productivity’ could change over this Run’s goal '
+  + 'period without an intervention, including any forecast or uncertainty already retained in the model.';
+const SQ_LEVEL_CAPACITY = 'This Run cannot give a chance for carrying on as now: it uses ‘Development capacity’ as its unchanged '
+  + 'reference, by assumption. The model’s held reference value is 75%; the target for this Run is at least '
+  + '85%. Review the evidence for how ‘Development capacity’ could change over this Run’s goal period '
+  + 'without an intervention, including any forecast or uncertainty already retained in the model.';
 type Rec = Record<string, unknown>;
 
 // ── Hiring: productivity, % change from today; +10 by month three ─────────────────────────────────────────────────────
@@ -596,8 +598,9 @@ const capacityWireRun = (): Rec => ({ option_comparison: [
   { option_id: 'two', probability_of_goal: 0.31, probability_of_goal_precision: wilson(0.31, 3100), outcome: { mean: 0.83, std: 0.03, p10: 0.79, p50: 0.83, p90: 0.87 } },
   { option_id: 'carry_on', probability_of_goal: 0, probability_of_goal_precision: wilson(0, 0), outcome: { mean: 0.75, std: 0, p10: 0.75, p50: 0.75, p90: 0.75 } },
 ] });
-/** The status quo's typed zero-spread line (Science §(ab)(2)), its true reading when the frame is unknown. */
-const ZERO_SPREAD_LINE = 'Falls short of 85% if today’s figures hold.';
+/** The status quo's typed zero-spread line, its true reading when the frame is unknown: no future event (capacity post3010 row 3). */
+const ZERO_SPREAD_LINE = 'Chance not shown: the recorded results for this option do not establish that it is certain to meet or miss your goal. '
+  + 'You can review whether the model reflects the uncertainties that matter for this option.';
 /** The field this Run records for itself (run-analysis.ts: `sentGoalThresholdOf` beside `withGoalChanceLicence`). */
 const recordedField = (run: Rec, g: Rec) => sentGoalThresholdOf(run, g, 'capacity', () => false);
 const wireLicence = (g: Rec = capacityGraph(), run: Rec = capacityWireRun()) => goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {});

@@ -254,11 +254,13 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
 
 /** The DISPLAYED whole percentage of a chance: the figure the user reads, and the one Science's gap is tested on. */
 /**
- * Science §(ab)(2) face words for a zero-spread option (93 @0ecd69e4, ruled (a): never " / month" on the face):
- *  · the goal's level projected from monthly rates (an accumulation carrier): "Meets £20,000 a month by month 12 if today’s
- *    rates hold." / "Falls short of £20,000 a month by month 12 if today’s rates hold.";
- *  · no carrier and no horizon: "Meets £20,000 a month if today’s figures hold." / "Falls short of … if today’s figures hold.";
- *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
+ * ⛔ THE PLAIN ZERO-SPREAD CELL SAYS WHAT ITS PREDICATE PROVES, AND NO FUTURE EVENT (capacity judge post3010 row 3, 14 Oct; PL
+ * #94 6135017311 and 05:25Z; AIE packet 247cd85a numeric_scope[2]). Served `keep_current_staffing`: "Falls short of 100 tickets
+ * per week if today’s figures hold." claimed the event's outcome. What the cell has is `zeroSpread` (`goal-certainty.ts`):
+ * true on EQUAL low and high deciles (p10 = p90) before any std test, so it never proves "every run the same" or "no
+ * uncertainty". The plain no-carrier, no-horizon variant now says that, and no more; `side` stays as data, never said.
+ * Unchanged (Science §(ab)(2) / 93 §(o′)): the accumulation-carrier variant ("… by month N if today’s rates hold.") and the
+ * stated-horizon, no-carrier line.
  */
 /**
  * How a Run reads carrying on as now (AIE status-quo disposition, 12 Oct, #94 6117119450):
@@ -348,19 +350,40 @@ function statusQuoReadingOf(a: {
   return ['p10', 'p50', 'p90', 'mean'].some((k) => away(o[k])) ? 'moved' : 'assumed';
 }
 
+/**
+ * AIE packet 281e8b3d `zero.line` (#94 6162120876), byte for byte: the plain zero-spread cell's line, label-free, the status quo
+ * included. True under both arms of `zeroSpread` (equal deciles, or a std within tolerance): it says only that the recorded
+ * results do not establish certainty, never a statistical diagnosis, a figure or a forecast.
+ */
+export const ZERO_SPREAD_LINE = 'Chance not shown: the recorded results for this option do not establish that it is certain to meet or miss your goal. '
+  + 'You can review whether the model reflects the uncertainties that matter for this option.';
+
+/** The goal's target as the face says it: the shared formatter's rate separator (" / month") is the panel's, the face's is "a month". */
+const zeroSpreadFigure = (value: number, unit: string): string => sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
+
+/**
+ * The RETIRED plain words, exactly as this producer wrote them before 14 Oct for a Run's own target: kept ONLY so the
+ * stored-licence reader can recognise that exact variant on a historical Run (by identity with its stored target, never a
+ * pattern) and say the current line instead. Never written.
+ */
+function retiredPlainZeroSpreadLine(side: 'meets' | 'falls_short', value: number, unit: string): string {
+  const figure = zeroSpreadFigure(value, unit);
+  return side === 'meets' ? `Meets ${figure} if today’s figures hold.` : `Falls short of ${figure} if today’s figures hold.`;
+}
+
 function zeroSpreadReasons(
   sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown, envelope: unknown,
 ): Record<string, GoalChanceZeroSpread> {
   const verdict = goalHorizonVerdict(graph, envelope);
   const rates = ordinaryTimingOf(graph, envelope).forecast;
   const months = heldGoalHorizonMonths(goal);
-  // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
-  const figure = sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
+  const figure = zeroSpreadFigure(value, unit);
   const out: Record<string, GoalChanceZeroSpread> = {};
   for (const [id, side] of Object.entries(sides)) {
-    const tail = rates ? `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.` : ' if today’s figures hold.';
+    const tail = `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.`;
     const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine()
-      : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`;
+      : rates ? (side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`)
+      : ZERO_SPREAD_LINE;
     out[id] = { reason: 'zero_spread', side, line };
   }
   return out;
@@ -1469,7 +1492,14 @@ export function goalChanceLicenceForAgent(result: unknown): {
     if (!withheld?.includes(id) || (isRec(r.pct_by_option) && Object.hasOwn(r.pct_by_option, id))
       || !isRec(reason) || typeof reason.line !== 'string' || reason.line.trim() === '' || /[\r\n]/.test(reason.line)) continue;
     if (reason.reason === 'zero_spread' && (reason.side === 'meets' || reason.side === 'falls_short')) {
-      zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line: reason.line };
+      // Capacity post3010 row 3: ONLY the retired plain variant, recognised by identity with the words this Run's producer wrote
+      // for its own stored target, is said with the current line. Every other stored line (the carrier's rates line, §(o′)'s
+      // horizon line) is the historical Run's own, kept with its figures, period and currentness.
+      const storedTarget = isRec(r.target) && finite(r.target.value) && typeof r.target.unit === 'string' ? r.target : undefined;
+      const retired = storedTarget !== undefined
+        && reason.line === retiredPlainZeroSpreadLine(reason.side, storedTarget.value as number, storedTarget.unit as string);
+      const line = retired ? ZERO_SPREAD_LINE : reason.line;
+      zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line };
     } else if (reason.reason === 'reference_moved' && reason.side === undefined) {
       // AIE status-quo disposition: the status quo's row disagrees with the same-draw reference (a typed reason, no side).
       zeroSpreadReasons[id] = { reason: 'reference_moved', line: reason.line };

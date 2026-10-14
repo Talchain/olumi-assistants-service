@@ -44,6 +44,30 @@ export interface GoalChanceWithheld {
   readonly note: string;
   /** The options whose chance was withheld. Absent = every option (#416 / #422). */
   readonly option_ids?: readonly string[];
+  /** Set only where the host shows `say` at the end of this reply (`SAY_SHOWN_NOTE`): the build's first pass and a Run. */
+  readonly say_shown?: string;
+}
+
+/**
+ * ⭐ SAY-SHOWN (capacity post3010 row 4; PL 03:51Z / 04:44Z; DL 14 Oct). Served: the AI explained the withheld cause in its
+ * own words, then the host's `say` said the same cause again. On a turn whose first pass or Run withheld the chance, the
+ * host shows `say` (the route's chance face), so the AI is told so and spends its reply elsewhere. The route keeps this
+ * promise (`goalChanceSayPromisedThisTurn`). The AIE's text, byte for byte (packet 6e52e896 `say_shown.text`).
+ */
+export const SAY_SHOWN_NOTE =
+  "The attached `say` is shown once, word for word, in this reply. Do not repeat its chance statement or withholding reason. Answer the user’s question and add relevant reasoning, qualifications or an available next step that `say` does not cover.";
+
+/** Whether the latest Run this turn told the AI its `say` is shown (`say_shown`); a later Run without it clears it. */
+export function goalChanceSayPromisedThisTurn(toolResults: readonly unknown[]): boolean {
+  let promised = false;
+  for (const r of toolResults) {
+    const rec = recordOf(r);
+    const firstPass = recordOf(rec?.first_analysis);
+    const chance = recordOf(rec?.goal_chance) ?? recordOf(firstPass?.goal_chance);
+    if (chance?.withheld === true && typeof chance.say === 'string' && chance.say.trim() !== '') promised = typeof chance.say_shown === 'string';
+    else if (rec?.ran === true || firstPass?.ran === true) promised = false;
+  }
+  return promised;
 }
 
 // DL words ruling (8 Oct): chance vocabulary, with the same held-target words as the horizon line.
