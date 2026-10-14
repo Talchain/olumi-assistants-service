@@ -2244,7 +2244,7 @@ export async function buildModelFromBrief(
     // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
     // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
     const setAside = setAsideEstimatesOf(admitted.loss);
-    const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside, brief);
+    const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
     // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
     // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
     // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
@@ -2691,21 +2691,12 @@ function setAsideEstimatesOf(loss: readonly unknown[]): SetAsideEstimate[] {
   });
 }
 
-/**
- * The drafter's questions, less any that writes the amount of a size Olumi set aside (it is asked in the contract's words).
- * ⛔ AN AMOUNT THE USER WROTE IS NEVER OLUMI'S SET-ASIDE FIGURE (T5 D3 A r2; AIE generation item 4, "the numeric-equality
- * question deletion"): "The interview evidence gives a 10–20% churn range …" and "… the stated 400 customers and £20
- * monthly price …" were deleted because 20 and 400 equalled two of Olumi's set-aside sizes. A written amount counts only
- * when the brief does not write it (same magnitude and kind, `findStatedAmounts`): those are the user's figures.
- */
-function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAsideEstimate[], brief: string): string[] {
+/** The drafter's questions, less any that writes the amount of a size Olumi set aside (it is asked in the contract's words). */
+function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAsideEstimate[]): string[] {
   const amounts = setAside.map((s) => s.amount).filter((a): a is number => a !== null && a !== 0).map(Math.abs);
   if (amounts.length === 0) return questions;
   const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, a, b);
-  const theUsers = findStatedAmounts(brief);
-  const usersOwn = (w: ReturnType<typeof findStatedAmounts>[number]): boolean => theUsers.some((u) => u.kind === w.kind
-    && (u.currencyCode ?? null) === (w.currencyCode ?? null) && same(Math.abs(u.magnitude), Math.abs(w.magnitude)));
-  return questions.filter((q) => !findStatedAmounts(q).some((w) => !usersOwn(w) && amounts.some((a) => same(Math.abs(w.magnitude), a))));
+  return questions.filter((q) => !findStatedAmounts(q).some((w) => amounts.some((a) => same(Math.abs(w.magnitude), a))));
 }
 
 export function userFacingDrafterQuestions(parked: unknown): string[] {

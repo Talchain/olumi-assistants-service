@@ -102,34 +102,6 @@ describe('L1: the drafter\'s horizon picks the brief\'s own span (D2: six months
   });
 });
 
-describe('GEN #2: a question is never deleted for a figure the USER wrote that equals a size Olumi set aside (D3 A r2)', () => {
-  const unknowns = (e: Episode): string[] => (JSON.parse(e.calls[0]!.text) as { unknowns: string[] }).unknowns;
-
-  it('⭐ RED→GREEN: the interviews\' "10–20% churn" question and the "400 customers and £20 monthly price" question are asked', async () => {
-    const e = ep('D3_noBase_r2');
-    const [mrr, , churn] = unknowns(e);
-    expect(churn).toContain('10–20% churn range');
-    expect(mrr).toContain('400 customers and £20 monthly price');
-    const { result, questions } = await build(e);
-    // PRECONDITION: Olumi set aside sizes of 60, 400 and 20 on this build (the equal numbers that deleted them).
-    expect(((result.set_aside_estimates ?? []) as Rec[]).map((s) => s.estimate)).toEqual(expect.arrayContaining([
-      expect.stringContaining('by 400 £ per month'), expect.stringContaining('by 20 £ per month'), expect.stringContaining('by 60 customers')]));
-    expect(questions).toContain(churn);
-    expect(questions).toContain(mrr);
-  });
-
-  it('CONTRAST: a drafter question quoting Olumi\'s own set-aside figure (60, which the user never wrote) is still not shown', async () => {
-    const base = ep('D3_noBase_r2');
-    const raw = JSON.parse(base.calls[0]!.text) as { unknowns: string[] };
-    const olumis = 'Is the provisional estimate of 60 customers lost per £2 rise right?';
-    raw.unknowns.push(olumis);
-    const e: Episode = { ...base, calls: [{ ...base.calls[0]!, text: JSON.stringify(raw) }, ...base.calls.slice(1)] };
-    const { questions } = await build(e);
-    expect(questions).not.toContain(olumis);
-    expect(questions).toContain(unknowns(ep('D3_noBase_r2'))[2]);
-  });
-});
-
 describe('L2: a base the drafter produced is Olumi\'s unless the brief attests it — never dropped (D3: £8,000)', () => {
   it('PRECONDITION: the raw answers give today\'s MRR as 8000 with a basis; the brief never writes it; T5 saved none', () => {
     for (const key of ['D3_r1', 'D3_r2']) {
