@@ -42,7 +42,11 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     });
   });
 
-  it('the face line (Science 93 @0ecd69e4): "a month", never " / month"; rates + horizon with a carrier; figures without one', () => {
+  // ⛔ Capacity post3010 row 3 (PL #94 6135017311): Science 93's "Meets / Falls short of … if today’s rates|figures hold" face words
+  // said a future event and are retired; every such cell says the ONE line, its side kept as data. §(o′) is unchanged.
+  it('the face line: §(o′) with no carrier and a horizon; otherwise the one zero-spread line, never a future event; side kept', () => {
+    const LINE = 'Chance not shown: every run of this model gave this option the same result for your goal, so the model holds no '
+      + 'uncertainty for it from which to give a chance. You can review whether the figures this option rests on are really that certain.';
     const short = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 0, 0, 18500) : r));
     const acc = structuredClone(graph);
     acc.nodes.find((n: Rec) => n.id === 'pro_paying_subscribers').nonlinear_identity = { operation: 'accumulation',
@@ -62,12 +66,12 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     const evaluated = bound.nodes.filter((n: Rec) => n.nonlinear_identity).map((n: Rec) => ({
       node_id: n.id, ...n.nonlinear_identity, evaluated: true,
     }));
-    expect(lineOf(bound, fixedRates, evaluated)).toEqual({ reason: 'zero_spread', side: 'meets', line: 'Meets £20,000 a month by month 12 if today’s rates hold.' });
-    expect(lineOf(bound, short, evaluated)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: 'Falls short of £20,000 a month by month 12 if today’s rates hold.' });
+    expect(lineOf(bound, fixedRates, evaluated)).toEqual({ reason: 'zero_spread', side: 'meets', line: LINE });
+    expect(lineOf(bound, short, evaluated)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
     const noHorizon = structuredClone(graph);
     delete noHorizon.nodes.find((n: Rec) => n.id === 'mrr').goal_horizon_months;
-    expect(lineOf(noHorizon, fixedRates).line).toBe('Meets £20,000 a month if today’s figures hold.');
-    expect(lineOf(noHorizon, short).line).toBe('Falls short of £20,000 a month if today’s figures hold.');
+    expect(lineOf(noHorizon, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: LINE });
+    expect(lineOf(noHorizon, short)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
     expect(lineOf(graph, short).line).toBe('Not shown yet: needs month-by-month changes');
     // CONTRAST: an exact 1 withheld for an UNSIZED path (spread present, not earned) carries no zero-spread reason.
     const spread = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 1, 400, 22500) : r));

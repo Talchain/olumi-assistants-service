@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   GOAL_CHANCE_LICENSED, agentLicenceRecordOf, goalChanceDisplayForAgent,
   goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent, goalChanceLicenceOf,
-  nearestFiveGoalChancesForAgent, sentGoalThresholdOf, withGoalChanceLicence,
+  nearestFiveGoalChancesForAgent, sentGoalThresholdOf, withGoalChanceLicence, ZERO_SPREAD_LINE,
 } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
 import * as horizonLine from '../../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
 import {
@@ -306,11 +306,13 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
       for (const key of ['enrichment', 'public_enrichment']) {
         licenceRecord(expected[key])!.withheld_reason_by_option[KEEP].line = alternate;
       }
-      keepCell(expected.canonical_view).reasons[0].message = alternate;
-      keepCell(expected.canonical_view).why = alternate;
+      // Capacity post3010 row 3: the reader says §(o′)'s own line where the Run stored it, else the ONE zero-spread line, so even
+      // a selector that produced the retired "… if today’s figures hold" words is never said on the screen.
+      keepCell(expected.canonical_view).reasons[0].message = ZERO_SPREAD_LINE;
+      keepCell(expected.canonical_view).why = ZERO_SPREAD_LINE;
       expect(after).toEqual(expected);
       expect(keepCell(after.canonical_view).face).toBe('Chance not shown yet');
-      expect(keepCell(after.canonical_view).why).toBe(alternate);
+      expect(keepCell(after.canonical_view).why).toBe(ZERO_SPREAD_LINE);
       expect(selector).toHaveBeenCalledOnce();
     } finally {
       selector.mockRestore();

@@ -1,6 +1,6 @@
-import { goalHorizonVerdict, heldGoalHorizonMonths } from './goal-horizon-verdict.js';
+import { goalHorizonVerdict } from './goal-horizon-verdict.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
-import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
+import { zeroSpreadNoCarrierHorizonLine, ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
 /**
  * ⭐ D3 MILESTONE 1, STEP 2 — EACH OPTION'S CHANCE OF MEETING THE GOAL, AND WHAT MAY BE SAID ABOUT IT (DL 0df0e1 #87
@@ -254,11 +254,12 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
 
 /** The DISPLAYED whole percentage of a chance: the figure the user reads, and the one Science's gap is tested on. */
 /**
- * Science §(ab)(2) face words for a zero-spread option (93 @0ecd69e4, ruled (a): never " / month" on the face):
- *  · the goal's level projected from monthly rates (an accumulation carrier): "Meets £20,000 a month by month 12 if today’s
- *    rates hold." / "Falls short of £20,000 a month by month 12 if today’s rates hold.";
- *  · no carrier and no horizon: "Meets £20,000 a month if today’s figures hold." / "Falls short of … if today’s figures hold.";
- *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
+ * ⛔ A ZERO-SPREAD OPTION'S CELL SAYS WHAT IS PROVEN, AND NO FUTURE EVENT (capacity judge post3010 row 3, 14 Oct; PL #94
+ * 6135017311; AIE packet 247cd85a numeric_scope[2]). Served `keep_current_staffing`: "Falls short of 100 tickets per week if
+ * today’s figures hold." claimed the event's outcome. The one fact this cell has is `zeroSpread` (every valid draw gave the
+ * option the same goal value): the model holds no uncertainty for it, so no chance is given. Science §(ab)(2)'s
+ * "Meets / Falls short of … if today’s figures|rates hold" words are retired; `side` stays as data, never said. A stated horizon
+ * with no monthly carrier keeps §(o′)'s own line.
  */
 /**
  * How a Run reads carrying on as now (AIE status-quo disposition, 12 Oct, #94 6117119450):
@@ -348,22 +349,19 @@ function statusQuoReadingOf(a: {
   return ['p10', 'p50', 'p90', 'mean'].some((k) => away(o[k])) ? 'moved' : 'assumed';
 }
 
+/**
+ * AIE_TEXT_PENDING (`recovery/prompt/ZERO-SPREAD-LINE-DRAFT.txt`): the zero-spread cell's one line. LABEL-FREE on purpose: the
+ * line is stored with each Run, and the stored-licence reader below re-says THIS line for every stored zero-spread reason, so a
+ * Run stored with the retired words never says them again on reopen (no matcher on old text).
+ */
+export const ZERO_SPREAD_LINE = 'Chance not shown: every run of this model gave this option the same result for your goal, so the model '
+  + 'holds no uncertainty for it from which to give a chance. You can review whether the figures this option rests on are really that certain.';
+
 function zeroSpreadReasons(
-  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown, envelope: unknown,
+  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, graph: unknown, envelope: unknown,
 ): Record<string, GoalChanceZeroSpread> {
-  const verdict = goalHorizonVerdict(graph, envelope);
-  const rates = ordinaryTimingOf(graph, envelope).forecast;
-  const months = heldGoalHorizonMonths(goal);
-  // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
-  const figure = sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
-  const out: Record<string, GoalChanceZeroSpread> = {};
-  for (const [id, side] of Object.entries(sides)) {
-    const tail = rates ? `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.` : ' if today’s figures hold.';
-    const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine()
-      : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`;
-    out[id] = { reason: 'zero_spread', side, line };
-  }
-  return out;
+  const line = goalHorizonVerdict(graph, envelope) === 'withhold' ? zeroSpreadNoCarrierHorizonLine() : ZERO_SPREAD_LINE;
+  return Object.fromEntries(Object.entries(sides).map(([id, side]) => [id, { reason: 'zero_spread' as const, side, line }]));
 }
 
 /** R5-5 (b): whether the Run sent the threshold of the target the goal states (see the guard in `goalChanceLicenceOf`). */
@@ -641,7 +639,7 @@ export function goalChanceLicenceOf(
   // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
   // reference: withheld with that reason, never relabelled.
   const withheldReasons: Record<string, GoalChanceWithheldReason> = {
-    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope) : {}),
+    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, horizonGraph, envelope) : {}),
     ...(sqReading === 'moved' && statusQuoId !== undefined && withheld.includes(statusQuoId) && goalLabel !== undefined
       ? { [statusQuoId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords([goalLabel]) } } : {}),
   };
@@ -1469,7 +1467,10 @@ export function goalChanceLicenceForAgent(result: unknown): {
     if (!withheld?.includes(id) || (isRec(r.pct_by_option) && Object.hasOwn(r.pct_by_option, id))
       || !isRec(reason) || typeof reason.line !== 'string' || reason.line.trim() === '' || /[\r\n]/.test(reason.line)) continue;
     if (reason.reason === 'zero_spread' && (reason.side === 'meets' || reason.side === 'falls_short')) {
-      zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line: reason.line };
+      // The stored finding is the typed reason and its side; its words are said NOW (capacity post3010 row 3): §(o′)'s own line
+      // where that is what the Run stored, else the one current line, never a retired "Meets / Falls short … if today's … hold".
+      const line = reason.line === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES ? reason.line : ZERO_SPREAD_LINE;
+      zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line };
     } else if (reason.reason === 'reference_moved' && reason.side === undefined) {
       // AIE status-quo disposition: the status quo's row disagrees with the same-draw reference (a typed reason, no side).
       zeroSpreadReasons[id] = { reason: 'reference_moved', line: reason.line };
